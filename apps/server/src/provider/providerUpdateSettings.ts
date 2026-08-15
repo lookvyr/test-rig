@@ -1,23 +1,13 @@
-import type { ServerSettings, ServerSettingsError } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as Stream from "effect/Stream";
 
-import type * as ServerSettingsModule from "../serverSettings.ts";
-
 export interface ProviderSnapshotSettings<Settings> {
   readonly provider: Settings;
-  readonly enableProviderUpdateChecks: boolean;
 }
 
-export function makeProviderSnapshotSettings<Settings>(
-  provider: Settings,
-  settings: ServerSettings,
-): ProviderSnapshotSettings<Settings> {
-  return {
-    provider,
-    enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
-  };
+export function makeProviderSnapshotSettings<Settings>(provider: Settings) {
+  return { provider } satisfies ProviderSnapshotSettings<Settings>;
 }
 
 export function haveProviderSnapshotSettingsChanged<Settings>(
@@ -27,17 +17,13 @@ export function haveProviderSnapshotSettingsChanged<Settings>(
   return !Equal.equals(previous, next);
 }
 
-export function makeProviderSnapshotSettingsSource<Settings>(
-  provider: Settings,
-  serverSettings: ServerSettingsModule.ServerSettingsService["Service"],
-): {
-  readonly getSettings: Effect.Effect<ProviderSnapshotSettings<Settings>, ServerSettingsError>;
+export function makeProviderSnapshotSettingsSource<Settings>(provider: Settings): {
+  readonly getSettings: Effect.Effect<ProviderSnapshotSettings<Settings>>;
   readonly streamSettings: Stream.Stream<ProviderSnapshotSettings<Settings>>;
 } {
-  const mapSettings = (settings: ServerSettings) =>
-    makeProviderSnapshotSettings(provider, settings);
+  const settings = makeProviderSnapshotSettings(provider);
   return {
-    getSettings: serverSettings.getSettings.pipe(Effect.map(mapSettings)),
-    streamSettings: serverSettings.streamChanges.pipe(Stream.map(mapSettings)),
+    getSettings: Effect.succeed(settings),
+    streamSettings: Stream.empty,
   };
 }

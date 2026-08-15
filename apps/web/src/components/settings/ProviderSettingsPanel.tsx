@@ -53,13 +53,7 @@ import {
   connectionPhaseDotClassName,
   connectionPhasePingClassName,
 } from "../ConnectionStatusDot";
-import {
-  canOneClickUpdateProviderCandidate,
-  collectProviderUpdateCandidates,
-  hasOneClickUpdateProviderCandidate,
-  isProviderUpdateActive,
-  type ProviderUpdateCandidate,
-} from "../ProviderUpdateLaunchNotification.logic";
+import { isProviderUpdateActive } from "../providerUpdateProgress";
 import { Button } from "../ui/button";
 import {
   NumberField,
@@ -386,14 +380,6 @@ export function EnvironmentProviderSettings({
   const refreshingRef = useRef(false);
   const updatingDriversRef = useRef<Set<ProviderDriverKind>>(new Set());
 
-  const providerUpdateCandidates = useMemo(
-    () => collectProviderUpdateCandidates(serverProviders),
-    [serverProviders],
-  );
-  const providerUpdateCandidateByInstanceId = useMemo(
-    () => new Map(providerUpdateCandidates.map((candidate) => [candidate.instanceId, candidate])),
-    [providerUpdateCandidates],
-  );
   const visibleProviderSettings = PROVIDER_SETTINGS.filter(
     (providerSettings) =>
       providerSettings.provider !== "cursor" ||
@@ -442,7 +428,10 @@ export function EnvironmentProviderSettings({
   }, [environmentId, refreshServerProviders]);
 
   const runProviderUpdate = useCallback(
-    async (candidate: ProviderUpdateCandidate) => {
+    async (candidate: {
+      readonly driver: ProviderDriverKind;
+      readonly instanceId: ProviderInstanceId;
+    }) => {
       // Ref-based re-entry guard, mirroring refreshProviders: a state updater
       // may run after this function returns, so it cannot gate the dispatch.
       if (updatingDriversRef.current.has(candidate.driver)) {
@@ -791,23 +780,17 @@ export function EnvironmentProviderSettings({
             const liveProvider = serverProviders.find(
               (candidate) => candidate.instanceId === row.instanceId,
             );
-            const updateCandidate = liveProvider
-              ? providerUpdateCandidateByInstanceId.get(liveProvider.instanceId)
-              : undefined;
+            const supportsInlineUpdate =
+              liveProvider?.versionAdvisory?.canUpdate === true &&
+              liveProvider.versionAdvisory.updateCommand !== null;
             const isDriverUpdateRunning =
-              updateCandidate !== undefined &&
-              (updatingProviderDrivers.has(updateCandidate.driver) ||
+              liveProvider !== undefined &&
+              (updatingProviderDrivers.has(liveProvider.driver) ||
                 serverProviders.some(
                   (provider) =>
-                    provider.driver === updateCandidate.driver && isProviderUpdateActive(provider),
+                    provider.driver === liveProvider.driver && isProviderUpdateActive(provider),
                 ));
-            const showInlineUpdateButton =
-              updateCandidate !== undefined &&
-              hasOneClickUpdateProviderCandidate(updateCandidate, serverProviders);
-            const canRunInlineUpdate =
-              updateCandidate !== undefined &&
-              canOneClickUpdateProviderCandidate(updateCandidate, serverProviders) &&
-              !updatingProviderDrivers.has(updateCandidate.driver);
+            const canRunInlineUpdate = supportsInlineUpdate && !isDriverUpdateRunning;
             const modelPreferences = settings.providerModelPreferences?.[row.instanceId] ?? {
               hiddenModels: [],
               modelOrder: [],
@@ -873,16 +856,16 @@ export function EnvironmentProviderSettings({
                   })
                 }
                 onRunUpdate={
-                  showInlineUpdateButton && updateCandidate
+                  supportsInlineUpdate && liveProvider
                     ? () => {
                         if (!canRunInlineUpdate) {
                           return;
                         }
-                        void runProviderUpdate(updateCandidate);
+                        void runProviderUpdate(liveProvider);
                       }
                     : undefined
                 }
-                isUpdating={showInlineUpdateButton ? isDriverUpdateRunning : undefined}
+                isUpdating={supportsInlineUpdate ? isDriverUpdateRunning : undefined}
               />
             );
           })}

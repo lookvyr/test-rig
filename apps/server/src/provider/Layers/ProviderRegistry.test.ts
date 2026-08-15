@@ -25,7 +25,6 @@ import {
   type ServerSettings as ContractServerSettings,
 } from "@t3tools/contracts";
 import * as PlatformError from "effect/PlatformError";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { deepMerge } from "@t3tools/shared/Struct";
 import { createModelCapabilities } from "@t3tools/shared/model";
@@ -68,13 +67,6 @@ process.env.T3CODE_CURSOR_ENABLED = "1";
 
 const encoder = new TextEncoder();
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
-
-const TestHttpClientLive = Layer.succeed(
-  HttpClient.HttpClient,
-  HttpClient.make((request) =>
-    Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({ version: "0.0.0" }))),
-  ),
-);
 
 const BackgroundPolicyAlwaysRunLayer = Layer.mock(BackgroundPolicy.BackgroundPolicy)({
   reportClientActivity: () => Effect.void,
@@ -338,7 +330,7 @@ function makeMutableServerSettingsService(
   });
 }
 
-it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), TestHttpClientLive))(
+it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
   "ProviderRegistry",
   (it) => {
     describe("checkCodexProviderStatus", () => {
@@ -850,7 +842,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             snapshot: {
               maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: codexDriver,
-                packageName: null,
               }),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Ref.update(refreshCalls, (count) => count + 1).pipe(
@@ -1005,7 +996,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             snapshot: {
               maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: cursorDriver,
-                packageName: null,
               }),
               getSnapshot: Effect.succeed(initialProvider),
               refresh: Effect.succeed(refreshedProvider),
@@ -1134,7 +1124,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               snapshot: {
                 maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                   provider: openCodeDriver,
-                  packageName: null,
                 }),
                 getSnapshot: Effect.succeed(initialProvider),
                 refresh: Effect.succeed(authoritativeProvider),
@@ -1241,7 +1230,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             snapshot: {
               maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: codexDriver,
-                packageName: null,
               }),
               getSnapshot: Effect.succeed(cachedProvider),
               refresh: Effect.die(new Error("simulated refresh failure")),
@@ -1334,7 +1322,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             snapshot: {
               maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: provider.driver,
-                packageName: null,
               }),
               getSnapshot: Effect.succeed(provider),
               refresh: Effect.succeed(provider),
@@ -1478,7 +1465,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 prefix: "t3-provider-registry-",
               }),
             ),
-            Layer.provideMerge(TestHttpClientLive),
             Layer.provideMerge(
               Layer.succeed(
                 ProviderEventLoggers.ProviderEventLoggers,
@@ -1571,7 +1557,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 prefix: "t3-provider-registry-",
               }),
             ),
-            Layer.provideMerge(TestHttpClientLive),
             Layer.provideMerge(
               Layer.succeed(
                 ProviderEventLoggers.ProviderEventLoggers,
@@ -1693,7 +1678,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 prefix: "t3-provider-registry-",
               }),
             ),
-            Layer.provideMerge(TestHttpClientLive),
             Layer.provideMerge(
               Layer.succeed(
                 ProviderEventLoggers.ProviderEventLoggers,
@@ -1755,7 +1739,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                   prefix: "t3-provider-registry-",
                 }),
               ),
-              Layer.provideMerge(TestHttpClientLive),
               Layer.provideMerge(
                 Layer.succeed(
                   ProviderEventLoggers.ProviderEventLoggers,

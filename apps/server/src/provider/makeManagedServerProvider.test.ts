@@ -39,7 +39,6 @@ interface TestSettings {
 
 const maintenanceCapabilities = {
   provider: ProviderDriverKind.make("codex"),
-  packageName: "@openai/codex",
   update: {
     command: "npm install -g @openai/codex@latest",
 

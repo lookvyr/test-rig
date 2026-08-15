@@ -621,7 +621,7 @@ export function ProviderInstanceCard({
                             ? "text-warning hover:text-warning"
                             : "text-update hover:text-update",
                         )}
-                        aria-label="Update available — view details"
+                        aria-label={`${versionAdvisory.title} — view details`}
                       >
                         <ArrowUpCircleIcon className="size-3.5 [animation:bounce_2.4s_ease-in-out_infinite] motion-reduce:animate-none" />
                       </Button>
@@ -635,7 +635,7 @@ export function ProviderInstanceCard({
                     <div className="grid min-w-0 gap-3">
                       <div className="grid gap-0.5">
                         <p className="text-[13px] font-semibold leading-tight text-foreground">
-                          Update available
+                          {versionAdvisory.title}
                         </p>
                         <p
                           className={cn(

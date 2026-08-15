@@ -16,8 +16,6 @@ import {
   makeProviderMaintenanceCapabilities,
   makeStaticProviderMaintenanceResolver,
   normalizeCommandPath,
-  ProviderVersionCache,
-  resolveLatestProviderVersion,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "./providerMaintenance.ts";
 
@@ -62,7 +60,6 @@ const scopedPackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
 const staticToolUpdate = makeStaticProviderMaintenanceResolver(
   makeProviderMaintenanceCapabilities({
     provider: driver("staticTool"),
-    packageName: null,
     updateExecutable: "static-tool",
     updateArgs: ["update"],
     updateLockKey: "static-tool",
@@ -83,45 +80,15 @@ const installedPackageToolProvider: ServerProvider = {
 };
 
 it.layer(NodeServices.layer)("providerMaintenance", (it) => {
-  it.effect("reads cached versions through the injectable cache reference", () =>
-    resolveLatestProviderVersion(packageToolUpdate.resolve()).pipe(
-      Effect.provideService(
-        ProviderVersionCache,
-        new Map([
-          [
-            "@example/package-tool",
-            {
-              expiresAt: Number.MAX_SAFE_INTEGER,
-              version: "9.9.9",
-            },
-          ],
-        ]),
-      ),
-      Effect.provideService(
-        HttpClient.HttpClient,
-        HttpClient.make(() =>
-          Effect.die("cached provider version should not make an HTTP request"),
-        ),
-      ),
-      Effect.map((version) => {
-        expect(version).toBe("9.9.9");
-      }),
-    ),
-  );
-
-  it.effect("does not fetch latest provider versions when update checks are disabled", () =>
+  it.effect("never fetches latest provider versions during snapshot enrichment", () =>
     enrichProviderSnapshotWithVersionAdvisory(
       installedPackageToolProvider,
       packageToolUpdate.resolve(),
-      {
-        enableProviderUpdateChecks: false,
-      },
     ).pipe(
-      Effect.provideService(ProviderVersionCache, new Map()),
       Effect.provideService(
         HttpClient.HttpClient,
         HttpClient.make(() =>
-          Effect.die("disabled provider update checks should not make an HTTP request"),
+          Effect.die("provider snapshot enrichment must not make an HTTP request"),
         ),
       ),
       Effect.map((provider) => {
@@ -135,57 +102,26 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     ),
   );
 
-  it("marks providers with unknown current versions as unknown", () => {
-    expect(
-      createProviderVersionAdvisory({
-        driver: driver("packageTool"),
-        currentVersion: null,
-        latestVersion: "9.9.9",
-      }),
-    ).toMatchObject({
-      status: "unknown",
-      currentVersion: null,
-      latestVersion: "9.9.9",
-    });
-  });
-
-  it("marks providers with unknown latest versions as unknown", () => {
+  it("keeps provider version status unknown without an external lookup", () => {
     expect(
       createProviderVersionAdvisory({
         driver: driver("packageTool"),
         currentVersion: "1.0.0",
-        latestVersion: null,
+        maintenanceCapabilities: packageToolUpdate.resolve(),
       }),
     ).toMatchObject({
       status: "unknown",
       currentVersion: "1.0.0",
       latestVersion: null,
-      message: null,
-    });
-  });
-
-  it("marks installed providers behind latest when a newer provider version is available", () => {
-    expect(
-      createProviderVersionAdvisory({
-        driver: driver("nativePackageTool"),
-        currentVersion: "2.1.110",
-        latestVersion: "2.1.117",
-        maintenanceCapabilities: nativePackageToolUpdate.resolve(),
-      }),
-    ).toMatchObject({
-      status: "behind_latest",
-      currentVersion: "2.1.110",
-      latestVersion: "2.1.117",
-      updateCommand: "npm install -g @example/native-package-tool@latest",
+      updateCommand: "npm install -g @example/package-tool@latest",
       canUpdate: true,
-      message: "Install the update now or review provider settings.",
+      message: null,
     });
   });
 
   it("keeps update commands owned by provider maintenance capabilities", () => {
     expect(staticToolUpdate.resolve()).toEqual({
       provider: driver("staticTool"),
-      packageName: null,
       update: {
         command: "static-tool update",
 
@@ -221,7 +157,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
 
         expect(capabilities).toEqual({
           provider: driver("packageTool"),
-          packageName: "@example/package-tool",
           update: {
             command: "vp i -g @example/package-tool",
 
@@ -257,7 +192,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
 
         expect(capabilities).toEqual({
           provider: driver("nativePackageTool"),
-          packageName: "@example/native-package-tool",
           update: {
             command: "bun i -g @example/native-package-tool@latest",
 
@@ -294,7 +228,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
 
         expect(capabilities).toEqual({
           provider: driver("scopedPackageTool"),
-          packageName: "@example/scoped-package-tool",
           update: {
             command: "pnpm add -g @example/scoped-package-tool@latest",
 
@@ -318,7 +251,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
       }),
     ).toEqual({
       provider: driver("packageTool"),
-      packageName: "@example/package-tool",
       update: {
         command: "brew upgrade package-tool",
 
@@ -354,7 +286,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
 
         expect(capabilities).toEqual({
           provider: driver("nativePackageTool"),
-          packageName: "@example/native-package-tool",
           update: {
             command: "native-package-tool update",
 
@@ -391,7 +322,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
 
         expect(capabilities).toEqual({
           provider: driver("scopedPackageTool"),
-          packageName: "@example/scoped-package-tool",
           update: {
             command: "scoped-package-tool upgrade",
 
@@ -415,7 +345,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
       }),
     ).toEqual({
       provider: driver("nativePackageTool"),
-      packageName: "@example/native-package-tool",
       update: {
         command: "brew upgrade native-package-tool",
 
@@ -438,7 +367,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
       }),
     ).toEqual({
       provider: driver("scopedPackageTool"),
-      packageName: "@example/scoped-package-tool",
       update: {
         command: "brew upgrade example/tap/scoped-package-tool",
 
@@ -480,7 +408,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
 
       expect(capabilities).toEqual({
         provider: driver("packageTool"),
-        packageName: "@example/package-tool",
         update: {
           command: "npm install -g @example/package-tool@latest",
 
@@ -527,7 +454,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
 
       expect(capabilities).toEqual({
         provider: driver("packageTool"),
-        packageName: "@example/package-tool",
         update: {
           command: "pnpm add -g @example/package-tool@latest",
 
@@ -552,7 +478,6 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
       }),
     ).toEqual({
       provider: driver("packageTool"),
-      packageName: "@example/package-tool",
       update: null,
     });
   });

@@ -17,7 +17,6 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
@@ -57,7 +56,6 @@ const UPDATE: ProviderMaintenanceCapabilitiesResolver = {
   resolve: (options) =>
     makeProviderMaintenanceCapabilities({
       provider: DRIVER_KIND,
-      packageName: null,
       updateExecutable: options?.binaryPath?.trim() || "cursor-agent",
       updateArgs: ["update"],
       updateLockKey: "cursor-agent",
@@ -69,7 +67,6 @@ export type CursorDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
-  | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers
   | ServerConfig
@@ -105,8 +102,6 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const httpClient = yield* HttpClient.HttpClient;
-      const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
@@ -140,7 +135,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         Effect.provideService(Path.Path, path),
       );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CursorSettings>>({
         maintenanceCapabilities,
         getSettings: snapshotSettings.getSettings,
@@ -151,15 +146,13 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         checkProvider,
         // Model catalog and capabilities come exclusively from Cursor's
         // list_available_models extension method during provider checks.
-        enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
+        enrichSnapshot: ({ snapshot: currentSnapshot, publishSnapshot }) =>
           enrichCursorSnapshot({
-            settings: settings.provider,
+            settings: effectiveConfig,
             snapshot: currentSnapshot,
             maintenanceCapabilities,
-            enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
             publishSnapshot,
             stampIdentity,
-            httpClient,
           }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
       }).pipe(
         Effect.mapError(

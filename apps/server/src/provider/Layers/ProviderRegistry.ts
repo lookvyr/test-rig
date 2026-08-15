@@ -72,7 +72,6 @@ const loadProviders = (
 const makeManualProviderMaintenanceCapabilities = (provider: ProviderDriverKind) =>
   makeManualOnlyProviderMaintenanceCapabilities({
     provider,
-    packageName: null,
   });
 
 const hasModelCapabilities = (model: ServerProvider["models"][number]): boolean =>

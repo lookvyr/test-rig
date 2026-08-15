@@ -117,7 +117,6 @@ const makeFakeInstance = (
     snapshot: {
       maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
         provider: driverKind,
-        packageName: null,
       }),
       getSnapshot: Effect.succeed({} as unknown as ServerProvider),
       refresh: Effect.succeed({} as unknown as ServerProvider),

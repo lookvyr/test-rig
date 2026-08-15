@@ -433,10 +433,6 @@ const buildAppUnderTest = (options?: {
       traceBatchWindowMs: 200,
       traceMaxBytes: 10 * 1024 * 1024,
       traceMaxFiles: 10,
-      otlpTracesUrl: undefined,
-      otlpMetricsUrl: undefined,
-      otlpExportIntervalMs: 10_000,
-      otlpServiceName: "t3-server",
       mode: "desktop",
       port: 0,
       host: "127.0.0.1",
@@ -630,9 +626,7 @@ const buildAppUnderTest = (options?: {
           refresh: () => Effect.succeed([]),
           refreshInstance: () => Effect.succeed([]),
           getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
-            Effect.succeed(
-              makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null }),
-            ),
+            Effect.succeed(makeManualOnlyProviderMaintenanceCapabilities({ provider })),
           setProviderMaintenanceActionState: () => Effect.succeed([]),
           streamChanges: Stream.empty,
           ...options?.layers?.providerRegistry,
@@ -4074,7 +4068,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("proxies browser OTLP trace exports through the server", () =>
+  it.effect("stores browser OTLP traces locally without forwarding them", () =>
     Effect.gen(function* () {
       const upstreamRequests: Array<{
         readonly body: string;
@@ -4138,7 +4132,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ],
       };
 
-      const collector = yield* Effect.acquireRelease(
+      yield* Effect.acquireRelease(
         Effect.promise(async () => {
           const NodeHttp = await import("node:http");
 
@@ -4189,9 +4183,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       yield* buildAppUnderTest({
-        config: {
-          otlpTracesUrl: collector.url,
-        },
         layers: {
           browserTraceCollector: {
             record: (records) =>
@@ -4252,12 +4243,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           },
         },
       ]);
-      assert.deepEqual(upstreamRequests, [
-        {
-          body: jsonRequestBody(payload),
-          contentType: "application/json",
-        },
-      ]);
+      assert.deepEqual(upstreamRequests, []);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -4533,10 +4519,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       } as const;
 
       yield* buildAppUnderTest({
-        config: {
-          otlpTracesUrl: "http://localhost:4318/v1/traces",
-          otlpMetricsUrl: "http://localhost:4318/v1/metrics",
-        },
         layers: {
           keybindings: {
             loadConfigState: Effect.succeed({
@@ -4567,10 +4549,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(first.config.providers, providers);
         assert.equal(first.config.observability.logsDirectoryPath.endsWith("/logs"), true);
         assert.equal(first.config.observability.localTracingEnabled, true);
-        assert.equal(first.config.observability.otlpTracesUrl, "http://localhost:4318/v1/traces");
-        assert.equal(first.config.observability.otlpTracesEnabled, true);
-        assert.equal(first.config.observability.otlpMetricsUrl, "http://localhost:4318/v1/metrics");
-        assert.equal(first.config.observability.otlpMetricsEnabled, true);
+        assert.isUndefined(first.config.observability.otlpTracesUrl);
+        assert.equal(first.config.observability.otlpTracesEnabled, false);
+        assert.isUndefined(first.config.observability.otlpMetricsUrl);
+        assert.equal(first.config.observability.otlpMetricsEnabled, false);
         assert.deepEqual(first.config.settings, DEFAULT_SERVER_SETTINGS);
       }
       assert.deepEqual(second, {

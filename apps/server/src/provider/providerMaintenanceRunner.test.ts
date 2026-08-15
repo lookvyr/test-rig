@@ -15,7 +15,6 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
@@ -24,7 +23,6 @@ import { ProviderRegistry, type ProviderRegistryShape } from "./Services/Provide
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
 import {
   makeProviderMaintenanceCapabilities,
-  ProviderVersionCache,
   type ProviderMaintenanceCapabilities,
 } from "./providerMaintenance.ts";
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
@@ -47,7 +45,6 @@ function lifecycleFor(provider: ProviderDriverKind): ProviderMaintenanceCapabili
   if (provider === CURSOR_DRIVER) {
     return makeProviderMaintenanceCapabilities({
       provider,
-      packageName: null,
       updateExecutable: "cursor-agent",
       updateArgs: ["update"],
       updateLockKey: "cursor-agent",
@@ -55,7 +52,6 @@ function lifecycleFor(provider: ProviderDriverKind): ProviderMaintenanceCapabili
   }
   return makeProviderMaintenanceCapabilities({
     provider,
-    packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
     updateExecutable: "npm",
     updateArgs:
       provider === OPENCODE_DRIVER
@@ -90,19 +86,6 @@ const baseOpenCodeProvider: ServerProvider = {
   instanceId: OPENCODE_INSTANCE_ID,
   driver: OPENCODE_DRIVER,
 };
-
-const latestVersionHttpClient = (version: string) =>
-  Layer.succeed(
-    HttpClient.HttpClient,
-    HttpClient.make((request) =>
-      Effect.succeed(
-        HttpClientResponse.fromWeb(
-          request,
-          Response.json({ version }, { headers: { "content-type": "application/json" } }),
-        ),
-      ),
-    ),
-  );
 
 function mockHandle(result: {
   readonly stdout?: string;
@@ -206,12 +189,7 @@ const makeTestRunner = (registry: ProviderRegistryShape) =>
   Effect.service(ProviderMaintenanceRunner.ProviderMaintenanceRunner).pipe(
     Effect.provide(
       ProviderMaintenanceRunner.layer.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.succeed(ProviderRegistry, registry),
-            Layer.succeed(ProviderVersionCache, new Map()),
-          ),
-        ),
+        Layer.provide(Layer.succeed(ProviderRegistry, registry)),
       ),
     ),
   );
@@ -239,7 +217,6 @@ describe("providerMaintenanceRunner", () => {
       Effect.provide(
         Layer.mergeAll(
           NonWindowsPlatform,
-          latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer((command, args) => {
             calls.push({ command, args });
             return { stdout: "updated" };
@@ -270,7 +247,6 @@ describe("providerMaintenanceRunner", () => {
           Effect.succeed(
             makeProviderMaintenanceCapabilities({
               provider: CODEX_DRIVER,
-              packageName: "@openai/codex",
               updateExecutable: "bun",
               updateArgs: ["i", "-g", "@openai/codex@latest"],
               updateLockKey: "bun-global",
@@ -289,7 +265,6 @@ describe("providerMaintenanceRunner", () => {
       Effect.provide(
         Layer.mergeAll(
           NonWindowsPlatform,
-          latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer((command, args) => {
             calls.push({ command, args });
             return { stdout: "updated" };
@@ -320,7 +295,6 @@ describe("providerMaintenanceRunner", () => {
         Effect.provide(
           Layer.mergeAll(
             NonWindowsPlatform,
-            latestVersionHttpClient("0.0.0"),
             mockSpawnerLayer((command, args) => {
               calls.push({ command, args });
               return { stdout: "updated" };
@@ -355,7 +329,6 @@ describe("providerMaintenanceRunner", () => {
           Effect.succeed(
             makeProviderMaintenanceCapabilities({
               provider,
-              packageName: "@openai/codex-instance-test",
               updateExecutable: "vp",
               updateArgs: ["i", "-g", "@openai/codex"],
               updateLockKey: "vite-plus-global",
@@ -393,7 +366,6 @@ describe("providerMaintenanceRunner", () => {
       Effect.provide(
         Layer.mergeAll(
           NonWindowsPlatform,
-          latestVersionHttpClient("0.124.0-alpha.3"),
           mockSpawnerLayer((command, args) => {
             calls.push({ command, args });
             return { stdout: "updated" };
@@ -418,37 +390,10 @@ describe("providerMaintenanceRunner", () => {
       Effect.provide(
         Layer.mergeAll(
           NonWindowsPlatform,
-          latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer(() => ({ stderr: "permission denied", code: 1 })),
         ),
       ),
     ),
-  );
-
-  it.effect(
-    "marks successful commands as unchanged when the refreshed provider is still outdated",
-    () =>
-      Effect.gen(function* () {
-        const { registry } = yield* makeRegistry({
-          ...baseProvider,
-          installed: true,
-          version: "0.1.0",
-        });
-        const updater = yield* makeTestRunner(registry);
-
-        const result = yield* updater.updateProvider(CODEX_DRIVER);
-
-        assert.strictEqual(result.providers[0]?.updateState?.status, "unchanged");
-        assert.include(result.providers[0]?.updateState?.message ?? "", "still detects");
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NonWindowsPlatform,
-            latestVersionHttpClient("9.9.9"),
-            mockSpawnerLayer(() => ({ stdout: "updated" })),
-          ),
-        ),
-      ),
   );
 
   it.effect("prevents concurrent updates for the same provider", () => {
@@ -483,7 +428,6 @@ describe("providerMaintenanceRunner", () => {
       Effect.provide(
         Layer.mergeAll(
           NonWindowsPlatform,
-          latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer(() => {
             startedLatch.resolve();
             return {
@@ -516,7 +460,6 @@ describe("providerMaintenanceRunner", () => {
           Effect.succeed(
             makeProviderMaintenanceCapabilities({
               provider,
-              packageName: provider === OPENCODE_DRIVER ? "opencode-ai" : "@openai/codex",
               updateExecutable: "npm",
               updateArgs:
                 provider === OPENCODE_DRIVER
@@ -560,7 +503,6 @@ describe("providerMaintenanceRunner", () => {
       Effect.provide(
         Layer.mergeAll(
           NonWindowsPlatform,
-          latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer((_command, args) => {
             calls.push(args.join(" "));
             if (calls.length === 1) {
@@ -589,7 +531,6 @@ describe("providerMaintenanceRunner", () => {
           Effect.succeed(
             makeProviderMaintenanceCapabilities({
               provider,
-              packageName: "@openai/codex",
               updateExecutable: "npm",
               updateArgs: ["install", "-g", "@openai/codex@latest"],
               updateLockKey: "unknown-lock-key",
@@ -604,7 +545,6 @@ describe("providerMaintenanceRunner", () => {
       Effect.provide(
         Layer.mergeAll(
           NonWindowsPlatform,
-          latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer((_command, args) => {
             calls.push(args.join(" "));
             return { stdout: "updated" };
@@ -659,7 +599,6 @@ describe("providerMaintenanceRunner", () => {
         Effect.provide(
           Layer.mergeAll(
             NonWindowsPlatform,
-            latestVersionHttpClient("0.0.0"),
             mockSpawnerLayer(() => ({ stdout: "updated" })),
           ),
         ),
@@ -706,7 +645,6 @@ describe("providerMaintenanceRunner", () => {
           Layer.succeed(SpawnExecutableResolution, (command) =>
             command === "npm" ? "C:\\fake\\npm\\npm.cmd" : undefined,
           ),
-          latestVersionHttpClient("0.0.0"),
           Layer.succeed(
             ChildProcessSpawner.ChildProcessSpawner,
             ChildProcessSpawner.make((command) => {

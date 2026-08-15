@@ -50,7 +50,6 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
     setDesktopName: () => Effect.void,
     setDockIcon: (iconPath) => Effect.sync(() => calls.setDockIcon.push(iconPath)),
     appendCommandLineSwitch: () => Effect.void,
-    onBeforeQuitForUpdate: () => Effect.void,
     removeCommandLineSwitch: () => Effect.void,
     on: () => Effect.void,
   } satisfies ElectronApp.ElectronApp["Service"]);

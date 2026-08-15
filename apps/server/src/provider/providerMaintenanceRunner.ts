@@ -18,13 +18,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { ProviderRegistry } from "./Services/ProviderRegistry.ts";
 import { makeProviderMaintenanceCommandCoordinator } from "./providerMaintenanceCommandCoordinator.ts";
-import { enrichProviderSnapshotWithVersionAdvisory } from "./providerMaintenance.ts";
-import type { ProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
@@ -177,10 +174,6 @@ function failureMessage(result: ProviderMaintenanceCommandResult): string {
   return "Update command failed.";
 }
 
-function isOutdatedProvider(provider: ServerProvider | undefined): boolean {
-  return provider?.versionAdvisory?.status === "behind_latest";
-}
-
 function makeUpdateState(input: {
   readonly status: ServerProviderUpdateState["status"];
   readonly startedAt: string | null;
@@ -200,7 +193,6 @@ function makeUpdateState(input: {
 export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
   const providerRegistry = yield* ProviderRegistry;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const httpClient = yield* HttpClient.HttpClient;
   const runMaintenanceCommand = (command: string, args: ReadonlyArray<string>) =>
     runProviderMaintenanceCommandWithSpawner({
       spawner,
@@ -217,7 +209,6 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
 
   const verifyRefreshedProvider = (
     provider: ProviderDriverKind,
-    maintenanceCapabilities: ProviderMaintenanceCapabilities,
     instanceId: ProviderInstanceId,
   ): Effect.Effect<VerifiedProviderRefresh> =>
     providerRegistry.getProviders.pipe(
@@ -242,45 +233,14 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
               },
             ).pipe(Effect.andThen(providerRegistry.getProviders)),
       ),
-      Effect.flatMap((providers) => {
+      Effect.map((providers) => {
         const refreshedProviders = providers.filter(
           (candidate) => candidate.driver === provider && candidate.instanceId === instanceId,
         );
-        if (refreshedProviders.length === 0) {
-          return Effect.succeed<VerifiedProviderRefresh>({
-            providers,
-            verifiedProviders: [],
-          });
-        }
-        return Effect.forEach(
-          refreshedProviders,
-          (refreshedProvider) =>
-            enrichProviderSnapshotWithVersionAdvisory(
-              refreshedProvider,
-              maintenanceCapabilities,
-            ).pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
-          {
-            concurrency: "unbounded",
-          },
-        ).pipe(
-          Effect.map(
-            (verifiedProviders): VerifiedProviderRefresh => ({
-              providers,
-              verifiedProviders,
-            }),
-          ),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Provider post-update version verification failed", {
-              provider,
-              cause: Cause.pretty(cause),
-            }).pipe(
-              Effect.as<VerifiedProviderRefresh>({
-                providers,
-                verifiedProviders: refreshedProviders,
-              }),
-            ),
-          ),
-        );
+        return {
+          providers,
+          verifiedProviders: refreshedProviders,
+        } satisfies VerifiedProviderRefresh;
       }),
     );
 
@@ -353,25 +313,16 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
               );
             }
 
-            const { verifiedProviders } = yield* verifyRefreshedProvider(
-              provider,
-              capabilities,
-              instanceId,
-            );
+            const { verifiedProviders } = yield* verifyRefreshedProvider(provider, instanceId);
             const couldNotVerify = verifiedProviders.length === 0;
-            const stillOutdated =
-              couldNotVerify ||
-              verifiedProviders.some((verifiedProvider) => isOutdatedProvider(verifiedProvider));
             return yield* finish(
               makeUpdateState({
-                status: stillOutdated ? "unchanged" : "succeeded",
+                status: couldNotVerify ? "unchanged" : "succeeded",
                 startedAt,
                 finishedAt,
                 message: couldNotVerify
-                  ? "Update command completed, but Sightseer could not verify the provider version."
-                  : stillOutdated
-                    ? "Update command completed, but Sightseer still detects an outdated provider version."
-                    : "Provider updated.",
+                  ? "Update command completed, but Sightseer could not confirm the provider is available."
+                  : "Update command completed.",
                 output: commandOutput(result),
               }),
             );
