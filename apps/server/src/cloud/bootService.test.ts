@@ -24,13 +24,15 @@ import {
 it("keeps systemd pinned to the stable launcher rather than a versioned server", () => {
   const unit = BootService.renderBootServiceUnit({
     nodePath: "/usr/bin/node",
-    launcherPath: "/home/theo/.t3/runtime/service-launcher.mjs",
+    launcherPath: "/home/theo/.sightseer/runtime/service-launcher.mjs",
     baseDir: "/home/theo/.t3",
-    logPath: "/home/theo/.t3/userdata/logs/boot-service.log",
-    unitPath: "/home/theo/.config/systemd/user/t3code.service",
+    logPath: "/home/theo/.sightseer/userdata/logs/boot-service.log",
+    unitPath: "/home/theo/.config/systemd/user/sightseer.service",
   });
 
-  expect(unit).toContain("ExecStart=/usr/bin/node /home/theo/.t3/runtime/service-launcher.mjs");
+  expect(unit).toContain(
+    "ExecStart=/usr/bin/node /home/theo/.sightseer/runtime/service-launcher.mjs",
+  );
   expect(unit).toContain("KillMode=mixed");
   expect(unit).not.toContain("versions/1.2.3");
 });
@@ -147,9 +149,9 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       const error = yield* service.install.pipe(Effect.flip);
       expect(error._tag).toBe("BootServiceCommandError");
       expect(commands.filter((command) => command.startsWith("systemctl "))).toEqual([
-        "systemctl --user stop t3code.service",
+        "systemctl --user stop sightseer.service",
         "systemctl --user daemon-reload",
-        "systemctl --user restart t3code.service",
+        "systemctl --user restart sightseer.service",
       ]);
     }),
   );
@@ -175,8 +177,8 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
       expect((yield* service.install.pipe(Effect.flip))._tag).toBe("BootServiceUpdatePendingError");
       expect(serviceStateHasPendingUpdate(yield* fs.readFileString(statePath))).toBe(true);
       expect(commands.filter((command) => command.startsWith("systemctl "))).toEqual([
-        "systemctl --user stop t3code.service",
-        "systemctl --user restart t3code.service",
+        "systemctl --user stop sightseer.service",
+        "systemctl --user restart sightseer.service",
       ]);
     }),
   );

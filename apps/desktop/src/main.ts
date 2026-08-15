@@ -156,13 +156,31 @@ const desktopWindowLayer = DesktopWindow.layer.pipe(
   Layer.provideMerge(desktopPreviewLayer),
 );
 
+const earlyDesktopEnvironmentLayer = desktopEnvironmentLayer.pipe(
+  Layer.provide(Layer.mergeAll(NodeServices.layer, ElectronApp.layer)),
+);
+
+const earlyDesktopAssetsLayer = DesktopAssets.layer.pipe(
+  Layer.provide(Layer.mergeAll(earlyDesktopEnvironmentLayer, NodeServices.layer)),
+);
+
+const desktopAppIdentityLayer = DesktopAppIdentity.layerInitialized.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      earlyDesktopAssetsLayer,
+      earlyDesktopEnvironmentLayer,
+      NodeServices.layer,
+      ElectronApp.layer,
+    ),
+  ),
+);
+
 // Pool layer instantiates the backend factory once for the Windows
 // primary instance and exposes it via pool.primary. Consumers go through
 // the pool now; the legacy DesktopBackendManager service is gone. The
 // WSL second instance gets registered later in the migration. See
 // DesktopBackendPool.ts header for the full rollout plan.
 const desktopBackendLayer = DesktopBackendPool.layer.pipe(
-  Layer.provideMerge(DesktopAppIdentity.layer),
   Layer.provideMerge(DesktopBackendConfiguration.layer),
   Layer.provideMerge(DesktopWslEnvironment.layer),
   Layer.provideMerge(DesktopTelemetryPublisher.layer),
@@ -192,10 +210,13 @@ const desktopApplicationLayer = Layer.mergeAll(
   Layer.provideMerge(desktopLocalEnvironmentAuthLayer),
 );
 
-const desktopClerkLayer = DesktopClerk.layer.pipe(
-  Layer.provideMerge(desktopEnvironmentLayer),
-  Layer.provideMerge(NodeServices.layer),
-  Layer.provideMerge(ElectronApp.layer),
+const desktopClerkLayer = desktopAppIdentityLayer.pipe(
+  Layer.flatMap((identityContext) =>
+    Layer.mergeAll(
+      Layer.succeedContext(identityContext),
+      DesktopClerk.layer.pipe(Layer.provide(earlyDesktopEnvironmentLayer)),
+    ),
+  ),
 );
 
 const desktopApplicationRuntimeLayer = desktopApplicationLayer.pipe(
@@ -205,8 +226,9 @@ const desktopApplicationRuntimeLayer = desktopApplicationLayer.pipe(
   Layer.provideMerge(electronLayer),
 );
 
-// Acquire strict pre-ready setup before Clerk, whose userData resolution can
-// yield and let Electron emit ready.
+// Build the app-owned identity layer before Clerk acquires Electron's
+// single-instance lock. The resulting context supplies the same identity
+// service to the rest of the desktop runtime.
 const desktopRuntimeLayer = desktopClerkLayer.pipe(
   Layer.flatMap((clerkContext) =>
     desktopApplicationRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(clerkContext))),

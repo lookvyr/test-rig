@@ -3,6 +3,11 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import {
+  DEVELOPMENT_ELECTRON_PROFILE_NAME,
+  PRODUCTION_ELECTRON_PROFILE_NAME,
+} from "@t3tools/shared/productIdentity";
+
+import {
   DEFAULT_LINUX_PASSWORD_STORE,
   normalizeLinuxPasswordStorePreference,
   resolveLinuxPasswordStoreSwitch,
@@ -49,7 +54,7 @@ function resolveEarlyDesktopSettingsPath(input: {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
 }): string {
-  const t3Home = Option.fromUndefinedOr(input.env.T3CODE_HOME);
+  const t3Home = Option.fromUndefinedOr(input.env.SIGHTSEER_HOME);
   const baseDir = resolveDesktopBaseDir({
     homeDirectory: input.homeDirectory,
     joinPath: input.joinPath,
@@ -81,7 +86,9 @@ export function resolveEarlyLinuxElectronOptions(
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
   return {
-    linuxWmClass: isDevelopmentEnvironment(input.env) ? "t3code-dev" : "t3code",
+    linuxWmClass: isDevelopmentEnvironment(input.env)
+      ? DEVELOPMENT_ELECTRON_PROFILE_NAME
+      : PRODUCTION_ELECTRON_PROFILE_NAME,
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

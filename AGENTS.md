@@ -77,7 +77,7 @@ The most common defect in this repo is a change that works on the path you teste
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
-- `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.t3`, which deliberately outranks an ambient `T3CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
+- `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.sightseer`, which deliberately outranks an ambient `SIGHTSEER_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
 - Sharing over the tailnet is three steps: run `vp run dev --share` in the background, wait for the `pairingUrl:` line in its output, paste that full URL (token included) in your reply. Do not wire up `tailscale serve` by hand for this, and do not open the URL yourself.
 - The web app requires pairing. Hand over the pairing URL, not the bare origin. A URL without its token is useless to whoever you gave it to. If the token got consumed, mint a fresh one with `node apps/server/src/bin.ts pair` — note it carries standard scopes, while the startup URL carries admin scopes (needed for Settings → Connections management).
@@ -85,15 +85,15 @@ The most common defect in this repo is a change that works on the path you teste
 
 ## Test data
 
-An empty database is a bad test. Seed your worktree's `.t3` with a copy of real data instead of pointing at live state:
+An empty database is a bad test. Seed your worktree's `.sightseer` with a copy of real data instead of pointing at live state:
 
-- Copy from `~/.t3/userdata` (the developer's real data, the most realistic test set) or `~/.t3/dev`. Worktree state lives at `<worktree>/.t3/userdata`.
+- Copy from `~/.t3/userdata` (the developer's real T3 Code data, the most realistic test set) or `~/.t3/dev`. Worktree state lives at `<worktree>/.sightseer/userdata`.
 - Snapshot the database with `VACUUM INTO`, which is safe even while a server has the source open and yields one consistent file:
 
   ```bash
-  mkdir -p .t3/userdata
-  rm -f .t3/userdata/state.sqlite*  # VACUUM INTO refuses to overwrite
-  bun -e "new (require('bun:sqlite').Database)(process.env.HOME + '/.t3/userdata/state.sqlite', { readonly: true }).run(\"VACUUM INTO '.t3/userdata/state.sqlite'\")"
+  mkdir -p .sightseer/userdata
+  rm -f .sightseer/userdata/state.sqlite*  # VACUUM INTO refuses to overwrite
+  bun -e "new (require('bun:sqlite').Database)(process.env.HOME + '/.t3/userdata/state.sqlite', { readonly: true }).run(\"VACUUM INTO '.sightseer/userdata/state.sqlite'\")"
   ```
 
   A plain `cp` is only safe when no server has the source open, and must bring the `-wal` and `-shm` siblings along. A live file copy is a corrupt copy.

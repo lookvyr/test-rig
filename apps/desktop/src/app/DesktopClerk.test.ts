@@ -23,37 +23,19 @@ vi.mock("@clerk/electron/storage", () => ({
 }));
 
 import * as Exit from "effect/Exit";
-import * as FileSystem from "effect/FileSystem";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
-const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
+const makeDesktopClerkLayer = (isDevelopment = true) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: "/tmp/t3-state",
     isDevelopment,
-    appDataDirectory: "/tmp/app-data",
-    userDataDirName: isDevelopment ? "t3code-dev" : "t3code",
-    legacyUserDataDirName: isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)",
-    path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
-  const electronApp = {
-    setPath: (name: string, value: string) =>
-      Effect.sync(() => {
-        events.push(`setPath:${name}:${value}`);
-      }),
-  } as unknown as ElectronApp.ElectronApp["Service"];
-
   return DesktopClerk.layer.pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
-        Layer.succeed(ElectronApp.ElectronApp, electronApp),
-        FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
-      ),
-    ),
+    Layer.provide(Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment)),
   );
 };
 
@@ -84,22 +66,19 @@ describe("DesktopClerk", () => {
     });
 
     return Effect.gen(function* () {
-      yield* Effect.scoped(Layer.build(makeDesktopClerkLayer(true, events)));
+      yield* Effect.scoped(Layer.build(makeDesktopClerkLayer(true)));
 
       assert.deepEqual(createClerkBridgeMock.mock.calls, [
         [
           {
             storage: storageAdapter,
             passkeys: true,
-            renderer: { scheme: "t3code-dev", host: "app" },
+            renderer: { scheme: "sightseer-dev", host: "app" },
           },
         ],
       ]);
       assert.equal(cleanup.mock.calls.length, 1);
-      // The bridge acquires Electron's single-instance lock at creation, and
-      // the lock both lives in and creates the userData directory — so the
-      // real path must be set before the bridge exists.
-      assert.deepEqual(events, ["setPath:userData:/tmp/app-data/t3code-dev", "createClerkBridge"]);
+      assert.deepEqual(events, ["createClerkBridge"]);
       storageMock.mockClear();
       createClerkBridgeMock.mockClear();
     });
@@ -210,8 +189,8 @@ describe("DesktopClerk", () => {
   });
 
   it.each([
-    { isDevelopment: true, scheme: "t3code-dev" },
-    { isDevelopment: false, scheme: "t3code" },
+    { isDevelopment: true, scheme: "sightseer-dev" },
+    { isDevelopment: false, scheme: "sightseer" },
   ])("configures the SDK with the $scheme renderer origin", ({ isDevelopment, scheme }) => {
     const bridge = { cleanup: vi.fn(), isPrimaryInstance: true };
     storageMock.mockReturnValue(storageAdapter);

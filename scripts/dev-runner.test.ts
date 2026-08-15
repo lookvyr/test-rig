@@ -60,7 +60,7 @@ function mockProcess(exit: number | PlatformError.PlatformError) {
 
 const devServerInput = {
   mode: "dev:server",
-  t3Home: "/tmp/t3code-dev-runner",
+  t3Home: "/tmp/sightseer-dev-runner",
   browser: undefined,
   autoBootstrapProjectFromCwd: undefined,
   logWebSocketEvents: undefined,
@@ -153,7 +153,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_HOME, undefined);
+        assert.equal(env.SIGHTSEER_HOME, undefined);
         assert.equal(env.T3CODE_NO_BROWSER, "1");
       }),
     );
@@ -215,7 +215,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: new URL("http://localhost:7331"),
         });
 
-        assert.equal(env.T3CODE_HOME, path.resolve("/tmp/custom-t3"));
+        assert.equal(env.SIGHTSEER_HOME, path.resolve("/tmp/custom-t3"));
         assert.equal(env.T3CODE_PORT, "4222");
         assert.equal(env.VITE_HTTP_URL, "http://localhost:4222");
         assert.equal(env.VITE_WS_URL, "ws://localhost:4222");
@@ -233,7 +233,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           mode: "dev",
           baseEnv: {
             T3_SERVICE_LAUNCHER_CONTEXT: '{"childVersion":"9.9.9"}',
-            T3_BOOT_SERVICE_UNIT: "t3code.service",
+            T3_BOOT_SERVICE_UNIT: "sightseer.service",
           },
           serverOffset: 0,
           webOffset: 0,
@@ -313,7 +313,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_HOME, path.resolve("/tmp/my-t3"));
+        assert.equal(env.SIGHTSEER_HOME, path.resolve("/tmp/my-t3"));
       }),
     );
 
@@ -341,7 +341,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_HOME, path.resolve("/tmp/my-t3"));
+        assert.equal(env.SIGHTSEER_HOME, path.resolve("/tmp/my-t3"));
         assert.equal(env.PORT, "5733");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://127.0.0.1:5733");
         assert.equal(env.HOST, "127.0.0.1");
@@ -874,11 +874,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
     // `tailscale serve` config outlives the process, so a dry run that shared
     // would replace and then tear down whatever mapping the port already had.
-    // Base-dir precedence (--home-dir > worktree .t3 > ambient T3CODE_HOME)
+    // Base-dir precedence (--home-dir > worktree .sightseer > ambient SIGHTSEER_HOME)
     // lives in runDevRunnerWithInput; the env builder must not consult the
     // ambient variable on its own, or it would silently outrank the worktree
     // default and land dev state on the user's real database.
-    it.effect("ignores an ambient T3CODE_HOME when no home is resolved", () =>
+    it.effect("ignores an ambient legacy T3CODE_HOME when no home is resolved", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
@@ -894,7 +894,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_HOME, undefined);
+        assert.equal(env.SIGHTSEER_HOME, undefined);
+        assert.equal(env.SIGHTSEER_HOME, undefined);
       }),
     );
 
@@ -1244,11 +1245,11 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             Effect.provideService(HostProcessWorkingDirectory, input.cwd),
             Effect.provideService(
               HostProcessEnvironment,
-              input.ambientHome === undefined ? {} : { T3CODE_HOME: input.ambientHome },
+              input.ambientHome === undefined ? {} : { SIGHTSEER_HOME: input.ambientHome },
             ),
           );
 
-          return captured?.T3CODE_HOME;
+          return captured?.SIGHTSEER_HOME;
         });
 
       it.effect("prefers an explicit --home-dir over the worktree default", () =>
@@ -1258,7 +1259,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           const home = yield* spawnedHome({
             t3Home: "/tmp/explicit-home",
             cwd: root,
-            ambientHome: "/home/user/.t3",
+            ambientHome: "/home/user/.sightseer",
           });
           assert.equal(home, path.resolve("/tmp/explicit-home"));
         }).pipe(Effect.scoped),
@@ -1271,34 +1272,34 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           const home = yield* spawnedHome({
             t3Home: "   ",
             cwd: root,
-            ambientHome: "/home/user/.t3",
+            ambientHome: "/home/user/.sightseer",
           });
-          assert.equal(home, path.join(path.resolve(root), ".t3"));
+          assert.equal(home, path.join(path.resolve(root), ".sightseer"));
         }).pipe(Effect.scoped),
       );
 
-      it.effect("prefers the worktree .t3 over an ambient T3CODE_HOME", () =>
+      it.effect("prefers the worktree .sightseer over an ambient SIGHTSEER_HOME", () =>
         Effect.gen(function* () {
           const path = yield* Path.Path;
           const root = yield* makeWorktree;
           const home = yield* spawnedHome({
             t3Home: undefined,
             cwd: root,
-            ambientHome: "/home/user/.t3",
+            ambientHome: "/home/user/.sightseer",
           });
-          assert.equal(home, path.join(path.resolve(root), ".t3"));
+          assert.equal(home, path.join(path.resolve(root), ".sightseer"));
         }).pipe(Effect.scoped),
       );
 
-      it.effect("falls back to an ambient T3CODE_HOME outside a worktree", () =>
+      it.effect("falls back to an ambient SIGHTSEER_HOME outside a worktree", () =>
         Effect.gen(function* () {
           const path = yield* Path.Path;
           const home = yield* spawnedHome({
             t3Home: undefined,
             cwd: NodeOS.tmpdir(),
-            ambientHome: "/home/user/.t3",
+            ambientHome: "/home/user/.sightseer",
           });
-          assert.equal(home, path.resolve("/home/user/.t3"));
+          assert.equal(home, path.resolve("/home/user/.sightseer"));
         }),
       );
 

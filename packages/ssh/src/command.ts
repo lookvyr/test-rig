@@ -2,6 +2,7 @@ import * as NodeCrypto from "node:crypto";
 
 import type { DesktopSshEnvironmentTarget, DesktopUpdateChannel } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { PRODUCT_PACKAGE_NAME } from "@t3tools/shared/productIdentity";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -371,12 +372,14 @@ export function resolveRemoteT3CliPackageSpec(input: {
 }): string {
   const appVersion = input.appVersion.trim();
   if (!input.isDevelopment && PUBLISHABLE_T3_VERSION_PATTERN.test(appVersion)) {
-    return `t3@${appVersion}`;
+    return `${PRODUCT_PACKAGE_NAME}@${appVersion}`;
   }
 
   if (input.isDevelopment) {
-    return "t3@nightly";
+    return `${PRODUCT_PACKAGE_NAME}@nightly`;
   }
 
-  return input.updateChannel === "nightly" ? "t3@nightly" : "t3@latest";
+  return input.updateChannel === "nightly"
+    ? `${PRODUCT_PACKAGE_NAME}@nightly`
+    : `${PRODUCT_PACKAGE_NAME}@latest`;
 }

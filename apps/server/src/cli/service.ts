@@ -10,6 +10,8 @@ import type * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
+const packageVersionLabel = (version: string) => `@lookvyr/sightseer@${version}`;
+
 export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) =>
   BootService.layer({
     baseDir: config.baseDir,
@@ -48,17 +50,17 @@ export function formatServiceStatus(
   cliVersion: string,
 ): string {
   if (!status.supported) {
-    return "T3 Code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd";
+    return "Sightseer service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd";
   }
   if (!status.installed) {
-    return "T3 Code service\n  Status: not installed\n  Next: Run `t3 service install`.";
+    return "Sightseer service\n  Status: not installed\n  Next: Run `sightseer service install`.";
   }
   return [
-    "T3 Code service",
-    `  Status: ${status.current ? `installed · t3@${cliVersion}` : "needs an update or repair"}`,
+    "Sightseer service",
+    `  Status: ${status.current ? `installed · ${packageVersionLabel(cliVersion)}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
-    ...(status.current ? [] : ["  Next: Run `npx t3@latest service update`."]),
+    ...(status.current ? [] : ["  Next: Run `npx @lookvyr/sightseer@latest service update`."]),
   ].join("\n");
 }
 
@@ -72,7 +74,7 @@ const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
 });
 
 const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe(
-  Command.withDescription("Install T3 Code as a background service for this user."),
+  Command.withDescription("Install Sightseer as a background service for this user."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -80,12 +82,12 @@ const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe
         const result = yield* reconcileService();
         if (!result.changed) {
           yield* Console.log(
-            `T3 Code service is already installed with t3@${packageJson.version}.`,
+            `Sightseer service is already installed with ${packageVersionLabel(packageJson.version)}.`,
           );
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} Sightseer service with ${packageVersionLabel(packageJson.version)}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -94,7 +96,7 @@ const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe
 
 const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
   Command.withDescription(
-    "Update or repair the background service using this CLI version. Use `npx t3@latest service update` for the latest release.",
+    "Update or repair the background service using this CLI version. Use `npx @lookvyr/sightseer@latest service update` for the latest release.",
   ),
   Command.withHandler((flags) =>
     runServiceCommand(
@@ -102,11 +104,13 @@ const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
       Effect.gen(function* () {
         const result = yield* reconcileService();
         if (!result.changed) {
-          yield* Console.log(`T3 Code service is already using t3@${packageJson.version}.`);
+          yield* Console.log(
+            `Sightseer service is already using ${packageVersionLabel(packageJson.version)}.`,
+          );
           return;
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} T3 Code service with t3@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+          `${result.previouslyInstalled ? "Updated" : "Installed"} Sightseer service with ${packageVersionLabel(packageJson.version)}.\nLogs: ${result.plan.logPath}`,
         );
       }),
     ),
@@ -114,7 +118,7 @@ const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
 );
 
 const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).pipe(
-  Command.withDescription("Stop and remove the T3 Code background service."),
+  Command.withDescription("Stop and remove the Sightseer background service."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -122,7 +126,7 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
         const service = yield* BootService.BootService;
         const removed = yield* service.uninstall;
         yield* Console.log(
-          removed ? "Removed the T3 Code service." : "T3 Code service is not installed.",
+          removed ? "Removed the Sightseer service." : "Sightseer service is not installed.",
         );
       }),
     ),
@@ -130,7 +134,7 @@ const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).
 );
 
 const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
-  Command.withDescription("Show whether the T3 Code background service is installed."),
+  Command.withDescription("Show whether the Sightseer background service is installed."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -149,14 +153,14 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
     return false;
   }
   if (installed && current) {
-    yield* Console.log("T3 Code is already set up to run in the background on this machine.");
+    yield* Console.log("Sightseer is already set up to run in the background on this machine.");
     return true;
   }
   const wanted = yield* Prompt.run(
     Prompt.confirm({
       message: installed
-        ? "The installed T3 Code service needs an update or repair. Update it now?"
-        : "Run T3 Code in the background whenever this machine boots? " +
+        ? "The installed Sightseer service needs an update or repair. Update it now?"
+        : "Run Sightseer in the background whenever this machine boots? " +
           "It stays reachable through T3 Connect even after you log out.",
       initial: true,
     }),
@@ -191,7 +195,7 @@ export const recoverServiceOnboardingOffer = <R>(
   );
 
 export const serviceCommand = Command.make("service").pipe(
-  Command.withDescription("Manage the T3 Code background service."),
+  Command.withDescription("Manage the Sightseer background service."),
   Command.withSubcommands([
     serviceInstallCommand,
     serviceUninstallCommand,

@@ -90,9 +90,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
   });
 
-  it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code (Alpha)");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
+  it("uses the stable Sightseer product name for every update channel", () => {
+    assert.equal(resolveDesktopProductName("0.0.17"), "Sightseer");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Sightseer");
   });
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
@@ -350,9 +350,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.notProperty(linux, "asarUnpack");
       assert.deepStrictEqual(win.asarUnpack, WINDOWS_ASAR_UNPACK);
       // Linux must register the renderer schemes so the generated .desktop
-      // entry advertises MimeType=x-scheme-handler/t3code; for OAuth deep links.
+      // entry advertises MimeType=x-scheme-handler/sightseer for OAuth deep links.
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        { name: "Sightseer", schemes: ["sightseer", "sightseer-dev"] },
       ]);
       for (const config of [mac, linux, win]) {
         assert.deepStrictEqual(config.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
@@ -409,7 +409,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "com.t3tools.t3code",
+      appId: "com.lookvyr.sightseer",
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -429,7 +429,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
+    assert.include(entitlements, "<string>ABC1234567.com.lookvyr.sightseer</string>");
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
@@ -524,11 +524,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       });
 
       const mac = config.mac as Record<string, unknown>;
-      assert.equal(config.appId, "com.t3tools.t3code");
+      assert.equal(config.appId, "com.lookvyr.sightseer");
       assert.equal(mac.entitlements, "/tmp/entitlements.mac.plist");
       assert.equal(mac.provisioningProfile, "/tmp/t3code.provisionprofile");
       assert.deepStrictEqual(mac.protocols, [
-        { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
+        { name: "Sightseer", schemes: ["sightseer", "sightseer-dev"] },
       ]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
@@ -569,8 +569,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("win", "arm64"), [
       "aarch64-pc-windows-msvc",
     ]);
-    assert.equal(resourceMonitorExecutableName("mac"), "t3-resource-monitor");
-    assert.equal(resourceMonitorExecutableName("win"), "t3-resource-monitor.exe");
+    assert.equal(resourceMonitorExecutableName("mac"), "sightseer-resource-monitor");
+    assert.equal(resourceMonitorExecutableName("win"), "sightseer-resource-monitor.exe");
   });
   it("promotes target fff binaries to direct staged dependencies", () => {
     assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {

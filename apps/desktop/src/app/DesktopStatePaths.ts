@@ -1,5 +1,11 @@
 import * as Option from "effect/Option";
 
+import {
+  DEVELOPMENT_HOME_DIRECTORY_NAME,
+  HOME_DIRECTORY_NAME,
+  USERDATA_DIRECTORY_NAME,
+} from "@t3tools/shared/productIdentity";
+
 export type JoinPath = (first: string, ...segments: string[]) => string;
 
 function normalizeConfiguredBaseDir(t3Home: Option.Option<string>): Option.Option<string> {
@@ -16,7 +22,7 @@ export function resolveDesktopBaseDir(input: {
   readonly t3Home: Option.Option<string>;
 }): string {
   return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
-    input.joinPath(input.homeDirectory, ".t3"),
+    input.joinPath(input.homeDirectory, HOME_DIRECTORY_NAME),
   );
 }
 
@@ -28,5 +34,8 @@ export function resolveDesktopStateDir(input: {
 }): string {
   const useDevSubdir =
     input.isDevelopment && Option.isNone(normalizeConfiguredBaseDir(input.t3Home));
-  return input.joinPath(input.baseDir, useDevSubdir ? "dev" : "userdata");
+  return input.joinPath(
+    input.baseDir,
+    useDevSubdir ? DEVELOPMENT_HOME_DIRECTORY_NAME : USERDATA_DIRECTORY_NAME,
+  );
 }

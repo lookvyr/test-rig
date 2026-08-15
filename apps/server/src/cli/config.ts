@@ -16,6 +16,7 @@ import { Argument, Flag } from "effect/unstable/cli";
 import { readBootstrapEnvelope } from "../bootstrap.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
+import { HOME_ENVIRONMENT_VARIABLE } from "@t3tools/shared/productIdentity";
 
 export const modeFlag = Flag.choice("mode", ServerConfig.RuntimeMode.literals).pipe(
   Flag.withDescription("Runtime mode. `desktop` keeps loopback defaults unless overridden."),
@@ -32,7 +33,7 @@ export const hostFlag = Flag.string("host").pipe(
 );
 export const baseDirFlag = Flag.string("base-dir").pipe(
   Flag.withDescription(
-    "Explicit T3 Code data directory; runtime state is stored under userdata (equivalent to T3CODE_HOME).",
+    "Explicit Sightseer data directory; runtime state is stored under userdata (equivalent to SIGHTSEER_HOME).",
   ),
   Flag.optional,
 );
@@ -104,7 +105,10 @@ const EnvServerConfig = Config.all({
   ),
   port: Config.port("T3CODE_PORT").pipe(Config.option, Config.map(Option.getOrUndefined)),
   host: Config.string("T3CODE_HOST").pipe(Config.option, Config.map(Option.getOrUndefined)),
-  t3Home: Config.string("T3CODE_HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  t3Home: Config.string(HOME_ENVIRONMENT_VARIABLE).pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
   devAllowedOrigins: Config.string("T3CODE_DEV_ALLOWED_ORIGINS").pipe(
     Config.withDefault(""),

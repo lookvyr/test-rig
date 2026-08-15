@@ -18,7 +18,7 @@ describe("ResourceMonitorBinary", () => {
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-resource-monitor-binary-",
       });
-      const binaryPath = `${baseDir}/t3-resource-monitor`;
+      const binaryPath = `${baseDir}/sightseer-resource-monitor`;
       yield* fileSystem.writeFileString(binaryPath, "binary");
       yield* fileSystem.chmod(binaryPath, 0o755);
 
@@ -65,7 +65,7 @@ describe("ResourceMonitorBinary", () => {
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "t3-resource-monitor-binary-",
       });
-      const binaryPath = `${baseDir}/t3-resource-monitor`;
+      const binaryPath = `${baseDir}/sightseer-resource-monitor`;
       yield* fileSystem.writeFileString(binaryPath, "binary");
       yield* fileSystem.chmod(binaryPath, 0o644);
 

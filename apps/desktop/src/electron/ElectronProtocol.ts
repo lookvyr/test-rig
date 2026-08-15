@@ -8,9 +8,11 @@ import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
 
+import { DEVELOPMENT_URL_SCHEME, PRODUCTION_URL_SCHEME } from "@t3tools/shared/productIdentity";
+
 export const DESKTOP_HOST = "app";
-export const DESKTOP_PRODUCTION_SCHEME = "t3code";
-export const DESKTOP_DEVELOPMENT_SCHEME = "t3code-dev";
+export const DESKTOP_PRODUCTION_SCHEME = PRODUCTION_URL_SCHEME;
+export const DESKTOP_DEVELOPMENT_SCHEME = DEVELOPMENT_URL_SCHEME;
 
 export function getDesktopScheme(isDevelopment: boolean): string {
   return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;

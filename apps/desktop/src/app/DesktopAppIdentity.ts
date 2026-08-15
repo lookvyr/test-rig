@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
@@ -18,22 +19,10 @@ const AppPackageMetadata = Schema.Struct({
 });
 const decodeAppPackageMetadata = Schema.decodeEffect(Schema.fromJsonString(AppPackageMetadata));
 
-export class DesktopUserDataPathResolutionError extends Schema.TaggedErrorClass<DesktopUserDataPathResolutionError>()(
-  "DesktopUserDataPathResolutionError",
-  {
-    legacyPath: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {
-  override get message(): string {
-    return `Failed to inspect legacy desktop user-data path at "${this.legacyPath}".`;
-  }
-}
-
 export class DesktopAppIdentity extends Context.Service<
   DesktopAppIdentity,
   {
-    readonly resolveUserDataPath: Effect.Effect<string, DesktopUserDataPathResolutionError>;
+    readonly configureStoragePaths: Effect.Effect<void, PlatformError.PlatformError>;
     readonly configure: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/app/DesktopAppIdentity") {}
@@ -44,27 +33,6 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
     ? Option.some(trimmed.slice(0, COMMIT_HASH_DISPLAY_LENGTH).toLowerCase())
     : Option.none();
 };
-
-export const resolveUserDataPath = Effect.gen(function* () {
-  const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const legacyPath = environment.path.join(
-    environment.appDataDirectory,
-    environment.legacyUserDataDirName,
-  );
-  const legacyPathExists = yield* fileSystem.exists(legacyPath).pipe(
-    Effect.mapError(
-      (cause) =>
-        new DesktopUserDataPathResolutionError({
-          legacyPath,
-          cause,
-        }),
-    ),
-  );
-  return legacyPathExists
-    ? legacyPath
-    : environment.path.join(environment.appDataDirectory, environment.userDataDirName);
-}).pipe(Effect.withSpan("desktop.appIdentity.resolveUserDataPath"));
 
 export const make = Effect.gen(function* () {
   const assets = yield* DesktopAssets.DesktopAssets;
@@ -111,11 +79,23 @@ export const make = Effect.gen(function* () {
     return commitHash;
   });
 
-  const userDataPath = resolveUserDataPath.pipe(
-    Effect.provide(
-      yield* Effect.context<DesktopEnvironment.DesktopEnvironment | FileSystem.FileSystem>(),
-    ),
-  );
+  const configureStoragePaths = Effect.gen(function* () {
+    const directories = [
+      environment.electronUserDataPath,
+      environment.electronSessionDataPath,
+      environment.logDir,
+      environment.electronCrashDumpsPath,
+    ];
+    yield* Effect.forEach(
+      directories,
+      (directory) => fileSystem.makeDirectory(directory, { recursive: true }),
+      { concurrency: "unbounded", discard: true },
+    );
+    yield* electronApp.setPath("userData", environment.electronUserDataPath);
+    yield* electronApp.setPath("sessionData", environment.electronSessionDataPath);
+    yield* electronApp.setPath("logs", environment.logDir);
+    yield* electronApp.setPath("crashDumps", environment.electronCrashDumpsPath);
+  }).pipe(Effect.withSpan("desktop.appIdentity.configureStoragePaths"));
 
   const configure = Effect.gen(function* () {
     const commitHash = yield* resolveAboutCommitHash;
@@ -144,9 +124,18 @@ export const make = Effect.gen(function* () {
   }).pipe(Effect.withSpan("desktop.appIdentity.configure"));
 
   return DesktopAppIdentity.of({
-    resolveUserDataPath: userDataPath,
+    configureStoragePaths,
     configure,
   });
 });
 
 export const layer = Layer.effect(DesktopAppIdentity, make);
+
+// App-owned pre-ready initialization. main.ts builds this layer before the
+// interim Clerk layer because Clerk acquires Electron's single-instance lock
+// during construction. Keeping the ordering here prevents Clerk removal from
+// also removing Sightseer's Electron profile initialization.
+export const layerInitialized = Layer.effect(
+  DesktopAppIdentity,
+  make.pipe(Effect.tap((identity) => identity.configureStoragePaths)),
+);

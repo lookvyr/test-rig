@@ -11,6 +11,14 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
+import {
+  DEVELOPMENT_APP_ID,
+  DEVELOPMENT_ELECTRON_PROFILE_NAME,
+  PRODUCT_NAME,
+  PRODUCTION_APP_ID,
+  PRODUCTION_ELECTRON_PROFILE_NAME,
+} from "@t3tools/shared/productIdentity";
+
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
@@ -50,6 +58,9 @@ export class DesktopEnvironment extends Context.Service<
     readonly serverSettingsPath: string;
     readonly logDir: string;
     readonly browserArtifactsDir: string;
+    readonly electronUserDataPath: string;
+    readonly electronSessionDataPath: string;
+    readonly electronCrashDumpsPath: string;
     readonly rootDir: string;
     readonly appRoot: string;
     readonly backendEntryPath: string;
@@ -70,7 +81,6 @@ export class DesktopEnvironment extends Context.Service<
     readonly linuxApplicationsDir: string;
     readonly appImagePath: Option.Option<string>;
     readonly userDataDirName: string;
-    readonly legacyUserDataDirName: string;
     readonly defaultDesktopSettings: DesktopAppSettings.DesktopSettings;
     readonly runtimeInfo: DesktopRuntimeInfo;
     readonly resolvePickFolderDefaultPath: (rawOptions: unknown) => Option.Option<string>;
@@ -79,7 +89,7 @@ export class DesktopEnvironment extends Context.Service<
   }
 >()("@t3tools/desktop/app/DesktopEnvironment") {}
 
-const APP_BASE_NAME = "T3 Code";
+const APP_BASE_NAME = PRODUCT_NAME;
 
 function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
@@ -100,7 +110,7 @@ function resolveDesktopAppBranding(input: {
   return {
     baseName: APP_BASE_NAME,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    displayName: input.isDevelopment ? `${APP_BASE_NAME} (Dev)` : APP_BASE_NAME,
   };
 }
 
@@ -168,8 +178,10 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
-  const userDataDirName = isDevelopment ? "t3code-dev" : "t3code";
-  const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+  const userDataDirName = isDevelopment
+    ? DEVELOPMENT_ELECTRON_PROFILE_NAME
+    : PRODUCTION_ELECTRON_PROFILE_NAME;
+  const electronUserDataPath = path.join(appDataDirectory, userDataDirName);
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
     "applications",
@@ -196,6 +208,9 @@ const make = Effect.fn("desktop.environment.make")(function* (
     serverSettingsPath: path.join(stateDir, "settings.json"),
     logDir: path.join(stateDir, "logs"),
     browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
+    electronUserDataPath,
+    electronSessionDataPath: path.join(electronUserDataPath, "session-data"),
+    electronCrashDumpsPath: path.join(stateDir, "crash-dumps"),
     rootDir,
     appRoot,
     backendEntryPath: path.join(appRoot, "apps/server/dist/bin.mjs"),
@@ -213,14 +228,13 @@ const make = Effect.fn("desktop.environment.make")(function* (
     branding,
     displayName,
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
-      isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code",
+      isDevelopment ? DEVELOPMENT_APP_ID : PRODUCTION_APP_ID,
     ),
-    linuxDesktopEntryName: isDevelopment ? "t3code-dev.desktop" : "t3code.desktop",
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
+    linuxDesktopEntryName: `${userDataDirName}.desktop`,
+    linuxWmClass: userDataDirName,
     linuxApplicationsDir,
     appImagePath: config.appImagePath,
     userDataDirName,
-    legacyUserDataDirName,
     defaultDesktopSettings: DesktopAppSettings.resolveDefaultDesktopSettings(input.appVersion),
     runtimeInfo: resolveDesktopRuntimeInfo({
       platform: input.platform,

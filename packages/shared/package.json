@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./productIdentity": {
+      "types": "./src/productIdentity.ts",
+      "import": "./src/productIdentity.ts"
+    },
     "./projectFavicon": {
       "types": "./src/projectFavicon.ts",
       "import": "./src/projectFavicon.ts"

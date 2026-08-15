@@ -128,7 +128,7 @@ const handleFatalStartupError = Effect.fn("desktop.startup.handleFatalStartupErr
   const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
   if (!wasQuitting) {
     yield* electronDialog.showErrorBox(
-      "T3 Code failed to start",
+      "Sightseer failed to start",
       `Stage: ${stage}\n${message}${detail}`,
     );
   }
@@ -253,8 +253,6 @@ const startup = Effect.gen(function* () {
       );
     }
   }
-  const userDataPath = yield* appIdentity.resolveUserDataPath;
-  yield* electronApp.setPath("userData", userDataPath);
   yield* logStartupInfo("runtime logging configured", { logDir: environment.logDir });
   yield* desktopSettings.load;
 

@@ -74,7 +74,7 @@ function makeEnvironmentLayer(
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
-          T3CODE_HOME: baseDir,
+          SIGHTSEER_HOME: baseDir,
           T3CODE_PORT: "9999",
           T3CODE_MODE: "desktop",
           T3CODE_DESKTOP_LAN_HOST: "192.168.1.50",
@@ -724,8 +724,8 @@ describe("DesktopBackendConfiguration", () => {
       });
       const resourcesPath = `${baseDir}/resources`;
       const dirname = `${resourcesPath}/app.asar/apps/desktop/dist-electron`;
-      const embeddedMonitorPath = `${resourcesPath}/app.asar/apps/desktop/prod-resources/resource-monitor/t3-resource-monitor`;
-      const monitorPath = `${resourcesPath}/resource-monitor/t3-resource-monitor`;
+      const embeddedMonitorPath = `${resourcesPath}/app.asar/apps/desktop/prod-resources/resource-monitor/sightseer-resource-monitor`;
+      const monitorPath = `${resourcesPath}/resource-monitor/sightseer-resource-monitor`;
       yield* fileSystem.makeDirectory(
         `${resourcesPath}/app.asar/apps/desktop/prod-resources/resource-monitor`,
         { recursive: true },
@@ -773,11 +773,11 @@ describe("DesktopBackendConfiguration", () => {
       const dirname = path.join(baseDir, "apps/desktop/src");
       const releaseMonitorPath = path.join(
         baseDir,
-        "native/resource-monitor/target/release/t3-resource-monitor",
+        "native/resource-monitor/target/release/sightseer-resource-monitor",
       );
       const debugMonitorPath = path.join(
         baseDir,
-        "native/resource-monitor/target/debug/t3-resource-monitor",
+        "native/resource-monitor/target/debug/sightseer-resource-monitor",
       );
       yield* fileSystem.makeDirectory(path.dirname(releaseMonitorPath), { recursive: true });
       yield* fileSystem.makeDirectory(path.dirname(debugMonitorPath), { recursive: true });
