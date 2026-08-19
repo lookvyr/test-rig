@@ -1,10 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import * as AuthPairingLinks from "../persistence/AuthPairingLinks.ts";
@@ -32,7 +34,7 @@ const makePairingGrantStoreLayer = (
   overrides?: Partial<Pick<ServerConfig.ServerConfig["Service"], "desktopBootstrapToken">>,
 ) =>
   PairingGrantStore.layer.pipe(
-    Layer.provide(SqlitePersistenceMemory),
+    Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provide(makeServerConfigLayer(overrides)),
   );
 
@@ -79,7 +81,6 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
         "orchestration:operate",
         "terminal:operate",
         "review:write",
-        "relay:read",
       ]);
       expect(first.subject).toBe("one-time-token");
       expect(first.label).toBe("Julius iPhone");
@@ -114,26 +115,40 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
     }).pipe(Effect.provide(makePairingGrantStoreLayer())),
   );
 
-  it.effect("requires the bound proof key thumbprint when present", () =>
+  it.effect("fails closed for historical proof-key-bound pairing grants", () =>
     Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = yield* DateTime.now;
+      const expiresAt = DateTime.add(createdAt, { minutes: 5 });
+      yield* sql`
+        INSERT INTO auth_pairing_links (
+          id, credential, method, scopes, subject, label, proof_key_thumbprint,
+          created_at, expires_at, consumed_at, revoked_at
+        ) VALUES (
+          ${"historical-proof-grant"},
+          ${"historical-proof-token"},
+          ${"one-time-token"},
+          ${JSON.stringify(["orchestration:read"])},
+          ${"legacy-relay"},
+          NULL,
+          ${"client-proof-key-thumbprint"},
+          ${DateTime.formatIso(createdAt)},
+          ${DateTime.formatIso(expiresAt)},
+          NULL,
+          NULL
+        )
+      `;
+
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore;
-      const token = yield* bootstrapCredentials.issueOneTimeToken({
-        proofKeyThumbprint: "client-proof-key-thumbprint",
-      });
+      const error = yield* Effect.flip(bootstrapCredentials.consume("historical-proof-token"));
+      const rows = yield* sql<{ readonly consumedAt: string | null }>`
+        SELECT consumed_at AS "consumedAt"
+        FROM auth_pairing_links
+        WHERE id = 'historical-proof-grant'
+      `;
 
-      const missing = yield* Effect.flip(bootstrapCredentials.consume(token.credential));
-      const wrong = yield* Effect.flip(
-        bootstrapCredentials.consume(token.credential, {
-          proofKeyThumbprint: "other-proof-key-thumbprint",
-        }),
-      );
-      const consumed = yield* bootstrapCredentials.consume(token.credential, {
-        proofKeyThumbprint: "client-proof-key-thumbprint",
-      });
-
-      expect(missing.message).toContain("proof key mismatch");
-      expect(wrong.message).toContain("proof key mismatch");
-      expect(consumed.proofKeyThumbprint).toBe("client-proof-key-thumbprint");
+      expect(error._tag).toBe("UnavailableBootstrapCredentialError");
+      expect(rows).toEqual([{ consumedAt: null }]);
     }).pipe(Effect.provide(makePairingGrantStoreLayer())),
   );
 
@@ -150,10 +165,8 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
         "orchestration:operate",
         "terminal:operate",
         "review:write",
-        "relay:read",
         "access:read",
         "access:write",
-        "relay:write",
       ]);
       expect(first.subject).toBe("desktop-bootstrap");
       expect(second.method).toBe("desktop-bootstrap");

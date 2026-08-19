@@ -2,7 +2,6 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   BearerConnectionTarget,
-  RelayConnectionTarget,
   SshConnectionProfile,
   SshConnectionTarget,
 } from "@t3tools/client-runtime/connection";
@@ -10,7 +9,7 @@ import {
   ConnectionCatalogDocument as RuntimeConnectionCatalogDocument,
   type ConnectionCatalogDocument as RuntimeConnectionCatalogDocumentType,
 } from "@t3tools/client-runtime/platform";
-import type { PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -23,7 +22,6 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
-import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
 const EncryptedConnectionCatalogDocument = Schema.Struct({
@@ -44,6 +42,36 @@ const RuntimeConnectionCatalogDocumentJson = Schema.fromJsonString(
 );
 const encodeRuntimeConnectionCatalogDocumentJson = Schema.encodeEffect(
   RuntimeConnectionCatalogDocumentJson,
+);
+
+const LegacySavedEnvironmentRecord = Schema.Struct({
+  environmentId: EnvironmentId,
+  label: Schema.String,
+  httpBaseUrl: Schema.String,
+  wsBaseUrl: Schema.String,
+  createdAt: Schema.String,
+  lastConnectedAt: Schema.NullOr(Schema.String),
+  desktopSsh: Schema.optionalKey(
+    Schema.Struct({
+      alias: Schema.String,
+      hostname: Schema.String,
+      username: Schema.NullOr(Schema.String),
+      port: Schema.NullOr(Schema.Number),
+    }),
+  ),
+  relayManaged: Schema.optionalKey(Schema.Struct({ relayUrl: Schema.String })),
+  encryptedBearerToken: Schema.optionalKey(Schema.String),
+});
+type LegacySavedEnvironmentRecord = typeof LegacySavedEnvironmentRecord.Type;
+
+const LegacySavedEnvironmentRegistryJson = fromLenientJson(
+  Schema.Struct({
+    version: Schema.optionalKey(Schema.Number),
+    records: Schema.optionalKey(Schema.Array(LegacySavedEnvironmentRecord)),
+  }),
+);
+const decodeLegacySavedEnvironmentRegistryJson = Schema.decodeEffect(
+  LegacySavedEnvironmentRegistryJson,
 );
 
 const DesktopConnectionCatalogStoreWriteOperation = Schema.Literals([
@@ -288,8 +316,8 @@ function connectionId(prefix: "bearer" | "ssh", environmentId: string): string {
 const migrateSavedEnvironmentRecords = Effect.fn(
   "desktop.connectionCatalogStore.migrateSavedEnvironmentRecords",
 )(function* (
-  records: readonly PersistedSavedEnvironmentRecord[],
-  savedEnvironments: DesktopSavedEnvironments.DesktopSavedEnvironments["Service"],
+  records: readonly LegacySavedEnvironmentRecord[],
+  safeStorage: ElectronSafeStorage.ElectronSafeStorage["Service"],
   catalogPath: string,
 ): Effect.fn.Return<
   RuntimeConnectionCatalogDocumentType,
@@ -300,15 +328,7 @@ const migrateSavedEnvironmentRecords = Effect.fn(
   const credentials: Array<RuntimeConnectionCatalogDocumentType["credentials"][number]> = [];
 
   for (const record of records) {
-    if (record.relayManaged !== undefined) {
-      targets.push(
-        new RelayConnectionTarget({
-          environmentId: record.environmentId,
-          label: record.label,
-        }),
-      );
-      continue;
-    }
+    if (record.relayManaged !== undefined) continue;
 
     if (record.desktopSsh !== undefined) {
       const id = connectionId("ssh", record.environmentId);
@@ -347,31 +367,43 @@ const migrateSavedEnvironmentRecords = Effect.fn(
         wsBaseUrl: record.wsBaseUrl,
       }),
     );
-    const token = yield* savedEnvironments.getSecret(record.environmentId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new DesktopConnectionCatalogStoreMigrationError({
-            operation: "read-legacy-secret",
-            catalogPath,
-            environmentId: record.environmentId,
-            cause,
-          }),
-      ),
-    );
-    if (Option.isSome(token)) {
+    if (record.encryptedBearerToken !== undefined) {
+      const encryptedToken = yield* Effect.fromResult(
+        Encoding.decodeBase64(record.encryptedBearerToken),
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new DesktopConnectionCatalogStoreMigrationError({
+              operation: "read-legacy-secret",
+              catalogPath,
+              environmentId: record.environmentId,
+              cause,
+            }),
+        ),
+      );
+      const token = yield* safeStorage.decryptString(encryptedToken).pipe(
+        Effect.mapError(
+          (cause) =>
+            new DesktopConnectionCatalogStoreMigrationError({
+              operation: "read-legacy-secret",
+              catalogPath,
+              environmentId: record.environmentId,
+              cause,
+            }),
+        ),
+      );
       credentials.push({
         connectionId: id,
-        credential: new BearerConnectionCredential({ token: token.value }),
+        credential: new BearerConnectionCredential({ token }),
       });
     }
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     targets,
     profiles,
     credentials,
-    remoteDpopTokens: [],
   };
 });
 
@@ -381,8 +413,8 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const safeStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
   const crypto = yield* Crypto.Crypto;
-  const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
   const catalogPath = path.join(environment.stateDir, "connection-catalog.json");
+  const legacyRegistryPath = path.join(environment.stateDir, "saved-environments.json");
   const encryptionAvailable = safeStorage.isEncryptionAvailable.pipe(
     Effect.mapError(
       (cause) =>
@@ -432,20 +464,38 @@ export const make = Effect.gen(function* () {
     if (!(yield* encryptionAvailable)) {
       return Option.none<string>();
     }
-    const records = yield* savedEnvironments.getRegistry.pipe(
-      Effect.mapError(
-        (cause) =>
-          new DesktopConnectionCatalogStoreMigrationError({
-            operation: "read-legacy-registry",
-            catalogPath,
-            cause,
-          }),
+    const records = yield* fileSystem.readFileString(legacyRegistryPath).pipe(
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound"
+          ? Effect.succeed<string | null>(null)
+          : Effect.fail(
+              new DesktopConnectionCatalogStoreMigrationError({
+                operation: "read-legacy-registry",
+                catalogPath,
+                cause: error,
+              }),
+            ),
+      ),
+      Effect.flatMap((raw) =>
+        raw === null
+          ? Effect.succeed([])
+          : decodeLegacySavedEnvironmentRegistryJson(raw).pipe(
+              Effect.map((document) => document.records ?? []),
+              Effect.mapError(
+                (cause) =>
+                  new DesktopConnectionCatalogStoreMigrationError({
+                    operation: "read-legacy-registry",
+                    catalogPath,
+                    cause,
+                  }),
+              ),
+            ),
       ),
     );
     if (records.length === 0) {
       return Option.none<string>();
     }
-    const catalog = yield* migrateSavedEnvironmentRecords(records, savedEnvironments, catalogPath);
+    const catalog = yield* migrateSavedEnvironmentRecords(records, safeStorage, catalogPath);
     const encoded = yield* encodeRuntimeConnectionCatalogDocumentJson(catalog).pipe(
       Effect.mapError(
         (cause) =>

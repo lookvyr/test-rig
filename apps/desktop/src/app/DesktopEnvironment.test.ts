@@ -57,10 +57,6 @@ describe("DesktopEnvironment", () => {
         "/tmp/sightseer/userdata/desktop-settings.json",
       );
       assert.equal(environment.clientSettingsPath, "/tmp/sightseer/userdata/client-settings.json");
-      assert.equal(
-        environment.savedEnvironmentRegistryPath,
-        "/tmp/sightseer/userdata/saved-environments.json",
-      );
       assert.equal(environment.serverSettingsPath, "/tmp/sightseer/userdata/settings.json");
       assert.equal(environment.logDir, "/tmp/sightseer/userdata/logs");
       assert.equal(environment.browserArtifactsDir, "/tmp/sightseer/userdata/browser-artifacts");

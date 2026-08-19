@@ -1,4 +1,3 @@
-import { readHostedPairingRequest } from "@t3tools/shared/remote";
 import * as Schema from "effect/Schema";
 
 const MOBILE_PAIRING_URL_PARAM = "pairingUrl";
@@ -27,6 +26,15 @@ export class PairingQrPayloadEmptyError extends Schema.TaggedErrorClass<PairingQ
   }
 }
 
+export class LegacyHostedPairingUrlError extends Schema.TaggedErrorClass<LegacyHostedPairingUrlError>()(
+  "LegacyHostedPairingUrlError",
+  {},
+) {
+  override get message(): string {
+    return "T3 Connect pairing links are no longer supported.";
+  }
+}
+
 export function buildPairingUrl(host: string, code: string): string {
   const h = host.trim();
   const c = code.trim();
@@ -48,14 +56,9 @@ export function parsePairingUrl(url: string): { host: string; code: string } {
 
   try {
     const parsed = new URL(trimmed);
-    const hostedPairingRequest = readHostedPairingRequest(parsed);
-    if (hostedPairingRequest) {
-      return {
-        host: hostedPairingRequest.host.replace(/\/$/, ""),
-        code: hostedPairingRequest.token,
-      };
+    if (parsed.searchParams.has("host")) {
+      throw new LegacyHostedPairingUrlError();
     }
-
     const hashParams = new URLSearchParams(parsed.hash.slice(1));
     const hashToken = hashParams.get("token");
     const queryToken = parsed.searchParams.get("token");
@@ -65,7 +68,8 @@ export function parsePairingUrl(url: string): { host: string; code: string } {
     parsed.search = "";
     parsed.pathname = "/";
     return { host: parsed.toString().replace(/\/$/, ""), code };
-  } catch {
+  } catch (error) {
+    if (error instanceof LegacyHostedPairingUrlError) throw error;
     return { host: trimmed, code: "" };
   }
 }

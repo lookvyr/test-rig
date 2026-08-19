@@ -8,7 +8,13 @@ type WslEnableBridge = Pick<DesktopBridge, "setWslBackendEnabled" | "setWslDistr
  * offered as QR targets.
  */
 export function isQrShareableEndpoint(endpoint: AdvertisedEndpoint): boolean {
-  return endpoint.status !== "unavailable" && endpoint.reachability !== "loopback";
+  return endpoint.reachability !== "loopback";
+}
+
+export function advertisedEndpointStatusLabel(
+  status: AdvertisedEndpoint["status"],
+): string | null {
+  return status === "available" ? null : "Not verified";
 }
 
 export type QrEndpointOption = {

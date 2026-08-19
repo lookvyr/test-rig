@@ -8,11 +8,10 @@ import { afterEach, vi } from "vite-plus/test";
 import { makeCatalogBackend, makeCatalogStore } from "./storage";
 
 const emptyCatalog = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   targets: [],
   profiles: [],
   credentials: [],
-  remoteDpopTokens: [],
 } as const;
 const decodeCatalog = Schema.decodeUnknownSync(Schema.fromJsonString(ConnectionCatalogDocument));
 
@@ -51,6 +50,48 @@ describe("makeCatalogStore", () => {
       });
 
       expect(yield* Effect.flip(store.read)).toBe(failure);
+    }),
+  );
+
+  it.effect("persists a sanitized v2 catalog after reading legacy relay data", () =>
+    Effect.gen(function* () {
+      const writes: string[] = [];
+      const store = yield* makeCatalogStore({
+        read: Effect.succeed(
+          JSON.stringify({
+            schemaVersion: 1,
+            targets: [
+              {
+                _tag: "RelayConnectionTarget",
+                environmentId: "env-relay",
+                label: "Removed relay",
+              },
+            ],
+            profiles: [],
+            credentials: [],
+            remoteDpopTokens: [{ accessToken: "removed-token" }],
+          }),
+        ),
+        write: (raw) => Effect.sync(() => writes.push(raw)),
+      });
+
+      expect(yield* store.read).toEqual(emptyCatalog);
+      expect(writes).toHaveLength(1);
+      expect(JSON.parse(writes[0]!)).toEqual(emptyCatalog);
+      expect(writes[0]).not.toContain("removed-token");
+    }),
+  );
+
+  it.effect("recovers malformed legacy-shaped catalogs with only one handled write", () =>
+    Effect.gen(function* () {
+      let writes = 0;
+      const store = yield* makeCatalogStore({
+        read: Effect.succeed('{"schemaVersion":1,"targets":"invalid"}'),
+        write: () => Effect.sync(() => void writes++),
+      });
+
+      expect(yield* store.read).toEqual(emptyCatalog);
+      expect(writes).toBe(1);
     }),
   );
 });

@@ -1,10 +1,18 @@
 import type { AdvertisedEndpoint, DesktopWslState } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
+  advertisedEndpointStatusLabel,
   applyWslEnableSelection,
   isQrShareableEndpoint,
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
+
+describe("advertisedEndpointStatusLabel", () => {
+  it("does not mislabel an unverified custom endpoint as needing setup", () => {
+    expect(advertisedEndpointStatusLabel("available")).toBeNull();
+    expect(advertisedEndpointStatusLabel("unknown")).toBe("Not verified");
+  });
+});
 
 const baseWslState: DesktopWslState = {
   enabled: false,
@@ -82,12 +90,9 @@ function makeEndpoint(overrides: Partial<AdvertisedEndpoint>): AdvertisedEndpoin
   return {
     id: "desktop-lan:http://192.168.1.42:4780",
     label: "Local network",
-    provider: { id: "desktop-core", label: "Desktop", kind: "core", isAddon: false },
     httpBaseUrl: "http://192.168.1.42:4780",
     wsBaseUrl: "ws://192.168.1.42:4780",
     reachability: "lan",
-    compatibility: { hostedHttpsApp: "unknown", desktopApp: "compatible" },
-    source: "desktop-core",
     status: "available",
     ...overrides,
   };
@@ -106,12 +111,9 @@ describe("isQrShareableEndpoint", () => {
     ).toBe(false);
   });
 
-  it("excludes unavailable endpoints and keeps reachable ones", () => {
-    expect(isQrShareableEndpoint(makeEndpoint({ status: "unavailable" }))).toBe(false);
+  it("keeps reachable endpoints shareable before availability is verified", () => {
     expect(isQrShareableEndpoint(makeEndpoint({}))).toBe(true);
-    expect(
-      isQrShareableEndpoint(makeEndpoint({ reachability: "private-network", status: "unknown" })),
-    ).toBe(true);
+    expect(isQrShareableEndpoint(makeEndpoint({ status: "unknown" }))).toBe(true);
   });
 });
 
@@ -123,25 +125,25 @@ describe("selectQrEndpointOption", () => {
       qrShareable: false,
     },
     {
-      id: "tailscale-ip:http://100.84.12.7:4780",
-      preferenceKey: "tailscale:ip:http",
-      qrShareable: true,
-    },
-    {
-      id: "tailscale-ip:http://100.84.12.8:4780",
-      preferenceKey: "tailscale:ip:http",
-      qrShareable: true,
-    },
-    {
       id: "desktop-lan:http://192.168.1.42:4780",
+      preferenceKey: "desktop-core:lan:http",
+      qrShareable: true,
+    },
+    {
+      id: "desktop-lan:http://192.168.1.8:4780",
+      preferenceKey: "desktop-core:lan:http",
+      qrShareable: true,
+    },
+    {
+      id: "desktop-lan:http://192.168.1.7:4780",
       preferenceKey: "desktop-core:lan:http",
       qrShareable: true,
     },
   ];
 
   it("resolves an explicit selection by unique endpoint id, not the shared preference key", () => {
-    expect(selectQrEndpointOption(options, "tailscale-ip:http://100.84.12.8:4780", null)?.id).toBe(
-      "tailscale-ip:http://100.84.12.8:4780",
+    expect(selectQrEndpointOption(options, "desktop-lan:http://192.168.1.8:4780", null)?.id).toBe(
+      "desktop-lan:http://192.168.1.8:4780",
     );
   });
 
@@ -152,8 +154,8 @@ describe("selectQrEndpointOption", () => {
   });
 
   it("skips non-QR-shareable options in the fallback so the panel never opens on loopback", () => {
-    expect(selectQrEndpointOption(options, "tailscale-ip:gone", "nope")?.id).toBe(
-      "tailscale-ip:http://100.84.12.7:4780",
+    expect(selectQrEndpointOption(options, "desktop-lan:gone", "nope")?.id).toBe(
+      "desktop-lan:http://192.168.1.42:4780",
     );
   });
 

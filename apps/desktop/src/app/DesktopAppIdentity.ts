@@ -132,9 +132,7 @@ export const make = Effect.gen(function* () {
 export const layer = Layer.effect(DesktopAppIdentity, make);
 
 // App-owned pre-ready initialization. main.ts builds this layer before the
-// interim Clerk layer because Clerk acquires Electron's single-instance lock
-// during construction. Keeping the ordering here prevents Clerk removal from
-// also removing Sightseer's Electron profile initialization.
+// app-owned single-instance layer acquires Electron's lock.
 export const layerInitialized = Layer.effect(
   DesktopAppIdentity,
   make.pipe(Effect.tap((identity) => identity.configureStoragePaths)),

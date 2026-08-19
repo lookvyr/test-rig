@@ -1,8 +1,6 @@
 import * as Schema from "effect/Schema";
 
 const PAIRING_TOKEN_PARAM = "token";
-const HOSTED_PAIRING_HOST_PARAM = "host";
-const HOSTED_PAIRING_LABEL_PARAM = "label";
 const SUPPORTED_REMOTE_BACKEND_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
 
 export const readHashParams = (url: URL): URLSearchParams =>
@@ -32,7 +30,7 @@ export class RemotePairingUrlInvalidError extends Schema.TaggedErrorClass<Remote
 export class RemoteBackendUrlInvalidError extends Schema.TaggedErrorClass<RemoteBackendUrlInvalidError>()(
   "RemoteBackendUrlInvalidError",
   {
-    source: Schema.Literals(["direct-host", "hosted-pairing-host"]),
+    source: Schema.Literal("direct-host"),
     cause: Schema.optional(Schema.Defect()),
     protocol: Schema.optional(Schema.String),
   },
@@ -97,6 +95,9 @@ const normalizeRemoteBaseUrl = (
       protocol: url.protocol,
     });
   }
+  if (url.searchParams.has("host")) {
+    throw new RemoteBackendUrlInvalidError({ source });
+  }
   url.pathname = "/";
   url.search = "";
   url.hash = "";
@@ -135,12 +136,6 @@ export interface ResolvedRemotePairingTarget {
   readonly wsBaseUrl: string;
 }
 
-export interface HostedPairingRequest {
-  readonly host: string;
-  readonly token: string;
-  readonly label: string;
-}
-
 export const getPairingTokenFromUrl = (url: URL): string | null => {
   const hashToken = readHashParams(url).get(PAIRING_TOKEN_PARAM)?.trim() ?? "";
   if (hashToken.length > 0) {
@@ -169,22 +164,6 @@ export const setPairingTokenOnUrl = (url: URL, credential: string): URL => {
   return next;
 };
 
-export const readHostedPairingRequest = (url: URL): HostedPairingRequest | null => {
-  const host = url.searchParams.get(HOSTED_PAIRING_HOST_PARAM)?.trim() ?? "";
-  const token = getPairingTokenFromUrl(url)?.trim() ?? "";
-  const label = url.searchParams.get(HOSTED_PAIRING_LABEL_PARAM)?.trim() ?? "";
-
-  if (!host || !token) {
-    return null;
-  }
-
-  return {
-    host,
-    token,
-    label,
-  };
-};
-
 export const resolveRemotePairingTarget = (input: {
   readonly pairingUrl?: string;
   readonly host?: string;
@@ -203,19 +182,12 @@ export const resolveRemotePairingTarget = (input: {
         protocol: url.protocol,
       });
     }
-    const hostedPairingRequest = readHostedPairingRequest(url);
-    if (hostedPairingRequest) {
-      const hostedBackendUrl = normalizeRemoteBaseUrl(
-        hostedPairingRequest.host,
-        "hosted-pairing-host",
-      );
-      return {
-        credential: hostedPairingRequest.token,
-        httpBaseUrl: toHttpBaseUrl(hostedBackendUrl),
-        wsBaseUrl: toWsBaseUrl(hostedBackendUrl),
-      };
+    // Hosted T3 Connect links wrapped the real backend in a `host` query
+    // parameter. Treating the wrapper origin as a direct backend would send
+    // the pairing credential to the removed hosted service.
+    if (url.searchParams.has("host")) {
+      throw new RemotePairingUrlInvalidError();
     }
-
     const credential = getPairingTokenFromUrl(url) ?? "";
     if (!credential) {
       throw new RemotePairingTokenMissingError({ host: url.host });

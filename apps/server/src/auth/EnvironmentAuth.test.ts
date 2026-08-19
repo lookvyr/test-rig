@@ -1,10 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { AuthAdministrativeScopes } from "@t3tools/contracts";
+import { AuthAdministrativeScopes, AuthSessionId } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
 import * as ServerConfig from "../config.ts";
+import * as AuthSessions from "../persistence/AuthSessions.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as PairingGrantStore from "./PairingGrantStore.ts";
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
@@ -32,7 +35,7 @@ const makeServerConfigLayer = (overrides?: Partial<ServerConfig.ServerConfig["Se
 
 const makeEnvironmentAuthLayer = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
   EnvironmentAuth.layer.pipe(
-    Layer.provide(SqlitePersistenceMemory),
+    Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provide(ServerSecretStore.layer),
     Layer.provide(makeServerConfigLayer(overrides)),
   );
@@ -103,7 +106,6 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         "orchestration:operate",
         "terminal:operate",
         "review:write",
-        "relay:read",
       ]);
       expect(verified.subject).toBe("one-time-token");
     }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
@@ -182,10 +184,8 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         "orchestration:operate",
         "terminal:operate",
         "review:write",
-        "relay:read",
         "access:read",
         "access:write",
-        "relay:write",
       ]);
       expect(verified.subject).toBe("administrative-bootstrap");
     }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
@@ -262,5 +262,41 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
           }),
         ),
       ),
+  );
+
+  it.effect("rejects historical DPoP sessions presented through websocket tickets", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const authSessions = yield* AuthSessions.AuthSessionRepository;
+      const issuedAt = yield* DateTime.now;
+      const sessionId = AuthSessionId.make("historical-dpop-session");
+      yield* authSessions.create({
+        sessionId,
+        subject: "managed-relay",
+        scopes: ["orchestration:read"],
+        method: "dpop-access-token",
+        client: {
+          label: "Historical relay client",
+          ipAddress: null,
+          userAgent: null,
+          deviceType: "desktop",
+          os: null,
+          browser: null,
+        },
+        issuedAt,
+        expiresAt: DateTime.add(issuedAt, { days: 1 }),
+      });
+      const websocketTicket = yield* sessions.issueWebSocketToken(sessionId);
+      const request = {
+        url: `/ws?wsTicket=${encodeURIComponent(websocketTicket.token)}`,
+        headers: {},
+        cookies: {},
+      } as unknown as HttpServerRequest.HttpServerRequest;
+
+      const error = yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(Effect.flip);
+
+      expect(error._tag).toBe("ServerAuthInvalidCredentialError");
+    }).pipe(Effect.provide(makeEnvironmentAuthLayer())),
   );
 });

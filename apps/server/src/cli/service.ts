@@ -161,7 +161,7 @@ export const offerServiceDuringOnboarding = Effect.gen(function* () {
       message: installed
         ? "The installed Sightseer service needs an update or repair. Update it now?"
         : "Run Sightseer in the background whenever this machine boots? " +
-          "It stays reachable through T3 Connect even after you log out.",
+          "It stays available after you log out.",
       initial: true,
     }),
   );

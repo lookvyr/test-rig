@@ -33,7 +33,7 @@ import * as ElectronWindow from "./electron/ElectronWindow.ts";
 import * as DesktopApp from "./app/DesktopApp.ts";
 import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
 import * as DesktopConnectionCatalogStore from "./app/DesktopConnectionCatalogStore.ts";
-import * as DesktopClerk from "./app/DesktopClerk.ts";
+import * as DesktopSingleInstance from "./app/DesktopSingleInstance.ts";
 import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
 import * as DesktopAssets from "./app/DesktopAssets.ts";
 import * as DesktopBackendConfiguration from "./backend/DesktopBackendConfiguration.ts";
@@ -47,7 +47,6 @@ import * as DesktopShutdown from "./app/DesktopShutdown.ts";
 import * as DesktopObservability from "./app/DesktopObservability.ts";
 import * as DesktopServerExposure from "./backend/DesktopServerExposure.ts";
 import * as DesktopClientSettings from "./settings/DesktopClientSettings.ts";
-import * as DesktopSavedEnvironments from "./settings/DesktopSavedEnvironments.ts";
 import * as DesktopAppSettings from "./settings/DesktopAppSettings.ts";
 import * as DesktopPreReadyPlatform from "./app/DesktopPreReadyPlatform.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
@@ -129,7 +128,7 @@ const desktopFoundationLayer = Layer.mergeAll(
   DesktopShutdown.layer,
   DesktopAppSettings.layer,
   DesktopClientSettings.layer,
-  DesktopConnectionCatalogStore.layer.pipe(Layer.provideMerge(DesktopSavedEnvironments.layer)),
+  DesktopConnectionCatalogStore.layer,
   DesktopAssets.layer,
   DesktopObservability.layer,
 ).pipe(Layer.provideMerge(desktopEnvironmentLayer));
@@ -206,11 +205,11 @@ const desktopApplicationLayer = Layer.mergeAll(
   Layer.provideMerge(desktopLocalEnvironmentAuthLayer),
 );
 
-const desktopClerkLayer = desktopAppIdentityLayer.pipe(
+const desktopSingleInstanceLayer = desktopAppIdentityLayer.pipe(
   Layer.flatMap((identityContext) =>
     Layer.mergeAll(
       Layer.succeedContext(identityContext),
-      DesktopClerk.layer.pipe(Layer.provide(earlyDesktopEnvironmentLayer)),
+      DesktopSingleInstance.layer.pipe(Layer.provide(ElectronApp.layer)),
     ),
   ),
 );
@@ -222,12 +221,14 @@ const desktopApplicationRuntimeLayer = desktopApplicationLayer.pipe(
   Layer.provideMerge(electronLayer),
 );
 
-// Build the app-owned identity layer before Clerk acquires Electron's
-// single-instance lock. The resulting context supplies the same identity
-// service to the rest of the desktop runtime.
-const desktopRuntimeLayer = desktopClerkLayer.pipe(
-  Layer.flatMap((clerkContext) =>
-    desktopApplicationRuntimeLayer.pipe(Layer.provideMerge(Layer.succeedContext(clerkContext))),
+// Configure Sightseer's Electron profile before acquiring the app-owned
+// single-instance lock. The resulting context supplies both services to the
+// rest of the desktop runtime.
+const desktopRuntimeLayer = desktopSingleInstanceLayer.pipe(
+  Layer.flatMap((singleInstanceContext) =>
+    desktopApplicationRuntimeLayer.pipe(
+      Layer.provideMerge(Layer.succeedContext(singleInstanceContext)),
+    ),
   ),
   Layer.provideMerge(DesktopPreReadyPlatform.layer),
 );

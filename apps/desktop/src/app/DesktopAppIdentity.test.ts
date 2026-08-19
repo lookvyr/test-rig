@@ -38,6 +38,7 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
     name: Effect.succeed("Sightseer"),
     whenReady: Effect.void,
     quit: Effect.void,
+    requestSingleInstanceLock: Effect.succeed(true),
     exit: () => Effect.void,
     relaunch: () => Effect.void,
     setPath: (name, value) => Effect.sync(() => calls.setPath.push([name, value])),

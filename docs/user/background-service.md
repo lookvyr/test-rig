@@ -38,6 +38,4 @@ launcher snapshots the database before a remote candidate starts, so database up
 with the server version. An older launcher may require one local `service update` before this is
 available.
 
-## Using It with T3 Connect
-
 The background service currently requires Linux with systemd.

@@ -161,6 +161,26 @@ describe("connection onboarding", () => {
     }),
   );
 
+  it.effect("rejects legacy hosted pairing wrappers before making a request", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+      const layer = Layer.mergeAll(CLIENT_PRESENTATION_LAYER, pairingHttpLayer(calls));
+      const hostedUrl =
+        "https://app.t3.codes/pair?host=https%3A%2F%2Fremote.example.test#token=pairing-token";
+
+      yield* preparePairingRegistration({ pairingUrl: hostedUrl }).pipe(
+        Effect.provide(layer),
+        Effect.flip,
+      );
+      yield* preparePairingRegistration({ host: hostedUrl, pairingCode: "pairing-token" }).pipe(
+        Effect.provide(layer),
+        Effect.flip,
+      );
+
+      expect(calls).toEqual([]);
+    }),
+  );
+
   it.effect("updates bearer metadata while preserving the credential and identity", () =>
     Effect.gen(function* () {
       const environmentId = EnvironmentId.make("environment-paired");

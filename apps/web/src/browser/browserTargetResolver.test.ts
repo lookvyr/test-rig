@@ -25,7 +25,7 @@ describe("browser target resolver", () => {
     });
   });
 
-  it("maps localhost URL navigation onto a remote Tailscale IPv4 host", async () => {
+  it("maps localhost URL navigation onto a remote private IPv4 host", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://100.65.180.100:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
@@ -108,8 +108,8 @@ describe("browser target resolver", () => {
     });
   });
 
-  it("refuses public relay hosts until the authenticated gateway exists", async () => {
-    readPreparedConnection.mockReturnValue({ httpBaseUrl: "https://relay.example.com" });
+  it("refuses public hosts until the authenticated gateway exists", async () => {
+    readPreparedConnection.mockReturnValue({ httpBaseUrl: "https://remote.example.com" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(() =>
       resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
@@ -121,6 +121,19 @@ describe("browser target resolver", () => {
       resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
         kind: "url",
         url: "http://localhost:5173",
+      }),
+    ).toThrow(/authenticated preview gateway/);
+  });
+
+  it("does not grant legacy Tailscale DNS names private-network rewriting", async () => {
+    readPreparedConnection.mockReturnValue({
+      httpBaseUrl: "https://machine.example-tailnet.ts.net",
+    });
+    const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
+    expect(() =>
+      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
+        kind: "environment-port",
+        port: 5173,
       }),
     ).toThrow(/authenticated preview gateway/);
   });

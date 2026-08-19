@@ -59,4 +59,32 @@ describe("automatic egress boundary", () => {
 
     expect(violations).toEqual([]);
   });
+
+  it("contains no removed Tailscale integration paths", () => {
+    const forbiddenNeedles = [
+      "@t3tools/tailscale",
+      "tailscaleServeEnabled",
+      "tailscaleServePort",
+      "SET_TAILSCALE_SERVE_ENABLED_CHANNEL",
+      "--tailscale-serve",
+      "--share",
+      "dev:share",
+      ".ts.net",
+    ];
+    const files = [
+      ...sourceRoots.flatMap((sourceRoot) =>
+        productionSourceFiles(NodePath.join(repoRoot, sourceRoot)),
+      ),
+      NodePath.join(repoRoot, "package.json"),
+      NodePath.join(repoRoot, "pnpm-workspace.yaml"),
+    ];
+    const violations = files.flatMap((file) => {
+      const contents = NodeFS.readFileSync(file, "utf8");
+      return forbiddenNeedles
+        .filter((needle) => contents.includes(needle))
+        .map((needle) => `${NodePath.relative(repoRoot, file)}: ${needle}`);
+    });
+
+    expect(violations).toEqual([]);
+  });
 });

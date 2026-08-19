@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildPairingUrl,
   extractPairingUrlFromQrPayload,
+  LegacyHostedPairingUrlError,
   PairingQrPayloadEmptyError,
   parsePairingUrl,
 } from "./pairing";
@@ -51,14 +52,18 @@ describe("extractPairingUrlFromQrPayload", () => {
 });
 
 describe("parsePairingUrl", () => {
-  it("reads hosted pairing links into backend host fields", () => {
-    expect(
-      parsePairingUrl(
-        "https://app.t3.codes/pair?host=https%3A%2F%2Fdesktop.tailnet.ts.net%2F#token=pairing-token",
-      ),
-    ).toEqual({
-      host: "https://desktop.tailnet.ts.net",
+  it("reads direct pairing links into backend host fields", () => {
+    expect(parsePairingUrl("https://remote.example.com/pair#token=pairing-token")).toEqual({
+      host: "https://remote.example.com",
       code: "pairing-token",
     });
+  });
+
+  it("rejects legacy hosted wrappers before they can lose their backend marker", () => {
+    expect(() =>
+      parsePairingUrl(
+        "https://app.t3.codes/pair?host=https%3A%2F%2Fremote.example.com#token=pairing-token",
+      ),
+    ).toThrowError(LegacyHostedPairingUrlError);
   });
 });

@@ -1,12 +1,18 @@
+import { EnvironmentId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 
 import {
   type ConnectionRegistration,
   ConnectionCredential,
   ConnectionProfile,
 } from "../connection/catalog.ts";
-import { type ConnectionTarget, PersistedConnectionTarget } from "../connection/model.ts";
-import * as TokenStore from "../authorization/tokenStore.ts";
+import {
+  BearerConnectionTarget,
+  type ConnectionTarget,
+  PersistedConnectionTarget,
+  SshConnectionTarget,
+} from "../connection/model.ts";
 
 export const StoredConnectionCredential = Schema.Struct({
   connectionId: Schema.String,
@@ -14,21 +20,66 @@ export const StoredConnectionCredential = Schema.Struct({
 });
 export type StoredConnectionCredential = typeof StoredConnectionCredential.Type;
 
-export const ConnectionCatalogDocument = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
+const CurrentConnectionCatalogDocument = Schema.Struct({
+  schemaVersion: Schema.Literal(2),
   targets: Schema.Array(PersistedConnectionTarget),
   profiles: Schema.Array(ConnectionProfile),
   credentials: Schema.Array(StoredConnectionCredential),
-  remoteDpopTokens: Schema.Array(TokenStore.RemoteDpopAccessToken),
 });
+
+const LegacyRelayConnectionTarget = Schema.Struct({
+  _tag: Schema.Literal("RelayConnectionTarget"),
+  environmentId: EnvironmentId,
+  label: Schema.String,
+});
+
+const LegacyConnectionCatalogDocument = Schema.Struct({
+  schemaVersion: Schema.Literal(1),
+  targets: Schema.Array(
+    Schema.Union([BearerConnectionTarget, SshConnectionTarget, LegacyRelayConnectionTarget]),
+  ),
+  profiles: Schema.Array(ConnectionProfile),
+  credentials: Schema.Array(StoredConnectionCredential),
+  remoteDpopTokens: Schema.Array(Schema.Unknown),
+});
+
+const ConnectionCatalogDocumentSource = Schema.Union([
+  CurrentConnectionCatalogDocument,
+  LegacyConnectionCatalogDocument,
+]);
+type ConnectionCatalogDocumentSource = typeof ConnectionCatalogDocumentSource.Type;
+const decodeCurrentConnectionCatalogDocument = Schema.decodeUnknownSync(
+  CurrentConnectionCatalogDocument,
+);
+
+export const ConnectionCatalogDocument = ConnectionCatalogDocumentSource.pipe(
+  Schema.decodeTo(CurrentConnectionCatalogDocument, {
+    decode: SchemaGetter.transform((document) =>
+      document.schemaVersion === 2
+        ? document
+        : {
+            schemaVersion: 2 as const,
+            targets: document.targets.filter(
+              (target): target is BearerConnectionTarget | SshConnectionTarget =>
+                target._tag !== "RelayConnectionTarget",
+            ),
+            profiles: document.profiles,
+            credentials: document.credentials,
+          },
+    ),
+    encode: SchemaGetter.transform(
+      (document): ConnectionCatalogDocumentSource =>
+        decodeCurrentConnectionCatalogDocument(document),
+    ),
+  }),
+);
 export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type;
 
 export const EMPTY_CONNECTION_CATALOG_DOCUMENT: ConnectionCatalogDocument = Object.freeze({
-  schemaVersion: 1,
+  schemaVersion: 2,
   targets: [],
   profiles: [],
   credentials: [],
-  remoteDpopTokens: [],
 });
 
 export function replaceCatalogValue<A>(
@@ -51,7 +102,6 @@ export function removeCatalogValue<A>(
 function connectionIdOf(target: ConnectionTarget): string | null {
   switch (target._tag) {
     case "PrimaryConnectionTarget":
-    case "RelayConnectionTarget":
       return null;
     case "BearerConnectionTarget":
     case "SshConnectionTarget":
@@ -62,7 +112,6 @@ function connectionIdOf(target: ConnectionTarget): string | null {
 function removeConnectionMetadata(
   document: ConnectionCatalogDocument,
   target: ConnectionTarget,
-  removeRemoteToken: boolean,
 ): ConnectionCatalogDocument {
   const connectionId = connectionIdOf(target);
   return {
@@ -80,13 +129,6 @@ function removeConnectionMetadata(
       connectionId === null
         ? document.credentials
         : removeCatalogValue(document.credentials, (value) => value.connectionId, connectionId),
-    remoteDpopTokens: removeRemoteToken
-      ? removeCatalogValue(
-          document.remoteDpopTokens,
-          (value) => value.environmentId,
-          target.environmentId,
-        )
-      : document.remoteDpopTokens,
   };
 }
 
@@ -98,16 +140,13 @@ export function registerConnectionInCatalog(
   const previous = document.targets.find(
     (candidate) => candidate.environmentId === target.environmentId,
   );
-  const cleaned =
-    previous === undefined ? document : removeConnectionMetadata(document, previous, false);
+  const cleaned = previous === undefined ? document : removeConnectionMetadata(document, previous);
   const next: ConnectionCatalogDocument = {
     ...cleaned,
     targets: replaceCatalogValue(cleaned.targets, (value) => value.environmentId, target),
   };
 
   switch (registration._tag) {
-    case "RelayConnectionRegistration":
-      return next;
     case "BearerConnectionRegistration":
       return {
         ...next,
@@ -137,5 +176,5 @@ export function removeConnectionFromCatalog(
   document: ConnectionCatalogDocument,
   target: ConnectionTarget,
 ): ConnectionCatalogDocument {
-  return removeConnectionMetadata(document, target, true);
+  return removeConnectionMetadata(document, target);
 }

@@ -10,6 +10,7 @@ const {
   isDefaultProtocolClientMock,
   onMock,
   quitMock,
+  requestSingleInstanceLockMock,
   relaunchMock,
   removeListenerMock,
   removeSwitchMock,
@@ -29,6 +30,7 @@ const {
   isDefaultProtocolClientMock: vi.fn(() => false),
   onMock: vi.fn(),
   quitMock: vi.fn(),
+  requestSingleInstanceLockMock: vi.fn(() => true),
   relaunchMock: vi.fn(),
   removeListenerMock: vi.fn(),
   removeSwitchMock: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock("electron", () => ({
     name: "T3 Code",
     on: onMock,
     quit: quitMock,
+    requestSingleInstanceLock: requestSingleInstanceLockMock,
     relaunch: relaunchMock,
     removeListener: removeListenerMock,
     runningUnderARM64Translation: false,
@@ -80,6 +83,7 @@ describe("ElectronApp", () => {
     exitMock.mockClear();
     onMock.mockClear();
     quitMock.mockClear();
+    requestSingleInstanceLockMock.mockClear();
     relaunchMock.mockClear();
     removeListenerMock.mockClear();
     removeSwitchMock.mockClear();
@@ -152,6 +156,14 @@ describe("ElectronApp", () => {
 
       assert.deepEqual(onMock.mock.calls, [["activate", listener]]);
       assert.deepEqual(removeListenerMock.mock.calls, [["activate", listener]]);
+    }).pipe(Effect.provide(ElectronApp.layer)),
+  );
+
+  it.effect("acquires the single-instance lock through the service", () =>
+    Effect.gen(function* () {
+      const electronApp = yield* ElectronApp.ElectronApp;
+      assert.isTrue(yield* electronApp.requestSingleInstanceLock);
+      assert.equal(requestSingleInstanceLockMock.mock.calls.length, 1);
     }).pipe(Effect.provide(ElectronApp.layer)),
   );
 

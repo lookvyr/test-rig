@@ -11,7 +11,6 @@ import {
   removeConnectionFromCatalog,
   replaceCatalogValue,
 } from "@t3tools/client-runtime/platform";
-import { TokenStore } from "@t3tools/client-runtime/authorization";
 import {
   ConnectionTransientError,
   CredentialStore,
@@ -301,6 +300,17 @@ interface CatalogStore {
   ) => Effect.Effect<void, ConnectionTransientError>;
 }
 
+function catalogSchemaVersion(raw: string): unknown {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null && "schemaVersion" in parsed
+      ? parsed.schemaVersion
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStore")(function* (
   backend: CatalogBackend,
 ) {
@@ -315,7 +325,9 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
     const raw = yield* backend.read;
     let catalog = EMPTY_CONNECTION_CATALOG_DOCUMENT;
     if (raw !== null && raw.trim() !== "") {
-      catalog = yield* decodeCatalog(raw).pipe(
+      const sourceSchemaVersion = catalogSchemaVersion(raw);
+      const decoded = yield* decodeCatalog(raw).pipe(
+        Effect.map((value) => ({ catalog: value, persistMigration: sourceSchemaVersion === 1 })),
         Effect.catch((error) =>
           Effect.gen(function* () {
             yield* Effect.logWarning("Discarding a corrupt web connection catalog.", {
@@ -338,10 +350,14 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
                 }),
               ),
             );
-            return EMPTY_CONNECTION_CATALOG_DOCUMENT;
+            return { catalog: EMPTY_CONNECTION_CATALOG_DOCUMENT, persistMigration: false };
           }),
         ),
       );
+      catalog = decoded.catalog;
+      if (decoded.persistMigration) {
+        yield* backend.write(yield* encodeCatalog(catalog));
+      }
     }
     yield* Ref.set(state, Option.some(catalog));
     return catalog;
@@ -434,34 +450,6 @@ export const connectionStorageLayer = Layer.effectContext(
             document.credentials,
             (value) => value.connectionId,
             connectionId,
-          ),
-        })),
-    });
-    const remoteTokenStore = TokenStore.make({
-      get: (environmentId) =>
-        catalog.read.pipe(
-          Effect.map((document) =>
-            Option.fromUndefinedOr(
-              document.remoteDpopTokens.find((token) => token.environmentId === environmentId),
-            ),
-          ),
-        ),
-      put: (token) =>
-        catalog.update((document) => ({
-          ...document,
-          remoteDpopTokens: replaceCatalogValue(
-            document.remoteDpopTokens,
-            (value) => value.environmentId,
-            token,
-          ),
-        })),
-      remove: (environmentId) =>
-        catalog.update((document) => ({
-          ...document,
-          remoteDpopTokens: removeCatalogValue(
-            document.remoteDpopTokens,
-            (value) => value.environmentId,
-            environmentId,
           ),
         })),
     });
@@ -666,7 +654,6 @@ export const connectionStorageLayer = Layer.effectContext(
       Context.add(ConnectionRegistrationStore, registrationStore),
       Context.add(ProfileStore.ConnectionProfileStore, profileStore),
       Context.add(CredentialStore.ConnectionCredentialStore, credentialStore),
-      Context.add(TokenStore.RemoteDpopAccessTokenStore, remoteTokenStore),
       Context.add(EnvironmentCacheStore, cacheStore),
     );
   }),

@@ -1,7 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { ConnectionCatalogDocument } from "@t3tools/client-runtime/platform";
-import { EnvironmentId, type PersistedSavedEnvironmentRecord } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
+import * as Encoding from "effect/Encoding";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -11,7 +12,6 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
-import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import * as DesktopConnectionCatalogStore from "./DesktopConnectionCatalogStore.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
@@ -71,14 +71,7 @@ function makeLayer(
     NodeServices.layer,
     fileSystemLayer,
   );
-  const savedEnvironmentsLayer = DesktopSavedEnvironments.layer.pipe(
-    Layer.provideMerge(dependencies),
-  );
-
-  return DesktopConnectionCatalogStore.layer.pipe(
-    Layer.provideMerge(savedEnvironmentsLayer),
-    Layer.provideMerge(dependencies),
-  );
+  return DesktopConnectionCatalogStore.layer.pipe(Layer.provideMerge(dependencies));
 }
 
 const withStore = <A, E, R>(
@@ -120,12 +113,13 @@ describe("DesktopConnectionCatalogStore", () => {
     ),
   );
 
-  it.effect("migrates legacy relay, SSH, bearer profile, and credential data", () =>
+  it.effect("drops legacy relay while migrating SSH and Bearer data", () =>
     withStore(
       Effect.gen(function* () {
         const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-        const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
-        const records: readonly PersistedSavedEnvironmentRecord[] = [
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const records = [
           {
             environmentId: EnvironmentId.make("relay-environment"),
             label: "Relay",
@@ -157,12 +151,22 @@ describe("DesktopConnectionCatalogStore", () => {
             createdAt: "2026-06-03T00:00:00.000Z",
             lastConnectedAt: null,
           },
-        ];
-        yield* savedEnvironments.setRegistry(records);
-        assert.isTrue(
-          yield* savedEnvironments.setSecret({
-            environmentId: EnvironmentId.make("bearer-environment"),
-            secret: "legacy-token",
+        ] as const;
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          `${environment.stateDir}/saved-environments.json`,
+          JSON.stringify({
+            version: 1,
+            records: records.map((record) =>
+              record.environmentId === "bearer-environment"
+                ? {
+                    ...record,
+                    encryptedBearerToken: Encoding.encodeBase64(
+                      textEncoder.encode("encrypted:legacy-token"),
+                    ),
+                  }
+                : record,
+            ),
           }),
         );
 
@@ -173,18 +177,14 @@ describe("DesktopConnectionCatalogStore", () => {
         }
         const catalog = yield* decodeConnectionCatalog(migrated.value);
 
+        assert.equal(catalog.targets.length, 2);
         assert.deepInclude(catalog.targets[0], {
-          _tag: "RelayConnectionTarget",
-          environmentId: EnvironmentId.make("relay-environment"),
-          label: "Relay",
-        });
-        assert.deepInclude(catalog.targets[1], {
           _tag: "SshConnectionTarget",
           environmentId: EnvironmentId.make("ssh-environment"),
           label: "SSH",
           connectionId: "ssh:ssh-environment",
         });
-        assert.deepInclude(catalog.targets[2], {
+        assert.deepInclude(catalog.targets[1], {
           _tag: "BearerConnectionTarget",
           environmentId: EnvironmentId.make("bearer-environment"),
           label: "Bearer",
@@ -217,8 +217,46 @@ describe("DesktopConnectionCatalogStore", () => {
           assert.equal(catalog.credentials[0].credential.token, "legacy-token");
         }
 
-        yield* savedEnvironments.setRegistry([]);
         assert.deepEqual(yield* store.get, migrated);
+      }),
+    ),
+  );
+
+  it.effect("keeps migration retryable when a legacy bearer secret is corrupt", () =>
+    withStore(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
+        const catalogPath = `${environment.stateDir}/connection-catalog.json`;
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          `${environment.stateDir}/saved-environments.json`,
+          JSON.stringify({
+            version: 1,
+            records: [
+              {
+                environmentId: "bearer-environment",
+                label: "Bearer",
+                httpBaseUrl: "https://bearer.example.com/",
+                wsBaseUrl: "wss://bearer.example.com/",
+                createdAt: "2026-06-03T00:00:00.000Z",
+                lastConnectedAt: null,
+                encryptedBearerToken: "%%%",
+              },
+            ],
+          }),
+        );
+
+        const error = yield* store.get.pipe(Effect.flip);
+        assert.instanceOf(
+          error,
+          DesktopConnectionCatalogStore.DesktopConnectionCatalogStoreMigrationError,
+        );
+        assert.equal(error.operation, "read-legacy-secret");
+        assert.equal(error.environmentId, "bearer-environment");
+        assert.notInclude(error.message, "%%%");
+        assert.isFalse(yield* fileSystem.exists(catalogPath));
       }),
     ),
   );
@@ -327,7 +365,10 @@ describe("DesktopConnectionCatalogStore", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
         yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
-        yield* fileSystem.writeFileString(environment.savedEnvironmentRegistryPath, "{not-json");
+        yield* fileSystem.writeFileString(
+          `${environment.stateDir}/saved-environments.json`,
+          "{not-json",
+        );
 
         const error = yield* store.get.pipe(Effect.flip);
         assert.instanceOf(
@@ -336,18 +377,11 @@ describe("DesktopConnectionCatalogStore", () => {
         );
         assert.equal(error.operation, "read-legacy-registry");
         assert.equal(error.catalogPath, `${environment.stateDir}/connection-catalog.json`);
-        assert.instanceOf(
-          error.cause,
-          DesktopSavedEnvironments.DesktopSavedEnvironmentsDocumentDecodeError,
-        );
-        const registryError =
-          error.cause as DesktopSavedEnvironments.DesktopSavedEnvironmentsDocumentDecodeError;
-        assert.exists(registryError.cause);
+        assert.exists(error.cause);
         assert.equal(
           error.message,
           `Legacy desktop saved-environment migration failed during read-legacy-registry into ${environment.stateDir}/connection-catalog.json.`,
         );
-        assert.notEqual(error.message, registryError.message);
       }),
     ),
   );

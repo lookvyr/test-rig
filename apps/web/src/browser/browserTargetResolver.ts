@@ -28,7 +28,6 @@ const isPrivateNetworkHost = (host: string): boolean => {
   if (isLocalLoopbackHost(normalized) || normalized.endsWith(".local")) {
     return true;
   }
-  if (normalized.endsWith(".ts.net")) return true;
   const parts = parseIpv4Address(normalized);
   if (parts) {
     return (
