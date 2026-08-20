@@ -42,7 +42,10 @@ type OpenInOption = {
   kind: "brand" | "generic";
 };
 
-const resolveOptions = (platform: string, availableEditors: ReadonlyArray<EditorId>) => {
+export const resolveOpenInOptions = (
+  platform: string,
+  availableEditors: ReadonlyArray<EditorId>,
+) => {
   const baseOptions: ReadonlyArray<OpenInOption> = [
     {
       label: "Cursor",
@@ -201,7 +204,7 @@ export const OpenInPicker = memo(function OpenInPicker({
   const openInEditorMutation = useAtomCommand(shellEnvironment.openInEditor, "open in editor");
   const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
   const options = useMemo(
-    () => resolveOptions(navigator.platform, availableEditors),
+    () => resolveOpenInOptions(navigator.platform, availableEditors),
     [availableEditors],
   );
   const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null;

@@ -8,9 +8,11 @@
  *      registry expects. Keyed by `ProviderInstanceId`, values are
  *      `ProviderInstanceConfig` envelopes.
  *   2. `settings.providers.<kind>` — the legacy single-instance-per-driver
- *      fields (`providers.codex`, `providers.claudeAgent`, …). These are
- *      the source of truth for every deployment that hasn't been migrated
- *      yet to an explicit `providerInstances` entry.
+ *      fields for executable drivers shipped by this build. These are the
+ *      source of truth for every deployment that hasn't been migrated yet
+ *      to an explicit `providerInstances` entry. Legacy fields for drivers
+ *      this build does not ship remain readable settings data, but never
+ *      synthesize executable instances.
  *
  * This module bridges (2) into (1) and wires the resulting map into a
  * mutable registry. For every built-in driver whose id is not already
@@ -62,7 +64,7 @@ import { ProviderInstanceRegistryMutableLayer } from "./ProviderInstanceRegistry
  *
  * Strategy:
  *   1. Copy all explicit `settings.providerInstances` entries verbatim.
- *   2. For each built-in driver whose `defaultInstanceIdForDriver(id)` key
+ *   2. For each shipped driver whose `defaultInstanceIdForDriver(id)` key
  *      is *not* already in the explicit map, synthesize an entry from the
  *      matching legacy `settings.providers.<kind>` blob.
  *
@@ -83,7 +85,7 @@ export const deriveProviderInstanceConfigMap = (
       continue;
     }
 
-    // Only built-in drivers have a legacy mirror; the registry's
+    // Only shipped drivers are hydrated from a legacy mirror; the registry's
     // `providers` struct is keyed on the same literal slug as
     // `driverKind`. Access is dynamic (the driver kind is a branded string),
     // but it's constrained to `keyof settings.providers` by the union of

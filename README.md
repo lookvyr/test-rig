@@ -2,7 +2,7 @@
 
 Sightseer is a single-user, local-first desktop control surface for coding agents. Its Electron app runs an authenticated local server and renders the bundled web client.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, and OpenCode. If they're set up on your computer, Sightseer can control them.
+Works with your subscriptions on Claude Code, Codex, and OpenCode. If they're set up on your computer, Sightseer can control them.
 
 ## "Wait, what are you selling me?"
 
@@ -13,12 +13,10 @@ We wanted something performant, remote-ready, and truly open. If we ever go the 
 ## Installation
 
 > [!WARNING]
-> Sightseer currently supports Codex, Claude, Cursor, Grok Build and OpenCode. Install and authenticate at least one provider before use:
+> Sightseer currently supports Codex, Claude, and OpenCode. Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
 > - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
-> - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
 > - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 
 ### Try it out (install-free)

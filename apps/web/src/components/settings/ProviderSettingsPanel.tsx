@@ -378,14 +378,7 @@ export function EnvironmentProviderSettings({
   const refreshingRef = useRef(false);
   const updatingDriversRef = useRef<Set<ProviderDriverKind>>(new Set());
 
-  const visibleProviderSettings = PROVIDER_SETTINGS.filter(
-    (providerSettings) =>
-      providerSettings.provider !== "cursor" ||
-      serverProviders.some(
-        (provider) =>
-          provider.instanceId === defaultInstanceIdForDriver(ProviderDriverKind.make("cursor")),
-      ),
-  );
+  const visibleProviderSettings = PROVIDER_SETTINGS;
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenInstanceId = textGenerationModelSelection.instanceId;
   const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);

@@ -74,9 +74,9 @@ export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boo
   return entry.enabled && entry.isAvailable && entry.status === "ready";
 }
 
-/** Picker rails contain configured, enabled instances only. */
+/** Picker rails contain configured instances that are both enabled and available. */
 export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean {
-  return entry.enabled;
+  return entry.enabled && entry.isAvailable;
 }
 
 /**

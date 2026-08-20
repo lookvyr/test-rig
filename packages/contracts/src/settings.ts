@@ -677,19 +677,6 @@ const ClaudeSettingsPatch = Schema.Struct({
   launchArgs: Schema.optionalKey(TrimmedString),
 });
 
-const CursorSettingsPatch = Schema.Struct({
-  enabled: Schema.optionalKey(Schema.Boolean),
-  binaryPath: Schema.optionalKey(TrimmedString),
-  apiEndpoint: Schema.optionalKey(TrimmedString),
-  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
-});
-
-const GrokSettingsPatch = Schema.Struct({
-  enabled: Schema.optionalKey(Schema.Boolean),
-  binaryPath: Schema.optionalKey(TrimmedString),
-  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
-});
-
 const OpenCodeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
@@ -734,8 +721,6 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
-      cursor: Schema.optionalKey(CursorSettingsPatch),
-      grok: Schema.optionalKey(GrokSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
     }),
   ),

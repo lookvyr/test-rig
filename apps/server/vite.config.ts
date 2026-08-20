@@ -4,12 +4,7 @@ import { defineConfig, mergeConfig } from "vite-plus";
 import baseConfig from "../../vite.config.ts";
 import packageJson from "./package.json" with { type: "json" };
 
-const bundledPackagePrefixes = [
-  "@pierre/diffs",
-  "@t3tools/",
-  "effect-acp",
-  "effect-codex-app-server",
-];
+const bundledPackagePrefixes = ["@pierre/diffs", "@t3tools/", "effect-codex-app-server"];
 
 export function shouldBundleCliDependency(id: string): boolean {
   return bundledPackagePrefixes.some((prefix) => id.startsWith(prefix));

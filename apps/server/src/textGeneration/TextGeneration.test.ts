@@ -95,26 +95,28 @@ describe("makeTextGenerationFromRegistry", () => {
     }),
   );
 
-  it.effect("fails with TextGenerationError when the instance is unknown", () =>
+  it.effect("rejects excluded provider ids before text generation can run", () =>
     Effect.gen(function* () {
       const tg = TextGeneration.makeTextGenerationFromRegistry(makeStubRegistry([]));
 
-      const result = yield* tg
-        .generateBranchName({
-          cwd: process.cwd(),
-          message: "anything",
-          modelSelection: createModelSelection(
-            ProviderInstanceId.make("missing_instance"),
-            "gpt-5",
-          ),
-        })
-        .pipe(Effect.result);
+      for (const excludedId of ["cursor_legacy", "grok_legacy"] as const) {
+        const result = yield* tg
+          .generateBranchName({
+            cwd: process.cwd(),
+            message: "anything",
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make(excludedId),
+              "legacy-model",
+            ),
+          })
+          .pipe(Effect.result);
 
-      expect(Result.isFailure(result)).toBe(true);
-      if (Result.isFailure(result)) {
-        expect(result.failure._tag).toBe("TextGenerationError");
-        expect(result.failure.operation).toBe("generateBranchName");
-        expect(result.failure.detail).toContain("missing_instance");
+        expect(Result.isFailure(result)).toBe(true);
+        if (Result.isFailure(result)) {
+          expect(result.failure._tag).toBe("TextGenerationError");
+          expect(result.failure.operation).toBe("generateBranchName");
+          expect(result.failure.detail).toContain(excludedId);
+        }
       }
     }),
   );

@@ -26,7 +26,6 @@ import {
 import { cn } from "../../lib/utils";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { normalizeProviderAccentColor } from "../../providerInstances";
-import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
@@ -394,7 +393,8 @@ export function ProviderInstanceCard({
   onRunUpdate,
   isUpdating = false,
 }: ProviderInstanceCardProps) {
-  const enabled = instance.enabled ?? true;
+  const isUnavailable = liveProvider?.availability === "unavailable";
+  const enabled = !isUnavailable && (instance.enabled ?? true);
   // The server-reported status wins when present; otherwise fall back to
   // "disabled"/"warning" based on the local `enabled` flag so the dot
   // reflects the persisted intent even before the first probe completes.
@@ -538,11 +538,6 @@ export function ProviderInstanceCard({
         <code className="truncate rounded bg-muted/60 px-1 py-0.5 text-[10px] text-muted-foreground">
           {instanceId}
         </code>
-      ) : null}
-      {driverOption?.badgeLabel ? (
-        <Badge variant="warning" size="sm" className="shrink-0">
-          {driverOption.badgeLabel}
-        </Badge>
       ) : null}
     </>
   );
@@ -721,6 +716,7 @@ export function ProviderInstanceCard({
             <Switch
               checked={enabled}
               onCheckedChange={(checked) => updateEnabled(Boolean(checked))}
+              disabled={isUnavailable}
               aria-label={`Enable ${displayName}`}
             />
           </div>

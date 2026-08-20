@@ -28,16 +28,11 @@ Winget, Homebrew, and AUR packages do not install Sightseer.
 Sightseer drives provider CLIs; it does not ship them. Install the CLI for each provider you want
 to use, then authenticate it.
 
-| Provider   | CLI                                                   | Default binary | Log in with           |
-| ---------- | ----------------------------------------------------- | -------------- | --------------------- |
-| Codex      | [Codex CLI](https://developers.openai.com/codex/cli)  | `codex`        | `codex login`         |
-| Claude     | [Claude Code](https://claude.com/product/claude-code) | `claude`       | `claude auth login`   |
-| Cursor     | [Cursor CLI](https://cursor.com/cli)                  | `cursor-agent` | `agent login`         |
-| Grok Build | [Grok Build CLI](https://x.ai/cli)                    | `grok`         | `grok login`          |
-| OpenCode   | [OpenCode](https://opencode.ai)                       | `opencode`     | `opencode auth login` |
-
-Cursor is the one to watch: install Cursor CLI, which provides the `cursor-agent` binary that
-Sightseer looks for, but authenticate with `agent login`, not `cursor-agent login`.
+| Provider | CLI                                                   | Default binary | Log in with           |
+| -------- | ----------------------------------------------------- | -------------- | --------------------- |
+| Codex    | [Codex CLI](https://developers.openai.com/codex/cli)  | `codex`        | `codex login`         |
+| Claude   | [Claude Code](https://claude.com/product/claude-code) | `claude`       | `claude auth login`   |
+| OpenCode | [OpenCode](https://opencode.ai)                       | `opencode`     | `opencode auth login` |
 
 Run the login command on the machine running the Sightseer server, not on the device you browse
 from.

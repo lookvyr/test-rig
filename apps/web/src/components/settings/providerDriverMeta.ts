@@ -1,13 +1,11 @@
 import {
   ClaudeSettings,
   CodexSettings,
-  CursorSettings,
-  GrokSettings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@t3tools/contracts";
 import type * as Schema from "effect/Schema";
-import { ClaudeAI, CursorIcon, GrokIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import { ClaudeAI, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -24,14 +22,6 @@ export interface ProviderClientDefinition {
   readonly label: string;
   readonly icon: Icon;
   readonly settingsSchema: ProviderSettingsSchema;
-  /**
-   * Optional short label rendered as a `variant="warning"` badge next to
-   * the instance title. Used to flag drivers that still ship under an
-   * early-access or preview gate — the flag is a property of the driver
-   * kind (not a specific instance), so every instance of that driver —
-   * built-in default or custom — advertises the same marker.
-   */
-  readonly badgeLabel?: string;
 }
 
 export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
@@ -46,20 +36,6 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Claude",
     icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
-  },
-  {
-    value: ProviderDriverKind.make("cursor"),
-    label: "Cursor",
-    icon: CursorIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: CursorSettings,
-  },
-  {
-    value: ProviderDriverKind.make("grok"),
-    label: "Grok",
-    icon: GrokIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: GrokSettings,
   },
   {
     value: ProviderDriverKind.make("opencode"),

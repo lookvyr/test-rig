@@ -189,11 +189,13 @@ function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings
 }
 
 function fallbackTextGenerationProvider(settings: ServerSettings): ServerSettings {
-  const fallbackEntry = Object.entries(settings.providers).find(([, provider]) => provider.enabled);
-  const fallback = fallbackEntry ? ProviderDriverKind.make(fallbackEntry[0]) : undefined;
-  if (!fallback) {
+  const fallbackProvider = (["codex", "claudeAgent", "opencode"] as const).find(
+    (provider) => settings.providers[provider].enabled,
+  );
+  if (!fallbackProvider) {
     return settings;
   }
+  const fallback = ProviderDriverKind.make(fallbackProvider);
 
   return {
     ...settings,

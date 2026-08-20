@@ -34,7 +34,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "@t3tools/contracts";
-import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import { ProviderAdapterRequestError, ProviderUnsupportedError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -150,6 +150,7 @@ describe("ProviderCommandReactor", () => {
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
+    readonly unavailableProviderInstanceIds?: ReadonlySet<string>;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -322,6 +323,9 @@ describe("ProviderCommandReactor", () => {
         }),
       getInstanceInfo: (instanceId) => {
         const raw = String(instanceId);
+        if (input?.unavailableProviderInstanceIds?.has(raw) === true) {
+          return Effect.fail(new ProviderUnsupportedError({ provider: raw }));
+        }
         const driverKind = ProviderDriverKind.make(
           raw.startsWith("claude") ? "claudeAgent" : raw.startsWith("codex") ? "codex" : raw,
         );
@@ -550,6 +554,49 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("rejects a persisted excluded-provider binding before session start", async () => {
+    const excludedInstanceId = ProviderInstanceId.make("cursor_legacy");
+    const harness = await createHarness({
+      threadModelSelection: {
+        instanceId: excludedInstanceId,
+        model: "cursor-legacy-model",
+      },
+      unavailableProviderInstanceIds: new Set([excludedInstanceId]),
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-excluded-provider"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-excluded-provider"),
+          role: "user",
+          text: "resume historical thread",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await harness.drain();
+
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(
+      thread?.activities.find((activity) => activity.kind === "provider.turn.start.failed"),
+    ).toMatchObject({
+      payload: {
+        detail: expect.stringContaining("cursor_legacy"),
+      },
+    });
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>

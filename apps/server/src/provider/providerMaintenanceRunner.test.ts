@@ -22,6 +22,7 @@ import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import { ProviderRegistry, type ProviderRegistryShape } from "./Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
 import {
+  makeManualOnlyProviderMaintenanceCapabilities,
   makeProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilities,
 } from "./providerMaintenance.ts";
@@ -31,7 +32,6 @@ const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
 const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
 const CODEX_INSTANCE_ID = ProviderInstanceId.make("codex");
-const CURSOR_INSTANCE_ID = ProviderInstanceId.make("cursor");
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make("opencode");
 const encoder = new TextEncoder();
 
@@ -42,14 +42,6 @@ const encoder = new TextEncoder();
 const NonWindowsPlatform = Layer.succeed(HostProcessPlatform, "linux");
 
 function lifecycleFor(provider: ProviderDriverKind): ProviderMaintenanceCapabilities {
-  if (provider === CURSOR_DRIVER) {
-    return makeProviderMaintenanceCapabilities({
-      provider,
-      updateExecutable: "cursor-agent",
-      updateArgs: ["update"],
-      updateLockKey: "cursor-agent",
-    });
-  }
   return makeProviderMaintenanceCapabilities({
     provider,
     updateExecutable: "npm",
@@ -73,12 +65,6 @@ const baseProvider: ServerProvider = {
   models: [],
   slashCommands: [],
   skills: [],
-};
-
-const baseCursorProvider: ServerProvider = {
-  ...baseProvider,
-  instanceId: CURSOR_INSTANCE_ID,
-  driver: CURSOR_DRIVER,
 };
 
 const baseOpenCodeProvider: ServerProvider = {
@@ -195,17 +181,46 @@ const makeTestRunner = (registry: ProviderRegistryShape) =>
   );
 
 describe("providerMaintenanceRunner", () => {
+  it.effect("rejects excluded provider maintenance before spawning a child", () => {
+    const calls: Array<string> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry();
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+          Effect.succeed(makeManualOnlyProviderMaintenanceCapabilities({ provider })),
+      });
+
+      for (const provider of [CURSOR_DRIVER, ProviderDriverKind.make("grok")]) {
+        const error = yield* updater.updateProvider(provider).pipe(Effect.flip);
+        assert.strictEqual(error._tag, "ServerProviderUpdateError");
+        assert.include(error.reason, "does not support one-click updates");
+      }
+      assert.deepStrictEqual(calls, []);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          mockSpawnerLayer((command) => {
+            calls.push(command);
+            return { stdout: "must not run" };
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("runs the allowlisted provider update command and records success", () => {
     const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
     return Effect.gen(function* () {
-      const { registry, updateStatesRef } = yield* makeRegistry(baseCursorProvider);
+      const { registry, updateStatesRef } = yield* makeRegistry(baseOpenCodeProvider);
       const updater = yield* makeTestRunner(registry);
 
-      const result = yield* updater.updateProvider(CURSOR_DRIVER);
+      const result = yield* updater.updateProvider(OPENCODE_DRIVER);
       assert.deepStrictEqual(calls, [
         {
-          command: "cursor-agent",
-          args: ["update"],
+          command: "npm",
+          args: ["install", "-g", "opencode-ai@latest"],
         },
       ]);
       assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");

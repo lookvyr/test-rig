@@ -1530,7 +1530,7 @@ export function makeOpenCodeAdapter(
         threadId: input.threadId,
         turnId,
         // Re-surface the durable cursor on every turn so the persisted binding
-        // is refreshed alongside last-seen/runtime state (mirrors Grok/Codex).
+        // is refreshed alongside last-seen/runtime state.
         ...(context.session.resumeCursor !== undefined
           ? { resumeCursor: context.session.resumeCursor }
           : {}),

@@ -116,6 +116,35 @@ describe("applyProviderInstanceSettings", () => {
 
     expect(entry?.enabled).toBe(false);
   });
+
+  it.each(["cursor", "grok"])(
+    "does not expose an unavailable %s shadow when explicit settings still say enabled",
+    (driver) => {
+      const instanceId = ProviderInstanceId.make(`${driver}_legacy`);
+      const entries = deriveProviderInstanceEntries([
+        provider({
+          provider: ProviderDriverKind.make(driver),
+          instanceId,
+          enabled: false,
+          availability: "unavailable",
+        }),
+      ]);
+      const [entry] = applyProviderInstanceSettings(entries, {
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make(driver),
+            enabled: true,
+          },
+        },
+        providers: {} as never,
+      });
+
+      expect(entry?.enabled).toBe(true);
+      expect(entry?.isAvailable).toBe(false);
+      expect(entry && isProviderInstancePickerVisible(entry)).toBe(false);
+      expect(entry && isProviderInstancePickerReady(entry)).toBe(false);
+    },
+  );
 });
 
 describe("deriveProviderInstanceEntries", () => {
@@ -130,6 +159,29 @@ describe("deriveProviderInstanceEntries", () => {
     expect(entry?.driverKind).toBe("codex");
     expect(entry?.isDefault).toBe(false);
   });
+
+  it.each(["cursor", "grok"])(
+    "keeps an unavailable historical %s row generic, readable, and disabled",
+    (driver) => {
+      const [entry] = deriveProviderInstanceEntries([
+        provider({
+          provider: ProviderDriverKind.make(driver),
+          instanceId: `${driver}_legacy`,
+          displayName: `${driver} legacy`,
+          enabled: false,
+          availability: "unavailable",
+        }),
+      ]);
+
+      expect(entry).toMatchObject({
+        displayName: `${driver} legacy`,
+        enabled: false,
+        isAvailable: false,
+      });
+      expect(entry && isProviderInstancePickerReady(entry)).toBe(false);
+      expect(entry && isProviderInstancePickerVisible(entry)).toBe(false);
+    },
+  );
 });
 
 describe("resolveSelectableProviderInstance", () => {
@@ -370,6 +422,27 @@ describe("resolveDefaultProviderModelSelection", () => {
 
     expect(resolveDefaultProviderModelSelection(providers, stored)).toBe(stored);
   });
+
+  it.each(["cursor", "grok"])(
+    "does not reactivate a historical %s selection without an available snapshot",
+    (driver) => {
+      const stored = {
+        instanceId: ProviderInstanceId.make(driver),
+        model: "historical-model",
+      };
+      const providers = [
+        provider({
+          provider: ProviderDriverKind.make(driver),
+          instanceId: driver,
+          enabled: false,
+          availability: "unavailable",
+          models: [model("historical-model")],
+        }),
+      ];
+
+      expect(resolveDefaultProviderModelSelection(providers, stored)).toBeNull();
+    },
+  );
 
   it("replaces a stale stored instance with the first ready instance and its model", () => {
     const providers = [

@@ -132,6 +132,57 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
     expect(decoded.providers.codex.enabled).toBe(true);
   });
 
+  it("round-trips excluded legacy provider settings losslessly", () => {
+    const decoded = decodeServerSettings({
+      providers: {
+        cursor: {
+          enabled: true,
+          binaryPath: "/legacy/cursor-agent",
+          apiEndpoint: "https://legacy.invalid/cursor",
+          customModels: ["cursor-legacy-model"],
+        },
+        grok: {
+          enabled: true,
+          binaryPath: "/legacy/grok",
+          customModels: ["grok-legacy-model"],
+        },
+      },
+    });
+    const encoded = encodeServerSettings(decoded);
+
+    expect(encoded.providers?.cursor).toEqual({
+      enabled: true,
+      binaryPath: "/legacy/cursor-agent",
+      apiEndpoint: "https://legacy.invalid/cursor",
+      customModels: ["cursor-legacy-model"],
+    });
+    expect(encoded.providers?.grok).toEqual({
+      enabled: true,
+      binaryPath: "/legacy/grok",
+      customModels: ["grok-legacy-model"],
+    });
+  });
+
+  it("strips excluded provider patch keys while retaining approved provider patches", () => {
+    const patch = decodeServerSettingsPatch({
+      providers: {
+        codex: { enabled: false },
+        claudeAgent: { binaryPath: "/approved/claude" },
+        cursor: { enabled: true, binaryPath: "/excluded/cursor-agent" },
+        grok: { enabled: true, binaryPath: "/excluded/grok" },
+        opencode: { binaryPath: "/approved/opencode" },
+      },
+    });
+
+    expect(patch.providers).toEqual({
+      codex: { enabled: false },
+      claudeAgent: { binaryPath: "/approved/claude" },
+      opencode: { binaryPath: "/approved/opencode" },
+    });
+    expect(patch.providers).not.toHaveProperty("cursor");
+    expect(patch.providers).not.toHaveProperty("grok");
+  });
+
   it("decodes a multi-instance map mixing first-party and fork drivers", () => {
     const decoded = decodeServerSettings({
       providerInstances: {

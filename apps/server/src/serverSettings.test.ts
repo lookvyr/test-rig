@@ -205,6 +205,90 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("preserves excluded legacy settings across unrelated updates", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      yield* fileSystem.writeFileString(
+        serverConfig.settingsPath,
+        JSON.stringify({
+          providers: {
+            cursor: {
+              enabled: true,
+              binaryPath: "/legacy/cursor-agent",
+              apiEndpoint: "https://legacy.invalid/cursor",
+              customModels: ["cursor-legacy-model"],
+            },
+            grok: {
+              enabled: true,
+              binaryPath: "/legacy/grok",
+              customModels: ["grok-legacy-model"],
+            },
+          },
+          textGenerationModelSelection: {
+            instanceId: "grok",
+            model: "grok-legacy-model",
+          },
+        }),
+      );
+
+      const next = yield* serverSettings.updateSettings({
+        newWorktreesStartFromOrigin: false,
+      });
+
+      assert.deepEqual(next.providers.cursor, {
+        enabled: true,
+        binaryPath: "/legacy/cursor-agent",
+        apiEndpoint: "https://legacy.invalid/cursor",
+        customModels: ["cursor-legacy-model"],
+      });
+      assert.deepEqual(next.providers.grok, {
+        enabled: true,
+        binaryPath: "/legacy/grok",
+        customModels: ["grok-legacy-model"],
+      });
+      assert.deepEqual(next.textGenerationModelSelection, {
+        instanceId: ProviderInstanceId.make("grok"),
+        model: "grok-legacy-model",
+      });
+
+      const persisted = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const roundTripped = yield* decodeServerSettings(JSON.parse(persisted));
+      assert.deepEqual(roundTripped.providers.cursor, next.providers.cursor);
+      assert.deepEqual(roundTripped.providers.grok, next.providers.grok);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("falls back only to an enabled approved provider", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const settings = yield* serverSettings.getSettings;
+
+      assert.deepEqual(settings.textGenerationModelSelection, {
+        instanceId: ProviderInstanceId.make("opencode"),
+        model: "openai/gpt-5",
+      });
+    }).pipe(
+      Effect.provide(
+        ServerSettingsModule.layerTest({
+          providers: {
+            codex: { enabled: false },
+            claudeAgent: { enabled: false },
+            cursor: { enabled: true },
+            grok: { enabled: true },
+            opencode: { enabled: true },
+          },
+          textGenerationModelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "disabled-codex-model",
+          },
+        }),
+      ),
+    ),
+  );
+
   it.effect("buffers changes after a subscription is acquired but before it is consumed", () =>
     Effect.scoped(
       Effect.gen(function* () {

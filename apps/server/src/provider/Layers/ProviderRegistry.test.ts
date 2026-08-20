@@ -1706,7 +1706,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
       );
 
       it.effect(
-        "keeps cursor disabled and skips probing when the provider setting is disabled",
+        "keeps excluded legacy providers unavailable and never probes their executables",
         () =>
           Effect.gen(function* () {
             const serverSettings = yield* makeMutableServerSettingsService(
@@ -1716,17 +1716,39 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
                     codex: {
                       enabled: false,
                     },
-                    cursor: {
+                    claudeAgent: {
                       enabled: false,
                     },
+                    cursor: {
+                      enabled: true,
+                      binaryPath: "/sentinel/must-not-spawn/cursor-agent",
+                    },
                     grok: {
+                      enabled: true,
+                      binaryPath: "/sentinel/must-not-spawn/grok",
+                    },
+                    opencode: {
                       enabled: false,
                     },
                   },
+                  providerInstances: {
+                    cursor_legacy: {
+                      driver: "cursor",
+                      displayName: "Historical Cursor",
+                      enabled: true,
+                      config: { binaryPath: "/sentinel/must-not-spawn/cursor-agent" },
+                    },
+                    grok_legacy: {
+                      driver: "grok",
+                      displayName: "Historical Grok",
+                      enabled: true,
+                      config: { binaryPath: "/sentinel/must-not-spawn/grok" },
+                    },
+                  } as unknown as ContractServerSettings["providerInstances"],
                 }),
               ),
             );
-            let cursorSpawned = false;
+            const spawnedCommands: Array<string> = [];
             const scope = yield* Scope.make();
             yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
             const providerRegistryLayer = ProviderRegistryLive.pipe(
@@ -1749,9 +1771,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
               Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
               Layer.provideMerge(
                 mockCommandSpawnerLayer((command, args) => {
-                  if (command === "cursor-agent") {
-                    cursorSpawned = true;
-                  }
+                  spawnedCommands.push(command);
                   const joined = args.join(" ");
                   if (joined === "--version") {
                     return {
@@ -1782,23 +1802,26 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
               const registry = yield* ProviderRegistry.ProviderRegistry;
               const providers = yield* registry.getProviders;
               const cursorProvider = providers.find(
-                (provider) => provider.instanceId === ProviderInstanceId.make("cursor"),
+                (provider) => provider.instanceId === ProviderInstanceId.make("cursor_legacy"),
+              );
+              const grokProvider = providers.find(
+                (provider) => provider.instanceId === ProviderInstanceId.make("grok_legacy"),
               );
 
               assert.deepStrictEqual(providers.map((provider) => provider.instanceId).toSorted(), [
                 "claudeAgent",
                 "codex",
-                "cursor",
-                "grok",
+                "cursor_legacy",
+                "grok_legacy",
                 "opencode",
               ]);
               assert.strictEqual(cursorProvider?.enabled, false);
-              assert.strictEqual(cursorProvider?.status, "disabled");
-              assert.strictEqual(
-                cursorProvider?.message,
-                "Cursor is disabled in T3 Code settings.",
-              );
-              assert.strictEqual(cursorSpawned, false);
+              assert.strictEqual(cursorProvider?.installed, false);
+              assert.strictEqual(cursorProvider?.availability, "unavailable");
+              assert.strictEqual(grokProvider?.enabled, false);
+              assert.strictEqual(grokProvider?.installed, false);
+              assert.strictEqual(grokProvider?.availability, "unavailable");
+              assert.deepStrictEqual(spawnedCommands, []);
             }).pipe(Effect.provide(runtimeServices));
           }),
       );
