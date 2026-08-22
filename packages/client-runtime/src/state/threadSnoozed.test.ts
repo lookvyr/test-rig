@@ -261,7 +261,7 @@ describe("snoozeWakeLabel", () => {
 });
 
 describe("resolveSnoozePresets", () => {
-  it("offers the shared desktop and mobile choices", () => {
+  it("offers the shared client choices", () => {
     const presets = resolveSnoozePresets(localDate(2026, 4, 8, 10));
     expect(presets.map((preset) => preset.id)).toEqual([
       "hour",

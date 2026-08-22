@@ -363,8 +363,7 @@ export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset> {
 
 /**
  * Compact "wakes in" label for snoozed rows: "2h", "18h", "3d". Minutes
- * round up so a snooze never reads "0m" while still hidden. Shared by web
- * and mobile so the same wake time never reads differently per client.
+ * round up so a snooze never reads "0m" while still hidden.
  */
 export function snoozeWakeLabel(snoozedUntil: string, options: { readonly now: string }): string {
   const wakeMs = Date.parse(snoozedUntil);

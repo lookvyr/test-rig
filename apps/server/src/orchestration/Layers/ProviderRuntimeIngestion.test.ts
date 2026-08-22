@@ -3194,7 +3194,7 @@ describe("ProviderRuntimeIngestion", () => {
       turnId: asTurnId("turn-named-task"),
       payload: {
         taskId: "named-task-1",
-        description: "Typecheck mobile app",
+        description: "Typecheck web app",
         taskType: "local_bash",
       },
     });
@@ -3208,8 +3208,8 @@ describe("ProviderRuntimeIngestion", () => {
       turnId: asTurnId("turn-named-task"),
       payload: {
         taskId: "named-task-1",
-        description: "Typecheck mobile app",
-        summary: "Running tsc across the mobile workspace.",
+        description: "Typecheck web app",
+        summary: "Running tsc across the web workspace.",
       },
     });
 
@@ -3250,10 +3250,10 @@ describe("ProviderRuntimeIngestion", () => {
         ? (completed.payload as Record<string, unknown>)
         : undefined;
 
-    expect(progress?.summary).toBe("Typecheck mobile app");
-    expect(progressPayload?.title).toBe("Typecheck mobile app");
+    expect(progress?.summary).toBe("Typecheck web app");
+    expect(progressPayload?.title).toBe("Typecheck web app");
     expect(completed?.summary).toBe("Task completed");
-    expect(completedPayload?.title).toBe("Typecheck mobile app");
+    expect(completedPayload?.title).toBe("Typecheck web app");
     expect(completedPayload?.summary).toBe("Typecheck finished without errors.");
     expect(completedPayload?.detail).toBe("Typecheck finished without errors.");
   });

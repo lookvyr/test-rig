@@ -538,7 +538,7 @@ export const WsVcsInitRpc = Rpc.make(WS_METHODS.vcsInit, {
 });
 
 /**
- * Ephemeral live diff preview for compact/mobile surfaces.
+ * Ephemeral live diff preview for compact surfaces.
  * Not the persisted T3 Review model. Future review sessions should use
  * review.open* + review.getSnapshot.
  */

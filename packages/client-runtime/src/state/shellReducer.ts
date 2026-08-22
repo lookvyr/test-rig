@@ -3,8 +3,8 @@ import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "
 
 /**
  * Reduce a single shell stream event into an existing snapshot, returning a new
- * snapshot with the event's changes applied. This is a pure reducer that both
- * web and mobile can use to keep their local shell snapshot in sync.
+ * snapshot with the event's changes applied. This pure reducer keeps the
+ * client shell snapshot in sync.
  *
  * Returns the original snapshot reference unchanged if the event is not
  * recognized (forward-compatible).

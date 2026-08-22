@@ -274,7 +274,7 @@ describe("EnvironmentSupervisor", () => {
         (state) => state.phase === "offline" && state.attempt === 2,
       );
 
-      yield* harness.wake("application-active-reconnect");
+      yield* harness.wake("application-active");
       yield* awaitState(
         supervisor.state,
         (state) => state.phase === "offline" && state.attempt === 1,
@@ -538,7 +538,7 @@ describe("EnvironmentSupervisor", () => {
         (state) => state.phase === "blocked" && state.attempt === 2,
       );
 
-      yield* harness.wake("application-active-reconnect");
+      yield* harness.wake("application-active");
       yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.attempt === 1,
@@ -672,7 +672,7 @@ describe("EnvironmentSupervisor", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
-  it.effect("restarts the retry ladder when mobile returns to the foreground", () =>
+  it.effect("restarts the retry ladder when the app returns to the foreground", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();
       const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
@@ -696,7 +696,7 @@ describe("EnvironmentSupervisor", () => {
         (state) => state.phase === "backoff" && state.attempt === 2,
       );
 
-      yield* harness.wake("application-active-reconnect");
+      yield* harness.wake("application-active");
       yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 3 && state.attempt === 1,
@@ -708,62 +708,6 @@ describe("EnvironmentSupervisor", () => {
       );
 
       expect(yield* Ref.get(harness.sessionCount)).toBe(3);
-    }).pipe(Effect.provide(TestClock.layer())),
-  );
-
-  it.effect("restarts the retry ladder when a long resume replaces a connected session", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness();
-      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
-      yield* harness.closeLatestSession();
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "backoff" && state.attempt === 1,
-      );
-      yield* TestClock.adjust("3 seconds");
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2 && state.attempt === 2,
-      );
-
-      yield* harness.wake("application-active-reconnect");
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 3 && state.attempt === 1,
-      );
-    }).pipe(Effect.provide(TestClock.layer())),
-  );
-
-  it.effect("restarts the retry ladder when a long resume interrupts connection setup", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness({
-        prepare: (attempt) => (attempt === 2 ? Effect.never : Effect.succeed(PREPARED_CONNECTION)),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
-      yield* harness.closeLatestSession();
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "backoff" && state.attempt === 1,
-      );
-      yield* TestClock.adjust("3 seconds");
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connecting" && state.attempt === 2,
-      );
-
-      yield* harness.wake("application-active-reconnect");
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2 && state.attempt === 1,
-      );
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
@@ -789,58 +733,6 @@ describe("EnvironmentSupervisor", () => {
       expect(yield* Ref.get(harness.sessionCount)).toBe(1);
       expect(yield* Ref.get(harness.releaseCount)).toBe(0);
       expect((yield* SubscriptionRef.get(supervisor.state)).phase).toBe("connected");
-    }),
-  );
-
-  it.effect("immediately replaces a mobile session after a long background resume", () =>
-    Effect.gen(function* () {
-      const probeCount = yield* Ref.make(0);
-      const harness = yield* makeHarness({
-        probe: () => Ref.update(probeCount, (count) => count + 1),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 1,
-      );
-      yield* harness.wake("application-active-reconnect");
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2,
-      );
-
-      expect(yield* Ref.get(probeCount)).toBe(0);
-      expect(yield* Ref.get(harness.sessionCount)).toBe(2);
-      expect(yield* Ref.get(harness.releaseCount)).toBe(1);
-    }),
-  );
-
-  it.effect("replaces a mobile session when a long resume interrupts an active probe", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness({
-        probe: (attempt) => (attempt === 1 ? Effect.never : Effect.void),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 1,
-      );
-      yield* harness.wake("application-active-probe");
-      yield* Effect.yieldNow;
-      yield* harness.wake("application-active-reconnect");
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2,
-      );
-
-      expect(yield* Ref.get(harness.sessionCount)).toBe(2);
-      expect(yield* Ref.get(harness.releaseCount)).toBe(1);
     }),
   );
 
@@ -926,29 +818,6 @@ describe("EnvironmentSupervisor", () => {
       yield* TestClock.adjust("14999 millis");
       expect(yield* Ref.get(harness.sessionCount)).toBe(1);
       yield* TestClock.adjust("1 milli");
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2 && state.attempt === 1,
-      );
-
-      expect(yield* Ref.get(harness.sessionCount)).toBe(2);
-    }).pipe(Effect.provide(TestClock.layer())),
-  );
-
-  it.effect("quickly times out a stalled mobile foreground liveness probe", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness({
-        probe: (attempt) => (attempt === 1 ? Effect.never : Effect.void),
-      });
-      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
-        initiallyDesired: true,
-      }).pipe(Effect.provide(harness.dependencies));
-
-      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
-      yield* harness.wake("application-active-probe");
-      yield* TestClock.adjust("3 seconds");
-      // The timed-out wake probe reconnects immediately without a backoff
-      // sleep: no further clock advance is needed.
       yield* awaitState(
         supervisor.state,
         (state) => state.phase === "connected" && state.generation === 2 && state.attempt === 1,

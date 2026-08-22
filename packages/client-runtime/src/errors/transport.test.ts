@@ -11,7 +11,7 @@ describe("isTransportConnectionErrorMessage", () => {
     expect(isTransportConnectionErrorMessage("SocketOpenError: ECONNREFUSED")).toBe(true);
   });
 
-  it("returns true for React Native disconnected socket errors", () => {
+  it("returns true for disconnected socket errors", () => {
     expect(
       isTransportConnectionErrorMessage(
         "The operation couldn't be completed. Socket is not connected",

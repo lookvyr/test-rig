@@ -54,8 +54,6 @@ available. You can set another endpoint as the default from the expanded endpoin
 If the copied link points directly at `http://192.168.x.y:3773`, open it from a client that can reach
 that LAN address.
 
-In the mobile app's **Add Environment** form, a numeric IP address without a scheme uses HTTP. Include `https://` explicitly when the backend is served over HTTPS.
-
 ### Option 2: Headless Server (CLI)
 
 Use this when you want to run the server without a GUI, for example on a remote machine over SSH.

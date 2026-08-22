@@ -23,7 +23,7 @@ const cell = (text: string, wide = 0): GhosttyCell => ({
 });
 
 describe("terminalGridSize", () => {
-  it("matches the mobile renderer's cell-and-padding sizing model", () => {
+  it("uses the expected cell-and-padding sizing model", () => {
     expect(terminalGridSize(808, 408, { width: 10, height: 20, baseline: 15 }, 4)).toEqual({
       cols: 80,
       rows: 20,
@@ -39,7 +39,7 @@ describe("terminalGridSize", () => {
 });
 
 describe("measureGhosttyCell", () => {
-  it("uses descender-aware metrics and the mobile terminal line-height", () => {
+  it("uses descender-aware metrics and the configured terminal line-height", () => {
     const measureText = (text: string) =>
       text === "M"
         ? { width: 7.2, actualBoundingBoxAscent: 9, actualBoundingBoxDescent: 0 }

@@ -42,7 +42,7 @@ describe("resolveThreadSyncPhase", () => {
 });
 
 describe("threadSyncLabel", () => {
-  it("uses the same loading and syncing language as mobile", () => {
+  it("uses consistent loading and syncing language", () => {
     expect(threadSyncLabel("loading")).toBe("Loading messages...");
     expect(threadSyncLabel("syncing")).toBe("Syncing messages...");
   });

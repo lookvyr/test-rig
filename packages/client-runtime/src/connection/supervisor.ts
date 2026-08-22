@@ -30,7 +30,6 @@ import * as ConnectionWakeups from "./wakeups.ts";
 const RETRY_DELAYS_MS = [3_000, 4_000, 8_000, 16_000] as const;
 const CONNECTION_ESTABLISHMENT_TIMEOUT = "15 seconds";
 const CONNECTION_PROBE_TIMEOUT = "15 seconds";
-const MOBILE_CONNECTION_PROBE_TIMEOUT = "3 seconds";
 const BACKOFF_RESET_AFTER_MS = 30_000;
 
 interface SupervisorIntent {
@@ -277,9 +276,6 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         case "ConnectRequested":
           break;
         case "Wakeup":
-          if (next.reason === "application-active-reconnect") {
-            return true;
-          }
           break;
       }
     }
@@ -299,69 +295,54 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
             return false;
           }
           break;
-        case "Wakeup":
-          if (next.reason === "application-active-reconnect") {
-            // Mobile operating systems commonly suspend sockets without
-            // delivering a close event. A long background resume deliberately
-            // replaces that lease and starts a fresh attempt without backoff.
-            return true;
-          }
-          if (next.reason === "application-active" || next.reason === "application-active-probe") {
-            const probe = yield* lease.session.probe.pipe(
-              Effect.timeoutOrElse({
-                duration:
-                  next.reason === "application-active-probe"
-                    ? MOBILE_CONNECTION_PROBE_TIMEOUT
-                    : CONNECTION_PROBE_TIMEOUT,
-                orElse: () =>
-                  Effect.fail(
-                    new ConnectionTransientError({
-                      reason: "timeout",
-                      detail: `${target.label} did not respond to a connection health check.`,
-                    }),
-                  ),
-              }),
-              Effect.forkChild,
+        case "Wakeup": {
+          const probe = yield* lease.session.probe.pipe(
+            Effect.timeoutOrElse({
+              duration: CONNECTION_PROBE_TIMEOUT,
+              orElse: () =>
+                Effect.fail(
+                  new ConnectionTransientError({
+                    reason: "timeout",
+                    detail: `${target.label} did not respond to a connection health check.`,
+                  }),
+                ),
+            }),
+            Effect.forkChild,
+          );
+          for (;;) {
+            const probeEvent = yield* Effect.raceFirst(
+              Fiber.await(probe).pipe(
+                Effect.map((exit) => ({ _tag: "ProbeCompleted" as const, exit })),
+              ),
+              Queue.take(signals).pipe(
+                Effect.map((signal) => ({ _tag: "Signal" as const, signal })),
+              ),
             );
-            for (;;) {
-              const probeEvent = yield* Effect.raceFirst(
-                Fiber.await(probe).pipe(
-                  Effect.map((exit) => ({ _tag: "ProbeCompleted" as const, exit })),
-                ),
-                Queue.take(signals).pipe(
-                  Effect.map((signal) => ({ _tag: "Signal" as const, signal })),
-                ),
-              );
-              if (probeEvent._tag === "ProbeCompleted") {
-                if (Exit.isFailure(probeEvent.exit)) {
-                  yield* Ref.set(wakeProbeFailed, true);
-                }
-                yield* probeEvent.exit;
-                break;
+            if (probeEvent._tag === "ProbeCompleted") {
+              if (Exit.isFailure(probeEvent.exit)) {
+                yield* Ref.set(wakeProbeFailed, true);
               }
-              switch (probeEvent.signal._tag) {
-                case "DisconnectRequested":
-                case "RetryRequested":
+              yield* probeEvent.exit;
+              break;
+            }
+            switch (probeEvent.signal._tag) {
+              case "DisconnectRequested":
+              case "RetryRequested":
+                yield* Fiber.interrupt(probe);
+                return false;
+              case "NetworkChanged":
+                if (probeEvent.signal.network === "offline") {
                   yield* Fiber.interrupt(probe);
                   return false;
-                case "NetworkChanged":
-                  if (probeEvent.signal.network === "offline") {
-                    yield* Fiber.interrupt(probe);
-                    return false;
-                  }
-                  break;
-                case "Wakeup":
-                  if (probeEvent.signal.reason === "application-active-reconnect") {
-                    yield* Fiber.interrupt(probe);
-                    return true;
-                  }
-                  break;
-                case "ConnectRequested":
-                  break;
-              }
+                }
+                break;
+              case "ConnectRequested":
+              case "Wakeup":
+                break;
             }
           }
           break;
+        }
         case "ConnectRequested":
           break;
       }

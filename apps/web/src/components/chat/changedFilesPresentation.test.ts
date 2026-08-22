@@ -41,7 +41,7 @@ describe("changed-files presentation", () => {
       { path: "README.md", kind: "modified", additions: 1, deletions: 0 },
       { path: "apps/server/src/index.ts", kind: "modified", additions: 1, deletions: 0 },
       { path: "packages/shared/src/git.ts", kind: "modified", additions: 1, deletions: 0 },
-      { path: "apps\\mobile\\App.tsx", kind: "modified", additions: 1, deletions: 0 },
+      { path: "apps\\web\\App.tsx", kind: "modified", additions: 1, deletions: 0 },
     ];
 
     expect(summarizeChangedFileScopes(files)).toEqual([

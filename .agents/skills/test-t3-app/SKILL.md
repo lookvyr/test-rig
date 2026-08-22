@@ -5,7 +5,7 @@ description: Launch, retain, and test the Sightseer web app in isolated developm
 
 # Test Sightseer App
 
-Use this skill for the web client. For iOS Simulator, Android Emulator, or physical-device testing against an isolated Sightseer backend, use the sibling [`test-t3-mobile`](../test-t3-mobile/SKILL.md) skill.
+Use this skill for the web client, including the renderer used by the desktop app.
 
 ## Start an isolated web environment
 

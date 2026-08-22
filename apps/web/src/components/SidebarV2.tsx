@@ -523,7 +523,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const shouldRecede =
     (status === "ready" || isInFlight) && !isUnread && !isWoke && !props.isActive && !isSelected;
   // Status hues follow the system-wide convention set by sidebar v1 and the
-  // mobile Live Activity/widgets (amber approval, indigo input, sky working)
+  // status surfaces (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
   const topStatus =
     status === "working"

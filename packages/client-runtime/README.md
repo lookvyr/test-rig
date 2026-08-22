@@ -1,13 +1,13 @@
 # Client Runtime
 
-Shared client behavior for web and mobile. Public APIs are organized by package
+Non-visual client behavior for web and the desktop renderer. Public APIs are organized by package
 subpath. The package intentionally has no root export.
 
 ## Public subpaths
 
 | Subpath               | Responsibility                                                   |
 | --------------------- | ---------------------------------------------------------------- |
-| `authorization`       | Bearer authorization                                               |
+| `authorization`       | Bearer authorization                                             |
 | `connection`          | Targets, catalog, supervision, retries, registry, and onboarding |
 | `environment`         | Environment identity, descriptors, endpoints, and scoped keys    |
 | `errors`              | Shared client error inspection                                   |
