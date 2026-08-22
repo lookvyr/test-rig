@@ -6,7 +6,6 @@ node_modules
 *.tsbuildinfo
 apps/*/dist
 infra/*/dist
-.astro
 packages/*/dist
 .env
 .env.local
@@ -24,7 +23,6 @@ apps/web/src/components/__screenshots__
 __screenshots__/
 .tanstack
 squashfs-root/
-.vercel
 .gstack/
 dist-electron/
 .electron-runtime/

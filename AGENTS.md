@@ -125,7 +125,7 @@ Full glossary with file links: `docs/internals/glossary.md`
 ## Where code lives
 
 - `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read `.repos/effect-smol/LLMS.md` before writing Effect code.
-- `apps/web` - React/Vite UI. `apps/desktop` wraps it, and `apps/marketing` is the site.
+- `apps/web` - React/Vite UI. `apps/desktop` wraps it.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
 - `packages/client-runtime` - non-visual connection and state code used by web and desktop.
