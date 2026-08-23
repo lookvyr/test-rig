@@ -14,7 +14,7 @@
 ## Working on Sightseer
 
 Everything below is for maintainers. Setup lives in the [root README](../README.md);
-policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../AGENTS.md).
+agent rules live in [AGENTS.md](../AGENTS.md).
 
 - [Architecture overview](./internals/overview.md)
 - [Workspace layout](./internals/workspace-layout.md)

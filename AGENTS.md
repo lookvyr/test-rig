@@ -1,3 +1,5 @@
+> **Fork note:** This is the original T3 Code `AGENTS.md`. It has not yet been fully updated for Sightseer. Where it conflicts with [`FORK.md`](./FORK.md), `FORK.md` controls.
+
 # T3 Code
 
 Sightseer is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs (Codex, Claude Code, OpenCode) and serves web and desktop clients.
