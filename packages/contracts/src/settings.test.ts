@@ -265,6 +265,44 @@ describe("ServerSettings.sourceControlWritingStyle", () => {
   });
 });
 
+describe("ServerSettings.sourceControlProviders", () => {
+  it("enables only GitHub for legacy settings", () => {
+    expect(decodeServerSettings({}).sourceControlProviders).toEqual({
+      github: true,
+      gitlab: false,
+      "azure-devops": false,
+      bitbucket: false,
+    });
+  });
+
+  it("fills provider defaults around a partial stored setting", () => {
+    expect(
+      decodeServerSettings({
+        sourceControlProviders: { github: false },
+      }).sourceControlProviders,
+    ).toEqual({
+      github: false,
+      gitlab: false,
+      "azure-devops": false,
+      bitbucket: false,
+    });
+  });
+
+  it("accepts partial provider enablement patches", () => {
+    expect(
+      decodeServerSettingsPatch({
+        sourceControlProviders: {
+          gitlab: true,
+          bitbucket: true,
+        },
+      }).sourceControlProviders,
+    ).toEqual({
+      gitlab: true,
+      bitbucket: true,
+    });
+  });
+});
+
 describe("ServerSettingsPatch.providerInstances", () => {
   it("treats providerInstances as an optional whole-map replacement", () => {
     const patch = decodeServerSettingsPatch({});

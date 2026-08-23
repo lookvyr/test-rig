@@ -95,6 +95,7 @@ export function buildMenuItems(
   gitStatus: VcsStatusResult | null,
   isBusy: boolean,
   hasPrimaryRemote = true,
+  changeRequestsEnabled = true,
 ): GitActionMenuItem[] {
   if (!gitStatus) return [];
   const terminology = resolveChangeRequestTerminology(gitStatus);
@@ -135,7 +136,7 @@ export function buildMenuItems(
     return [commitItem];
   }
 
-  return [
+  const gitItems: GitActionMenuItem[] = [
     commitItem,
     {
       id: "push",
@@ -145,6 +146,13 @@ export function buildMenuItems(
       kind: "open_dialog",
       dialogAction: "push",
     },
+  ];
+  if (!changeRequestsEnabled) {
+    return gitItems;
+  }
+
+  return [
+    ...gitItems,
     hasOpenPr
       ? {
           id: "pr",
@@ -169,6 +177,10 @@ export function resolveQuickAction(
   isBusy: boolean,
   isDefaultRef = false,
   hasPrimaryRemote = true,
+  options?: {
+    readonly changeRequestsEnabled?: boolean;
+    readonly publishEnabled?: boolean;
+  },
 ): GitQuickAction {
   if (isBusy) {
     return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
@@ -185,7 +197,9 @@ export function resolveQuickAction(
 
   const hasBranch = gitStatus.refName !== null;
   const hasChanges = gitStatus.hasWorkingTreeChanges;
-  const hasOpenPr = gitStatus.pr?.state === "open";
+  const changeRequestsEnabled = options?.changeRequestsEnabled ?? true;
+  const publishEnabled = options?.publishEnabled ?? true;
+  const hasOpenPr = changeRequestsEnabled && gitStatus.pr?.state === "open";
   const isAhead = gitStatus.aheadCount > 0;
   const hasDefaultBranchDelta = (gitStatus.aheadOfDefaultCount ?? gitStatus.aheadCount) > 0;
   const isBehind = gitStatus.behindCount > 0;
@@ -205,7 +219,7 @@ export function resolveQuickAction(
     if (!gitStatus.hasUpstream && !hasPrimaryRemote) {
       return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
     }
-    if (hasOpenPr || isDefaultRef) {
+    if (hasOpenPr || isDefaultRef || !changeRequestsEnabled) {
       return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
     }
     return {
@@ -221,11 +235,18 @@ export function resolveQuickAction(
       if (hasOpenPr && !isAhead) {
         return { label: `View ${terminology.shortLabel}`, disabled: false, kind: "open_pr" };
       }
-      return {
-        label: "Publish repository",
-        disabled: false,
-        kind: "open_publish",
-      };
+      return publishEnabled
+        ? {
+            label: "Publish repository",
+            disabled: false,
+            kind: "open_publish",
+          }
+        : {
+            label: "Publish repository",
+            disabled: true,
+            kind: "show_hint",
+            hint: "Enable a source control provider integration to publish this repository.",
+          };
     }
     if (!isAhead) {
       if (hasOpenPr) {
@@ -238,7 +259,7 @@ export function resolveQuickAction(
         hint: "No local commits to push.",
       };
     }
-    if (hasOpenPr || isDefaultRef) {
+    if (hasOpenPr || isDefaultRef || !changeRequestsEnabled) {
       return {
         label: "Push",
         disabled: false,
@@ -272,7 +293,7 @@ export function resolveQuickAction(
   }
 
   if (isAhead) {
-    if (hasOpenPr || isDefaultRef) {
+    if (hasOpenPr || isDefaultRef || !changeRequestsEnabled) {
       return {
         label: "Push",
         disabled: false,
@@ -293,6 +314,14 @@ export function resolveQuickAction(
   }
 
   if (hasDefaultBranchDelta && !isDefaultRef) {
+    if (!changeRequestsEnabled) {
+      return {
+        label: "Create pull request",
+        disabled: true,
+        kind: "show_hint",
+        hint: "Enable this repository's source control provider integration first.",
+      };
+    }
     return {
       label: `Create ${terminology.shortLabel}`,
       disabled: false,

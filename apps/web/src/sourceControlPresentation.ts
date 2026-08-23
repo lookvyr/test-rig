@@ -1,6 +1,10 @@
 import { GitPullRequestIcon } from "lucide-react";
 import type { ElementType } from "react";
-import type { SourceControlProviderInfo } from "@t3tools/contracts";
+import type {
+  SourceControlProviderInfo,
+  SourceControlProviderKind,
+  SourceControlProviderSettings,
+} from "@t3tools/contracts";
 export {
   DEFAULT_CHANGE_REQUEST_TERMINOLOGY,
   formatChangeRequestAction,
@@ -21,6 +25,15 @@ export interface SourceControlPresentation {
   readonly providerName: string;
   readonly terminology: ChangeRequestTerminology;
   readonly Icon: ElementType<{ className?: string }>;
+}
+
+export function isSourceControlProviderEnabled(
+  settings: SourceControlProviderSettings,
+  provider: SourceControlProviderKind | null | undefined,
+): boolean {
+  return (
+    provider !== undefined && provider !== null && provider !== "unknown" && settings[provider]
+  );
 }
 
 export function getSourceControlPresentation(

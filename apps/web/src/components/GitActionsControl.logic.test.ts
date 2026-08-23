@@ -1,5 +1,5 @@
 import type { VcsStatusResult } from "@t3tools/contracts";
-import { assert, describe, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import {
   buildGitActionProgressStages,
   buildMenuItems,
@@ -148,6 +148,35 @@ describe("when: git status is unavailable", () => {
   it("buildMenuItems returns no menu items", () => {
     const items = buildMenuItems(null, false);
     assert.deepEqual(items, []);
+  });
+});
+
+describe("when: the repository hosting integration is disabled", () => {
+  it("omits change request actions from the menu", () => {
+    expect(
+      buildMenuItems(status({ aheadCount: 1 }), false, true, false).map((item) => item.id),
+    ).toEqual(["commit", "push"]);
+  });
+
+  it("keeps push available without adding change request work", () => {
+    expect(
+      resolveQuickAction(status({ aheadCount: 1 }), false, false, true, {
+        changeRequestsEnabled: false,
+      }),
+    ).toEqual({ label: "Push", disabled: false, kind: "run_action", action: "push" });
+  });
+
+  it("disables repository publishing when every hosting integration is disabled", () => {
+    expect(
+      resolveQuickAction(status({ hasUpstream: false }), false, false, false, {
+        publishEnabled: false,
+      }),
+    ).toEqual({
+      label: "Publish repository",
+      disabled: true,
+      kind: "show_hint",
+      hint: "Enable a source control provider integration to publish this repository.",
+    });
   });
 });
 

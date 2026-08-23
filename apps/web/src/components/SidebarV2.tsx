@@ -89,7 +89,11 @@ import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
+import {
+  useClientSettings,
+  useEnvironmentSettings,
+  useUpdateClientSettings,
+} from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
@@ -129,7 +133,7 @@ import {
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
   prStatusIndicator,
-  resolveThreadPr,
+  resolveEnabledThreadPr,
   settledPrHoverColorClass,
   terminalStatusFromRunningIds,
   type TerminalStatusIndicator,
@@ -486,9 +490,14 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         })
       : null,
   );
-  const pr = resolveThreadPr({
+  const providerSettings = useEnvironmentSettings(
+    thread.environmentId,
+    (settings) => settings.sourceControlProviders,
+  );
+  const pr = resolveEnabledThreadPr({
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
+    providerSettings,
   });
   const prState = pr?.state ?? null;
 

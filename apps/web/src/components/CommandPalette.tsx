@@ -23,6 +23,7 @@ import {
   type SourceControlDiscoveryResult,
   type SourceControlProviderKind,
   type SourceControlRepositoryInfo,
+  DEFAULT_SERVER_SETTINGS,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
 } from "@t3tools/contracts";
 import { useNavigate, useParams } from "@tanstack/react-router";
@@ -1123,16 +1124,26 @@ function OpenCommandPaletteDialog(props: {
     [pushPaletteView],
   );
 
-  const openSourceControlSettings = useCallback(() => {
-    setOpen(false);
-    void navigate({ to: "/settings/source-control" });
-  }, [navigate, setOpen]);
+  const openSourceControlSettings = useCallback(
+    (environmentId: EnvironmentId) => {
+      setOpen(false);
+      void navigate({
+        to: "/settings/source-control",
+        search: { environmentId },
+      });
+    },
+    [navigate, setOpen],
+  );
 
   const buildAddProjectSourceGroups = useCallback(
     (
       environmentId: EnvironmentId,
       readinessBySource: AddProjectRemoteSourceReadiness,
     ): CommandPaletteView["groups"] => {
+      const providerSettings =
+        environments.find((environment) => environment.environmentId === environmentId)
+          ?.serverConfig?.settings.sourceControlProviders ??
+        DEFAULT_SERVER_SETTINGS.sourceControlProviders;
       const sourceItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [
         {
           kind: "action",
@@ -1150,7 +1161,10 @@ function OpenCommandPaletteDialog(props: {
 
       const orderedSources: ReadonlyArray<AddProjectRemoteSource> = [
         "url",
-        ...sortAddProjectProviderSources(readinessBySource),
+        ...sortAddProjectProviderSources(readinessBySource).filter((source) => {
+          const provider = sourceProviderKind(source);
+          return provider !== null && providerSettings[provider];
+        }),
       ];
 
       for (const source of orderedSources) {
@@ -1173,7 +1187,7 @@ function OpenCommandPaletteDialog(props: {
                     size="xs"
                     className="h-5 rounded-[.25rem] px-1.5 text-[10px] text-warning-foreground"
                     onClick={() => {
-                      openSourceControlSettings();
+                      openSourceControlSettings(environmentId);
                     }}
                   >
                     Setup Required
@@ -1219,7 +1233,7 @@ function OpenCommandPaletteDialog(props: {
 
       return [{ value: `sources:${environmentId}`, label: "Sources", items: sourceItems }];
     },
-    [openSourceControlSettings, startAddProjectBrowse, startAddProjectClone],
+    [environments, openSourceControlSettings, startAddProjectBrowse, startAddProjectClone],
   );
 
   const startAddProjectSourceSelection = useCallback(

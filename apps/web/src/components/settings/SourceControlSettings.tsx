@@ -4,7 +4,9 @@ import * as Option from "effect/Option";
 import { useState, type ReactNode } from "react";
 import type {
   BackgroundActivitySettings,
+  EnvironmentId,
   SourceControlProviderKind,
+  SourceControlProviderSettings,
   SourceControlDiscoveryResult,
   SourceControlProviderAuth,
   SourceControlProviderDiscoveryItem,
@@ -17,11 +19,13 @@ import {
   resolveServerBackgroundActivitySettings,
 } from "@t3tools/shared/backgroundActivitySettings";
 
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { usePrimaryEnvironment } from "../../state/environments";
+import { useEnvironment, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
@@ -68,6 +72,19 @@ const SOURCE_CONTROL_PROVIDER_ICONS: Partial<Record<SourceControlProviderKind, I
   "azure-devops": AzureDevOpsIcon,
   bitbucket: BitbucketIcon,
 };
+
+type ConfigurableSourceControlProvider = keyof SourceControlProviderSettings;
+
+const SOURCE_CONTROL_PROVIDER_OPTIONS = [
+  { kind: "github", label: "GitHub", Icon: GitHubIcon },
+  { kind: "gitlab", label: "GitLab", Icon: GitLabIcon },
+  { kind: "azure-devops", label: "Azure DevOps", Icon: AzureDevOpsIcon },
+  { kind: "bitbucket", label: "Bitbucket", Icon: BitbucketIcon },
+] as const satisfies ReadonlyArray<{
+  readonly kind: ConfigurableSourceControlProvider;
+  readonly label: string;
+  readonly Icon: Icon;
+}>;
 
 const VCS_ICONS: Partial<Record<VcsDriverKind, Icon>> = {
   git: GitIcon,
@@ -346,9 +363,64 @@ function DiscoveryItemRow({
   );
 }
 
-function GitFetchIntervalSettings() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+function SourceControlProviderToggleRow(props: {
+  readonly kind: ConfigurableSourceControlProvider;
+  readonly label: string;
+  readonly Icon: Icon;
+  readonly enabled: boolean;
+  readonly discoveryItem: SourceControlProviderDiscoveryItem | undefined;
+  readonly isPending: boolean;
+  readonly isUpdating: boolean;
+  readonly onEnabledChange: (enabled: boolean) => void;
+}) {
+  const authAccount = props.discoveryItem ? optionLabel(props.discoveryItem.auth.account) : null;
+
+  return (
+    <div className="rounded-xl px-3 py-3 transition-colors hover:bg-muted/20 sm:px-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {props.discoveryItem ? (
+              <SourceControlItemMark item={props.discoveryItem} />
+            ) : (
+              <span className="inline-flex size-5 shrink-0 items-center justify-center">
+                <props.Icon className="size-4.5 text-foreground/80" aria-hidden />
+              </span>
+            )}
+            <span className="truncate text-sm font-medium tracking-[-0.005em] text-foreground">
+              {props.label}
+            </span>
+          </div>
+          <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-[13px] leading-[1.45] text-muted-foreground/80">
+            {!props.enabled ? (
+              <span>Disabled. Sightseer will not use this hosting integration.</span>
+            ) : props.discoveryItem ? (
+              itemSummary({
+                item: props.discoveryItem,
+                auth: props.discoveryItem.auth,
+                authAccount,
+              })
+            ) : props.isPending ? (
+              <span>Checking availability...</span>
+            ) : (
+              <span>Status unavailable. Rescan the server environment.</span>
+            )}
+          </p>
+        </div>
+        <Switch
+          checked={props.enabled}
+          onCheckedChange={(checked) => props.onEnabledChange(Boolean(checked))}
+          disabled={props.isUpdating}
+          aria-label={`Enable ${props.label} integration`}
+        />
+      </div>
+    </div>
+  );
+}
+
+function GitFetchIntervalSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const settings = useEnvironmentSettings(environmentId);
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
   const automaticGitFetchIntervalSeconds = durationToSeconds(
     resolvedBackgroundActivity.automaticGitFetchInterval,
@@ -507,8 +579,34 @@ function EmptySourceControlDiscovery({
   );
 }
 
-export function SourceControlSettingsPanel() {
-  const environmentId = usePrimaryEnvironment()?.environmentId ?? null;
+export function SourceControlSettingsPanel(props: { readonly environmentId?: EnvironmentId }) {
+  const primaryEnvironment = usePrimaryEnvironment();
+  const environmentId = props.environmentId ?? primaryEnvironment?.environmentId ?? null;
+
+  if (environmentId === null) {
+    return <SettingsPageContainer>{null}</SettingsPageContainer>;
+  }
+
+  return (
+    <EnvironmentSourceControlSettingsPanel
+      environmentId={environmentId}
+      isPrimary={environmentId === primaryEnvironment?.environmentId}
+    />
+  );
+}
+
+function EnvironmentSourceControlSettingsPanel(props: {
+  readonly environmentId: EnvironmentId;
+  readonly isPrimary: boolean;
+}) {
+  const { environmentId } = props;
+  const environment = useEnvironment(environmentId);
+  const settings = useEnvironmentSettings(environmentId);
+  const updateServerSettings = useAtomCommand(
+    serverEnvironment.updateSettings,
+    "source control provider settings update",
+  );
+  const [isProviderUpdatePending, setIsProviderUpdatePending] = useState(false);
   const discovery = useEnvironmentQuery(
     environmentId === null
       ? null
@@ -519,10 +617,26 @@ export function SourceControlSettingsPanel() {
   );
   const result = discovery.data ?? EMPTY_DISCOVERY_RESULT;
   const hasVersionControlSystems = result.versionControlSystems.length > 0;
-  const hasDiscoveryItems = hasVersionControlSystems || result.sourceControlProviders.length > 0;
   const isInitialScanPending = discovery.isPending && discovery.data === null;
+  const providerDiscoveryByKind = new Map(
+    result.sourceControlProviders.map((provider) => [provider.kind, provider]),
+  );
   const handleScan = () => {
     discovery.refresh();
+  };
+  const setProviderEnabled = (kind: ConfigurableSourceControlProvider, enabled: boolean) => {
+    if (isProviderUpdatePending) return;
+    setIsProviderUpdatePending(true);
+    void updateServerSettings({
+      environmentId,
+      input: {
+        patch: {
+          sourceControlProviders: { [kind]: enabled },
+        },
+      },
+    })
+      .then(() => discovery.refresh())
+      .finally(() => setIsProviderUpdatePending(false));
   };
   const scanButton = (
     <Tooltip>
@@ -547,38 +661,21 @@ export function SourceControlSettingsPanel() {
   return (
     <SettingsPageContainer>
       {isInitialScanPending ? (
-        <>
-          <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />
-          <SourceControlSectionSkeleton title="Source Control Providers" />
-        </>
-      ) : hasDiscoveryItems ? (
-        <>
-          {hasVersionControlSystems ? (
-            <SettingsSection
-              id={searchableSetting("source-control").id}
-              title="Version Control"
-              headerAction={scanButton}
-            >
-              {result.versionControlSystems.map((item) => (
-                <DiscoveryItemRow key={`vcs:${item.kind}`} item={item}>
-                  {item.kind === "git" ? <GitFetchIntervalSettings /> : undefined}
-                </DiscoveryItemRow>
-              ))}
-            </SettingsSection>
-          ) : null}
-
-          {result.sourceControlProviders.length > 0 ? (
-            <SettingsSection
-              id={hasVersionControlSystems ? undefined : searchableSetting("source-control").id}
-              title="Source Control Providers"
-              headerAction={hasVersionControlSystems ? null : scanButton}
-            >
-              {result.sourceControlProviders.map((item) => (
-                <DiscoveryItemRow key={`provider:${item.kind}`} item={item} />
-              ))}
-            </SettingsSection>
-          ) : null}
-        </>
+        <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />
+      ) : hasVersionControlSystems ? (
+        <SettingsSection
+          id={searchableSetting("source-control").id}
+          title="Version Control"
+          headerAction={scanButton}
+        >
+          {result.versionControlSystems.map((item) => (
+            <DiscoveryItemRow key={`vcs:${item.kind}`} item={item}>
+              {item.kind === "git" ? (
+                <GitFetchIntervalSettings environmentId={environmentId} />
+              ) : undefined}
+            </DiscoveryItemRow>
+          ))}
+        </SettingsSection>
       ) : (
         <EmptySourceControlDiscovery
           error={discovery.error}
@@ -587,7 +684,27 @@ export function SourceControlSettingsPanel() {
         />
       )}
 
-      {environmentId !== null ? <SourceControlWritingSettingsSection /> : null}
+      <SettingsSection
+        title={
+          props.isPrimary || environment === null
+            ? "Source Control Providers"
+            : `Source Control Providers · ${environment.label}`
+        }
+      >
+        {SOURCE_CONTROL_PROVIDER_OPTIONS.map((provider) => (
+          <SourceControlProviderToggleRow
+            key={provider.kind}
+            {...provider}
+            enabled={settings.sourceControlProviders[provider.kind]}
+            discoveryItem={providerDiscoveryByKind.get(provider.kind)}
+            isPending={discovery.isPending}
+            isUpdating={isProviderUpdatePending}
+            onEnabledChange={(enabled) => setProviderEnabled(provider.kind, enabled)}
+          />
+        ))}
+      </SettingsSection>
+
+      {props.isPrimary ? <SourceControlWritingSettingsSection /> : null}
     </SettingsPageContainer>
   );
 }

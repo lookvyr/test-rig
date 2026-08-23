@@ -1,3 +1,5 @@
+import type { SourceControlProviderKind } from "@t3tools/contracts";
+
 const GITHUB_PULL_REQUEST_URL_PATTERN =
   /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)(?:[/?#].*)?$/i;
 const GITLAB_MERGE_REQUEST_URL_PATTERN =
@@ -55,5 +57,28 @@ export function parsePullRequestReference(input: string): string | null {
     return numberMatch[1];
   }
 
+  return null;
+}
+
+export function pullRequestReferenceProviderKind(input: string): SourceControlProviderKind | null {
+  const trimmed = input.trim();
+  if (
+    GITHUB_CLI_PR_CHECKOUT_PATTERN.test(trimmed) ||
+    GITHUB_PULL_REQUEST_URL_PATTERN.test(trimmed)
+  ) {
+    return "github";
+  }
+  if (
+    GITLAB_CLI_MR_CHECKOUT_PATTERN.test(trimmed) ||
+    GITLAB_MERGE_REQUEST_URL_PATTERN.test(trimmed)
+  ) {
+    return "gitlab";
+  }
+  if (
+    AZURE_DEVOPS_CLI_PR_CHECKOUT_PATTERN.test(trimmed) ||
+    AZURE_DEVOPS_PULL_REQUEST_URL_PATTERN.test(trimmed)
+  ) {
+    return "azure-devops";
+  }
   return null;
 }

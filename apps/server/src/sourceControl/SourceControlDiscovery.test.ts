@@ -4,9 +4,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { VcsProcessSpawnError } from "@t3tools/contracts";
+import { type SourceControlProviderSettings, VcsProcessSpawnError } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
@@ -16,9 +17,17 @@ import * as GitLabCli from "./GitLabCli.ts";
 import * as SourceControlDiscovery from "./SourceControlDiscovery.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 
+const ALL_SOURCE_CONTROL_PROVIDERS_ENABLED = {
+  github: true,
+  gitlab: true,
+  "azure-devops": true,
+  bitbucket: true,
+} as const;
+
 const sourceControlProviderRegistryTestLayer = (input: {
   readonly bitbucket: Partial<BitbucketApi.BitbucketApi["Service"]>;
   readonly process: Partial<VcsProcess.VcsProcess["Service"]>;
+  readonly sourceControlProviders?: Partial<SourceControlProviderSettings>;
 }) =>
   SourceControlProviderRegistry.layer.pipe(
     Layer.provide(
@@ -30,6 +39,10 @@ const sourceControlProviderRegistryTestLayer = (input: {
         Layer.mock(BitbucketApi.BitbucketApi)(input.bitbucket),
         Layer.mock(GitHubCli.GitHubCli)({}),
         Layer.mock(GitLabCli.GitLabCli)({}),
+        ServerSettings.ServerSettingsService.layerTest({
+          sourceControlProviders:
+            input.sourceControlProviders ?? ALL_SOURCE_CONTROL_PROVIDERS_ENABLED,
+        }),
         Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({}),
         Layer.mock(VcsProcess.VcsProcess)(input.process),
       ),
@@ -279,5 +292,82 @@ Logged in to gitlab.com as gitlab-user
         },
       ],
     );
+  }).pipe(Effect.provide(testLayer));
+});
+
+it.effect("probes only enabled source control providers", () => {
+  const commands: Array<string> = [];
+  let bitbucketProbed = false;
+  const processMock = {
+    run: (input: VcsProcess.VcsProcessInput) => {
+      commands.push(`${input.command} ${input.args.join(" ")}`);
+      if (input.command === "git") {
+        return Effect.succeed(processOutput("git version 2.51.0\n"));
+      }
+      if (input.command === "gh" && input.args[0] === "--version") {
+        return Effect.succeed(processOutput("gh version 2.83.0\n"));
+      }
+      if (input.command === "gh") {
+        return Effect.succeed(processOutput(JSON.stringify({ hosts: {} })));
+      }
+      return Effect.fail(
+        new VcsProcessSpawnError({
+          operation: input.operation,
+          command: input.command,
+          cwd: input.cwd,
+          cause: new Error(`${input.command} not found`),
+        }),
+      );
+    },
+  } satisfies Partial<VcsProcess.VcsProcess["Service"]>;
+  const testLayer = SourceControlDiscovery.layer.pipe(
+    Layer.provide(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3-source-control-enabled-discovery-",
+      }),
+    ),
+    Layer.provide(Layer.mock(VcsProcess.VcsProcess)(processMock)),
+    Layer.provide(
+      sourceControlProviderRegistryTestLayer({
+        process: processMock,
+        sourceControlProviders: {
+          github: true,
+          gitlab: false,
+          "azure-devops": false,
+          bitbucket: false,
+        },
+        bitbucket: {
+          probeAuth: Effect.sync(() => {
+            bitbucketProbed = true;
+            return {
+              status: "authenticated" as const,
+              account: Option.none(),
+              host: Option.some("bitbucket.org"),
+              detail: Option.none(),
+            };
+          }),
+        },
+      }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+  return Effect.gen(function* () {
+    const discovery = yield* SourceControlDiscovery.SourceControlDiscovery;
+    const result = yield* discovery.discover;
+
+    assert.deepStrictEqual(
+      result.sourceControlProviders.map((provider) => provider.kind),
+      ["github"],
+    );
+    assert.strictEqual(
+      commands.some((command) => command.startsWith("glab ")),
+      false,
+    );
+    assert.strictEqual(
+      commands.some((command) => command.startsWith("az ")),
+      false,
+    );
+    assert.strictEqual(bitbucketProbed, false);
   }).pipe(Effect.provide(testLayer));
 });

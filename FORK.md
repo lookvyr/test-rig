@@ -50,11 +50,17 @@ Sightseer supports these executable providers:
 - Claude Code
 - OpenCode
 
-The local product also retains terminals, filesystem operations, Git and GitHub
-CLI affordances, worktrees and checkpoints, project scripts, permission-mode
-selection, browser and MCP integrations, local secrets, and resource
-diagnostics. Approved provider harnesses, Git/GitHub, browser/MCP tools, and
-explicit user-directed actions may use the network.
+The local product also retains terminals, filesystem operations, Git workflows,
+source-control hosting integrations, worktrees and checkpoints, project scripts,
+permission-mode selection, browser and MCP integrations, local secrets, and
+resource diagnostics. GitHub integration is enabled by default. GitLab, Azure
+DevOps, and Bitbucket integrations may be explicitly enabled by the user.
+Disabled source-control hosting integrations must have no reachable discovery,
+authentication, enrichment, or operation path. This integration boundary does
+not restrict explicit generic Git operations against user-configured remotes.
+Approved provider harnesses, explicit Git actions, enabled source-control hosting
+integrations, browser/MCP tools, and other explicit user-directed actions may use
+the network.
 
 ## Architecture to protect
 
@@ -145,6 +151,7 @@ Claude Code, and OpenCode authentication homes remain intentionally shared.
 | --- | --- |
 | Desktop-first and local-first | The desktop workflow is the product; the web code is retained as its renderer and the authenticated loopback server owns the local core. |
 | Three approved providers | Codex, Claude Code, and OpenCode cover the intended harnesses without retaining unused executable integrations. |
+| Explicit source-control integrations | GitHub is enabled by default; GitLab, Azure DevOps, and Bitbucket are opt-in and fail closed while disabled. Generic Git remains independent of hosting-provider integration state. |
 | Remove cloud product edges | A personally owned tool used with company repositories must not make data egress to unapproved services accidentally enableable. |
 | Preserve architectural seams | Contracts, orchestration, drivers, checkpoints, client runtime, migrations, and local auth make the local product coherent and keep valuable upstream work portable. |
 | Selective upstream intake | Direct, adapted, and independent implementations are all valid; product fit matters more than complete parity. |
@@ -170,7 +177,9 @@ Use the smallest focused checks appropriate to a changed vertical slice:
   make no request to PostHog, OTLP, update feeds, LiteLLM pricing, Google
   favicons, or npm-registry enrichment.
 - [ ] Local NDJSON observability, resource diagnostics, browser/MCP actions,
-  explicit Git/GitHub actions, and approved provider networking still work.
+  explicit Git actions, enabled source-control hosting integrations, and approved
+  provider networking still work; disabled hosting integrations make no
+  discovery, authentication, enrichment, or operation request.
 - [ ] `SIGHTSEER_HOME` and `~/.sightseer` contain Sightseer state; ambient
   `T3CODE_HOME` is ignored; T3 Code and Sightseer can run concurrently without
   Electron, port, URL-scheme, database, worktree, cache, or log collisions.

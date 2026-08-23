@@ -21,6 +21,7 @@ import {
 } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { useEnvironmentSettings } from "../hooks/useSettings";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
@@ -32,8 +33,14 @@ import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import { vcsEnvironment } from "../state/vcs";
 import { cn } from "../lib/utils";
-import { parsePullRequestReference } from "../pullRequestReference";
-import { getSourceControlPresentation } from "../sourceControlPresentation";
+import {
+  parsePullRequestReference,
+  pullRequestReferenceProviderKind,
+} from "../pullRequestReference";
+import {
+  getSourceControlPresentation,
+  isSourceControlProviderEnabled,
+} from "../sourceControlPresentation";
 import {
   deriveLocalBranchNameFromRemoteRef,
   resolveBranchTriggerLabel,
@@ -240,6 +247,10 @@ export function BranchToolbarBranchSelector({
     [branchStatusQuery.data?.sourceControlProvider],
   );
   const SourceControlIcon = sourceControlPresentation.Icon;
+  const sourceControlProviderSettings = useEnvironmentSettings(
+    environmentId,
+    (settings) => settings.sourceControlProviders,
+  );
   const canonicalActiveBranch = resolveBranchToolbarValue({
     envMode: effectiveEnvMode,
     activeWorktreePath,
@@ -253,10 +264,19 @@ export function BranchToolbarBranchSelector({
   );
   const normalizedDeferredBranchQuery = deferredTrimmedBranchQuery.toLowerCase();
   const prReference = parsePullRequestReference(trimmedBranchQuery);
+  const prProviderKind =
+    pullRequestReferenceProviderKind(trimmedBranchQuery) ??
+    branchStatusQuery.data?.sourceControlProvider?.kind;
+  const isPrProviderEnabled = isSourceControlProviderEnabled(
+    sourceControlProviderSettings,
+    prProviderKind,
+  );
   const isSelectingWorktreeBase =
     effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
   const checkoutPullRequestItemValue =
-    prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null;
+    prReference && onCheckoutPullRequestRequest && isPrProviderEnabled
+      ? `__checkout_pull_request__:${prReference}`
+      : null;
   const canCreateBranch = !isSelectingWorktreeBase && trimmedBranchQuery.length > 0;
   const hasExactBranchMatch = branchByName.has(trimmedBranchQuery);
   const createBranchItemValue = canCreateBranch
@@ -609,7 +629,12 @@ export function BranchToolbarBranchSelector({
     }),
     gitStatus: branchStatusQuery.data ?? null,
   });
-  const branchPrStatus = prStatusIndicator(branchPr, branchStatusQuery.data?.sourceControlProvider);
+  const branchProvider = branchStatusQuery.data?.sourceControlProvider;
+  const branchPrStatus =
+    branchProvider &&
+    isSourceControlProviderEnabled(sourceControlProviderSettings, branchProvider.kind)
+      ? prStatusIndicator(branchPr, branchProvider)
+      : null;
   // Action-oriented tooltip (the pill opens the PR), distinct from the sidebar's
   // state-description tooltip.
   const branchPrTooltip = branchPr

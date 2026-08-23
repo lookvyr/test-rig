@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, SourceControlProviderKind, ThreadId } from "@t3tools/contracts";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,8 +9,15 @@ import {
   usePullRequestResolution,
 } from "~/lib/sourceControlActions";
 import { cn } from "~/lib/utils";
-import { parsePullRequestReference } from "~/pullRequestReference";
-import { getSourceControlPresentation } from "~/sourceControlPresentation";
+import {
+  parsePullRequestReference,
+  pullRequestReferenceProviderKind,
+} from "~/pullRequestReference";
+import {
+  getSourceControlPresentation,
+  isSourceControlProviderEnabled,
+} from "~/sourceControlPresentation";
+import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { useEnvironmentQuery } from "~/state/query";
 import { vcsEnvironment } from "~/state/vcs";
 import { Button } from "./ui/button";
@@ -34,6 +41,21 @@ interface PullRequestThreadDialogProps {
   initialReference: string | null;
   onOpenChange: (open: boolean) => void;
   onPrepared: (input: { branch: string; worktreePath: string | null }) => Promise<void> | void;
+}
+
+function sourceControlProviderLabel(kind: SourceControlProviderKind): string {
+  switch (kind) {
+    case "github":
+      return "GitHub";
+    case "gitlab":
+      return "GitLab";
+    case "azure-devops":
+      return "Azure DevOps";
+    case "bitbucket":
+      return "Bitbucket";
+    case "unknown":
+      return "This source control provider";
+  }
 }
 
 export function PullRequestThreadDialog({
@@ -68,6 +90,10 @@ export function PullRequestThreadDialog({
   );
   const terminology = sourceControlPresentation.terminology;
   const SourceControlIcon = sourceControlPresentation.Icon;
+  const providerSettings = useEnvironmentSettings(
+    environmentId,
+    (settings) => settings.sourceControlProviders,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -82,6 +108,12 @@ export function PullRequestThreadDialog({
 
   const parsedReference = parsePullRequestReference(reference);
   const parsedDebouncedReference = parsePullRequestReference(debouncedReference);
+  const explicitProviderKind = pullRequestReferenceProviderKind(reference);
+  const referenceProviderKind = explicitProviderKind ?? gitStatus?.sourceControlProvider?.kind;
+  const isReferenceProviderEnabled = isSourceControlProviderEnabled(
+    providerSettings,
+    referenceProviderKind,
+  );
   const sourceControlScope = useMemo(
     () => ({
       environmentId,
@@ -91,16 +123,17 @@ export function PullRequestThreadDialog({
   );
   const pullRequestResolution = usePullRequestResolution({
     ...sourceControlScope,
-    reference: open ? parsedDebouncedReference : null,
+    reference: open && isReferenceProviderEnabled ? parsedDebouncedReference : null,
   });
   const cachedPullRequest = useMemo(() => {
+    if (!isReferenceProviderEnabled) return null;
     return (
       readCachedPullRequestResolution({
         ...sourceControlScope,
         reference: parsedReference,
       })?.pullRequest ?? null
     );
-  }, [parsedReference, sourceControlScope]);
+  }, [isReferenceProviderEnabled, parsedReference, sourceControlScope]);
   const preparePullRequestThreadAction = usePreparePullRequestThreadAction(sourceControlScope);
 
   const liveResolvedPullRequest =
@@ -135,7 +168,7 @@ export function PullRequestThreadDialog({
         setReferenceDirty(true);
         return;
       }
-      if (!parsedReference || !resolvedPullRequest || !cwd) {
+      if (!parsedReference || !resolvedPullRequest || !cwd || !isReferenceProviderEnabled) {
         return;
       }
       setPreparingMode(mode);
@@ -162,19 +195,23 @@ export function PullRequestThreadDialog({
       onOpenChange,
       onPrepared,
       parsedReference,
+      isReferenceProviderEnabled,
       preparePullRequestThreadAction,
       resolvedPullRequest,
       threadId,
     ],
   );
 
-  const validationMessage = !referenceDirty
-    ? null
-    : reference.trim().length === 0
-      ? `Paste a ${terminology.singular} URL, checkout command, or enter 123 / #123.`
-      : parsedReference === null
-        ? `Use a ${terminology.singular} URL, checkout command, 123, or #123.`
-        : null;
+  const validationMessage =
+    parsedReference !== null && !isReferenceProviderEnabled && referenceProviderKind
+      ? `${sourceControlProviderLabel(referenceProviderKind)} is disabled in Settings.`
+      : !referenceDirty
+        ? null
+        : reference.trim().length === 0
+          ? `Paste a ${terminology.singular} URL, checkout command, or enter 123 / #123.`
+          : parsedReference === null
+            ? `Use a ${terminology.singular} URL, checkout command, 123, or #123.`
+            : null;
   const errorMessage =
     validationMessage ??
     (resolvedPullRequest === null && pullRequestResolution.error

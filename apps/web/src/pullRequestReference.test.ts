@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parsePullRequestReference } from "./pullRequestReference";
+import {
+  parsePullRequestReference,
+  pullRequestReferenceProviderKind,
+} from "./pullRequestReference";
 
 describe("parsePullRequestReference", () => {
   it("accepts GitHub pull request URLs", () => {
@@ -69,5 +72,19 @@ describe("parsePullRequestReference", () => {
 
   it("rejects non-pull-request input", () => {
     expect(parsePullRequestReference("feature/my-branch")).toBeNull();
+  });
+});
+
+describe("pullRequestReferenceProviderKind", () => {
+  it("identifies provider-specific URLs and checkout commands", () => {
+    expect(pullRequestReferenceProviderKind("https://github.com/pingdotgg/t3code/pull/42")).toBe(
+      "github",
+    );
+    expect(pullRequestReferenceProviderKind("glab mr checkout 42")).toBe("gitlab");
+    expect(pullRequestReferenceProviderKind("az repos pr checkout --id 42")).toBe("azure-devops");
+  });
+
+  it("leaves number-only references to the current repository provider", () => {
+    expect(pullRequestReferenceProviderKind("#42")).toBeNull();
   });
 });

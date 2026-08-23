@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { type ScopedThreadRef } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
@@ -11,6 +12,7 @@ import type {
   SourceControlCloneProtocol,
   SourceControlProviderDiscoveryItem,
   SourceControlProviderKind,
+  SourceControlProviderSettings,
   SourceControlPublishRepositoryResult,
   SourceControlRepositoryVisibility,
   VcsStatusResult,
@@ -88,7 +90,10 @@ import { randomUUID } from "~/lib/utils";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { readLocalApi } from "~/localApi";
-import { getSourceControlPresentation } from "~/sourceControlPresentation";
+import {
+  getSourceControlPresentation,
+  isSourceControlProviderEnabled,
+} from "~/sourceControlPresentation";
 import { openPullRequestLink } from "~/lib/openPullRequestLink";
 
 interface GitActionsControlProps {
@@ -369,6 +374,7 @@ interface PublishRepositoryDialogProps {
   readonly onOpenChange: (open: boolean) => void;
   readonly environmentId: ScopedThreadRef["environmentId"] | null;
   readonly gitCwd: string;
+  readonly providerSettings: SourceControlProviderSettings;
 }
 
 function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
@@ -428,13 +434,18 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
       ]),
     ) as Record<PublishProviderKind, { readonly ready: boolean; readonly hint: string | null }>;
   }, [sourceControlDiscovery.data]);
+  const enabledPublishProviderOptions = useMemo(
+    () => PUBLISH_PROVIDER_OPTIONS.filter((option) => props.providerSettings[option.value]),
+    [props.providerSettings],
+  );
   const hasReadyPublishProvider = useMemo(
-    () => PUBLISH_PROVIDER_OPTIONS.some((option) => publishProviderReadiness[option.value].ready),
-    [publishProviderReadiness],
+    () =>
+      enabledPublishProviderOptions.some((option) => publishProviderReadiness[option.value].ready),
+    [enabledPublishProviderOptions, publishProviderReadiness],
   );
   const sortedPublishProviderOptions = useMemo(
     () =>
-      PUBLISH_PROVIDER_OPTIONS.toSorted((left, right) => {
+      enabledPublishProviderOptions.toSorted((left, right) => {
         const leftReady = publishProviderReadiness[left.value].ready;
         const rightReady = publishProviderReadiness[right.value].ready;
         if (leftReady !== rightReady) {
@@ -442,15 +453,17 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
         }
         return left.label.localeCompare(right.label);
       }),
-    [publishProviderReadiness],
+    [enabledPublishProviderOptions, publishProviderReadiness],
   );
   const firstReadyPublishProvider = sortedPublishProviderOptions.find(
     (option) => publishProviderReadiness[option.value].ready,
   )?.value;
   const publishProvider =
-    selectedPublishProvider !== null && publishProviderReadiness[selectedPublishProvider].ready
+    selectedPublishProvider !== null &&
+    props.providerSettings[selectedPublishProvider] &&
+    publishProviderReadiness[selectedPublishProvider].ready
       ? selectedPublishProvider
-      : (firstReadyPublishProvider ?? selectedPublishProvider ?? "github");
+      : (firstReadyPublishProvider ?? enabledPublishProviderOptions[0]?.value ?? "github");
   const selectedPublishProviderReadiness = publishProviderReadiness[publishProvider];
   const publishRepositoryPrefill = publishAccountByProvider[publishProvider]
     ? `${publishAccountByProvider[publishProvider]}/`
@@ -468,6 +481,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
   ] as const;
 
   const canSubmitPublishRepository = useMemo(() => {
+    if (!props.providerSettings[publishProvider]) return false;
     if (!selectedPublishProviderReadiness.ready) return false;
     if (publishRepositoryAction.isPending) return false;
     const repositoryParts = publishRepository.trim().split("/");
@@ -475,7 +489,13 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
     const rest = repositoryParts.slice(1);
     const name = rest.join("/").trim();
     return owner.length > 0 && name.length > 0;
-  }, [publishRepository, publishRepositoryAction.isPending, selectedPublishProviderReadiness]);
+  }, [
+    props.providerSettings,
+    publishProvider,
+    publishRepository,
+    publishRepositoryAction.isPending,
+    selectedPublishProviderReadiness,
+  ]);
 
   const submitPublishRepository = useCallback(() => {
     if (!canSubmitPublishRepository) {
@@ -539,8 +559,11 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
 
   const openSourceControlSettings = useCallback(() => {
     handleOpenChange(false);
-    void navigate({ to: "/settings/source-control" });
-  }, [handleOpenChange, navigate]);
+    void navigate({
+      to: "/settings/source-control",
+      search: { environmentId: props.environmentId ?? undefined },
+    });
+  }, [handleOpenChange, navigate, props.environmentId]);
 
   return (
     <Dialog open={props.open} onOpenChange={handleOpenChange}>
@@ -978,6 +1001,11 @@ export default function GitActionsControl({
   );
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(activeEnvironmentId));
+  const sourceControlProviderSettings =
+    serverConfig?.settings.sourceControlProviders ?? DEFAULT_SERVER_SETTINGS.sourceControlProviders;
+  const hasEnabledSourceControlProvider = Object.values(sourceControlProviderSettings).some(
+    Boolean,
+  );
   const openInPreferredEditor = useOpenInPreferredEditor(
     activeEnvironmentId,
     serverConfig?.availableEditors ?? [],
@@ -1096,6 +1124,10 @@ export default function GitActionsControl({
   );
   const changeRequestTerminology = sourceControlPresentation.terminology;
   const SourceControlIcon = sourceControlPresentation.Icon;
+  const activeSourceControlProviderEnabled = isSourceControlProviderEnabled(
+    sourceControlProviderSettings,
+    gitStatus?.sourceControlProvider?.kind,
+  );
   // Default to true while loading so we don't flash init controls.
   const isRepo = gitStatus?.isRepo ?? true;
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
@@ -1146,13 +1178,29 @@ export default function GitActionsControl({
   }, [gitStatusForActions?.isDefaultRef]);
 
   const gitActionMenuItems = useMemo(
-    () => buildMenuItems(gitStatusForActions, isGitActionRunning, hasPrimaryRemote),
-    [gitStatusForActions, hasPrimaryRemote, isGitActionRunning],
+    () =>
+      buildMenuItems(
+        gitStatusForActions,
+        isGitActionRunning,
+        hasPrimaryRemote,
+        activeSourceControlProviderEnabled,
+      ),
+    [activeSourceControlProviderEnabled, gitStatusForActions, hasPrimaryRemote, isGitActionRunning],
   );
   const quickAction = useMemo(
     () =>
-      resolveQuickAction(gitStatusForActions, isGitActionRunning, isDefaultRef, hasPrimaryRemote),
-    [gitStatusForActions, hasPrimaryRemote, isDefaultRef, isGitActionRunning],
+      resolveQuickAction(gitStatusForActions, isGitActionRunning, isDefaultRef, hasPrimaryRemote, {
+        changeRequestsEnabled: activeSourceControlProviderEnabled,
+        publishEnabled: hasEnabledSourceControlProvider,
+      }),
+    [
+      activeSourceControlProviderEnabled,
+      gitStatusForActions,
+      hasEnabledSourceControlProvider,
+      hasPrimaryRemote,
+      isDefaultRef,
+      isGitActionRunning,
+    ],
   );
   const quickActionDisabledReason = quickAction.disabled
     ? (quickAction.hint ?? "This action is currently unavailable.")
@@ -1650,7 +1698,8 @@ export default function GitActionsControl({
     [gitCwd, openInPreferredEditor, threadToastData],
   );
 
-  const canPublishRepository = isRepo && gitStatusForActions !== null && !hasPrimaryRemote;
+  const canPublishRepository =
+    isRepo && gitStatusForActions !== null && !hasPrimaryRemote && hasEnabledSourceControlProvider;
 
   if (!gitCwd) return null;
 
@@ -1989,6 +2038,7 @@ export default function GitActionsControl({
         onOpenChange={setIsPublishDialogOpen}
         environmentId={activeEnvironmentId}
         gitCwd={gitCwd}
+        providerSettings={sourceControlProviderSettings}
       />
 
       <Dialog

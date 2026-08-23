@@ -15,6 +15,19 @@ import {
 } from "./serverSettings.ts";
 
 describe("serverSettings helpers", () => {
+  it("merges source control provider toggles without changing the other defaults", () => {
+    expect(
+      applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+        sourceControlProviders: { gitlab: true },
+      }).sourceControlProviders,
+    ).toEqual({
+      github: true,
+      gitlab: true,
+      "azure-devops": false,
+      bitbucket: false,
+    });
+  });
+
   it("replaces text generation selection when provider/model are provided", () => {
     const current = {
       ...DEFAULT_SERVER_SETTINGS,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   prStatusIndicator,
+  resolveEnabledThreadPr,
   resolveThreadPr,
   settledPrHoverColorClass,
 } from "./ThreadStatusIndicators";
@@ -67,6 +68,31 @@ describe("resolveThreadPr", () => {
         gitStatus,
       }),
     ).toBe(gitStatus.pr);
+  });
+});
+
+describe("resolveEnabledThreadPr", () => {
+  it("drops cached pull request state when its provider is disabled", () => {
+    const gitStatus = status({
+      sourceControlProvider: {
+        kind: "gitlab",
+        name: "GitLab",
+        baseUrl: "https://gitlab.com",
+      },
+    });
+
+    expect(
+      resolveEnabledThreadPr({
+        threadBranch: "feature/current",
+        gitStatus,
+        providerSettings: {
+          github: true,
+          gitlab: false,
+          "azure-devops": false,
+          bitbucket: false,
+        },
+      }),
+    ).toBeNull();
   });
 });
 

@@ -3,16 +3,20 @@ import {
   scopedThreadKey,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import type { VcsStatusResult } from "@t3tools/contracts";
+import type { SourceControlProviderSettings, VcsStatusResult } from "@t3tools/contracts";
 import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import { useMemo } from "react";
+import { useEnvironmentSettings } from "../hooks/useSettings";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { useProject } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { vcsEnvironment } from "../state/vcs";
 import { useUiStateStore } from "../uiStateStore";
-import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
+import {
+  isSourceControlProviderEnabled,
+  resolveChangeRequestPresentation,
+} from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
 import type { SidebarThreadSummary } from "../types";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
@@ -124,6 +128,18 @@ export function resolveThreadPr(input: {
   }
 
   return gitStatus.pr ?? null;
+}
+
+export function resolveEnabledThreadPr(input: {
+  threadBranch: string | null;
+  gitStatus: VcsStatusResult | null;
+  providerSettings: SourceControlProviderSettings;
+}): ThreadPr | null {
+  const providerKind = input.gitStatus?.sourceControlProvider?.kind;
+  if (!isSourceControlProviderEnabled(input.providerSettings, providerKind)) {
+    return null;
+  }
+  return resolveThreadPr(input);
 }
 
 export function terminalStatusFromRunningIds(
@@ -250,9 +266,14 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
         })
       : null,
   );
-  const pr = resolveThreadPr({
+  const providerSettings = useEnvironmentSettings(
+    thread.environmentId,
+    (settings) => settings.sourceControlProviders,
+  );
+  const pr = resolveEnabledThreadPr({
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
+    providerSettings,
   });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const threadStatus = resolveThreadStatusPill({

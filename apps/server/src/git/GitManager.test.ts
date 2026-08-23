@@ -10,6 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
+import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { expect } from "vite-plus/test";
@@ -616,6 +617,7 @@ function makeManager(input?: {
   ghScenario?: FakeGhScenario;
   textGeneration?: Partial<FakeGitTextGeneration>;
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
+  sourceControlProviderEnabled?: Effect.Effect<boolean>;
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
 }) {
   const { service: gitHubCli, ghCalls } = createGitHubCliWithFakeGh(input?.ghScenario);
@@ -637,7 +639,10 @@ function makeManager(input?: {
       Effect.map((provider) =>
         SourceControlProviderRegistry.SourceControlProviderRegistry.of({
           get: () => Effect.succeed(provider),
-          resolveHandle: () => Effect.succeed({ provider, context: null }),
+          resolveHandle: () =>
+            (input?.sourceControlProviderEnabled ?? Effect.succeed(true)).pipe(
+              Effect.map((enabled) => ({ provider, context: null, enabled })),
+            ),
           resolve: () => Effect.succeed(provider),
           discover: Effect.succeed([]),
         }),
@@ -1356,6 +1361,47 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* manager.invalidateStatus(repoDir);
       const second = yield* manager.status({ cwd: repoDir });
       expect(second.pr?.number).toBe(214);
+    }),
+  );
+
+  it.effect("status drops cached PR enrichment when the provider is disabled", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/pr-disabled"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-disabled"]);
+
+      const enabled = yield* Ref.make(true);
+      const { manager, ghCalls } = yield* makeManager({
+        sourceControlProviderEnabled: Ref.get(enabled),
+        ghScenario: {
+          prListSequence: [
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                number: 215,
+                title: "Disabled provider PR",
+                url: "https://github.com/acme/repo/pull/215",
+                baseRefName: "main",
+                headRefName: "feature/pr-disabled",
+              },
+            ]),
+          ],
+        },
+      });
+
+      const first = yield* manager.status({ cwd: repoDir });
+      expect(first.pr?.number).toBe(215);
+      const callsBeforeDisable = ghCalls.length;
+
+      yield* Ref.set(enabled, false);
+      yield* manager.invalidateStatus(repoDir);
+      const second = yield* manager.status({ cwd: repoDir });
+
+      expect(second.pr).toBeNull();
+      expect(ghCalls).toHaveLength(callsBeforeDisable);
     }),
   );
 

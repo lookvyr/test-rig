@@ -974,6 +974,11 @@ export const make = Effect.gen(function* () {
     // Keyed by (cwd, branch) only: the upstream ref changing (e.g. a first
     // `push -u`) must not orphan the fallback value for the same branch.
     const branchKey = `${cwd}\u0000${details.branch}`;
+    const providerHandle = yield* sourceControlProviders.resolveHandle({ cwd });
+    if (!providerHandle.enabled) {
+      lastKnownPrByBranchKey.delete(branchKey);
+      return null;
+    }
     return yield* Cache.get(prLookupCache, prLookupCacheKey(cwd, details)).pipe(
       Effect.map(({ latest, headContext }) => {
         if (!latest) return { pr: null, headContext };

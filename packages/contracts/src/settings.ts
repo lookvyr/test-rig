@@ -495,6 +495,14 @@ export const SourceControlWritingStyleSettings = Schema.Struct({
 });
 export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyleSettings.Type;
 
+export const SourceControlProviderSettings = Schema.Struct({
+  github: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  gitlab: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  "azure-devops": Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  bitbucket: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type SourceControlProviderSettings = typeof SourceControlProviderSettings.Type;
+
 export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
 export const DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL = Duration.minutes(5);
 
@@ -582,6 +590,7 @@ export const ServerSettings = Schema.Struct({
   sourceControlWriterModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  sourceControlProviders: SourceControlProviderSettings,
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -711,6 +720,14 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  sourceControlProviders: Schema.optionalKey(
+    Schema.Struct({
+      github: Schema.optionalKey(Schema.Boolean),
+      gitlab: Schema.optionalKey(Schema.Boolean),
+      "azure-devops": Schema.optionalKey(Schema.Boolean),
+      bitbucket: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
