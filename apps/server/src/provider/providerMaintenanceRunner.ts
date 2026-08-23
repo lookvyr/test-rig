@@ -321,7 +321,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
                 startedAt,
                 finishedAt,
                 message: couldNotVerify
-                  ? "Update command completed, but Sightseer could not confirm the provider is available."
+                  ? "Update command completed, but Test Rig could not confirm the provider is available."
                   : "Update command completed.",
                 output: commandOutput(result),
               }),

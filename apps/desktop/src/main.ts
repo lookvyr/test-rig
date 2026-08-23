@@ -221,7 +221,7 @@ const desktopApplicationRuntimeLayer = desktopApplicationLayer.pipe(
   Layer.provideMerge(electronLayer),
 );
 
-// Configure Sightseer's Electron profile before acquiring the app-owned
+// Configure Test Rig's Electron profile before acquiring the app-owned
 // single-instance lock. The resulting context supplies both services to the
 // rest of the desktop runtime.
 const desktopRuntimeLayer = desktopSingleInstanceLayer.pipe(

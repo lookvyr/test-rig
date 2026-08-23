@@ -71,7 +71,7 @@ export const make = Effect.gen(function* () {
           httpBaseUrl: config.httpBaseUrl.href,
           credential,
           clientMetadata: {
-            label: "Sightseer Desktop",
+            label: "Test Rig Desktop",
             deviceType: "desktop",
           },
         }).pipe(

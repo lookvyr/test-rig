@@ -323,7 +323,7 @@ export function createDevRunnerEnv({
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
-    // Precedence (--home-dir > worktree .sightseer > ambient SIGHTSEER_HOME) is resolved
+    // Precedence (--home-dir > worktree .test-rig > ambient TEST_RIG_HOME) is resolved
     // by the caller; an unset t3Home here genuinely means "use the default".
     const configuredBaseDir = t3Home?.trim() || undefined;
     const resolvedBaseDir = yield* resolveBaseDir(configuredBaseDir);
@@ -670,8 +670,8 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const hostEnvironment = yield* HostProcessEnvironment;
     // A dev server started inside a worktree defaults to that worktree's own
-    // (gitignored) `.sightseer` — see @t3tools/shared/devHome for why this must
-    // outrank an ambient SIGHTSEER_HOME. `--home-dir` still wins.
+    // (gitignored) `.test-rig` — see @t3tools/shared/devHome for why this must
+    // outrank an ambient TEST_RIG_HOME. `--home-dir` still wins.
     const worktreeHome = yield* resolveWorktreeT3Home(yield* HostProcessWorkingDirectory);
     // Trim before choosing: `--home-dir ""` is not a selection, and treating it
     // as one would skip the worktree default and land on the shared home —
@@ -767,7 +767,7 @@ const devRunnerCli = Command.make("dev-runner", {
   ),
   t3Home: Flag.string("home-dir").pipe(
     Flag.withDescription(
-      "Explicit Sightseer data directory; runtime state is stored under userdata (equivalent to SIGHTSEER_HOME). Inside a git worktree this defaults to that worktree's own .sightseer so dev state stays off the shared home.",
+      "Explicit Test Rig data directory; runtime state is stored under userdata (equivalent to TEST_RIG_HOME). Inside a git worktree this defaults to that worktree's own .test-rig so dev state stays off the shared home.",
     ),
     Flag.optional,
     Flag.map(Option.getOrUndefined),

@@ -102,7 +102,7 @@ const buildCmd = Command.make(
 // ---------------------------------------------------------------------------
 
 const cli = Command.make("cli").pipe(
-  Command.withDescription("Sightseer server build CLI."),
+  Command.withDescription("Test Rig server build CLI."),
   Command.withSubcommands([buildCmd]),
 );
 

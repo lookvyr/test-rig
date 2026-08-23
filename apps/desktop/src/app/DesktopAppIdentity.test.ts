@@ -19,9 +19,9 @@ const defaultEnvironmentInput = {
   platform: "darwin",
   processArch: "arm64",
   appVersion: "1.2.3",
-  appPath: "/Applications/Sightseer.app/Contents/Resources/app.asar",
+  appPath: "/Applications/Test Rig.app/Contents/Resources/app.asar",
   isPackaged: true,
-  resourcesPath: "/Applications/Sightseer.app/Contents/Resources",
+  resourcesPath: "/Applications/Test Rig.app/Contents/Resources",
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
@@ -35,7 +35,7 @@ interface ElectronAppCalls {
 const makeElectronAppLayer = (calls: ElectronAppCalls) =>
   Layer.succeed(ElectronApp.ElectronApp, {
     metadata: Effect.die("unexpected metadata read"),
-    name: Effect.succeed("Sightseer"),
+    name: Effect.succeed("Test Rig"),
     whenReady: Effect.void,
     quit: Effect.void,
     requestSingleInstanceLock: Effect.succeed(true),
@@ -104,10 +104,10 @@ describe("DesktopAppIdentity", () => {
       Effect.gen(function* () {
         yield* DesktopAppIdentity.DesktopAppIdentity;
         assert.deepEqual(calls.setPath, [
-          ["userData", "/Users/alice/Library/Application Support/sightseer"],
-          ["sessionData", "/Users/alice/Library/Application Support/sightseer/session-data"],
-          ["logs", "/Users/alice/.sightseer/userdata/logs"],
-          ["crashDumps", "/Users/alice/.sightseer/userdata/crash-dumps"],
+          ["userData", "/Users/alice/Library/Application Support/test-rig"],
+          ["sessionData", "/Users/alice/Library/Application Support/test-rig/session-data"],
+          ["logs", "/Users/alice/.test-rig/userdata/logs"],
+          ["crashDumps", "/Users/alice/.test-rig/userdata/crash-dumps"],
         ]);
       }),
       calls,
@@ -116,14 +116,14 @@ describe("DesktopAppIdentity", () => {
     );
   });
 
-  it.effect("configures the Sightseer product identity", () => {
+  it.effect("configures the Test Rig product identity", () => {
     const calls = makeCalls();
     return withIdentity(
       Effect.gen(function* () {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         yield* identity.configure;
-        assert.deepEqual(calls.setName, ["Sightseer"]);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "Sightseer");
+        assert.deepEqual(calls.setName, ["Test Rig"]);
+        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "Test Rig");
         assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, "1.2.3");
         assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
         assert.deepEqual(calls.setDockIcon, ["/icon.png"]);

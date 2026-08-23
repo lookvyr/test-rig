@@ -968,7 +968,7 @@ describe("deriveWorkLogEntries", () => {
   it("preserves MCP server, tool, arguments, and results for expanded display", () => {
     const item = {
       type: "mcpToolCall",
-      server: "sightseer",
+      server: "test_rig",
       tool: "preview_status",
       arguments: {},
       status: "completed",
@@ -978,24 +978,24 @@ describe("deriveWorkLogEntries", () => {
       makeActivity({
         id: "mcp-tool-done",
         kind: "tool.completed",
-        summary: "sightseer · preview_status",
+        summary: "test-rig · preview_status",
         payload: {
           itemType: "mcp_tool_call",
-          title: "sightseer · preview_status",
+          title: "test-rig · preview_status",
           data: { item },
         },
       }),
     ];
 
     const [entry] = deriveWorkLogEntries(activities);
-    expect(entry?.toolTitle).toBe("sightseer · preview_status");
+    expect(entry?.toolTitle).toBe("test-rig · preview_status");
     expect(entry?.toolData).toEqual(item);
   });
 
   it("keeps MCP payloads while collapsing lifecycle updates", () => {
     const item = {
       type: "mcpToolCall",
-      server: "sightseer",
+      server: "test_rig",
       tool: "preview_snapshot",
       arguments: { interactiveOnly: true },
       status: "completed",
@@ -1004,7 +1004,7 @@ describe("deriveWorkLogEntries", () => {
       makeActivity({
         id: "mcp-tool-progress",
         kind: "tool.updated",
-        summary: "sightseer · preview_snapshot",
+        summary: "test-rig · preview_snapshot",
         payload: {
           itemType: "mcp_tool_call",
           toolCallId: "call-1",
@@ -1014,7 +1014,7 @@ describe("deriveWorkLogEntries", () => {
       makeActivity({
         id: "mcp-tool-complete",
         kind: "tool.completed",
-        summary: "sightseer · preview_snapshot",
+        summary: "test-rig · preview_snapshot",
         payload: {
           itemType: "mcp_tool_call",
           toolCallId: "call-1",

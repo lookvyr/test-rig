@@ -114,7 +114,7 @@ export function resolveResourceMonitorRustTargets(
 }
 
 export function resourceMonitorExecutableName(platform: typeof BuildPlatform.Type): string {
-  return platform === "win" ? "sightseer-resource-monitor.exe" : "sightseer-resource-monitor";
+  return platform === "win" ? "test-rig-resource-monitor.exe" : "test-rig-resource-monitor";
 }
 
 const PLATFORM_CONFIG: Record<typeof BuildPlatform.Type, PlatformConfig> = {
@@ -1095,7 +1095,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "Sightseer-${version}-${arch}.${ext}",
+    artifactName: "Test Rig-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [...DESKTOP_FILE_EXCLUSIONS],
     directories: {
@@ -1132,7 +1132,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "Development",
       // electron-builder turns these into MimeType=x-scheme-handler/<scheme>;
       // in the .desktop entry (Exec already gets %U), so browsers can hand
-      // sightseer:// OAuth callbacks to the app.
+      // test-rig:// OAuth callbacks to the app.
       protocols: [
         {
           name: PRODUCT_NAME,
@@ -1434,7 +1434,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     t3codeCommitHash: commitHash,
     private: true,
     packageManager: rootPackageJson.packageManager,
-    description: "Sightseer desktop build",
+    description: "Test Rig desktop build",
     author: "Lookvyr",
     main: "apps/desktop/dist-electron/main.cjs",
     build: yield* createBuildConfig(options.platform, options.target, appVersion, options.signed),

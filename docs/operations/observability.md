@@ -1,12 +1,12 @@
 # Observability
 
-> For maintainers. Using Sightseer? See [docs/user](../user/).
+> For maintainers. Using Test Rig? See [docs/user](../user/).
 
-Sightseer observability is local-only:
+Test Rig observability is local-only:
 
 - human-readable logs go to stdout;
 - completed Effect spans are persisted to a local NDJSON file;
-- authenticated browser spans are sent to the connected Sightseer server and written to that same
+- authenticated browser spans are sent to the connected Test Rig server and written to that same
   environment's local trace file;
 - resource telemetry stays inside the environment and is exposed through authenticated local RPC;
 - in-process metrics are not exported or persisted.
@@ -17,7 +17,7 @@ client bootstrap values cannot enable one.
 ## Logs
 
 Normal local launches write pretty logs to stdout. SSH-managed launches also persist the remote
-process output at `~/.sightseer/ssh-launch/<state>/server.log`.
+process output at `~/.test-rig/ssh-launch/<state>/server.log`.
 
 Logs emitted with `Effect.log...` inside an active span are included as events in the persisted span.
 
@@ -26,19 +26,19 @@ Logs emitted with `Effect.log...` inside an active span are included as events i
 Completed spans are written to `server.trace.ndjson`. The default location depends on the launch:
 
 - production or an explicit home: `<home>/userdata/logs/server.trace.ndjson`;
-- linked-worktree development: `<worktree>/.sightseer/userdata/logs/server.trace.ndjson`;
-- implicit development outside a worktree: `~/.sightseer/dev/logs/server.trace.ndjson`.
+- linked-worktree development: `<worktree>/.test-rig/userdata/logs/server.trace.ndjson`;
+- implicit development outside a worktree: `~/.test-rig/dev/logs/server.trace.ndjson`.
 
 The common production default is:
 
 ```sh
-TRACE_FILE="${SIGHTSEER_HOME:-$HOME/.sightseer}/userdata/logs/server.trace.ndjson"
+TRACE_FILE="${TEST_RIG_HOME:-$HOME/.test-rig}/userdata/logs/server.trace.ndjson"
 ```
 
 For a linked worktree:
 
 ```sh
-TRACE_FILE="$WORKTREE/.sightseer/userdata/logs/server.trace.ndjson"
+TRACE_FILE="$WORKTREE/.test-rig/userdata/logs/server.trace.ndjson"
 ```
 
 Useful commands:
@@ -76,7 +76,7 @@ jq -r 'select(.traceId == "TRACE_ID_HERE") | [
 
 ## Browser traces
 
-The web client serializes its spans to `/api/observability/v1/traces` on its connected Sightseer
+The web client serializes its spans to `/api/observability/v1/traces` on its connected Test Rig
 server. The route requires the normal environment authentication, decodes the payload, and records
 it through the server's local browser trace collector. It does not forward spans to another host.
 

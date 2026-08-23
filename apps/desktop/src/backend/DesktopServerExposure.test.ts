@@ -37,7 +37,7 @@ function makeEnvironmentLayer(baseDir: string, env: Record<string, string | unde
     Layer.provide(
       Layer.mergeAll(
         NodeServices.layer,
-        DesktopConfig.layerTest({ SIGHTSEER_HOME: baseDir, ...env }),
+        DesktopConfig.layerTest({ TEST_RIG_HOME: baseDir, ...env }),
       ),
     ),
   );
@@ -49,7 +49,7 @@ function makeLayer(input: {
   readonly env?: Record<string, string | undefined>;
   readonly desktopSettingsLayer?: Layer.Layer<DesktopAppSettings.DesktopAppSettings>;
 }) {
-  const env = { SIGHTSEER_HOME: input.baseDir, ...input.env };
+  const env = { TEST_RIG_HOME: input.baseDir, ...input.env };
   const environmentLayer = makeEnvironmentLayer(input.baseDir, env);
   const networkLayer = Layer.succeed(DesktopNetworkInterfaces.DesktopNetworkInterfaces, {
     read: Effect.succeed(input.networkInterfaces ?? emptyNetworkInterfaces),
@@ -200,7 +200,6 @@ describe("DesktopServerExposure", () => {
           "Failed to persist desktop server exposure mode network-accessible.",
         );
         assert.notInclude(modeError.message, diskFailure.message);
-
       }),
       {},
       settingsLayer,

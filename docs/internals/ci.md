@@ -1,10 +1,10 @@
 # Local verification
 
-> For maintainers. Using Sightseer? See [docs/user](../user/).
+> For maintainers. Using Test Rig? See [docs/user](../user/).
 
-Sightseer intentionally retains no inherited GitHub Actions workflows. Builds,
+Test Rig intentionally retains no inherited GitHub Actions workflows. Builds,
 tests, and checks run from source when they are needed; future CI will be added
-from scratch only for Sightseer's use cases.
+from scratch only for Test Rig's use cases.
 
 Use the smallest local proof for the change:
 

@@ -34,12 +34,12 @@ authenticated.
 
 ### Dev state directories
 
-- Dev commands run from a linked **git worktree** default to that worktree's gitignored `.sightseer`, even
-  when `SIGHTSEER_HOME` is set, storing state in `<worktree>/.sightseer/userdata`. Pass `--home-dir <path>` to
+- Dev commands run from a linked **git worktree** default to that worktree's gitignored `.test-rig`, even
+  when `TEST_RIG_HOME` is set, storing state in `<worktree>/.test-rig/userdata`. Pass `--home-dir <path>` to
   choose another isolated directory explicitly. Submodules are not worktrees and keep the normal
   precedence.
-- From the **main checkout**, dev commands implicitly use `~/.sightseer/dev`, keeping development state
-  separate from `~/.sightseer/userdata`. An explicit `--home-dir <path>` stores state under
+- From the **main checkout**, dev commands implicitly use `~/.test-rig/dev`, keeping development state
+  separate from `~/.test-rig/userdata`. An explicit `--home-dir <path>` stores state under
   `<path>/userdata`; the base directory remains available for caches, worktrees, and other shared
   data.
 

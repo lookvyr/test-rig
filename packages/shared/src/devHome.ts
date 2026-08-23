@@ -1,10 +1,10 @@
 /**
  * Where development state lives, and how to keep it away from the shared
- * `~/.sightseer` that a user's installed Sightseer runs against.
+ * `~/.test-rig` that a user's installed Test Rig runs against.
  *
- * A linked git worktree gets its own (gitignored) `.sightseer`: feature work in a
+ * A linked git worktree gets its own (gitignored) `.test-rig`: feature work in a
  * throwaway branch must not share a database with the real app, and an ambient
- * `SIGHTSEER_HOME` counts as an explicit base dir — flipping the state directory
+ * `TEST_RIG_HOME` counts as an explicit base dir — flipping the state directory
  * from `<base>/dev` to `<base>/userdata`, the live production database.
  */
 
@@ -99,5 +99,5 @@ export const resolveWorktreeT3Home = (
       return undefined;
     }
     const path = yield* Path.Path;
-    return path.join(worktreePath, ".sightseer");
+    return path.join(worktreePath, ".test-rig");
   });

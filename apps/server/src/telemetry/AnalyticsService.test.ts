@@ -22,7 +22,7 @@ it.effect("keeps production analytics permanently inert", () => {
       HttpClient.HttpClient,
       HttpClient.make(() => {
         requests += 1;
-        return Effect.die("Sightseer analytics must not make HTTP requests");
+        return Effect.die("Test Rig analytics must not make HTTP requests");
       }),
     ),
   );

@@ -1,12 +1,12 @@
-# Sightseer
+# Test Rig
 
-Sightseer is a local-first fork of [T3 Code](https://github.com/pingdotgg/t3code). It keeps T3 Code's desktop app, web client, local server, and coding-agent workflow, but cuts the product down to a narrower job.
+Test Rig is a local-first fork of [T3 Code](https://github.com/pingdotgg/t3code). It keeps T3 Code's desktop app, web client, local server, and coding-agent workflow, but cuts the product down to a narrower job.
 
-Sightseer runs coding tools that are already installed and authenticated on your machine. It does not include T3 Code's hosted services, analytics, mobile app, public web deployment, release pipeline, or self-update system. [FORK.md](./FORK.md) defines the exact product boundary.
+Test Rig runs coding tools that are already installed and authenticated on your machine. It does not include T3 Code's hosted services, analytics, mobile app, public web deployment, release pipeline, or self-update system. [FORK.md](./FORK.md) defines the exact product boundary.
 
 ## Supported providers
 
-Sightseer supports three coding tools:
+Test Rig supports three coding tools:
 
 | Provider    | Install                                               |
 | ----------- | ----------------------------------------------------- |
@@ -52,4 +52,4 @@ Useful references:
 
 ## Upstream and license
 
-Sightseer began from T3 Code `v0.0.32` and keeps the full Git history. See [FORK.md](./FORK.md) for the upstream relationship and [LICENSE](./LICENSE) for license and attribution details.
+Test Rig began from T3 Code `v0.0.32` and keeps the full Git history. See [FORK.md](./FORK.md) for the upstream relationship and [LICENSE](./LICENSE) for license and attribution details.

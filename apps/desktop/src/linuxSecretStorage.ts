@@ -112,11 +112,11 @@ export function resolveLinuxSecretStorageUnavailableMessage(input: {
 }
 
 function getGnomeKeyringRemediationMessage(): string {
-  return "Sightseer could not access GNOME Keyring to save this environment credential. Install and start GNOME Keyring, then restart Sightseer.";
+  return "Test Rig could not access GNOME Keyring to save this environment credential. Install and start GNOME Keyring, then restart Test Rig.";
 }
 
 function getKWalletRemediationMessage(): string {
-  return "Sightseer could not access KWallet to save this environment credential. Enable the KDE wallet subsystem in System Settings, then restart Sightseer.";
+  return "Test Rig could not access KWallet to save this environment credential. Enable the KDE wallet subsystem in System Settings, then restart Test Rig.";
 }
 
 // Advisory only: this picks between the GNOME Keyring and KWallet wording in the failure notice. It

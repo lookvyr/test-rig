@@ -63,7 +63,7 @@ function makeFakeBrowserWindow() {
   const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>();
   const webContents = {
     copyImageAt: vi.fn(),
-    getURL: vi.fn(() => "sightseer-dev://app/"),
+    getURL: vi.fn(() => "test-rig-dev://app/"),
     isLoadingMainFrame: vi.fn(() => false),
     on: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) => {
       webContentsListeners.set(eventName, listener);
@@ -258,8 +258,8 @@ function makeTestLayer(input: {
         Layer.mock(PreviewManager.PreviewManager)({
           getBrowserSession: () => Effect.succeed({} as Electron.Session),
           setMainWindow: () => Effect.void,
-          isBrowserPartition: (partition) => partition.startsWith("persist:sightseer-preview-"),
-          getBrowserPartition: () => Effect.succeed("persist:sightseer-preview-test"),
+          isBrowserPartition: (partition) => partition.startsWith("persist:test-rig-preview-"),
+          getBrowserPartition: () => Effect.succeed("persist:test-rig-preview-test"),
         }),
       ),
     ),
@@ -352,8 +352,8 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           Layer.mock(PreviewManager.PreviewManager)({
             getBrowserSession: () => Effect.succeed({} as Electron.Session),
             setMainWindow: () => Effect.void,
-            isBrowserPartition: (partition) => partition.startsWith("persist:sightseer-preview-"),
-            getBrowserPartition: () => Effect.succeed("persist:sightseer-preview-test"),
+            isBrowserPartition: (partition) => partition.startsWith("persist:test-rig-preview-"),
+            getBrowserPartition: () => Effect.succeed("persist:test-rig-preview-test"),
           }),
         ),
       ),
@@ -383,19 +383,19 @@ describe("DesktopWindow", () => {
   it("recognizes only same-origin renderer navigations", () => {
     assert.isTrue(
       DesktopWindow.isSameOriginRendererNavigation({
-        applicationUrl: "sightseer://app/",
-        navigationUrl: "sightseer://app/settings/connections",
+        applicationUrl: "test-rig://app/",
+        navigationUrl: "test-rig://app/settings/connections",
       }),
     );
     assert.isFalse(
       DesktopWindow.isSameOriginRendererNavigation({
-        applicationUrl: "sightseer://app/",
+        applicationUrl: "test-rig://app/",
         navigationUrl: "https://accounts.microsoft.com/oauth",
       }),
     );
     assert.isFalse(
       DesktopWindow.isSameOriginRendererNavigation({
-        applicationUrl: "sightseer://app/",
+        applicationUrl: "test-rig://app/",
         navigationUrl: "not a url",
       }),
     );
@@ -428,7 +428,7 @@ describe("DesktopWindow", () => {
         assert.isTrue(createdWindowOptions[0]?.disableAutoHideCursor);
         assert.isFalse(createdWindowOptions[0]?.webPreferences?.backgroundThrottling);
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
-        assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["sightseer-dev://app/"]);
+        assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["test-rig-dev://app/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
       }).pipe(Effect.provide(layer));
     }),
@@ -952,17 +952,17 @@ describe("DesktopWindow", () => {
           return yield* Effect.die("renderer load listeners were not registered");
         }
 
-        didFailLoad({}, -9, "ERR_UNEXPECTED", "sightseer-dev://app/", true);
+        didFailLoad({}, -9, "ERR_UNEXPECTED", "test-rig-dev://app/", true);
         assert.equal(fakeWindow.loadURL.mock.calls.length, 1);
 
         yield* TestClock.adjust(100);
         assert.deepEqual(fakeWindow.loadURL.mock.calls, [
-          ["sightseer-dev://app/"],
-          ["sightseer-dev://app/"],
+          ["test-rig-dev://app/"],
+          ["test-rig-dev://app/"],
         ]);
         assert.equal(fakeWindow.reload.mock.calls.length, 0);
 
-        didFailLoad({}, -9, "ERR_UNEXPECTED", "sightseer-dev://app/", true);
+        didFailLoad({}, -9, "ERR_UNEXPECTED", "test-rig-dev://app/", true);
         didFinishLoad();
         yield* TestClock.adjust(250);
         assert.equal(fakeWindow.loadURL.mock.calls.length, 2);
@@ -974,23 +974,23 @@ describe("DesktopWindow", () => {
   it("retries only transient failures for the development renderer", () => {
     assert.isTrue(
       DesktopWindow.isRetryableDevelopmentRendererLoadFailure({
-        applicationUrl: "sightseer-dev://app/",
+        applicationUrl: "test-rig-dev://app/",
         errorCode: -102,
         isMainFrame: true,
-        validatedUrl: "sightseer-dev://app/",
+        validatedUrl: "test-rig-dev://app/",
       }),
     );
     assert.isFalse(
       DesktopWindow.isRetryableDevelopmentRendererLoadFailure({
-        applicationUrl: "sightseer-dev://app/",
+        applicationUrl: "test-rig-dev://app/",
         errorCode: -3,
         isMainFrame: true,
-        validatedUrl: "sightseer-dev://app/",
+        validatedUrl: "test-rig-dev://app/",
       }),
     );
     assert.isFalse(
       DesktopWindow.isRetryableDevelopmentRendererLoadFailure({
-        applicationUrl: "sightseer-dev://app/",
+        applicationUrl: "test-rig-dev://app/",
         errorCode: -102,
         isMainFrame: true,
         validatedUrl: "https://example.com/",

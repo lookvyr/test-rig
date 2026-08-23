@@ -1,6 +1,6 @@
-# Sightseer docs
+# Test Rig docs
 
-## Using Sightseer
+## Using Test Rig
 
 - [Install and first run](./user/install.md)
 - [Permission modes](./user/permission-modes.md)
@@ -11,7 +11,7 @@
 
 ---
 
-## Working on Sightseer
+## Working on Test Rig
 
 Everything below is for maintainers. Setup lives in the [root README](../README.md);
 agent rules live in [AGENTS.md](../AGENTS.md).

@@ -393,7 +393,7 @@ function SourceControlProviderToggleRow(props: {
           </div>
           <p className="flex min-w-0 flex-wrap items-center gap-x-1 text-[13px] leading-[1.45] text-muted-foreground/80">
             {!props.enabled ? (
-              <span>Disabled. Sightseer will not use this hosting integration.</span>
+              <span>Disabled. Test Rig will not use this hosting integration.</span>
             ) : props.discoveryItem ? (
               itemSummary({
                 item: props.discoveryItem,

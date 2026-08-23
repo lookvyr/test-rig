@@ -4118,7 +4118,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(mcpSession
           ? {
               mcpServers: {
-                sightseer: {
+                test_rig: {
                   type: "http",
                   url: mcpSession.endpoint,
                   headers: {

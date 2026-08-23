@@ -76,8 +76,8 @@ function nativeSnapshot(input: {
       pid: 9_000,
       ppid: process.pid,
       startTimeMs: 400,
-      name: "sightseer-resource-monitor",
-      command: "sightseer-resource-monitor",
+      name: "test-rig-resource-monitor",
+      command: "test-rig-resource-monitor",
       cpuTimeMs: input.sequence * 5,
     }),
   ];

@@ -1,6 +1,6 @@
 # Remote Access
 
-Use this when you want to connect to a Sightseer server from another device such as a phone, tablet, or separate desktop app.
+Use this when you want to connect to a Test Rig server from another device such as a phone, tablet, or separate desktop app.
 
 ## Quick Pairing for a Running Server
 
@@ -15,7 +15,7 @@ and prints the pairing URL as a QR code you can scan from another device. Build
 it first with `vp run --filter t3 build`.
 
 If the server is only bound to loopback, the printed URL is not reachable from another device.
-Restart the server with a `--host` address the other device can reach, then run `sightseer pair` again.
+Restart the server with a `--host` address the other device can reach, then run `test-rig pair` again.
 Use `--ttl` to change the token lifetime and `--base-dir` to target a specific data directory.
 
 If no server is running, start one from the same checkout as shown below.
@@ -68,7 +68,7 @@ vp run --filter t3 build
 node apps/server/dist/bin.mjs serve --host 0.0.0.0
 ```
 
-`sightseer serve` starts the server without opening a browser and prints:
+`test-rig serve` starts the server without opening a browser and prints:
 
 - a connection string
 - a pairing token
@@ -90,8 +90,8 @@ the environment the project lives on. Every saved environment is offered, not on
 
 ### Option 3: Desktop-Managed SSH Launch
 
-The inherited SSH launcher installs a versioned Sightseer npm package on the
-remote machine. Sightseer no longer publishes that package, so this flow is not
+The inherited SSH launcher installs a versioned Test Rig npm package on the
+remote machine. Test Rig no longer publishes that package, so this flow is not
 part of the supported source-build path. Direct LAN or explicitly configured
 remote connections remain available for a server you build and start yourself.
 
@@ -99,7 +99,7 @@ The UI and runtime are retained temporarily while the separate SSH/remote
 boundary is audited. Invoking this flow may contact the npm registry.
 
 On a Linux host, you can keep a source-built server running after logout using
-your own process supervisor. Sightseer does not include inherited
+your own process supervisor. Test Rig does not include inherited
 package-backed service installation, management, or update commands.
 
 ## How Pairing Works
@@ -108,7 +108,7 @@ The remote device does not need a long-lived secret up front.
 
 Instead:
 
-1. `sightseer serve` issues a one-time owner pairing token.
+1. `test-rig serve` issues a one-time owner pairing token.
 2. The remote device exchanges that token with the server.
 3. The server creates an authenticated session for that device.
 
@@ -116,7 +116,7 @@ After pairing, future access is session-based. You do not need to keep reusing t
 
 ## Managing Access Later
 
-Use `sightseer auth` to manage access after the initial pairing flow.
+Use `test-rig auth` to manage access after the initial pairing flow.
 
 Typical uses:
 
@@ -124,7 +124,7 @@ Typical uses:
 - inspect active sessions
 - revoke old pairing links or sessions
 
-Use `sightseer auth --help` and the nested subcommand help pages for the full reference.
+Use `test-rig auth --help` and the nested subcommand help pages for the full reference.
 
 ## Security Notes
 
@@ -133,4 +133,4 @@ Use `sightseer auth --help` and the nested subcommand help pages for the full re
 - Anyone with a valid pairing credential can create a session until that credential expires or is revoked.
 - Pairing links keep the credential in the URL hash, but it can still be exposed through browser
   history, screenshots, logs, or copy/paste.
-- Use `sightseer auth` to revoke credentials or sessions you no longer trust.
+- Use `test-rig auth` to revoke credentials or sessions you no longer trust.

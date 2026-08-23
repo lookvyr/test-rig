@@ -14,7 +14,7 @@ export class BunPtyUnsupportedPlatformError extends Schema.TaggedErrorClass<BunP
   },
 ) {
   override get message(): string {
-    return `Bun PTY terminal support is unavailable on ${this.platform}. Please run the source-built Sightseer server with Node.js instead.`;
+    return `Bun PTY terminal support is unavailable on ${this.platform}. Please run the source-built Test Rig server with Node.js instead.`;
   }
 }
 

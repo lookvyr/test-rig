@@ -2436,7 +2436,7 @@ export function ConnectionsSettings() {
         {desktopWslState.enabled ? (
           <SettingsRow
             title="WSL only"
-            description="Stop the Windows backend and run only the WSL backend. Useful if you develop entirely inside WSL and don't want a second backend process. Sightseer restarts when you change this."
+            description="Stop the Windows backend and run only the WSL backend. Useful if you develop entirely inside WSL and don't want a second backend process. Test Rig restarts when you change this."
             className="bg-muted/20 pl-7 sm:pl-8"
             control={
               <Switch
@@ -2618,8 +2618,8 @@ export function ConnectionsSettings() {
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   {pendingDesktopServerExposureMode === "network-accessible"
-                    ? "Sightseer will restart to expose this environment over the network."
-                    : "Sightseer will restart and limit this environment back to this machine."}
+                    ? "Test Rig will restart to expose this environment over the network."
+                    : "Test Rig will restart and limit this environment back to this machine."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -2677,15 +2677,15 @@ export function ConnectionsSettings() {
                 <AlertDialogDescription>
                   {pendingWslChange?.kind === "disable"
                     ? pendingWslChange.wasWslOnly
-                      ? "Sightseer will restart on the Windows backend. Threads and projects opened against WSL stay safe inside the distro and become available again when you re-enable WSL."
-                      : "The WSL backend will stop. Threads and projects opened against WSL stay safe inside the distro, but they'll be unavailable in Sightseer until you re-enable WSL."
+                      ? "Test Rig will restart on the Windows backend. Threads and projects opened against WSL stay safe inside the distro and become available again when you re-enable WSL."
+                      : "The WSL backend will stop. Threads and projects opened against WSL stay safe inside the distro, but they'll be unavailable in Test Rig until you re-enable WSL."
                     : pendingWslChange?.kind === "distro"
-                      ? "Sightseer will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted."
+                      ? "Test Rig will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted."
                       : pendingWslChange?.kind === "enable"
                         ? "Run the WSL backend alongside the Windows one, or stop the Windows backend and use only WSL? You can change this later from Settings."
                         : pendingWslChange?.nextValue
-                          ? "Sightseer will restart and start only the WSL backend. Your Windows-side projects won't be accessible until you turn this off again."
-                          : "Sightseer will restart and bring the Windows backend back up alongside WSL."}
+                          ? "Test Rig will restart and start only the WSL backend. Your Windows-side projects won't be accessible until you turn this off again."
+                          : "Test Rig will restart and bring the Windows backend back up alongside WSL."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

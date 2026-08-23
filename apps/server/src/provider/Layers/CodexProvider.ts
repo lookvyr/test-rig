@@ -309,8 +309,8 @@ const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
 export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   return {
     clientInfo: {
-      name: "sightseer_desktop",
-      title: "Sightseer Desktop",
+      name: "test_rig_desktop",
+      title: "Test Rig Desktop",
       version: packageJson.version,
     },
     capabilities: {
@@ -371,8 +371,8 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
 
   const initialize = yield* client.request("initialize", {
     clientInfo: {
-      name: "sightseer_desktop",
-      title: "Sightseer Desktop",
+      name: "test_rig_desktop",
+      title: "Test Rig Desktop",
       version: "0.1.0",
     },
     capabilities: {
@@ -450,7 +450,7 @@ const makePendingCodexProvider = (
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Codex is disabled in Sightseer settings.",
+          message: "Codex is disabled in Test Rig settings.",
         },
       });
     }
@@ -536,7 +536,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Codex is disabled in Sightseer settings.",
+        message: "Codex is disabled in Test Rig settings.",
       },
     });
   }

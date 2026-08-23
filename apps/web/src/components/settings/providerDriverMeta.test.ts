@@ -5,7 +5,7 @@ import { PROVIDER_ICON_BY_PROVIDER } from "../chat/providerIconUtils";
 import { DRIVER_OPTIONS, getDriverOption, PROVIDER_CLIENT_DEFINITIONS } from "./providerDriverMeta";
 
 describe("provider client definitions", () => {
-  it("offers exactly the three Sightseer executable providers", () => {
+  it("offers exactly the three Test Rig executable providers", () => {
     const expected = [
       ["codex", "Codex"],
       ["claudeAgent", "Claude"],

@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 /**
- * Product analytics is outside Sightseer's local-first boundary. Keep the
+ * Product analytics is outside Test Rig's local-first boundary. Keep the
  * service contract so provider and startup orchestration stay provider-neutral,
  * but make every production and test composition permanently inert.
  */

@@ -79,9 +79,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
   });
 
-  it("uses the stable Sightseer product name for every update channel", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "Sightseer");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Sightseer");
+  it("uses the stable Test Rig product name for every update channel", () => {
+    assert.equal(resolveDesktopProductName("0.0.17"), "Test Rig");
+    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "Test Rig");
   });
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
@@ -283,14 +283,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.notProperty(win, "publish");
       assert.deepStrictEqual((mac.mac as Record<string, unknown>).target, ["dmg"]);
       assert.deepStrictEqual((mac.mac as Record<string, unknown>).protocols, [
-        { name: "Sightseer", schemes: ["sightseer", "sightseer-dev"] },
+        { name: "Test Rig", schemes: ["test-rig", "test-rig-dev"] },
       ]);
       assert.deepStrictEqual(mac.dmg, { writeUpdateInfo: false });
       assert.deepStrictEqual(win.nsis, { differentialPackage: false });
       // Linux must register the renderer schemes so the generated .desktop
-      // entry advertises MimeType=x-scheme-handler/sightseer for OAuth deep links.
+      // entry advertises MimeType=x-scheme-handler/test-rig for OAuth deep links.
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
-        { name: "Sightseer", schemes: ["sightseer", "sightseer-dev"] },
+        { name: "Test Rig", schemes: ["test-rig", "test-rig-dev"] },
       ]);
       for (const config of [mac, linux, win]) {
         assert.deepStrictEqual(config.electronLanguages, DESKTOP_ELECTRON_LANGUAGES);
@@ -367,8 +367,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("win", "arm64"), [
       "aarch64-pc-windows-msvc",
     ]);
-    assert.equal(resourceMonitorExecutableName("mac"), "sightseer-resource-monitor");
-    assert.equal(resourceMonitorExecutableName("win"), "sightseer-resource-monitor.exe");
+    assert.equal(resourceMonitorExecutableName("mac"), "test-rig-resource-monitor");
+    assert.equal(resourceMonitorExecutableName("win"), "test-rig-resource-monitor.exe");
   });
   it("promotes target fff binaries to direct staged dependencies", () => {
     assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {

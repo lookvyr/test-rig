@@ -2,7 +2,7 @@
 
 > For maintainers. Using T3 Code? See [docs/user](../user/).
 
-Sightseer is a server runtime that owns agent sessions, workspaces, and version control, plus web
+Test Rig is a server runtime that owns agent sessions, workspaces, and version control, plus web
 and desktop clients that talk to it over one authenticated Effect RPC WebSocket. The server is the
 execution boundary: every provider process, terminal, git operation, and filesystem read happens
 there, never in the client.

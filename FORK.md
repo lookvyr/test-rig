@@ -1,8 +1,8 @@
-# Sightseer Fork Boundary
+# Test Rig Fork Boundary
 
 ## Product definition
 
-Sightseer is a single-user, local-first desktop application that provides a UI
+Test Rig is a single-user, local-first desktop application that provides a UI
 over approved coding harnesses: Codex, Claude Code, and OpenCode. It removes
 unneeded cloud services and providers while retaining enough of T3 Code's local
 core to adopt, adapt, or learn from valuable upstream work selectively. Full
@@ -14,22 +14,22 @@ work backlog. Linear owns actionable work and current status.
 
 ## Upstream baseline and relationship
 
-Sightseer began from T3 Code release tag `v0.0.32`, commit
+Test Rig began from T3 Code release tag `v0.0.32`, commit
 `239ef1c54df2f657912ccb5b8e25193d49d90417`, with its full history preserved.
 
-Sightseer is upstream-aware, not upstream-compatible at all costs. It stays
+Test Rig is upstream-aware, not upstream-compatible at all costs. It stays
 close to T3 Code in the local core and may diverge confidently at product
 edges. Stable release tags are the preferred intake points; daily merges from
 upstream's main branch and isolated UI cherry-picks are not the default.
 
-For each cohesive upstream change, Sightseer may choose one of three paths:
+For each cohesive upstream change, Test Rig may choose one of three paths:
 
 - **Direct port:** apply the change substantially as upstream shipped it when
   its behavior and dependencies fit this boundary.
 - **Adapted port:** preserve the useful behavior while changing its interfaces,
-  dependencies, or presentation to fit Sightseer.
+  dependencies, or presentation to fit Test Rig.
 - **Independent implementation:** use upstream as a design reference, or do not
-  use it, when a Sightseer-native solution is smaller or clearer.
+  use it, when a Test Rig-native solution is smaller or clearer.
 
 Ports should include the relevant contracts, tests, and migrations rather than
 only their visible UI. Historical migrations are preserved and are never
@@ -44,7 +44,7 @@ authenticated local backend, not merely a UI helper: it owns threads,
 orchestration, provider processes, terminals, filesystem access, Git workflows,
 and project state.
 
-Sightseer supports these executable providers:
+Test Rig supports these executable providers:
 
 - Codex
 - Claude Code
@@ -91,7 +91,7 @@ deleted merely because a cloud feature also consumes it.
 
 ## Excluded product edges
 
-The following are outside Sightseer's product boundary:
+The following are outside Test Rig's product boundary:
 
 - T3 Connect, including its server routes, lifecycle, UI, and packaging.
 - Clerk account flows. Electron responsibilities currently coupled to Clerk,
@@ -135,17 +135,17 @@ new explicit boundary decision before implementation.
 
 ## Independent identity and state
 
-Sightseer's identity is independent of T3 Code:
+Test Rig's identity is independent of T3 Code:
 
-- Product name: Sightseer
-- Bundle/application ID: `com.lookvyr.sightseer`
-- Production state root: `~/.sightseer`
-- State override: `SIGHTSEER_HOME`
-- URL schemes: `sightseer://` and `sightseer-dev://`
+- Product name: Test Rig
+- Bundle/application ID: `com.lookvyr.testrig`
+- Production state root: `~/.test-rig`
+- State override: `TEST_RIG_HOME`
+- URL schemes: `test-rig://` and `test-rig-dev://`
 
-Sightseer must ignore ambient `T3CODE_HOME` and must not fall back to T3 legacy
+Test Rig must ignore ambient `T3CODE_HOME` and must not fall back to T3 legacy
 paths. Its Electron profile, caches, logs, browser partitions, updater state,
-database, worktrees, and runtime directories are Sightseer-specific so both
+database, worktrees, and runtime directories are Test Rig-specific so both
 applications can run concurrently without collisions. Provider-owned Codex,
 Claude Code, and OpenCode authentication homes remain intentionally shared.
 
@@ -160,7 +160,7 @@ Claude Code, and OpenCode authentication homes remain intentionally shared.
 | Build and verify from source         | Local build, test, and desktop artifact commands remain; inherited CI and publication automation do not. Future automation will be purpose-built.                                                                        |
 | Preserve architectural seams         | Contracts, orchestration, drivers, checkpoints, client runtime, migrations, and local auth make the local product coherent and keep valuable upstream work portable.                                                     |
 | Selective upstream intake            | Direct, adapted, and independent implementations are all valid; product fit matters more than complete parity.                                                                                                           |
-| Independent state identity           | Sightseer and T3 Code must coexist without sharing application state, while provider-owned authentication remains reusable.                                                                                              |
+| Independent state identity           | Test Rig and T3 Code must coexist without sharing application state, while provider-owned authentication remains reusable.                                                                                               |
 
 ## Boundary smoke tests
 
@@ -185,8 +185,8 @@ Use the smallest focused checks appropriate to a changed vertical slice:
       explicit Git actions, enabled source-control hosting integrations, and approved
       provider networking still work; disabled hosting integrations make no
       discovery, authentication, enrichment, or operation request.
-- [ ] `SIGHTSEER_HOME` and `~/.sightseer` contain Sightseer state; ambient
-      `T3CODE_HOME` is ignored; T3 Code and Sightseer can run concurrently without
+- [ ] `TEST_RIG_HOME` and `~/.test-rig` contain Test Rig state; ambient
+      `T3CODE_HOME` is ignored; T3 Code and Test Rig can run concurrently without
       Electron, port, URL-scheme, database, worktree, cache, or log collisions.
 - [ ] A database carrying historical migrations and excluded-provider rows
       upgrades without rewriting history or corrupting unavailable settings.
@@ -198,7 +198,7 @@ Use the smallest focused checks appropriate to a changed vertical slice:
 
 ## License and attribution
 
-Sightseer is derived from T3 Code, which is licensed under the MIT License and
+Test Rig is derived from T3 Code, which is licensed under the MIT License and
 copyright T3 Tools Inc. The repository's `LICENSE` file is authoritative and
 its copyright and permission notice must remain included in copies or
 substantial portions of the upstream software. Existing third-party notices

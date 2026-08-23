@@ -26,9 +26,9 @@ describe("branding", () => {
       value: {
         desktopBridge: {
           getAppBranding: () => ({
-            baseName: "Sightseer",
+            baseName: "Test Rig",
             stageLabel: "Nightly",
-            displayName: "Sightseer (Nightly)",
+            displayName: "Test Rig (Nightly)",
           }),
         },
       },
@@ -36,9 +36,9 @@ describe("branding", () => {
 
     const branding = await import("./branding");
 
-    expect(branding.APP_BASE_NAME).toBe("Sightseer");
+    expect(branding.APP_BASE_NAME).toBe("Test Rig");
     expect(branding.APP_STAGE_LABEL).toBe("Nightly");
-    expect(branding.APP_DISPLAY_NAME).toBe("Sightseer (Nightly)");
+    expect(branding.APP_DISPLAY_NAME).toBe("Test Rig (Nightly)");
   });
 });
 
@@ -55,34 +55,34 @@ describe("branding logic", () => {
   it("updates the display name for nightly primary server versions", () => {
     expect(
       resolveServerBackedAppDisplayName({
-        baseName: "Sightseer",
-        fallbackDisplayName: "Sightseer (Alpha)",
+        baseName: "Test Rig",
+        fallbackDisplayName: "Test Rig (Alpha)",
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.28-nightly.20260616.12",
       }),
-    ).toBe("Sightseer (Nightly)");
+    ).toBe("Test Rig (Nightly)");
   });
 
   it("keeps the fallback display name for stable primary server versions", () => {
     expect(
       resolveServerBackedAppDisplayName({
-        baseName: "Sightseer",
-        fallbackDisplayName: "Sightseer (Alpha)",
+        baseName: "Test Rig",
+        fallbackDisplayName: "Test Rig (Alpha)",
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.27",
       }),
-    ).toBe("Sightseer (Alpha)");
+    ).toBe("Test Rig (Alpha)");
   });
 
   it("keeps the fallback display name for malformed nightly primary server versions", () => {
     expect(
       resolveServerBackedAppDisplayName({
-        baseName: "Sightseer",
-        fallbackDisplayName: "Sightseer (Alpha)",
+        baseName: "Test Rig",
+        fallbackDisplayName: "Test Rig (Alpha)",
         fallbackStageLabel: "Alpha",
         primaryServerVersion: "0.0.28-nightly.20260616",
       }),
-    ).toBe("Sightseer (Alpha)");
+    ).toBe("Test Rig (Alpha)");
   });
 });
 

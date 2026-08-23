@@ -1,4 +1,4 @@
-// This file mostly exists because we want dev mode to say "Sightseer (Dev)" instead of "electron".
+// This file mostly exists because we want dev mode to say "Test Rig (Dev)" instead of "electron".
 
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -15,11 +15,11 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-export const APP_DISPLAY_NAME = isDevelopment ? "Sightseer (Dev)" : "Sightseer";
+export const APP_DISPLAY_NAME = isDevelopment ? "Test Rig (Dev)" : "Test Rig";
 export const APP_BUNDLE_ID = isDevelopment
-  ? `com.lookvyr.sightseer.dev.${devBundleIdSuffix || "local"}`
-  : "com.lookvyr.sightseer";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["sightseer-dev"] : ["sightseer"];
+  ? `com.lookvyr.testrig.dev.${devBundleIdSuffix || "local"}`
+  : "com.lookvyr.testrig";
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["test-rig-dev"] : ["test-rig"];
 const LAUNCHER_VERSION = 14;
 const defaultIconPath = NodePath.join(desktopDir, "resources", "icon.icns");
 const developmentMacIconPngPath = NodePath.join(
@@ -109,7 +109,7 @@ export function makeDevelopmentLauncherScript({
   const envEntries = [
     ["VITE_DEV_SERVER_URL", environment.VITE_DEV_SERVER_URL],
     ["T3CODE_PORT", environment.T3CODE_PORT],
-    ["SIGHTSEER_HOME", environment.SIGHTSEER_HOME],
+    ["TEST_RIG_HOME", environment.TEST_RIG_HOME],
     ["T3CODE_COMMIT_HASH", environment.T3CODE_COMMIT_HASH],
     ["T3CODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
@@ -119,7 +119,7 @@ export function makeDevelopmentLauncherScript({
       ([name, value]) =>
         `if [ -z "\${${name}:-}" ]; then export ${name}=${shellSingleQuote(value)}; fi`,
     ),
-    `exec ${shellSingleQuote(electronBinaryPath)} --sightseer-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
+    `exec ${shellSingleQuote(electronBinaryPath)} --test-rig-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
     "",
   ].join("\n");
 }
@@ -344,7 +344,7 @@ function buildMacLauncher(electronBinaryPath) {
   if (isDevelopment) {
     // Keep Electron's native executable inside the branded bundle. Launching the
     // node_modules copy makes macOS associate the process (and Dock label) with
-    // Electron.app even though this bundle's Info.plist has the Sightseer name.
+    // Electron.app even though this bundle's Info.plist has the Test Rig name.
     // Its conventional executable name also keeps Electron's default-app runtime
     // in development mode instead of making app.isPackaged report true.
     writeDevelopmentLauncherScript(launcherBinaryPath, runtimeElectronBinaryPath);

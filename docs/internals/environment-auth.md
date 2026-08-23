@@ -1,8 +1,8 @@
 # Environment Authentication Profile
 
-> For maintainers. Using Sightseer? See [docs/user](../user/).
+> For maintainers. Using Test Rig? See [docs/user](../user/).
 
-Sightseer's environment server uses scoped local credentials for browser and explicitly paired
+Test Rig's environment server uses scoped local credentials for browser and explicitly paired
 clients. It has no account provider, hosted control plane, relay issuer, or proof-of-possession token
 flow.
 
@@ -46,7 +46,7 @@ advertised, refreshed, or converted to bearer sessions.
 - Scope values follow the space-delimited capability model from RFC 6749.
 
 This is not a general-purpose OAuth authorization server. Bootstrap token types, browser cookies,
-and WebSocket tickets are product-specific adapters around Sightseer's local session model.
+and WebSocket tickets are product-specific adapters around Test Rig's local session model.
 
 ## Upgrade Behavior
 

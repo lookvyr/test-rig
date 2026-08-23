@@ -1,9 +1,9 @@
 ---
 name: test-t3-app
-description: Launch, retain, and test the Sightseer web app in isolated development environments, including first-try browser authentication with one-time pairing URLs, pairing-token recovery, worktree-safe state directories, cross-turn dev server lifecycle, and direct SQLite inspection or fixture seeding. Use when an agent needs to run Sightseer locally, iteratively test UI behavior with a human, recover from an expired or consumed pairing token, isolate dev state, or prepare test data in state.sqlite.
+description: Launch, retain, and test the Test Rig web app in isolated development environments, including first-try browser authentication with one-time pairing URLs, pairing-token recovery, worktree-safe state directories, cross-turn dev server lifecycle, and direct SQLite inspection or fixture seeding. Use when an agent needs to run Test Rig locally, iteratively test UI behavior with a human, recover from an expired or consumed pairing token, isolate dev state, or prepare test data in state.sqlite.
 ---
 
-# Test Sightseer App
+# Test Rig App Testing
 
 Use this skill for the web client, including the renderer used by the desktop app.
 
@@ -11,14 +11,14 @@ Use this skill for the web client, including the renderer used by the desktop ap
 
 1. Run commands from the repository root.
 2. Choose a base directory that belongs only to the current worktree or test:
-   - Use the repository's ignored `.sightseer` directory for reusable worktree-local state.
-   - Use `mktemp -d /tmp/sightseer-test.XXXXXX` for disposable state and retain the printed absolute path.
-3. Start the full web stack with `vp run dev`. In a linked worktree it defaults to that worktree's gitignored `.sightseer`; pass `--home-dir <base-dir>` only when the test needs a different isolated directory.
+   - Use the repository's ignored `.test-rig` directory for reusable worktree-local state.
+   - Use `mktemp -d /tmp/test-rig-test.XXXXXX` for disposable state and retain the printed absolute path.
+3. Start the full web stack with `vp run dev`. In a linked worktree it defaults to that worktree's gitignored `.test-rig`; pass `--home-dir <base-dir>` only when the test needs a different isolated directory.
 4. Keep the terminal session alive and read the selected server port, web port, base directory, and pairing URL from its output.
 
-Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.sightseer` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
+Treat a base directory as disposable only when it was created or deliberately selected for the current test. Never delete or directly seed the shared `~/.test-rig` directory. Prefer starting with a new temporary base directory over clearing state of uncertain ownership.
 
-The worktree-local default deliberately outranks an ambient `SIGHTSEER_HOME`; do not pass the shared home through to a worktree dev server.
+The worktree-local default deliberately outranks an ambient `TEST_RIG_HOME`; do not pass the shared home through to a worktree dev server.
 
 Ports are derived from the worktree path but can shift when occupied. Always read the actual values from the `[dev-runner]` line.
 
@@ -28,7 +28,7 @@ The dev runner disables browser auto-open by default. Do not pass `--browser` du
 
 ### Verify an environment before human handoff
 
-When another person will use the printed pairing URL on the same machine, first open the origin without the pairing path or fragment in the controlled browser and confirm the Sightseer app loads. This browser navigation is required even when curl succeeds because browsers block some otherwise reachable ports before making a network request.
+When another person will use the printed pairing URL on the same machine, first open the origin without the pairing path or fragment in the controlled browser and confirm the Test Rig app loads. This browser navigation is required even when curl succeeds because browsers block some otherwise reachable ports before making a network request.
 
 Do not open the other person's complete pairing URL during this reachability check; doing so consumes its one-time token. If the agent also needs an authenticated browser, create and consume a separate pairing token, then leave a fresh token for the other person.
 
@@ -54,7 +54,7 @@ Keep pairing URLs out of screenshots, committed files, and durable logs. When th
 
 ## Recover a consumed or expired pairing token
 
-Run `node apps/server/src/bin.ts pair` from the repository root. It discovers the running dev server (worktree `.sightseer` first, same precedence as the dev runner) and prints a fresh pairing URL against the server's current web origin. Pass `--base-dir <base-dir>` only when the server was started with `--home-dir`, using the identical path.
+Run `node apps/server/src/bin.ts pair` from the repository root. It discovers the running dev server (worktree `.test-rig` first, same precedence as the dev runner) and prints a fresh pairing URL against the server's current web origin. Pass `--base-dir <base-dir>` only when the server was started with `--home-dir`, using the identical path.
 
 Tokens from `pair` carry standard client scopes. The startup pairing URL carries admin scopes; if the user needs Settings → Connections management (`access:write`), restart the server and hand over the new startup URL instead.
 
@@ -67,7 +67,7 @@ Read [references/sqlite-fixtures.md](references/sqlite-fixtures.md) before chang
 - Seed projection tables only for disposable UI fixtures. Use application commands and APIs when testing business behavior or projection correctness.
 - Use the auth CLI, not direct `auth_*` table edits, for pairing and sessions.
 
-The helper refuses to write to the shared `~/.sightseer` directory by default and creates a database backup before each mutation.
+The helper refuses to write to the shared `~/.test-rig` directory by default and creates a database backup before each mutation.
 
 ## Tear down only when the testing loop is finished
 

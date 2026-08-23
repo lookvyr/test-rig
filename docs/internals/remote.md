@@ -1,8 +1,8 @@
 # Remote Architecture
 
-> For maintainers. Using Sightseer? See [remote access](../user/remote-access.md).
+> For maintainers. Using Test Rig? See [remote access](../user/remote-access.md).
 
-A client talks directly to one Sightseer server over HTTP and WebSocket. The server owns providers,
+A client talks directly to one Test Rig server over HTTP and WebSocket. The server owns providers,
 projects, threads, terminals, Git, and filesystem operations; the connection layer only decides how
 the client reaches that server.
 
@@ -39,7 +39,7 @@ current device.
 Direct access uses `ws://` or `wss://` paired as a bearer target. Transport security and network
 reachability remain the operator's responsibility.
 
-Desktop-managed SSH discovers SSH targets, launches or reuses a remote Sightseer server, forwards a
+Desktop-managed SSH discovers SSH targets, launches or reuses a remote Test Rig server, forwards a
 local port, and returns ordinary HTTP/WebSocket endpoints. The renderer then connects through the
 same runtime as any other target. Disconnect closes the tunnel and stops only a server the launcher
 started.

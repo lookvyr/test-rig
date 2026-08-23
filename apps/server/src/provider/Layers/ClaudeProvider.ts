@@ -819,7 +819,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Claude is disabled in Sightseer settings.",
+        message: "Claude is disabled in Test Rig settings.",
       },
     });
   }
@@ -982,7 +982,7 @@ export const makePendingClaudeProvider = (
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Claude is disabled in Sightseer settings.",
+          message: "Claude is disabled in Test Rig settings.",
         },
       });
     }

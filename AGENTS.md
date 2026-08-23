@@ -1,8 +1,8 @@
-> **Fork note:** This is the original T3 Code `AGENTS.md`. It has not yet been fully updated for Sightseer. Where it conflicts with [`FORK.md`](./FORK.md), `FORK.md` controls.
+> **Fork note:** This is the original T3 Code `AGENTS.md`. It has not yet been fully updated for Test Rig. Where it conflicts with [`FORK.md`](./FORK.md), `FORK.md` controls.
 
 # T3 Code
 
-Sightseer is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs (Codex, Claude Code, OpenCode) and serves web and desktop clients.
+Test Rig is a minimal GUI for coding agents. A Node WebSocket server wraps provider CLIs (Codex, Claude Code, OpenCode) and serves web and desktop clients.
 
 You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
 
@@ -24,7 +24,7 @@ The architecture of T3 Code's websocket layer (npx t3) enables a lot of awesome 
 
 ### 4. Web and desktop
 
-Sightseer has 2 key app surfaces: **web** and **desktop**.
+Test Rig has 2 key app surfaces: **web** and **desktop**.
 
 **Web** is the browser client served by the local server. It also supports explicitly configured remote environments. New features should support both local and remote browser connections where reasonable.
 
@@ -77,22 +77,22 @@ The most common defect in this repo is a change that works on the path you teste
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
-- `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.sightseer`, which deliberately outranks an ambient `SIGHTSEER_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
+- `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.test-rig`, which deliberately outranks an ambient `TEST_RIG_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
 - The web app requires pairing. Hand over the pairing URL, not the bare origin. A URL without its token is useless to whoever you gave it to. If the token got consumed, mint a fresh one with `node apps/server/src/bin.ts pair` — note it carries standard scopes, while the startup URL carries admin scopes (needed for Settings → Connections management).
 - Stop what you started, by the PID you tracked. See rule 1.
 
 ## Test data
 
-An empty database is a bad test. Seed your worktree's `.sightseer` with a copy of real data instead of pointing at live state:
+An empty database is a bad test. Seed your worktree's `.test-rig` with a copy of real data instead of pointing at live state:
 
-- Copy from `~/.t3/userdata` (the developer's real T3 Code data, the most realistic test set) or `~/.t3/dev`. Worktree state lives at `<worktree>/.sightseer/userdata`.
+- Copy from `~/.t3/userdata` (the developer's real T3 Code data, the most realistic test set) or `~/.t3/dev`. Worktree state lives at `<worktree>/.test-rig/userdata`.
 - Snapshot the database with `VACUUM INTO`, which is safe even while a server has the source open and yields one consistent file:
 
   ```bash
-  mkdir -p .sightseer/userdata
-  rm -f .sightseer/userdata/state.sqlite*  # VACUUM INTO refuses to overwrite
-  bun -e "new (require('bun:sqlite').Database)(process.env.HOME + '/.t3/userdata/state.sqlite', { readonly: true }).run(\"VACUUM INTO '.sightseer/userdata/state.sqlite'\")"
+  mkdir -p .test-rig/userdata
+  rm -f .test-rig/userdata/state.sqlite*  # VACUUM INTO refuses to overwrite
+  bun -e "new (require('bun:sqlite').Database)(process.env.HOME + '/.t3/userdata/state.sqlite', { readonly: true }).run(\"VACUUM INTO '.test-rig/userdata/state.sqlite'\")"
   ```
 
   A plain `cp` is only safe when no server has the source open, and must bring the `-wal` and `-shm` siblings along. A live file copy is a corrupt copy.

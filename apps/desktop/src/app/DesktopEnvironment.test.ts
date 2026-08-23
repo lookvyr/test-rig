@@ -13,9 +13,9 @@ const defaultInput = {
   platform: "darwin",
   processArch: "arm64",
   appVersion: "0.0.22",
-  appPath: "/Applications/Sightseer.app/Contents/Resources/app.asar",
+  appPath: "/Applications/Test Rig.app/Contents/Resources/app.asar",
   isPackaged: false,
-  resourcesPath: "/Applications/Sightseer.app/Contents/Resources",
+  resourcesPath: "/Applications/Test Rig.app/Contents/Resources",
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
@@ -40,7 +40,7 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          SIGHTSEER_HOME: " /tmp/sightseer ",
+          TEST_RIG_HOME: " /tmp/test-rig ",
           T3CODE_COMMIT_HASH: " 0123456789abcdef ",
           T3CODE_PORT: "4949",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
@@ -50,30 +50,27 @@ describe("DesktopEnvironment", () => {
 
       assert.equal(environment.isDevelopment, true);
       assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
-      assert.equal(environment.baseDir, "/tmp/sightseer");
-      assert.equal(environment.stateDir, "/tmp/sightseer/userdata");
-      assert.equal(
-        environment.desktopSettingsPath,
-        "/tmp/sightseer/userdata/desktop-settings.json",
-      );
-      assert.equal(environment.clientSettingsPath, "/tmp/sightseer/userdata/client-settings.json");
-      assert.equal(environment.serverSettingsPath, "/tmp/sightseer/userdata/settings.json");
-      assert.equal(environment.logDir, "/tmp/sightseer/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/sightseer/userdata/browser-artifacts");
+      assert.equal(environment.baseDir, "/tmp/test-rig");
+      assert.equal(environment.stateDir, "/tmp/test-rig/userdata");
+      assert.equal(environment.desktopSettingsPath, "/tmp/test-rig/userdata/desktop-settings.json");
+      assert.equal(environment.clientSettingsPath, "/tmp/test-rig/userdata/client-settings.json");
+      assert.equal(environment.serverSettingsPath, "/tmp/test-rig/userdata/settings.json");
+      assert.equal(environment.logDir, "/tmp/test-rig/userdata/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/test-rig/userdata/browser-artifacts");
       assert.equal(environment.rootDir, "/repo");
       assert.equal(environment.appRoot, "/repo");
       assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
       assert.equal(environment.backendCwd, "/repo");
-      assert.equal(environment.appUserModelId, "com.lookvyr.sightseer.dev");
-      assert.equal(environment.linuxWmClass, "sightseer-dev");
-      assert.equal(environment.displayName, "Sightseer (Dev)");
+      assert.equal(environment.appUserModelId, "com.lookvyr.testrig.dev");
+      assert.equal(environment.linuxWmClass, "test-rig-dev");
+      assert.equal(environment.displayName, "Test Rig (Dev)");
       assert.equal(
         environment.electronUserDataPath,
-        "/Users/alice/Library/Application Support/sightseer-dev",
+        "/Users/alice/Library/Application Support/test-rig-dev",
       );
       assert.equal(
         environment.electronSessionDataPath,
-        "/Users/alice/Library/Application Support/sightseer-dev/session-data",
+        "/Users/alice/Library/Application Support/test-rig-dev/session-data",
       );
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
@@ -90,15 +87,15 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          SIGHTSEER_HOME: "/tmp/sightseer",
+          TEST_RIG_HOME: "/tmp/test-rig",
         },
       );
 
       assert.equal(environment.isDevelopment, false);
-      assert.equal(environment.stateDir, "/tmp/sightseer/userdata");
-      assert.equal(environment.logDir, "/tmp/sightseer/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/sightseer/userdata/browser-artifacts");
-      assert.equal(environment.serverSettingsPath, "/tmp/sightseer/userdata/settings.json");
+      assert.equal(environment.stateDir, "/tmp/test-rig/userdata");
+      assert.equal(environment.logDir, "/tmp/test-rig/userdata/logs");
+      assert.equal(environment.browserArtifactsDir, "/tmp/test-rig/userdata/browser-artifacts");
+      assert.equal(environment.serverSettingsPath, "/tmp/test-rig/userdata/settings.json");
     }),
   );
 
@@ -110,8 +107,8 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.sightseer/dev");
-      assert.equal(production.stateDir, "/Users/alice/.sightseer/userdata");
+      assert.equal(development.stateDir, "/Users/alice/.test-rig/dev");
+      assert.equal(production.stateDir, "/Users/alice/.test-rig/userdata");
     }),
   );
 
@@ -123,16 +120,16 @@ describe("DesktopEnvironment", () => {
             { platform },
             isDevelopment ? { VITE_DEV_SERVER_URL: "http://localhost:5173" } : {},
           );
-          const expectedProfile = isDevelopment ? "sightseer-dev" : "sightseer";
+          const expectedProfile = isDevelopment ? "test-rig-dev" : "test-rig";
           const expectedState = isDevelopment
-            ? "/Users/alice/.sightseer/dev"
-            : "/Users/alice/.sightseer/userdata";
+            ? "/Users/alice/.test-rig/dev"
+            : "/Users/alice/.test-rig/userdata";
 
           assert.equal(environment.userDataDirName, expectedProfile);
-          assert.equal(environment.displayName, isDevelopment ? "Sightseer (Dev)" : "Sightseer");
+          assert.equal(environment.displayName, isDevelopment ? "Test Rig (Dev)" : "Test Rig");
           assert.equal(
             environment.appUserModelId,
-            isDevelopment ? "com.lookvyr.sightseer.dev" : "com.lookvyr.sightseer",
+            isDevelopment ? "com.lookvyr.testrig.dev" : "com.lookvyr.testrig",
           );
           assert.equal(environment.stateDir, expectedState);
           assert.isTrue(environment.electronUserDataPath.endsWith(`/${expectedProfile}`));
@@ -150,7 +147,7 @@ describe("DesktopEnvironment", () => {
             environment.electronCrashDumpsPath,
           ]) {
             assert.notInclude(derivedPath, "/.t3/");
-            assert.notInclude(derivedPath, "Sightseer");
+            assert.notInclude(derivedPath, "Test Rig");
             assert.notInclude(derivedPath, "t3code");
           }
         }
@@ -161,8 +158,8 @@ describe("DesktopEnvironment", () => {
   it.effect("ignores the legacy T3 home override", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment({}, { T3CODE_HOME: "/Users/alice/.t3" });
-      assert.equal(environment.baseDir, "/Users/alice/.sightseer");
-      assert.equal(environment.stateDir, "/Users/alice/.sightseer/userdata");
+      assert.equal(environment.baseDir, "/Users/alice/.test-rig");
+      assert.equal(environment.stateDir, "/Users/alice/.test-rig/userdata");
     }),
   );
 
@@ -171,12 +168,12 @@ describe("DesktopEnvironment", () => {
       const environment = yield* makeEnvironment(
         {},
         {
-          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.lookvyr.sightseer.dev.local ",
+          T3CODE_DESKTOP_APP_USER_MODEL_ID: " com.lookvyr.testrig.dev.local ",
           VITE_DEV_SERVER_URL: "http://localhost:5173",
         },
       );
 
-      assert.equal(environment.appUserModelId, "com.lookvyr.sightseer.dev.local");
+      assert.equal(environment.appUserModelId, "com.lookvyr.testrig.dev.local");
     }),
   );
 

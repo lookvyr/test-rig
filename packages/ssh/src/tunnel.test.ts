@@ -89,14 +89,14 @@ function commandArgs(command: ChildProcess.Command): ReadonlyArray<string> {
 }
 
 describe("ssh tunnel scripts", () => {
-  it("builds the remote Sightseer runner with npx and npm fallbacks", () => {
+  it("builds the remote Test Rig runner with npx and npm fallbacks", () => {
     const script = buildRemoteT3RunnerScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE });
 
     assert.include(script, "T3_NODE_SCRIPT_PATH=''");
-    assert.include(script, 'exec sightseer "$@"');
-    assert.include(script, "exec npx --yes '@lookvyr/sightseer@latest' \"$@\"");
-    assert.include(script, "exec npm exec --yes '@lookvyr/sightseer@latest' -- \"$@\"");
-    assert.include(script, "could not install '@lookvyr/sightseer@latest'");
+    assert.include(script, 'exec test-rig "$@"');
+    assert.include(script, "exec npx --yes '@lookvyr/test-rig@latest' \"$@\"");
+    assert.include(script, "exec npm exec --yes '@lookvyr/test-rig@latest' -- \"$@\"");
+    assert.include(script, "could not install '@lookvyr/test-rig@latest'");
     assert.include(script, 'prepend_path_if_dir "$HOME/.local/bin"');
     assert.include(script, `T3_NODE_ENGINE_RANGE='${TEST_NODE_ENGINE_RANGE}'`);
     assert.include(script, "remote_node_satisfies_engine()");
@@ -122,26 +122,26 @@ describe("ssh tunnel scripts", () => {
     assert.notInclude(script, TEST_NODE_ENGINE_RANGE);
   });
 
-  it("shell-quotes package specs in the remote Sightseer runner", () => {
+  it("shell-quotes package specs in the remote Test Rig runner", () => {
     const script = buildRemoteT3RunnerScript({
-      packageSpec: "@lookvyr/sightseer@nightly; touch /tmp/sightseer-owned",
+      packageSpec: "@lookvyr/test-rig@nightly; touch /tmp/test-rig-owned",
     });
 
     assert.include(
       script,
-      "exec npx --yes '@lookvyr/sightseer@nightly; touch /tmp/sightseer-owned' \"$@\"",
+      "exec npx --yes '@lookvyr/test-rig@nightly; touch /tmp/test-rig-owned' \"$@\"",
     );
     assert.include(
       script,
-      "exec npm exec --yes '@lookvyr/sightseer@nightly; touch /tmp/sightseer-owned' -- \"$@\"",
+      "exec npm exec --yes '@lookvyr/test-rig@nightly; touch /tmp/test-rig-owned' -- \"$@\"",
     );
     assert.notInclude(
       script,
-      "exec npx --yes @lookvyr/sightseer@nightly; touch /tmp/sightseer-owned",
+      "exec npx --yes @lookvyr/test-rig@nightly; touch /tmp/test-rig-owned",
     );
   });
 
-  it("builds the remote Sightseer runner with a node script override", () => {
+  it("builds the remote Test Rig runner with a node script override", () => {
     const script = buildRemoteT3RunnerScript({
       nodeScriptPath: "/Users/julius/Development/Work/codething-mvp/apps/server/dist/bin.mjs",
     });
@@ -153,7 +153,7 @@ describe("ssh tunnel scripts", () => {
     assert.include(script, 'exec node "$T3_NODE_SCRIPT_PATH" "$@"');
   });
 
-  it("uses the remote Sightseer runner for launch and pairing scripts", () => {
+  it("uses the remote Test Rig runner for launch and pairing scripts", () => {
     const target = {
       alias: "devbox",
       hostname: "devbox.example.com",
@@ -182,10 +182,10 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemoteLaunchScript(), '"$RUNNER_FILE" serve --host 127.0.0.1');
     assert.include(buildRemoteLaunchScript(), '--base-dir "$DEFAULT_SERVER_HOME"');
     assert.notInclude(buildRemoteLaunchScript(), "server-home");
-    assert.include(buildRemoteLaunchScript(), "Remote Sightseer server did not become ready");
+    assert.include(buildRemoteLaunchScript(), "Remote Test Rig server did not become ready");
     assert.include(
-      buildRemoteLaunchScript({ packageSpec: "@lookvyr/sightseer@nightly" }),
-      "@lookvyr/sightseer@nightly",
+      buildRemoteLaunchScript({ packageSpec: "@lookvyr/test-rig@nightly" }),
+      "@lookvyr/test-rig@nightly",
     );
     assert.include(
       buildRemotePairingScript(target),
@@ -194,8 +194,8 @@ describe("ssh tunnel scripts", () => {
     assert.include(buildRemotePairingScript(target), 'PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"');
     assert.notInclude(buildRemotePairingScript(target), "server-home");
     assert.include(
-      buildRemotePairingScript(target, { packageSpec: "@lookvyr/sightseer@nightly" }),
-      "@lookvyr/sightseer@nightly",
+      buildRemotePairingScript(target, { packageSpec: "@lookvyr/test-rig@nightly" }),
+      "@lookvyr/test-rig@nightly",
     );
     assert.include(
       buildRemoteStopScript(target),

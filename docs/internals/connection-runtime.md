@@ -1,6 +1,6 @@
 # Connection Runtime
 
-> For maintainers. Using Sightseer? See [docs/user](../user/).
+> For maintainers. Using Test Rig? See [docs/user](../user/).
 
 The connection runtime is used by the web client and desktop renderer. It owns connectivity,
 authentication, retries, transport lifetime, cached environment data, and

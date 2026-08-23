@@ -10,7 +10,7 @@ function readInjectedDesktopAppBranding(): DesktopAppBranding | null {
 }
 
 const injectedDesktopAppBranding = readInjectedDesktopAppBranding();
-export const APP_BASE_NAME = injectedDesktopAppBranding?.baseName ?? "Sightseer";
+export const APP_BASE_NAME = injectedDesktopAppBranding?.baseName ?? "Test Rig";
 export const APP_STAGE_LABEL =
   injectedDesktopAppBranding?.stageLabel ?? (import.meta.env.DEV ? "Dev" : "Latest");
 export const APP_DISPLAY_NAME =

@@ -142,7 +142,7 @@ describe("t3 pair", () => {
         // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is decoded as a presentation DTO.
         const credentials = JSON.parse(listed) as ReadonlyArray<{ readonly label?: string }>;
         assert.equal(credentials.length, 1);
-        assert.equal(credentials[0]?.label, "sightseer pair");
+        assert.equal(credentials[0]?.label, "test-rig pair");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -168,7 +168,7 @@ describe("t3 pair", () => {
     ).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("directs to Sightseer serve when no server is running", () =>
+  it.effect("directs to Test Rig serve when no server is running", () =>
     Effect.gen(function* () {
       const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pair-none-test-"));
 
@@ -179,7 +179,7 @@ describe("t3 pair", () => {
       const rendered = String(
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
       );
-      assert.include(rendered, "No running Sightseer server found.");
+      assert.include(rendered, "No running Test Rig server found.");
       assert.include(rendered, "node apps/server/dist/bin.mjs serve");
       assert.notInclude(rendered, "connect");
     }).pipe(Effect.provide(NodeServices.layer)),
@@ -210,7 +210,7 @@ describe("t3 pair", () => {
         const rendered = String(
           typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
         );
-        assert.include(rendered, "No running Sightseer server found.");
+        assert.include(rendered, "No running Test Rig server found.");
       }),
     ).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -236,7 +236,7 @@ describe("t3 pair", () => {
       const rendered = String(
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
       );
-      assert.include(rendered, "No running Sightseer server found.");
+      assert.include(rendered, "No running Test Rig server found.");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

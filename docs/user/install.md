@@ -1,6 +1,6 @@
-# Install Sightseer
+# Install Test Rig
 
-Sightseer is built and run from a source checkout. The desktop app starts the local server and uses the bundled web client for its UI.
+Test Rig is built and run from a source checkout. The desktop app starts the local server and uses the bundled web client for its UI.
 
 ## Requirements
 
@@ -10,7 +10,7 @@ Sightseer is built and run from a source checkout. The desktop app starts the lo
 
 ## Build from source
 
-Sightseer does not publish an npm package or prebuilt releases. Install the requirements above,
+Test Rig does not publish an npm package or prebuilt releases. Install the requirements above,
 then run the desktop app in development:
 
 ```bash
@@ -30,7 +30,7 @@ On macOS, `vp run dist:desktop:dmg` creates a DMG in `./release`. See the mainta
 
 ## Providers
 
-Sightseer drives provider CLIs; it does not ship them. Install the CLI for each provider you want
+Test Rig drives provider CLIs; it does not ship them. Install the CLI for each provider you want
 to use, then authenticate it.
 
 | Provider | CLI                                                   | Default binary |
@@ -39,7 +39,7 @@ to use, then authenticate it.
 | Claude   | [Claude Code](https://claude.com/product/claude-code) | `claude`       |
 | OpenCode | [OpenCode](https://opencode.ai)                       | `opencode`     |
 
-Run the login command on the machine running the Sightseer server, not on the device you browse
+Run the login command on the machine running the Test Rig server, not on the device you browse
 from.
 
 ### Binary discovery
@@ -47,12 +47,12 @@ from.
 Each provider CLI must be on the server's `PATH`, or have an explicit binary path set in
 **Settings** → the provider instance → **Binary path**. Use the explicit path when a version
 manager or a non-standard install location keeps the CLI off the `PATH` of the shell that
-started Sightseer.
+started Test Rig.
 
 ### When auth is needed
 
 Provider auth is required before you start a session with that provider, not before you start
-Sightseer. You can install Sightseer, open it, and add providers afterwards. A provider that is not
+Test Rig. You can install Test Rig, open it, and add providers afterwards. A provider that is not
 authenticated shows its status in **Settings** and fails at session start with the login command
 to run.
 
@@ -60,5 +60,5 @@ For multi-account setups, see [Codex](./providers-codex.md) and [Claude](./provi
 
 ## Next steps
 
-- [Permission modes](./permission-modes.md): how much Sightseer asks before acting
+- [Permission modes](./permission-modes.md): how much Test Rig asks before acting
 - [Remote access](./remote-access.md): connect from a phone, tablet, or another desktop

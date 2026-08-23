@@ -28,7 +28,7 @@ const environmentInput = {
 
 const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
   metadata: Effect.die("unexpected metadata read"),
-  name: Effect.succeed("Sightseer"),
+  name: Effect.succeed("Test Rig"),
   whenReady: Effect.void,
   quit: Effect.void,
   requestSingleInstanceLock: Effect.succeed(true),

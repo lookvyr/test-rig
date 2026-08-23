@@ -32,7 +32,7 @@ export const hostFlag = Flag.string("host").pipe(
 );
 export const baseDirFlag = Flag.string("base-dir").pipe(
   Flag.withDescription(
-    "Explicit Sightseer data directory; runtime state is stored under userdata (equivalent to SIGHTSEER_HOME).",
+    "Explicit Test Rig data directory; runtime state is stored under userdata (equivalent to TEST_RIG_HOME).",
   ),
   Flag.optional,
 );

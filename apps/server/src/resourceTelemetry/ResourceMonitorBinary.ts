@@ -63,7 +63,7 @@ export class ResourceMonitorBinary extends Context.Service<
 >()("t3/resourceTelemetry/ResourceMonitorBinary") {}
 
 function binaryName(platform: NodeJS.Platform): string {
-  return platform === "win32" ? "sightseer-resource-monitor.exe" : "sightseer-resource-monitor";
+  return platform === "win32" ? "test-rig-resource-monitor.exe" : "test-rig-resource-monitor";
 }
 
 export type ResourceMonitorLinuxLibc = "gnu" | "musl";

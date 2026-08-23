@@ -1,12 +1,12 @@
 /**
- * `sightseer pair` - mint a pairing token for an already-running server and print it
+ * `test-rig pair` - mint a pairing token for an already-running server and print it
  * as a QR code, without restarting anything.
  *
  * Discovery reads the `server-runtime.json` a live server persists next to its
  * database, then confirms the process is actually answering by fetching its
  * public environment descriptor. Inside a linked git worktree the worktree's
- * own `.sightseer` is checked first (matching dev-runner precedence); otherwise
- * the shared Sightseer home.
+ * own `.test-rig` is checked first (matching dev-runner precedence); otherwise
+ * the shared Test Rig home.
  */
 import { AuthStandardClientScopes, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { resolveWorktreeT3Home } from "@t3tools/shared/devHome";
@@ -60,7 +60,7 @@ export class NoRunningServerError extends Schema.TaggedErrorClass<NoRunningServe
 ) {
   override get message(): string {
     return [
-      "No running Sightseer server found.",
+      "No running Test Rig server found.",
       ...this.checkedStatePaths.map((statePath) => `  checked ${statePath}`),
       "Build the source checkout, then start one with `node apps/server/dist/bin.mjs serve`.",
     ].join("\n");
@@ -128,8 +128,8 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
   if (explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0) {
     bases.push(yield* resolveBaseDir(explicitBaseDir));
   } else {
-    // Same precedence as dev-runner: inside a linked worktree its own `.sightseer`
-    // outranks the shared home, so `sightseer pair` in a worktree pairs with the dev
+    // Same precedence as dev-runner: inside a linked worktree its own `.test-rig`
+    // outranks the shared home, so `test-rig pair` in a worktree pairs with the dev
     // server under test rather than the daily-driver install.
     const worktreeHome = yield* resolveWorktreeT3Home(process.cwd());
     if (worktreeHome !== undefined) {
@@ -232,7 +232,7 @@ const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
     return yield* environmentAuth.createPairingLink({
       scopes: AuthStandardClientScopes,
       subject: "one-time-token",
-      label: Option.getOrElse(input.label, () => "sightseer pair"),
+      label: Option.getOrElse(input.label, () => "test-rig pair"),
       ...(Option.isSome(input.ttl) ? { ttl: input.ttl.value } : {}),
     });
   }).pipe(
@@ -264,7 +264,7 @@ export const pairCommand = Command.make("pair", {
   label: labelFlag,
 }).pipe(
   Command.withDescription(
-    "Mint a pairing token for a running Sightseer server and print it as a QR code.",
+    "Mint a pairing token for a running Test Rig server and print it as a QR code.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {

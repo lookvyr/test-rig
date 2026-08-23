@@ -88,19 +88,19 @@ const wakeupsLayer = Layer.succeed(
   Wakeups.ConnectionWakeups.of({
     changes: Stream.callback<"application-active">((queue) =>
       Effect.acquireRelease(
-      Effect.sync(() => {
-        const listener = () => {
-          if (document.visibilityState === "visible") {
-            Queue.offerUnsafe(queue, "application-active");
-          }
-        };
-        document.addEventListener("visibilitychange", listener);
-        return listener;
-      }),
-      (listener) =>
         Effect.sync(() => {
-          document.removeEventListener("visibilitychange", listener);
+          const listener = () => {
+            if (document.visibilityState === "visible") {
+              Queue.offerUnsafe(queue, "application-active");
+            }
+          };
+          document.addEventListener("visibilitychange", listener);
+          return listener;
         }),
+        (listener) =>
+          Effect.sync(() => {
+            document.removeEventListener("visibilitychange", listener);
+          }),
       ).pipe(Effect.asVoid),
     ),
   }),
@@ -110,7 +110,7 @@ function clientMetadata() {
   const desktop = window.desktopBridge !== undefined;
   const platform = navigator.platform.trim();
   return {
-    label: desktop ? "Sightseer Desktop" : "Sightseer Web",
+    label: desktop ? "Test Rig Desktop" : "Test Rig Web",
     deviceType: "desktop" as const,
     ...(platform === "" ? {} : { os: platform }),
   };

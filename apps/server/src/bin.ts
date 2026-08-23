@@ -15,8 +15,8 @@ import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
 export const makeCli = () =>
-  Command.make("sightseer", { ...sharedServerCommandFlags }).pipe(
-    Command.withDescription("Run the Sightseer server."),
+  Command.make("test-rig", { ...sharedServerCommandFlags }).pipe(
+    Command.withDescription("Run the Test Rig server."),
     Command.withHandler((flags) => runServerCommand(flags)),
     Command.withSubcommands([startCommand, serveCommand, pairCommand, authCommand, projectCommand]),
   );

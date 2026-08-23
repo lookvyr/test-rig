@@ -10,7 +10,7 @@
  *
  *  2. **Many drivers, one registry** — the "built-in drivers slice" describe
  *     block configures one instance of every executable driver shipped by
- *     Sightseer (`codex`, `claudeAgent`, `opencode`) alongside excluded
+ *     Test Rig (`codex`, `claudeAgent`, `opencode`) alongside excluded
  *     Cursor/Grok rows. It proves the approved drivers boot normally while
  *     excluded rows fail closed as unavailable snapshots.
  *

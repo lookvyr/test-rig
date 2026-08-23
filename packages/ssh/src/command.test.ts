@@ -106,14 +106,14 @@ describe("ssh command", () => {
           appVersion: "0.0.17",
           updateChannel: "latest",
         }),
-        "@lookvyr/sightseer@0.0.17",
+        "@lookvyr/test-rig@0.0.17",
       );
       assert.equal(
         resolveRemoteT3CliPackageSpec({
           appVersion: "0.0.17-nightly.20260415.44",
           updateChannel: "nightly",
         }),
-        "@lookvyr/sightseer@0.0.17-nightly.20260415.44",
+        "@lookvyr/test-rig@0.0.17-nightly.20260415.44",
       );
       assert.equal(
         resolveRemoteT3CliPackageSpec({
@@ -121,7 +121,7 @@ describe("ssh command", () => {
           updateChannel: "nightly",
           isDevelopment: true,
         }),
-        "@lookvyr/sightseer@nightly",
+        "@lookvyr/test-rig@nightly",
       );
       assert.equal(
         resolveRemoteT3CliPackageSpec({
@@ -129,7 +129,7 @@ describe("ssh command", () => {
           updateChannel: "latest",
           isDevelopment: true,
         }),
-        "@lookvyr/sightseer@nightly",
+        "@lookvyr/test-rig@nightly",
       );
     }),
   );

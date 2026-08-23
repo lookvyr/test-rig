@@ -103,7 +103,7 @@ const mergeWslEnv = (
 };
 
 function resourceMonitorBinaryName(platform: NodeJS.Platform): string {
-  return platform === "win32" ? "sightseer-resource-monitor.exe" : "sightseer-resource-monitor";
+  return platform === "win32" ? "test-rig-resource-monitor.exe" : "test-rig-resource-monitor";
 }
 
 const resolveResourceMonitorPath = Effect.fn(
@@ -324,7 +324,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         ...backendChildEnvPatch(),
         ELECTRON_RUN_AS_NODE: "1",
       },
-      // Primary wants process.env (PATH, dev-runner's SIGHTSEER_HOME, etc.).
+      // Primary wants process.env (PATH, dev-runner's TEST_RIG_HOME, etc.).
       extendEnv: true,
       bootstrap,
       bootstrapDelivery: "fd3",
@@ -434,14 +434,14 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     }
   }
 
-  // Build an explicit copy of process.env minus the Sightseer and legacy T3
+  // Build an explicit copy of process.env minus the Test Rig and legacy T3
   // home overrides. If the Windows-side base dir leaks into the WSL backend,
-  // the Linux side ends up sharing C:\Users\...\.sightseer via
+  // the Linux side ends up sharing C:\Users\...\.test-rig via
   // /mnt/c, which means both backends read/write the same database and
   // their env-ids collide).
   const parentEnvWithoutT3Home: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key === "SIGHTSEER_HOME" || key === "T3CODE_HOME") continue;
+    if (key === "TEST_RIG_HOME" || key === "T3CODE_HOME") continue;
     parentEnvWithoutT3Home[key] = value;
   }
   const wslEnv = mergeWslEnv(parentEnvWithoutT3Home.WSLENV, forwardedEnvNames);

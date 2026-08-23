@@ -14,7 +14,7 @@ build/
 release/
 release-mock/
 .t3
-.sightseer
+.test-rig
 .idea/
 apps/web/.playwright
 apps/web/playwright-report
