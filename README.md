@@ -1,94 +1,55 @@
 # Sightseer
 
-Sightseer is a single-user, local-first desktop control surface for coding agents. Its Electron app runs an authenticated local server and renders the bundled web client.
+Sightseer is a local-first fork of [T3 Code](https://github.com/pingdotgg/t3code). It keeps T3 Code's desktop app, web client, local server, and coding-agent workflow, but cuts the product down to a narrower job.
 
-Works with your subscriptions on Claude Code, Codex, and OpenCode. If they're set up on your computer, Sightseer can control them.
+Sightseer runs coding tools that are already installed and authenticated on your machine. It does not include T3 Code's hosted services, analytics, mobile app, public web deployment, release pipeline, or self-update system. [FORK.md](./FORK.md) defines the exact product boundary.
 
-## "Wait, what are you selling me?"
+## Supported providers
 
-Nothing. We built Sightseer because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
+Sightseer supports three coding tools:
 
-We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
+| Provider    | Install                                               |
+| ----------- | ----------------------------------------------------- |
+| Codex       | [Codex CLI](https://developers.openai.com/codex/cli)  |
+| Claude Code | [Claude Code](https://claude.com/product/claude-code) |
+| OpenCode    | [OpenCode](https://opencode.ai)                       |
 
-## Installation
+## Build from source
 
-> [!WARNING]
-> Sightseer currently supports Codex, Claude, and OpenCode. Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+Building the app requires Node.js 24 and [Vite+](https://viteplus.dev/guide/).
 
-### Build from source
-
-Sightseer does not publish an npm package or prebuilt releases. Install Node.js
-24 and [Vite+](https://viteplus.dev/guide/), then build or run it from this
-checkout:
+Install dependencies and run the desktop app in development:
 
 ```bash
 vp i
 vp run dev:desktop
 ```
 
-For a production desktop build:
+Build and run the production desktop app:
 
 ```bash
 vp run build:desktop
 vp run start:desktop
 ```
 
-To create a local installer, use the matching `dist:desktop:*` command. For
-example, on macOS:
+On macOS, build a DMG in `./release`:
 
 ```bash
 vp run dist:desktop:dmg
 ```
 
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
-
 ## Documentation
 
-Full docs live in [docs/](./docs). There's no docs site yet.
+Start with the [documentation index](./docs/README.md). Most pages began as T3 Code docs. Treat them as reference material for now. Some still use upstream names or describe retained internals. When the docs disagree with [FORK.md](./FORK.md), the fork boundary wins.
+
+Useful references:
 
 - [Install and first run](./docs/user/install.md)
 - [Permission modes](./docs/user/permission-modes.md)
-- [Keyboard shortcuts](./docs/user/keybindings.md)
-- [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Source control integrations](./docs/user/source-control.md)
-- Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
+- Provider setup for [Codex](./docs/user/providers-codex.md) and [Claude Code](./docs/user/providers-claude.md)
+- [Architecture overview](./docs/internals/overview.md)
 
-Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
+## Upstream and license
 
-## If you REALLY want to contribute still.... read this first
-
-### Install `vp`
-
-Sightseer uses Vite+ so you'll need to install the global `vp` command-line tool.
-
-#### macOS / Linux
-
-```bash
-curl -fsSL https://vite.plus | bash
-```
-
-#### Windows
-
-```bash
-irm https://vite.plus/ps1 | iex
-```
-
-Checkout their getting started guide for more information: https://viteplus.dev/guide/
-
-### Install dependencies
-
-```bash
-vp i
-```
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
-
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+Sightseer began from T3 Code `v0.0.32` and keeps the full Git history. See [FORK.md](./FORK.md) for the upstream relationship and [LICENSE](./LICENSE) for license and attribution details.

@@ -1,136 +1,112 @@
-# Source Control Integrations
+# Source control
 
-T3 Code connects to your Git hosting provider so you can create pull requests, review code, and manage repositories without leaving the app.
+Sightseer uses Git for local repository work and can connect to a hosting provider for pull requests, repository lookup, cloning, and publishing.
 
-## Supported Providers
+Git and hosting providers are separate. Disabling a GitHub, GitLab, Azure DevOps, or Bitbucket integration stops Sightseer from checking credentials or making requests to that provider. It does not disable Git commands against remotes already configured in a repository.
 
-T3 Code works with the platforms your team already uses:
+## Provider switches
 
-- **GitHub** – Pull requests, repository creation, and clone integration
-- **GitLab** – Merge requests, repository publishing, and hosted clones
-- **Bitbucket** – Pull request workflows (via API token authentication)
-- **Azure DevOps** – Pull request support for Microsoft-hosted repositories
+Open **Settings** → **Source Control** to enable or disable each hosting integration.
 
-## What You Can Do
+| Provider     | Default  | Authentication                        |
+| ------------ | -------- | ------------------------------------- |
+| GitHub       | Enabled  | GitHub CLI                            |
+| GitLab       | Disabled | GitLab CLI                            |
+| Azure DevOps | Disabled | Azure CLI with the DevOps extension   |
+| Bitbucket    | Disabled | Access token, or email plus API token |
 
-### Start Projects from Anywhere
+When an integration is disabled:
 
-**Clone repositories directly**
+- Sightseer does not run its discovery or authentication checks.
+- Provider-specific clone, publish, and pull-request actions are unavailable.
+- Provider requests fail before Sightseer invokes the provider CLI or API.
 
-- Open the Command Palette (`Cmd/Ctrl + K`) → **Add Project**
-- Choose **GitHub repository**, **GitLab repository**, **Bitbucket repository**, **Azure DevOps repository**, or paste any **Git URL**
-- Enter the repository path (`owner/repo`, `group/project`, `workspace/repository`, or `project/repository`) or a full Git URL, pick a destination, and start coding
+Enable an integration before using any of its features. Sightseer scans it after the setting changes. Use the rescan button in **Settings** → **Source Control** after installing a CLI, signing in, or changing credentials.
 
-**Publish local projects to the cloud**
+Settings belong to the server environment that owns the repository. If you use more than one environment, configure each one separately.
 
-- Have a local Git repository without a remote?
-- Use the **Publish Repository** action to create a new hosted repository (GitHub, GitLab, Bitbucket, or Azure DevOps), add it as your origin remote, and push, in one flow
-- If the local repository has no commits yet, publishing creates the remote and wires it up but does not push. Make a commit, then push normally.
+## Git is separate
 
-### Manage Code Reviews Without Context Switching
+Git status, diffs, branches, worktrees, checkpoints, fetches, pulls, and pushes do not depend on a hosting-provider switch. They use the repository's configured Git remotes and credentials.
 
-**Create pull requests while you work**
+Sightseer refreshes remote branch status in the background. The default fetch interval is 30 seconds. Change it in **Settings** → **Source Control** → **Git** → **Fetch interval**. Set the interval to `0` if Git should contact remotes only after an explicit action.
 
-- Push a branch and create a pull request from the Git actions controls in the toolbar
-- T3 Code can suggest titles and descriptions based on your commits
-- Supports GitHub Pull Requests, GitLab Merge Requests, Bitbucket Pull Requests, and Azure DevOps Pull Requests
+The background-activity policy can pause a scheduled fetch while the machine is locked, on battery, or in another restricted state. The fetch interval controls how often a refresh becomes eligible to run.
 
-**Stay on top of open reviews**
+## Available provider actions
 
-- See if your current branch already has an open PR/MR
-- Open the review directly in your browser with one click
-- Check out a teammate's branch to review code locally
+With the matching integration enabled and authenticated, Sightseer can:
 
-### Know Your Setup at a Glance
+- Look up and clone a hosted repository.
+- Publish a local repository and add its remote.
+- Create a pull request or merge request from the current branch.
+- Find an existing pull request or merge request and open it in the browser.
+- Check out a change request for local review.
 
-The **Source Control settings** page shows you exactly what's connected:
+You can always clone by pasting a full Git URL. This uses Git directly rather than provider discovery.
 
-- ✅ Which providers are authenticated and ready
-- ⚠️ What's missing and how to fix it
-- 👤 Which account is signed in (when available)
+## Set up GitHub
 
-Run a quick **Rescan** after setting up a new machine or changing credentials.
+Install the GitHub CLI and sign in on the machine running the Sightseer environment:
 
-## Getting Started
+```bash
+brew install gh
+gh auth login
+```
 
-### For GitHub (Recommended for most users)
+GitHub is enabled by default. Open **Settings** → **Source Control** to check its status or turn it off.
 
-1. Install the GitHub CLI on the machine running T3 Code:
-   ```bash
-   brew install gh
-   ```
-2. Sign in:
-   ```bash
-   gh auth login
-   ```
-3. Open **Settings → Source Control** in T3 Code and verify GitHub shows as authenticated
+## Set up GitLab
 
-You can now clone, publish, and create pull requests.
+Install the GitLab CLI and sign in:
 
-### For GitLab
+```bash
+brew install glab
+glab auth login
+```
 
-1. Install the GitLab CLI:
-   ```bash
-   brew install glab
-   ```
-2. Authenticate:
-   ```bash
-   glab auth login
-   ```
-3. Check **Settings → Source Control** to confirm the connection
+Enable GitLab in **Settings** → **Source Control**, then rescan.
 
-### For Bitbucket
+## Set up Azure DevOps
 
-Bitbucket uses tokens instead of a CLI tool. Two options, both set as environment variables on the
-machine running T3 Code.
+Install Azure CLI, add the DevOps extension, and sign in:
 
-Recommended, a Bitbucket access token:
+```bash
+brew install azure-cli
+az extension add --name azure-devops
+az login
+```
+
+Enable Azure DevOps in **Settings** → **Source Control**, then rescan.
+
+## Set up Bitbucket
+
+Bitbucket reads credentials from environment variables on the machine running the Sightseer environment. These variable names retain their inherited `T3CODE_` prefix.
+
+Use a Bitbucket access token:
 
 ```bash
 export T3CODE_BITBUCKET_ACCESS_TOKEN="your-access-token"
 ```
 
-Or an Atlassian account email plus API token, with read/write access to pull requests and
-repositories:
+Or use an Atlassian account email and API token with repository and pull-request access:
 
 ```bash
 export T3CODE_BITBUCKET_EMAIL="you@example.com"
 export T3CODE_BITBUCKET_API_TOKEN="your-token"
 ```
 
-If both are set, the access token wins. Restart T3 Code and verify the connection in **Source
-Control settings**.
+The access token takes precedence when both forms are configured. Restart the Sightseer environment after changing these variables, enable Bitbucket in **Settings** → **Source Control**, then rescan.
 
-### For Azure DevOps
+## Troubleshooting
 
-1. Install Azure CLI:
-   ```bash
-   brew install azure-cli
-   ```
-2. Add the DevOps extension:
-   ```bash
-   az extension add --name azure-devops
-   ```
-3. Sign in:
-   ```bash
-   az login
-   ```
+- A disabled provider has no authentication status. Enable it before rescanning.
+- If a CLI is installed but the status is unavailable, make sure it is on the server process's `PATH`, then restart Sightseer and rescan.
+- If a provider reports that it is not authenticated, run its login command on the machine hosting the environment. Signing in on the browser device does not configure the server.
+- Provider authentication and Git remote authentication are separate. A provider CLI can be signed in while an SSH or HTTPS Git remote still needs its own credentials.
+- If background fetches prompt for credentials or a security key, set the Git fetch interval to `0` and use explicit Git actions.
 
----
-
-## Requirements & Troubleshooting
-
-**Git is required** – T3 Code uses Git for all local operations. Ensure `git` is installed on your server.
-
-**Server-side setup** – Authentication happens on the machine running T3 Code (the server), not your local browser. If you're using a hosted or team instance, your administrator may have already configured providers.
-
-**Common issues:**
-
-- **Provider shows "Not authenticated"** – Run the login command for that provider (e.g., `gh auth login`) in a terminal on the server, then rescan in Settings
-- **Bitbucket not connecting** – Double-check your environment variables are set in the correct shell profile and the server was restarted
-- **Can't push to a remote** – Verify your Git remote URL matches the provider you've authenticated with (SSH vs HTTPS remotes may need different credentials)
-
-**Need more help?** Check your provider's CLI documentation:
+Provider documentation:
 
 - [GitHub CLI](https://cli.github.com/)
 - [GitLab CLI](https://gitlab.com/gitlab-org/cli)
