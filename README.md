@@ -2,6 +2,8 @@
 
 Test Rig is a local-first fork of [T3 Code](https://github.com/pingdotgg/t3code). It keeps T3 Code's desktop app, web client, local server, and coding-agent workflow, but cuts the product down to a narrower job.
 
+This is mostly an experiment to try out a "control plane" harness and make some small tweaks along the way.
+
 Test Rig runs coding tools that are already installed and authenticated on your machine. It does not include T3 Code's hosted services, analytics, mobile app, public web deployment, release pipeline, or self-update system. [FORK.md](./FORK.md) defines the exact product boundary.
 
 ## Supported providers
