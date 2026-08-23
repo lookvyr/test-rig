@@ -11,8 +11,6 @@ import { pairCommand } from "./cli/pair.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
 import { projectCommand } from "./cli/project.ts";
 import { runServerCommand, serveCommand, startCommand } from "./cli/server.ts";
-import { serviceCommand } from "./cli/service.ts";
-import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 
 const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
 
@@ -20,15 +18,7 @@ export const makeCli = () =>
   Command.make("sightseer", { ...sharedServerCommandFlags }).pipe(
     Command.withDescription("Run the Sightseer server."),
     Command.withHandler((flags) => runServerCommand(flags)),
-    Command.withSubcommands([
-      startCommand,
-      serveCommand,
-      pairCommand,
-      authCommand,
-      projectCommand,
-      serviceCommand,
-      servicePreflightCommand,
-    ]),
+    Command.withSubcommands([startCommand, serveCommand, pairCommand, authCommand, projectCommand]),
   );
 
 export const cli = makeCli();

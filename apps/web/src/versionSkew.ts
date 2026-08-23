@@ -1,4 +1,4 @@
-import type { EnvironmentId, ServerConfig, ServerSelfUpdateCapability } from "@t3tools/contracts";
+import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 import { APP_VERSION } from "./branding";
@@ -49,29 +49,8 @@ export function resolveServerConfigVersionMismatch(
   return resolveVersionMismatch(serverConfig?.environment.serverVersion);
 }
 
-/** The update path the connected server offers, or null when it only
-    supports a manual relaunch (older servers, dev checkouts, Windows). */
-export function resolveServerSelfUpdateCapability(
-  serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
-): ServerSelfUpdateCapability | null {
-  return serverConfig?.environment.capabilities.serverSelfUpdate ?? null;
-}
-
-/** One sentence telling the user how to resolve version skew for a server,
-    matched to the update path it offers. */
-export function serverUpdateGuidance(
-  capability: ServerSelfUpdateCapability | null,
-  serverLabel: string,
-): string {
-  switch (capability) {
-    case "boot-service":
-    case "respawn":
-      return `Update the ${serverLabel} so they stay in sync.`;
-    case "desktop-managed":
-      return `The ${serverLabel} is run by the Sightseer desktop app on its machine — update the desktop app there to sync them.`;
-    default:
-      return `Rebuild and relaunch the ${serverLabel} from its source checkout to sync them.`;
-  }
+export function versionMismatchGuidance(serverLabel: string): string {
+  return `Rebuild and relaunch the ${serverLabel} from its source checkout to sync them.`;
 }
 
 export function buildVersionMismatchDismissalKey(

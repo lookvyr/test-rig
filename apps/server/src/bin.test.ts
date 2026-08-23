@@ -175,15 +175,11 @@ it.layer(NodeServices.layer)("bin cli parsing", (it) => {
     }),
   );
 
-  it.effect("only exposes safe inherited-service commands", () =>
+  it.effect("does not expose inherited service commands", () =>
     Effect.gen(function* () {
-      const { output } = yield* captureStdout(runCli(["service", "--help"]));
+      const { output } = yield* captureStdout(runCli(["--help"]));
 
-      assert.include(output, "Inspect or remove an inherited Sightseer background service.");
-      assert.include(output, "uninstall");
-      assert.include(output, "status");
-      assert.notInclude(output, "\n  install ");
-      assert.notInclude(output, "\n  update ");
+      assert.notInclude(output, "\n  service ");
     }),
   );
 

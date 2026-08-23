@@ -58,6 +58,9 @@ DevOps, and Bitbucket integrations may be explicitly enabled by the user.
 Disabled source-control hosting integrations must have no reachable discovery,
 authentication, enrichment, or operation path. This integration boundary does
 not restrict explicit generic Git operations against user-configured remotes.
+Automatic Git remote refresh is retained so local repository status stays
+current; it may contact remotes the user configured in Git independently of a
+hosting integration toggle.
 Approved provider harnesses, explicit Git actions, enabled source-control hosting
 integrations, browser/MCP tools, and other explicit user-directed actions may use
 the network.
@@ -148,16 +151,16 @@ Claude Code, and OpenCode authentication homes remain intentionally shared.
 
 ## Decision log
 
-| Decision                             | Rationale                                                                                                                                                                           |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop-first and local-first        | The desktop workflow is the product; the web code is retained as its renderer and the authenticated loopback server owns the local core.                                            |
-| Three approved providers             | Codex, Claude Code, and OpenCode cover the intended harnesses without retaining unused executable integrations.                                                                     |
-| Explicit source-control integrations | GitHub is enabled by default; GitLab, Azure DevOps, and Bitbucket are opt-in and fail closed while disabled. Generic Git remains independent of hosting-provider integration state. |
-| Remove cloud product edges           | A personally owned tool used with company repositories must not make data egress to unapproved services accidentally enableable.                                                    |
-| Build and verify from source         | Local build, test, and desktop artifact commands remain; inherited CI and publication automation do not. Future automation will be purpose-built.                                   |
-| Preserve architectural seams         | Contracts, orchestration, drivers, checkpoints, client runtime, migrations, and local auth make the local product coherent and keep valuable upstream work portable.                |
-| Selective upstream intake            | Direct, adapted, and independent implementations are all valid; product fit matters more than complete parity.                                                                      |
-| Independent state identity           | Sightseer and T3 Code must coexist without sharing application state, while provider-owned authentication remains reusable.                                                         |
+| Decision                             | Rationale                                                                                                                                                                                                                |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Desktop-first and local-first        | The desktop workflow is the product; the web code is retained as its renderer and the authenticated loopback server owns the local core.                                                                                 |
+| Three approved providers             | Codex, Claude Code, and OpenCode cover the intended harnesses without retaining unused executable integrations.                                                                                                          |
+| Explicit source-control integrations | GitHub is enabled by default; GitLab, Azure DevOps, and Bitbucket are opt-in and fail closed while disabled. Generic Git, including automatic remote refresh, remains independent of hosting-provider integration state. |
+| Remove cloud product edges           | A personally owned tool used with company repositories must not make data egress to unapproved services accidentally enableable.                                                                                         |
+| Build and verify from source         | Local build, test, and desktop artifact commands remain; inherited CI and publication automation do not. Future automation will be purpose-built.                                                                        |
+| Preserve architectural seams         | Contracts, orchestration, drivers, checkpoints, client runtime, migrations, and local auth make the local product coherent and keep valuable upstream work portable.                                                     |
+| Selective upstream intake            | Direct, adapted, and independent implementations are all valid; product fit matters more than complete parity.                                                                                                           |
+| Independent state identity           | Sightseer and T3 Code must coexist without sharing application state, while provider-owned authentication remains reusable.                                                                                              |
 
 ## Boundary smoke tests
 
@@ -189,8 +192,8 @@ Use the smallest focused checks appropriate to a changed vertical slice:
       upgrades without rewriting history or corrupting unavailable settings.
 - [ ] Focused desktop, server, web-renderer, contract, and provider tests pass
       for the boundaries touched by the change.
-- [ ] No inherited GitHub Actions workflow or npm/GitHub release publisher is
-      present, and no package-backed service install or self-update is reachable;
+- [ ] No inherited GitHub Actions workflow, npm/GitHub release publisher,
+      package-backed service lifecycle, or self-update path is present;
       local source builds and desktop artifact generation still work.
 
 ## License and attribution

@@ -8,9 +8,8 @@ import {
   dismissVersionMismatch,
   isVersionMismatchDismissed,
   resolveServerConfigVersionMismatch,
-  resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
-  serverUpdateGuidance,
+  versionMismatchGuidance,
 } from "./versionSkew";
 
 describe("versionSkew", () => {
@@ -78,32 +77,8 @@ describe("versionSkew", () => {
     );
   });
 
-  it("reads desktop-managed update capabilities from config descriptors", () => {
-    expect(
-      resolveServerSelfUpdateCapability({
-        environment: {
-          environmentId: EnvironmentId.make("environment-desktop"),
-          label: "Desktop",
-          platform: { os: "darwin", arch: "arm64" },
-          serverVersion: "9.9.9",
-          capabilities: {
-            repositoryIdentity: true,
-            serverSelfUpdate: "desktop-managed",
-          },
-        },
-      }),
-    ).toBe("desktop-managed");
-    expect(resolveServerSelfUpdateCapability(null)).toBeNull();
-  });
-
-  it("matches version-drift guidance to the advertised update path", () => {
-    expect(serverUpdateGuidance("respawn", "Remote server")).toBe(
-      "Update the Remote server so they stay in sync.",
-    );
-    expect(serverUpdateGuidance("desktop-managed", "Desktop server")).toBe(
-      "The Desktop server is run by the Sightseer desktop app on its machine — update the desktop app there to sync them.",
-    );
-    expect(serverUpdateGuidance(null, "Local server")).toBe(
+  it("directs version-drift recovery to the source checkout", () => {
+    expect(versionMismatchGuidance("Local server")).toBe(
       "Rebuild and relaunch the Local server from its source checkout to sync them.",
     );
   });

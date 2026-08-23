@@ -23,6 +23,25 @@ const removedPaths = [
   "scripts/lib/update-manifest.ts",
   "apps/server/src/cli/invocation.ts",
   "apps/server/src/cli/invocation.test.ts",
+  "apps/server/src/cli/service.ts",
+  "apps/server/src/cli/service.test.ts",
+  "apps/server/src/cli/servicePreflight.ts",
+  "apps/server/src/cloud/bootService.ts",
+  "apps/server/src/cloud/bootService.test.ts",
+  "apps/server/src/cloud/pinnedRuntime.ts",
+  "apps/server/src/cloud/pinnedRuntime.test.ts",
+  "apps/server/src/cloud/selfUpdate.ts",
+  "apps/server/src/cloud/selfUpdate.test.ts",
+  "apps/server/src/cloud/serviceLauncherClient.ts",
+  "apps/server/src/cloud/serviceLauncherClient.test.ts",
+  "apps/server/src/cloud/servicePreflight.ts",
+  "apps/server/src/cloud/servicePreflight.test.ts",
+  "apps/server/src/cloud/serviceProtocol.ts",
+  "apps/server/src/service-launcher.ts",
+  "apps/server/src/serviceLauncher.ts",
+  "apps/server/src/serviceLauncher.test.ts",
+  "apps/web/src/components/ServerUpdateAction.tsx",
+  "apps/web/src/components/ServerUpdateAction.test.tsx",
 ] as const;
 
 describe("release automation boundary", () => {
@@ -36,23 +55,15 @@ describe("release automation boundary", () => {
     );
   });
 
-  it("keeps the source-built server package private and without a publisher command", () => {
+  it("keeps the source-built server package private and source-only", () => {
     const rootPackage = JSON.parse(
       NodeFS.readFileSync(NodePath.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts?: Record<string, string> };
     const serverPackage = JSON.parse(
       NodeFS.readFileSync(NodePath.join(repoRoot, "apps/server/package.json"), "utf8"),
-    ) as { private?: boolean };
+    ) as { private?: boolean; scripts?: Record<string, string> };
     const serverBuildCli = NodeFS.readFileSync(
       NodePath.join(repoRoot, "apps/server/scripts/cli.ts"),
-      "utf8",
-    );
-    const serviceCli = NodeFS.readFileSync(
-      NodePath.join(repoRoot, "apps/server/src/cli/service.ts"),
-      "utf8",
-    );
-    const selfUpdate = NodeFS.readFileSync(
-      NodePath.join(repoRoot, "apps/server/src/cloud/selfUpdate.ts"),
       "utf8",
     );
 
@@ -60,9 +71,23 @@ describe("release automation boundary", () => {
     expect(serverPackage.private).toBe(true);
     expect(serverBuildCli).not.toContain('Command.make("publish"');
     expect(serverBuildCli).not.toContain("vp pm publish");
-    expect(serviceCli).not.toContain('Command.make("install"');
-    expect(serviceCli).not.toContain('Command.make("update"');
-    expect(selfUpdate).not.toContain("ensurePinnedRuntimeInstalled");
-    expect(selfUpdate).not.toContain('command: "npm"');
+    expect(serverPackage.scripts?.["build:bundle"]).toBe("vp pack");
+  });
+
+  it("keeps the inherited service and self-update wire absent", () => {
+    const boundarySources = [
+      "apps/server/src/bin.ts",
+      "apps/server/src/ws.ts",
+      "packages/contracts/src/environment.ts",
+      "packages/contracts/src/rpc.ts",
+      "packages/contracts/src/server.ts",
+      "packages/client-runtime/src/state/server.ts",
+    ]
+      .map((path) => NodeFS.readFileSync(NodePath.join(repoRoot, path), "utf8"))
+      .join("\n");
+
+    expect(boundarySources).not.toContain("serverUpdateServer");
+    expect(boundarySources).not.toContain("ServerSelfUpdate");
+    expect(boundarySources).not.toContain("ServiceLauncher");
   });
 });

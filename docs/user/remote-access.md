@@ -99,9 +99,8 @@ The UI and runtime are retained temporarily while the separate SSH/remote
 boundary is audited. Invoking this flow may contact the npm registry.
 
 On a Linux host, you can keep a source-built server running after logout using
-your own process supervisor. Sightseer retains status and uninstall commands
-for inherited background services, but package-backed service installation and
-updates are disabled in the source-only workflow.
+your own process supervisor. Sightseer does not include inherited
+package-backed service installation, management, or update commands.
 
 ## How Pairing Works
 
