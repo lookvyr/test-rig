@@ -2,15 +2,12 @@ import "vite-plus/test/config";
 import { defineConfig, mergeConfig } from "vite-plus";
 
 import baseConfig from "../../vite.config.ts";
-import packageJson from "./package.json" with { type: "json" };
 
 const bundledPackagePrefixes = ["@pierre/diffs", "@t3tools/", "effect-codex-app-server"];
 
 export function shouldBundleCliDependency(id: string): boolean {
   return bundledPackagePrefixes.some((prefix) => id.startsWith(prefix));
 }
-
-const cliBuildChannel = packageJson.version.includes("-nightly.") ? "nightly" : "latest";
 
 export default mergeConfig(
   baseConfig,
@@ -35,9 +32,6 @@ export default mergeConfig(
       },
       banner: {
         js: "#!/usr/bin/env node\n",
-      },
-      define: {
-        __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
       },
     },
     test: {

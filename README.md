@@ -19,23 +19,30 @@ We wanted something performant, remote-ready, and truly open. If we ever go the 
 > - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
 > - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 
-### Try it out (install-free)
+### Build from source
 
-The easiest way to test Sightseer is to run the server in your terminal (requires Node.js 22.16+, 23.11+, or 24.10+):
+Sightseer does not publish an npm package or prebuilt releases. Install Node.js
+24 and [Vite+](https://viteplus.dev/guide/), then build or run it from this
+checkout:
 
 ```bash
-npx @lookvyr/sightseer@latest
+vp i
+vp run dev:desktop
 ```
 
-This will launch Sightseer's backend on your machine as well as the local web app to control your agents.
+For a production desktop build:
 
-Tip: Use `npx @lookvyr/sightseer@latest --help` for the full CLI reference.
+```bash
+vp run build:desktop
+vp run start:desktop
+```
 
-### Desktop app
+To create a local installer, use the matching `dist:desktop:*` command. For
+example, on macOS:
 
-Prebuilt desktop artifacts, when published, will appear on
-[Sightseer GitHub Releases](https://github.com/lookvyr/sightseer/releases). Upstream T3 Code
-packages do not install Sightseer.
+```bash
+vp run dist:desktop:dmg
+```
 
 ## Some notes
 
@@ -51,10 +58,8 @@ Full docs live in [docs/](./docs). There's no docs site yet.
 - [Permission modes](./docs/user/permission-modes.md)
 - [Keyboard shortcuts](./docs/user/keybindings.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
-- [Keeping app and server in sync](./docs/user/updating.md)
 - [Source control integrations](./docs/user/source-control.md)
 - Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
-- Linux: [run Sightseer as a background service](./docs/user/background-service.md)
 
 Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
 

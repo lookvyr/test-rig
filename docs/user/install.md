@@ -8,20 +8,27 @@ Node.js `^22.16 || ^23.11 || >=24.10` on the machine that runs the Sightseer ser
 
 At least one provider CLI, installed and authenticated. See [Providers](#providers) below.
 
-## Run Without Installing
+## Build From Source
+
+Sightseer does not publish an npm package or prebuilt releases. Install Node.js
+24 and [Vite+](https://viteplus.dev/guide/), then run the desktop app from a
+source checkout:
 
 ```bash
-npx @lookvyr/sightseer@latest
+vp i
+vp run dev:desktop
 ```
 
-This starts the Sightseer server on your machine and opens the local web app. Use
-`npx @lookvyr/sightseer@latest --help` for the full CLI reference.
+Build and run the production desktop app with:
 
-## Desktop App
+```bash
+vp run build:desktop
+vp run start:desktop
+```
 
-Prebuilt desktop artifacts, when published, will appear on
-[Sightseer GitHub Releases](https://github.com/lookvyr/sightseer/releases). The upstream T3 Code
-Winget, Homebrew, and AUR packages do not install Sightseer.
+Local installer commands remain available. For example, `vp run
+dist:desktop:dmg` creates a macOS DMG in `./release`. See the maintainer
+[Scripts](../internals/scripts.md) reference for other platforms.
 
 ## Providers
 
@@ -57,5 +64,3 @@ For multi-account setups, see [Codex](./providers-codex.md) and [Claude](./provi
 
 - [Permission modes](./permission-modes.md): how much Sightseer asks before acting
 - [Remote access](./remote-access.md): connect from a phone, tablet, or another desktop
-- [Keeping Sightseer in sync](./updating.md): client and server version skew
-- [Running in the background](./background-service.md): Linux background service

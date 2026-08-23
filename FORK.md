@@ -102,6 +102,10 @@ The following are outside Sightseer's product boundary:
 - PostHog analytics and identity collection, and outbound OTLP export.
 - Hosted/public web deployment and the mobile and marketing surfaces and build
   targets.
+- Inherited CI, release, and publication automation, including GitHub Actions,
+  npm publication, GitHub Releases, release notifications, and automated
+  version commits. Package-backed server installation and self-update are also
+  excluded from the source-only product.
 - Usage/pricing UI and custom-gateway usage integration.
 - Upstream desktop auto-update feeds.
 
@@ -122,9 +126,6 @@ lifecycle, executable provider, or outbound client remains reachable.
 - ACP may remain temporarily dormant and unreachable. With Cursor and Grok
   removed it has no independent route or registration path; deletion waits for
   dependency analysis.
-- Sightseer-specific release automation, code signing, and notarization are
-  deferred. No T3 Code release or update infrastructure is inherited by
-  default.
 
 Deferred does not mean prohibited. Adding one of these capabilities requires a
 new explicit boundary decision before implementation.
@@ -147,46 +148,50 @@ Claude Code, and OpenCode authentication homes remain intentionally shared.
 
 ## Decision log
 
-| Decision | Rationale |
-| --- | --- |
-| Desktop-first and local-first | The desktop workflow is the product; the web code is retained as its renderer and the authenticated loopback server owns the local core. |
-| Three approved providers | Codex, Claude Code, and OpenCode cover the intended harnesses without retaining unused executable integrations. |
+| Decision                             | Rationale                                                                                                                                                                           |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop-first and local-first        | The desktop workflow is the product; the web code is retained as its renderer and the authenticated loopback server owns the local core.                                            |
+| Three approved providers             | Codex, Claude Code, and OpenCode cover the intended harnesses without retaining unused executable integrations.                                                                     |
 | Explicit source-control integrations | GitHub is enabled by default; GitLab, Azure DevOps, and Bitbucket are opt-in and fail closed while disabled. Generic Git remains independent of hosting-provider integration state. |
-| Remove cloud product edges | A personally owned tool used with company repositories must not make data egress to unapproved services accidentally enableable. |
-| Preserve architectural seams | Contracts, orchestration, drivers, checkpoints, client runtime, migrations, and local auth make the local product coherent and keep valuable upstream work portable. |
-| Selective upstream intake | Direct, adapted, and independent implementations are all valid; product fit matters more than complete parity. |
-| Independent state identity | Sightseer and T3 Code must coexist without sharing application state, while provider-owned authentication remains reusable. |
+| Remove cloud product edges           | A personally owned tool used with company repositories must not make data egress to unapproved services accidentally enableable.                                                    |
+| Build and verify from source         | Local build, test, and desktop artifact commands remain; inherited CI and publication automation do not. Future automation will be purpose-built.                                   |
+| Preserve architectural seams         | Contracts, orchestration, drivers, checkpoints, client runtime, migrations, and local auth make the local product coherent and keep valuable upstream work portable.                |
+| Selective upstream intake            | Direct, adapted, and independent implementations are all valid; product fit matters more than complete parity.                                                                      |
+| Independent state identity           | Sightseer and T3 Code must coexist without sharing application state, while provider-owned authentication remains reusable.                                                         |
 
 ## Boundary smoke tests
 
 Use the smallest focused checks appropriate to a changed vertical slice:
 
 - [ ] The desktop shell starts with the local web renderer and a loopback-bound,
-  authenticated server.
+      authenticated server.
 - [ ] A disposable repository can create and resume a thread, run terminal and
-  filesystem operations, use Git, and create and restore a checkpoint/worktree.
+      filesystem operations, use Git, and create and restore a checkpoint/worktree.
 - [ ] Codex, Claude Code, and OpenCode can each be selected and complete a
-  representative local turn with their existing provider-owned authentication.
+      representative local turn with their existing provider-owned authentication.
 - [ ] Cursor and Grok cannot be selected or executed through UI, RPC, persisted
-  legacy configuration, or direct server requests; legacy data remains
-  readable and fails closed.
+      legacy configuration, or direct server requests; legacy data remains
+      readable and fails closed.
 - [ ] T3 Connect, Clerk account flows, relay/cloudflared, mobile push, and
-  Tailscale have no reachable server lifecycle or route and no shipped client
-  entry point.
+      Tailscale have no reachable server lifecycle or route and no shipped client
+      entry point.
 - [ ] With automatic egress monitored or denied, startup and an idle session
-  make no request to PostHog, OTLP, update feeds, LiteLLM pricing, Google
-  favicons, or npm-registry enrichment.
+      make no request to PostHog, OTLP, update feeds, LiteLLM pricing, Google
+      favicons, or npm-registry enrichment.
 - [ ] Local NDJSON observability, resource diagnostics, browser/MCP actions,
-  explicit Git actions, enabled source-control hosting integrations, and approved
-  provider networking still work; disabled hosting integrations make no
-  discovery, authentication, enrichment, or operation request.
+      explicit Git actions, enabled source-control hosting integrations, and approved
+      provider networking still work; disabled hosting integrations make no
+      discovery, authentication, enrichment, or operation request.
 - [ ] `SIGHTSEER_HOME` and `~/.sightseer` contain Sightseer state; ambient
-  `T3CODE_HOME` is ignored; T3 Code and Sightseer can run concurrently without
-  Electron, port, URL-scheme, database, worktree, cache, or log collisions.
+      `T3CODE_HOME` is ignored; T3 Code and Sightseer can run concurrently without
+      Electron, port, URL-scheme, database, worktree, cache, or log collisions.
 - [ ] A database carrying historical migrations and excluded-provider rows
-  upgrades without rewriting history or corrupting unavailable settings.
+      upgrades without rewriting history or corrupting unavailable settings.
 - [ ] Focused desktop, server, web-renderer, contract, and provider tests pass
-  for the boundaries touched by the change.
+      for the boundaries touched by the change.
+- [ ] No inherited GitHub Actions workflow or npm/GitHub release publisher is
+      present, and no package-backed service install or self-update is reachable;
+      local source builds and desktop artifact generation still work.
 
 ## License and attribution
 

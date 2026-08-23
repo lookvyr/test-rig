@@ -25,7 +25,7 @@ The monitor is intentionally not a Node native addon.
 - A monitor crash cannot corrupt the Node runtime.
 - The server can supervise, restart, version-check, and measure the monitor as a
   normal child process.
-- The same protocol works for the desktop app and the published CLI.
+- The same protocol works for the desktop app and the source-built server CLI.
 - Packaging is a single platform executable instead of an addon toolchain plus
   Node/Electron ABI matrix.
 
@@ -341,15 +341,15 @@ Desktop artifact builds compile the Rust target, stage it as
 `resources/resource-monitor/t3-resource-monitor[.exe]`, and pass its path to the
 backend bootstrap.
 
-CLI release jobs upload each active platform monitor artifact and copy it into:
+Source-built server distributions may include a monitor at:
 
 ```text
 apps/server/dist/resource-monitor/<platform>-<arch>/
 ```
 
-The published server package already includes `dist`, so those executables ship
-with the CLI. Missing platform artifacts degrade native telemetry to
-`unavailable`; the server continues running.
+Local desktop artifact builds stage the correct executable automatically.
+Missing platform artifacts in other source-built server distributions degrade
+native telemetry to `unavailable`; the server continues running.
 
 ## Resource and failure behavior
 

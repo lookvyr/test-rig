@@ -22,10 +22,17 @@ it("reports the installed service version and host paths", () => {
   );
 });
 
-it("gives a direct repair command for a stale service", () => {
+it("keeps package-backed updates unavailable for a stale service", () => {
   assert.include(
     formatServiceStatus({ ...status, current: false }, "0.0.29"),
-    "Next: Run `npx @lookvyr/sightseer@latest service update`.",
+    "Source-only builds do not support service updates.",
+  );
+});
+
+it("keeps package-backed installation unavailable", () => {
+  assert.include(
+    formatServiceStatus({ ...status, installed: false }, "0.0.29"),
+    "Source-only builds do not support service installation.",
   );
 });
 

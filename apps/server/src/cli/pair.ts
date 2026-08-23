@@ -62,7 +62,7 @@ export class NoRunningServerError extends Schema.TaggedErrorClass<NoRunningServe
     return [
       "No running Sightseer server found.",
       ...this.checkedStatePaths.map((statePath) => `  checked ${statePath}`),
-      "Start one with `npx @lookvyr/sightseer serve`.",
+      "Build the source checkout, then start one with `node apps/server/dist/bin.mjs serve`.",
     ].join("\n");
   }
 }

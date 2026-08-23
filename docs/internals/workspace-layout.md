@@ -7,7 +7,7 @@ the task commands.
 
 ## apps
 
-- `apps/server` (`t3`): the execution runtime and the published CLI. Owns orchestration, provider
+- `apps/server` (`t3`): the execution runtime and source-built CLI. Owns orchestration, provider
   drivers, checkpointing, VCS, terminals, filesystem access, auth, and the HTTP + WebSocket surface.
   Also serves the built web app.
 - `apps/web` (`@t3tools/web`): React + Vite UI. Consumes the shared client runtime and adds routing,
@@ -31,8 +31,8 @@ the task commands.
 
 ## Other top-level directories
 
-- `scripts/`: workspace tooling run through `vp run`. Dev runner, desktop artifact builds, release
-  helpers, and update-manifest merging.
+- `scripts/`: workspace tooling run through `vp run`, including the dev runner
+  and local desktop artifact builds.
 - `assets/`: brand and app icon sources per channel (`dev`, `nightly`, `prod`).
 - `patches/`: pnpm patches for pinned upstream dependencies.
 - `oxlint-plugin-t3code/`: repo-specific lint rules.

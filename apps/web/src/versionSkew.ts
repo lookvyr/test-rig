@@ -57,11 +57,6 @@ export function resolveServerSelfUpdateCapability(
   return serverConfig?.environment.capabilities.serverSelfUpdate ?? null;
 }
 
-/** The command to hand users whose server cannot update itself. */
-export function manualServerUpdateCommand(targetVersion: string): string {
-  return `npx @lookvyr/sightseer@${targetVersion}`;
-}
-
 /** One sentence telling the user how to resolve version skew for a server,
     matched to the update path it offers. */
 export function serverUpdateGuidance(
@@ -75,7 +70,7 @@ export function serverUpdateGuidance(
     case "desktop-managed":
       return `The ${serverLabel} is run by the Sightseer desktop app on its machine — update the desktop app there to sync them.`;
     default:
-      return `Relaunch the ${serverLabel} with the copied command to sync them.`;
+      return `Rebuild and relaunch the ${serverLabel} from its source checkout to sync them.`;
   }
 }
 

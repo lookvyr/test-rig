@@ -5,10 +5,8 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { manualServerUpdateCommand } from "~/versionSkew";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
 
@@ -83,24 +81,6 @@ export function ServerUpdateAction({
   const updateServer = useAtomCommand(serverEnvironment.updateServer, {
     reportFailure: false,
   });
-  const { copyToClipboard } = useCopyToClipboard<{ command: string }>({
-    target: "update command",
-    onCopy: ({ command }) => {
-      toastManager.add({
-        type: "success",
-        title: "Update command copied",
-        description: `Run \`${command}\` on ${serverLabel} to update it.`,
-      });
-    },
-    onError: (error) => {
-      toastManager.add({
-        type: "error",
-        title: "Could not copy update command",
-        description: error.message,
-      });
-    },
-  });
-
   const handleUpdate = async () => {
     if (pendingUpdateEnvironmentIds.has(environmentId)) {
       return;
@@ -141,11 +121,10 @@ export function ServerUpdateAction({
   }
 
   if (selfUpdate === null) {
-    const command = manualServerUpdateCommand(targetVersion);
     return (
-      <Button size="xs" variant="outline" onClick={() => copyToClipboard(command, { command })}>
-        Copy update command
-      </Button>
+      <span className="text-muted-foreground text-xs">
+        Rebuild and relaunch this server from its source checkout to match the app.
+      </span>
     );
   }
 

@@ -78,7 +78,8 @@ authenticated.
 - Your tester can still open it on macOS by right-clicking the app and choosing **Open** on first
   launch.
 - To keep staging files for debugging package contents, run: `vp run dist:desktop:dmg --keep-stage`
-- To allow code-signing/notarization when configured in CI/secrets, add: `--signed`.
+- To allow code-signing/notarization with credentials configured in the local
+  environment, add: `--signed`.
 - Signed macOS builds also require `T3CODE_APPLE_TEAM_ID` and
   `T3CODE_MACOS_PROVISIONING_PROFILE`.
 - Windows `--signed` uses Azure Trusted Signing and expects:

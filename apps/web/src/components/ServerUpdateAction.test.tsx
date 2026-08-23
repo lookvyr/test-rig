@@ -10,9 +10,6 @@ const testState = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-vi.mock("~/hooks/useCopyToClipboard", () => ({
-  useCopyToClipboard: () => ({ copyToClipboard: vi.fn() }),
-}));
 vi.mock("~/state/server", () => ({
   serverEnvironment: { updateServer: Symbol("updateServer") },
 }));
@@ -97,6 +94,20 @@ describe("ServerUpdateAction", () => {
     await flushPromises();
 
     expect(testState.toast).not.toHaveBeenCalled();
+  });
+
+  it("gives source-build guidance when the server cannot update itself", () => {
+    const markup = renderToStaticMarkup(
+      <ServerUpdateAction
+        environmentId={"env-source" as EnvironmentId}
+        serverLabel="Source server"
+        selfUpdate={null}
+        targetVersion="0.0.31"
+      />,
+    );
+
+    expect(markup).toContain("Rebuild and relaunch this server from its source checkout");
+    expect(markup).not.toContain("Copy update command");
   });
 });
 

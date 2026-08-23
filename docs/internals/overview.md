@@ -129,9 +129,9 @@ already dispatch.
 ## Related
 
 - [Workspace layout](./workspace-layout.md), [Glossary](./glossary.md)
-- [Remote environments](./remote.md), [Server updates](./server-updates.md)
+- [Remote environments](./remote.md)
 - [Resource telemetry](./resource-telemetry.md)
-- [Scripts](./scripts.md), [CI gates](./ci.md)
+- [Scripts](./scripts.md), [local verification](./ci.md)
 
 [rpc]: ../../packages/contracts/src/rpc.ts
 [contracts]: ../../packages/contracts/src/orchestration.ts

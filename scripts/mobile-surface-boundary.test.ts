@@ -44,9 +44,7 @@ const activationFiles = [
   "package.json",
   "pnpm-workspace.yaml",
   "pnpm-lock.yaml",
-  ".github/workflows/ci.yml",
   ".gitignore",
-  "scripts/release-smoke.ts",
 ] as const;
 
 describe("mobile surface boundary", () => {

@@ -1,8 +1,7 @@
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Terminal from "effect/Terminal";
-import { Command, GlobalFlag, Prompt } from "effect/unstable/cli";
+import { Command, GlobalFlag } from "effect/unstable/cli";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
@@ -19,32 +18,6 @@ export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) =
     cliVersion: packageJson.version,
   }).pipe(Layer.provide(ProcessRunner.layer));
 
-export type ServiceReconcileResult =
-  | {
-      readonly changed: false;
-      readonly status: BootService.BootServiceStatus;
-    }
-  | {
-      readonly changed: true;
-      readonly previouslyInstalled: boolean;
-      readonly plan: BootService.BootServicePlan;
-    };
-
-/** Install, update, or repair the service using the CLI version running this command. */
-export const reconcileService = Effect.fn("cli.service.reconcile")(function* () {
-  const service = yield* BootService.BootService;
-  const status = yield* service.status;
-  if (status.installed && status.current) {
-    return { changed: false, status } satisfies ServiceReconcileResult;
-  }
-  const plan = yield* service.install;
-  return {
-    changed: true,
-    previouslyInstalled: status.installed,
-    plan,
-  } satisfies ServiceReconcileResult;
-});
-
 export function formatServiceStatus(
   status: BootService.BootServiceStatus,
   cliVersion: string,
@@ -53,14 +26,14 @@ export function formatServiceStatus(
     return "Sightseer service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd";
   }
   if (!status.installed) {
-    return "Sightseer service\n  Status: not installed\n  Next: Run `sightseer service install`.";
+    return "Sightseer service\n  Status: not installed\n  Source-only builds do not support service installation.";
   }
   return [
     "Sightseer service",
     `  Status: ${status.current ? `installed · ${packageVersionLabel(cliVersion)}` : "needs an update or repair"}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
-    ...(status.current ? [] : ["  Next: Run `npx @lookvyr/sightseer@latest service update`."]),
+    ...(status.current ? [] : ["  Source-only builds do not support service updates."]),
   ].join("\n");
 }
 
@@ -72,50 +45,6 @@ const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
   const config = yield* resolveCliAuthConfig(flags, logLevel);
   return yield* run.pipe(Effect.provide(bootServiceLayer(config)));
 });
-
-const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe(
-  Command.withDescription("Install Sightseer as a background service for this user."),
-  Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
-      Effect.gen(function* () {
-        const result = yield* reconcileService();
-        if (!result.changed) {
-          yield* Console.log(
-            `Sightseer service is already installed with ${packageVersionLabel(packageJson.version)}.`,
-          );
-          return;
-        }
-        yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} Sightseer service with ${packageVersionLabel(packageJson.version)}.\nLogs: ${result.plan.logPath}`,
-        );
-      }),
-    ),
-  ),
-);
-
-const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
-  Command.withDescription(
-    "Update or repair the background service using this CLI version. Use `npx @lookvyr/sightseer@latest service update` for the latest release.",
-  ),
-  Command.withHandler((flags) =>
-    runServiceCommand(
-      flags,
-      Effect.gen(function* () {
-        const result = yield* reconcileService();
-        if (!result.changed) {
-          yield* Console.log(
-            `Sightseer service is already using ${packageVersionLabel(packageJson.version)}.`,
-          );
-          return;
-        }
-        yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} Sightseer service with ${packageVersionLabel(packageJson.version)}.\nLogs: ${result.plan.logPath}`,
-        );
-      }),
-    ),
-  ),
-);
 
 const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).pipe(
   Command.withDescription("Stop and remove the Sightseer background service."),
@@ -146,60 +75,7 @@ const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
   ),
 );
 
-export const offerServiceDuringOnboarding = Effect.gen(function* () {
-  const service = yield* BootService.BootService;
-  const { supported, installed, current } = yield* service.status;
-  if (!supported) {
-    return false;
-  }
-  if (installed && current) {
-    yield* Console.log("Sightseer is already set up to run in the background on this machine.");
-    return true;
-  }
-  const wanted = yield* Prompt.run(
-    Prompt.confirm({
-      message: installed
-        ? "The installed Sightseer service needs an update or repair. Update it now?"
-        : "Run Sightseer in the background whenever this machine boots? " +
-          "It stays available after you log out.",
-      initial: true,
-    }),
-  );
-  if (!wanted) {
-    return false;
-  }
-  const result = yield* reconcileService();
-  if (result.changed) {
-    yield* Console.log(
-      `Background service ${result.previouslyInstalled ? "updated" : "installed"}. Logs: ${result.plan.logPath}`,
-    );
-  }
-  return true;
-});
-
-export const recoverServiceOnboardingOffer = <R>(
-  offer: Effect.Effect<boolean, BootService.BootServiceError | Terminal.QuitError, R>,
-) =>
-  offer.pipe(
-    Effect.catchTags({
-      QuitError: () => Effect.succeed(false),
-      BootServiceUnsupportedError: (error) =>
-        Console.log(`Skipping background setup: ${error.message}`).pipe(Effect.as(false)),
-      BootServiceCommandError: (error) =>
-        Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
-      BootServiceInstallError: (error) =>
-        Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
-      BootServiceUpdatePendingError: (error) =>
-        Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
-    }),
-  );
-
 export const serviceCommand = Command.make("service").pipe(
-  Command.withDescription("Manage the Sightseer background service."),
-  Command.withSubcommands([
-    serviceInstallCommand,
-    serviceUninstallCommand,
-    serviceUpdateCommand,
-    serviceStatusCommand,
-  ]),
+  Command.withDescription("Inspect or remove an inherited Sightseer background service."),
+  Command.withSubcommands([serviceUninstallCommand, serviceStatusCommand]),
 );

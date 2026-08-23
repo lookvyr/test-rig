@@ -45,7 +45,7 @@ describe("executable provider boundary", () => {
   });
 
   it("contains no ACP workspace dependency", () => {
-    const manifests = ["apps/server/package.json", "pnpm-lock.yaml", "scripts/release-smoke.ts"];
+    const manifests = ["apps/server/package.json", "pnpm-lock.yaml"];
     const violations = manifests.filter((path) =>
       NodeFS.readFileSync(NodePath.join(repoRoot, path), "utf8").includes("effect-acp"),
     );

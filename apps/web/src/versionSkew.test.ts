@@ -104,7 +104,7 @@ describe("versionSkew", () => {
       "The Desktop server is run by the Sightseer desktop app on its machine — update the desktop app there to sync them.",
     );
     expect(serverUpdateGuidance(null, "Local server")).toBe(
-      "Relaunch the Local server with the copied command to sync them.",
+      "Rebuild and relaunch the Local server from its source checkout to sync them.",
     );
   });
 });

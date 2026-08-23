@@ -180,7 +180,7 @@ describe("t3 pair", () => {
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
       );
       assert.include(rendered, "No running Sightseer server found.");
-      assert.include(rendered, "npx @lookvyr/sightseer serve");
+      assert.include(rendered, "node apps/server/dist/bin.mjs serve");
       assert.notInclude(rendered, "connect");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
