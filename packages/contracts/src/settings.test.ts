@@ -227,14 +227,43 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
 });
 
 describe("ServerSettings worktree defaults", () => {
-  it("defaults start-from-origin on for legacy configs", () => {
-    expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(true);
+  it("defaults legacy configs to Test Rig worktree naming", () => {
+    const settings = decodeServerSettings({});
+
+    expect(settings.newWorktreesStartFromOrigin).toBe(true);
+    expect(settings.newWorktreeBranchPrefix).toBe("test-rig");
   });
 
-  it("accepts start-from-origin updates", () => {
+  it("accepts worktree default updates", () => {
+    const patch = decodeServerSettingsPatch({
+      newWorktreesStartFromOrigin: false,
+      newWorktreeBranchPrefix: "example/team",
+    });
+
+    expect(patch.newWorktreesStartFromOrigin).toBe(false);
+    expect(patch.newWorktreeBranchPrefix).toBe("example/team");
+  });
+
+  it("trims valid prefixes and accepts the length boundary", () => {
     expect(
-      decodeServerSettingsPatch({ newWorktreesStartFromOrigin: false }).newWorktreesStartFromOrigin,
-    ).toBe(false);
+      decodeServerSettingsPatch({ newWorktreeBranchPrefix: "  example/team  " })
+        .newWorktreeBranchPrefix,
+    ).toBe("example/team");
+    expect(
+      decodeServerSettingsPatch({ newWorktreeBranchPrefix: "a".repeat(64) })
+        .newWorktreeBranchPrefix,
+    ).toBe("a".repeat(64));
+  });
+
+  it.each(["", "UPPERCASE", "has spaces", "/leading", "trailing/", "double//slash", "dot.name"])(
+    "rejects invalid worktree branch prefix %j",
+    (newWorktreeBranchPrefix) => {
+      expect(() => decodeServerSettingsPatch({ newWorktreeBranchPrefix })).toThrow();
+    },
+  );
+
+  it("rejects worktree branch prefixes longer than 64 characters", () => {
+    expect(() => decodeServerSettingsPatch({ newWorktreeBranchPrefix: "a".repeat(65) })).toThrow();
   });
 });
 

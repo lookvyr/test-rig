@@ -33,6 +33,16 @@ Test Rig refreshes remote branch status in the background. The default fetch int
 
 The background-activity policy can pause a scheduled fetch while the machine is locked, on battery, or in another restricted state. The fetch interval controls how often a refresh becomes eligible to run.
 
+## Worktree branch names
+
+Set the prefix for new worktree branches under **Settings** → **General** → **New threads** →
+**Worktree branch prefix**. The default is `test-rig`.
+
+With `example/team`, Test Rig creates `example/team/_worktree/a1b2c3d4`, then renames it after the first prompt, for example to `example/team fix-reconnect-backoff`. If naming fails, the temporary branch still works. Its folder keeps the temporary name.
+
+The setting applies only to new worktrees. It does not rename existing branches or folders, or
+affect synthetic branches for cross-repository pull requests.
+
 ## Available provider actions
 
 With the matching integration enabled and authenticated, Test Rig can:

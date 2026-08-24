@@ -211,6 +211,16 @@ export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientS
 export const ThreadEnvMode = Schema.Literals(["local", "worktree"]);
 export type ThreadEnvMode = typeof ThreadEnvMode.Type;
 
+export const NEW_WORKTREE_BRANCH_PREFIX_PATTERN =
+  /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?(?:\/[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?)*$/;
+export const MAX_NEW_WORKTREE_BRANCH_PREFIX_LENGTH = 64;
+export const NewWorktreeBranchPrefix = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(MAX_NEW_WORKTREE_BRANCH_PREFIX_LENGTH),
+  Schema.isPattern(NEW_WORKTREE_BRANCH_PREFIX_PATTERN),
+);
+export type NewWorktreeBranchPrefix = typeof NewWorktreeBranchPrefix.Type;
+export const DEFAULT_NEW_WORKTREE_BRANCH_PREFIX: NewWorktreeBranchPrefix = "test-rig";
+
 const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
     Schema.decodeTo(
@@ -569,6 +579,9 @@ export const ServerSettings = Schema.Struct({
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
+  newWorktreeBranchPrefix: NewWorktreeBranchPrefix.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_NEW_WORKTREE_BRANCH_PREFIX)),
+  ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
@@ -710,6 +723,7 @@ export const ServerSettingsPatch = Schema.Struct({
   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
+  newWorktreeBranchPrefix: Schema.optionalKey(NewWorktreeBranchPrefix),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sourceControlWritingStyle: Schema.optionalKey(

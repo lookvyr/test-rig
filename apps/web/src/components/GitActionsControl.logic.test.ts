@@ -1122,14 +1122,17 @@ describe("resolveLiveThreadBranchUpdate", () => {
     assert.equal(update, null);
   });
 
-  it("does not regress a semantic thread ref back to a temporary worktree ref", () => {
-    const update = resolveLiveThreadBranchUpdate({
-      threadBranch: "t3code/github-query-rate-limit",
-      gitStatus: status({ refName: "t3code/bda76797" }),
-    });
+  it.each(["t3code/bda76797", "example/team/_worktree/bda76797"])(
+    "does not regress a semantic thread ref back to temporary ref %s",
+    (temporaryBranch) => {
+      const update = resolveLiveThreadBranchUpdate({
+        threadBranch: "example/team/github-query-rate-limit",
+        gitStatus: status({ refName: temporaryBranch }),
+      });
 
-    assert.equal(update, null);
-  });
+      assert.equal(update, null);
+    },
+  );
 
   it("allows a temporary worktree ref to reconcile to a semantic branch", () => {
     const update = resolveLiveThreadBranchUpdate({
