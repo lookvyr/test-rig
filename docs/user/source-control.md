@@ -57,7 +57,7 @@ You can always clone by pasting a full Git URL. This uses Git directly rather th
 
 ## Set up GitHub
 
-Install the GitHub CLI and sign in on the machine running the Test Rig environment:
+Install GitHub CLI 2.81.0 or newer and sign in on the machine running the Test Rig environment:
 
 ```bash
 brew install gh
@@ -113,6 +113,7 @@ The access token takes precedence when both forms are configured. Restart the Te
 - A disabled provider has no authentication status. Enable it before rescanning.
 - If a CLI is installed but the status is unavailable, make sure it is on the server process's `PATH`, then restart Test Rig and rescan.
 - If a provider reports that it is not authenticated, run its login command on the machine hosting the environment. Signing in on the browser device does not configure the server.
+- If GitHub says it could not verify sign-in status, update `gh` to 2.81.0 or newer and rescan.
 - Provider authentication and Git remote authentication are separate. A provider CLI can be signed in while an SSH or HTTPS Git remote still needs its own credentials.
 - If background fetches prompt for credentials or a security key, set the Git fetch interval to `0` and use explicit Git actions.
 

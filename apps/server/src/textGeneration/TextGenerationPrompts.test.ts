@@ -6,7 +6,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
-import { normalizeCliError, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
+import { normalizeCliError, sanitizePrBody, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 
 describe("buildCommitMessagePrompt", () => {
@@ -243,6 +243,41 @@ describe("sanitizeThreadTitle", () => {
         '  "Reconnect failures after restart because the session state does not recover"  ',
       ),
     ).toBe("Reconnect failures after restart because the se...");
+  });
+});
+
+describe("sanitizePrBody", () => {
+  it("unwraps a duplicated structured-output envelope", () => {
+    expect(
+      sanitizePrBody(
+        '{"title":"Improve branch handling","body":"\\n## Summary\\n- Keep branch pushes isolated\\n\\n## Testing\\n- Focused tests\\n"}',
+        "Improve branch handling",
+      ),
+    ).toBe("## Summary\n- Keep branch pushes isolated\n\n## Testing\n- Focused tests");
+  });
+
+  it("unwraps a fenced duplicated structured-output envelope", () => {
+    expect(
+      sanitizePrBody(
+        '```json\n{"title":"Fix PR body","body":"## Summary\\n- Fix PR body"}\n```',
+        "Fix PR body",
+      ),
+    ).toBe("## Summary\n- Fix PR body");
+  });
+
+  it("preserves markdown and unrelated JSON", () => {
+    expect(sanitizePrBody("\n## Summary\n- Keep markdown\n", "Example")).toBe(
+      "## Summary\n- Keep markdown",
+    );
+    expect(sanitizePrBody('{"example":true,"body":"not an envelope"}', "Example")).toBe(
+      '{"example":true,"body":"not an envelope"}',
+    );
+    expect(sanitizePrBody('```json\n{"body":"API example"}\n```', "Example")).toBe(
+      '```json\n{"body":"API example"}\n```',
+    );
+    expect(
+      sanitizePrBody('{"title":"Different title","body":"Keep this JSON"}', "Expected title"),
+    ).toBe('{"title":"Different title","body":"Keep this JSON"}');
   });
 });
 

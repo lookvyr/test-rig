@@ -347,6 +347,7 @@ function createTextGeneration(
 function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
   service: GitHubCli.GitHubCli["Service"];
   ghCalls: string[];
+  createdPrBodies: string[];
 } {
   const prListQueue = [...(scenario.prListSequence ?? [])];
   const prListQueueByHeadSelector = new Map(
@@ -356,6 +357,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
     ]),
   );
   const ghCalls: string[] = [];
+  const createdPrBodies: string[] = [];
 
   const execute: GitHubCli.GitHubCli["Service"]["execute"] = (input) => {
     const args = [...input.args];
@@ -384,6 +386,11 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
     }
 
     if (args[0] === "pr" && args[1] === "create") {
+      const bodyFileIndex = args.indexOf("--body-file");
+      const bodyFile = bodyFileIndex >= 0 ? args[bodyFileIndex + 1] : undefined;
+      if (bodyFile) {
+        createdPrBodies.push(NodeFS.readFileSync(bodyFile, "utf8"));
+      }
       return Effect.succeed(
         fakeGhOutput(
           (scenario.createdPrUrl ?? "https://github.com/pingdotgg/codething-mvp/pull/101") + "\n",
@@ -575,6 +582,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
         }).pipe(Effect.asVoid),
     },
     ghCalls,
+    createdPrBodies,
   };
 }
 
@@ -620,7 +628,11 @@ function makeManager(input?: {
   sourceControlProviderEnabled?: Effect.Effect<boolean>;
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
 }) {
-  const { service: gitHubCli, ghCalls } = createGitHubCliWithFakeGh(input?.ghScenario);
+  const {
+    service: gitHubCli,
+    ghCalls,
+    createdPrBodies,
+  } = createGitHubCliWithFakeGh(input?.ghScenario);
   const textGeneration = createTextGeneration(input?.textGeneration);
   const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "t3-git-manager-test-",
@@ -668,7 +680,7 @@ function makeManager(input?: {
 
   return GitManager.make.pipe(
     Effect.provide(managerLayer),
-    Effect.map((manager) => ({ manager, ghCalls })),
+    Effect.map((manager) => ({ manager, ghCalls, createdPrBodies })),
   );
 }
 
@@ -2683,6 +2695,74 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect("rejects disabled create-PR actions before pushing", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      const remoteBefore = yield* runGit(remoteDir, ["rev-parse", "main"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "ahead.txt"), "ahead\n");
+      yield* runGit(repoDir, ["add", "ahead.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Local ahead commit"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        sourceControlProviderEnabled: Effect.succeed(false),
+        textGeneration: {
+          generatePrContent: () => Effect.die(new Error("PR generation must not run")),
+        },
+      });
+      const errorMessage = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "create_pr",
+      }).pipe(
+        Effect.flip,
+        Effect.map((error) => error.message),
+      );
+
+      expect(errorMessage).toContain("source control provider is disabled");
+      expect(yield* runGit(remoteDir, ["rev-parse", "main"])).toStrictEqual(remoteBefore);
+      expect(ghCalls).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects disabled commit-push-PR actions before mutating Git state", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      const headBefore = yield* runGit(repoDir, ["rev-parse", "HEAD"]);
+      const remoteBefore = yield* runGit(remoteDir, ["rev-parse", "main"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "dirty.txt"), "dirty\n");
+
+      const { manager, ghCalls } = yield* makeManager({
+        sourceControlProviderEnabled: Effect.succeed(false),
+        textGeneration: {
+          generateCommitMessage: () => Effect.die(new Error("Commit generation must not run")),
+          generatePrContent: () => Effect.die(new Error("PR generation must not run")),
+        },
+      });
+      const errorMessage = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit_push_pr",
+        featureBranch: true,
+      }).pipe(
+        Effect.flip,
+        Effect.map((error) => error.message),
+      );
+
+      expect(errorMessage).toContain("source control provider is disabled");
+      expect(yield* runGit(repoDir, ["rev-parse", "HEAD"])).toStrictEqual(headBefore);
+      expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe("main");
+      expect(yield* runGit(remoteDir, ["rev-parse", "main"])).toStrictEqual(remoteBefore);
+      expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toContain("dirty.txt");
+      expect(ghCalls).toEqual([]);
+    }),
+  );
+
   it.effect("creates PR when one does not already exist", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -2705,7 +2785,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       let generatedPolicy: TextGeneration.PrContentGenerationInput["policy"] = undefined;
       let generatedChangeRequestTemplate: string | undefined;
 
-      const { manager, ghCalls } = yield* makeManager({
+      const { manager, ghCalls, createdPrBodies } = yield* makeManager({
         serverSettings: {
           sourceControlWritingStyle: {
             mode: "custom" as const,
@@ -2718,7 +2798,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
             generatedChangeRequestTemplate = input.changeRequestTemplate;
             return Effect.succeed({
               title: "Add stacked git actions",
-              body: "## What changed?\nAdded stacked git actions.",
+              body: '{"title":"Add stacked git actions","body":"## What changed?\\nAdded stacked git actions."}',
             });
           },
         },
@@ -2754,6 +2834,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(
         ghCalls.some((call) => call.includes("pr create --base main --head feature-create-pr")),
       ).toBe(true);
+      expect(createdPrBodies).toEqual(["## What changed?\nAdded stacked git actions."]);
       expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
     }),
   );

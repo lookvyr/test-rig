@@ -50,6 +50,7 @@ import {
   customTextGenerationPolicy,
   repositoryConventionsTextGenerationPolicy,
 } from "../textGeneration/TextGenerationPresets.ts";
+import { sanitizePrBody } from "../textGeneration/TextGenerationUtils.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
@@ -1622,17 +1623,19 @@ export const make = Effect.gen(function* () {
       tempDir,
       `t3code-pr-body-${process.pid}-${yield* randomUUIDv4(cwd)}.md`,
     );
-    yield* fileSystem.writeFileString(bodyFile, generated.body).pipe(
-      Effect.mapError(
-        (cause) =>
-          new GitManagerError({
-            operation: "runPrStep",
-            cwd,
-            detail: "Failed to write pull request body temp file.",
-            cause,
-          }),
-      ),
-    );
+    yield* fileSystem
+      .writeFileString(bodyFile, sanitizePrBody(generated.body, generated.title))
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitManagerError({
+              operation: "runPrStep",
+              cwd,
+              detail: "Failed to write pull request body temp file.",
+              cause,
+            }),
+        ),
+      );
     yield* emit({
       kind: "phase_started",
       phase: "pr",
@@ -1940,15 +1943,26 @@ export const make = Effect.gen(function* () {
         GitRunStackedActionResult,
         GitManagerServiceError
       > {
-        const initialStatus = yield* gitCore.statusDetails(input.cwd);
         const wantsCommit = isCommitAction(input.action);
+        const wantsPr = input.action === "create_pr" || input.action === "commit_push_pr";
+        if (wantsPr) {
+          const providerHandle = yield* sourceControlProviders.resolveHandle({ cwd: input.cwd });
+          if (!providerHandle.enabled) {
+            return yield* new GitManagerError({
+              operation: "runStackedAction",
+              cwd: input.cwd,
+              detail: `Cannot create a change request because the ${providerHandle.provider.kind} source control provider is disabled.`,
+            });
+          }
+        }
+
+        const initialStatus = yield* gitCore.statusDetails(input.cwd);
         const wantsPush =
           input.action === "push" ||
           input.action === "commit_push" ||
           input.action === "commit_push_pr" ||
           (input.action === "create_pr" &&
             (!initialStatus.hasUpstream || initialStatus.aheadCount > 0));
-        const wantsPr = input.action === "create_pr" || input.action === "commit_push_pr";
 
         if (input.featureBranch && !wantsCommit) {
           return yield* new GitManagerError({

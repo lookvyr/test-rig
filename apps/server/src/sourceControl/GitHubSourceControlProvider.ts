@@ -67,6 +67,17 @@ function parseGitHubAuth(input: SourceControlAuthProbeInput) {
     });
   }
 
+  // `gh auth status --json` requires GitHub CLI 2.81.0 or newer. Older
+  // versions reject the flag with the same non-zero exit shape as a signed-out
+  // CLI, so surface the actionable version problem instead.
+  if (input.exitCode !== 0 && output.includes("unknown flag: --json")) {
+    return providerAuth({
+      status: "unknown",
+      detail:
+        "GitHub CLI is too old to report sign-in status. Update `gh` to 2.81.0 or newer (for example `brew upgrade gh`) and rescan.",
+    });
+  }
+
   if (input.exitCode !== 0) {
     return providerAuth({
       status: "unauthenticated",

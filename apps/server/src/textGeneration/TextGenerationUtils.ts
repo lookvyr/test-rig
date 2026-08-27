@@ -2,6 +2,7 @@ import { TextGenerationError } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 const isTextGenerationError = Schema.is(TextGenerationError);
+const decodeUnknownJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 /** Convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present. */
 export function toJsonSchemaObject(schema: Schema.Top): unknown {
@@ -40,6 +41,46 @@ export function sanitizePrTitle(raw: string): string {
     return singleLine;
   }
   return "Update project changes";
+}
+
+/**
+ * Normalize a generated PR body before it crosses into a source-control CLI.
+ *
+ * Structured-output models occasionally serialize the requested `{ title,
+ * body }` object a second time inside the `body` string. The outer response is
+ * schema-valid, so without this boundary check the JSON envelope becomes the
+ * literal PR description. Only unwrap the exact response shape we requested;
+ * arbitrary JSON in a legitimate markdown body is preserved.
+ */
+export function sanitizePrBody(raw: string, expectedTitle: string): string {
+  const trimmed = raw.trim();
+  const fenced = /^```json\s*\r?\n([\s\S]*?)\r?\n```$/iu.exec(trimmed);
+  const candidate = fenced?.[1]?.trim() ?? trimmed;
+
+  try {
+    const parsed = decodeUnknownJson(candidate);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return trimmed;
+    }
+
+    const record = parsed as Record<string, unknown>;
+    const keys = Object.keys(record);
+    const body = record.body;
+    const title = record.title;
+    if (
+      typeof body !== "string" ||
+      typeof title !== "string" ||
+      title.trim() !== expectedTitle.trim() ||
+      keys.length !== 2 ||
+      !keys.every((key) => key === "title" || key === "body")
+    ) {
+      return trimmed;
+    }
+
+    return body.trim();
+  } catch {
+    return trimmed;
+  }
 }
 
 /** Normalise a raw thread title to a compact single-line sidebar-safe label. */

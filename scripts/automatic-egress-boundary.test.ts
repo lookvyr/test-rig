@@ -9,6 +9,10 @@ const sourceRoots = ["apps", "packages", "scripts", ".github"] as const;
 const sourceExtensions = new Set([".cjs", ".js", ".json", ".mjs", ".ts", ".tsx", ".yaml", ".yml"]);
 
 function productionSourceFiles(root: string): string[] {
+  if (!NodeFS.existsSync(root)) {
+    if (root === NodePath.join(repoRoot, ".github")) return [];
+    throw new Error(`Required boundary-scan root is missing: ${NodePath.relative(repoRoot, root)}`);
+  }
   const files: string[] = [];
   for (const entry of NodeFS.readdirSync(root, { withFileTypes: true })) {
     const path = NodePath.join(root, entry.name);
