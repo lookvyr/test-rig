@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SourceControlWritingStyleMode } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -17,9 +17,11 @@ import {
 } from "../../modelSelection";
 import { primaryServerProvidersAtom } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; description: string }> =
@@ -34,21 +36,81 @@ const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; descr
         "Uses Conventional Commit prefixes for change descriptions; change request titles and descriptions stay concise.",
     },
     custom: {
-      label: "Custom instructions",
-      description:
-        "Applies your instructions to change descriptions and change request titles and descriptions in every project.",
+      label: "Default",
+      description: "Uses Test Rig's concise default source control writing style.",
     },
   };
+
+const INSTRUCTION_OPTIONS = [
+  {
+    key: "commitInstructions",
+    label: "Commit messages",
+    placeholder: "For example: Start with an imperative verb and keep the body to two bullets.",
+  },
+  {
+    key: "changeRequestTitleInstructions",
+    label: "PR titles",
+    placeholder: "For example: Use sentence case and avoid Conventional Commit prefixes.",
+  },
+  {
+    key: "changeRequestDescriptionInstructions",
+    label: "PR descriptions",
+    placeholder: "For example: Lead with user impact and list only checks that were actually run.",
+  },
+] as const;
+
+type InstructionKey = (typeof INSTRUCTION_OPTIONS)[number]["key"];
+
+function instructionDrafts(style: {
+  readonly commitInstructions: string;
+  readonly changeRequestTitleInstructions: string;
+  readonly changeRequestDescriptionInstructions: string;
+}) {
+  return {
+    commitInstructions: style.commitInstructions,
+    changeRequestTitleInstructions: style.changeRequestTitleInstructions,
+    changeRequestDescriptionInstructions: style.changeRequestDescriptionInstructions,
+  };
+}
 
 export function SourceControlWritingSettingsSection() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
-  const customInstructionsRef = useRef<HTMLTextAreaElement>(null);
   const style = settings.sourceControlWritingStyle;
   const defaults = DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle;
-  const isSourceControlWritingStyleDirty =
-    style.mode !== defaults.mode || style.customInstructions !== defaults.customInstructions;
+  const [activeInstruction, setActiveInstruction] = useState<InstructionKey>("commitInstructions");
+  const [drafts, setDrafts] = useState(() => instructionDrafts(style));
+  const dirtyFieldsRef = useRef(new Set<InstructionKey>());
+  const isSourceControlWritingStyleDirty = style.mode !== defaults.mode;
+
+  useEffect(() => {
+    setDrafts((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const option of INSTRUCTION_OPTIONS) {
+        if (!dirtyFieldsRef.current.has(option.key) && next[option.key] !== style[option.key]) {
+          next[option.key] = style[option.key];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [
+    style.commitInstructions,
+    style.changeRequestTitleInstructions,
+    style.changeRequestDescriptionInstructions,
+  ]);
+
+  const activeOption = INSTRUCTION_OPTIONS.find((option) => option.key === activeInstruction)!;
+  const saveInstruction = (key: InstructionKey, value: string) => {
+    const trimmed = value.trim();
+    dirtyFieldsRef.current.delete(key);
+    setDrafts((current) => ({ ...current, [key]: trimmed }));
+    if (trimmed !== style[key]) {
+      updateSettings({ sourceControlWritingStyle: { [key]: trimmed } });
+    }
+  };
 
   const defaultModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const usesDedicatedModel = settings.sourceControlWriterModelSelection !== null;
@@ -83,7 +145,6 @@ export function SourceControlWritingSettingsSection() {
                 updateSettings({
                   sourceControlWritingStyle: {
                     mode: defaults.mode,
-                    customInstructions: defaults.customInstructions,
                   },
                 })
               }
@@ -94,11 +155,9 @@ export function SourceControlWritingSettingsSection() {
           <Select
             value={style.mode}
             onValueChange={(value) => {
-              const customInstructions = customInstructionsRef.current?.value.trim();
               updateSettings({
                 sourceControlWritingStyle: {
                   mode: value as SourceControlWritingStyleMode,
-                  ...(customInstructions !== undefined ? { customInstructions } : {}),
                 },
               });
             }}
@@ -115,25 +174,62 @@ export function SourceControlWritingSettingsSection() {
             </SelectPopup>
           </Select>
         }
+      />
+
+      <SettingsRow
+        title="Additional writing instructions"
+        description="Use these to fine-tune generated text. They take precedence when they conflict with the selected writing style."
       >
-        {style.mode === "custom" ? (
-          <div className="mt-3 max-w-2xl pb-3.5">
-            <Textarea
-              key={style.customInstructions}
-              ref={customInstructionsRef}
-              defaultValue={style.customInstructions}
-              onBlur={(event) => {
-                const customInstructions = event.target.value.trim();
-                if (customInstructions !== style.customInstructions) {
-                  updateSettings({ sourceControlWritingStyle: { customInstructions } });
-                }
-              }}
-              rows={4}
-              placeholder="Keep titles concise. Use short bullet points in descriptions."
-              aria-label="Custom source control writing instructions"
-            />
+        <div className="mt-3 max-w-2xl space-y-3 pb-3.5">
+          <ToggleGroup
+            aria-label="Writing instruction type"
+            size="sm"
+            variant="outline"
+            value={[activeInstruction]}
+            onValueChange={(value) => {
+              const next = value[0];
+              if (INSTRUCTION_OPTIONS.some((option) => option.key === next)) {
+                setActiveInstruction(next as InstructionKey);
+              }
+            }}
+          >
+            {INSTRUCTION_OPTIONS.map((option) => (
+              <Toggle key={option.key} value={option.key}>
+                {option.label}
+              </Toggle>
+            ))}
+          </ToggleGroup>
+          <Textarea
+            value={drafts[activeInstruction]}
+            onChange={(event) => {
+              dirtyFieldsRef.current.add(activeInstruction);
+              setDrafts((current) => ({
+                ...current,
+                [activeInstruction]: event.target.value,
+              }));
+            }}
+            onBlur={(event) => saveInstruction(activeInstruction, event.target.value)}
+            maxLength={4_000}
+            rows={4}
+            placeholder={activeOption.placeholder}
+            aria-label={`${activeOption.label} additional writing instructions`}
+          />
+          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>Global default for every project in this environment.</span>
+            <div className="flex items-center gap-2">
+              <span>{drafts[activeInstruction].length.toLocaleString()} / 4,000</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={drafts[activeInstruction].length === 0}
+                onClick={() => saveInstruction(activeInstruction, "")}
+              >
+                Clear
+              </Button>
+            </div>
           </div>
-        ) : null}
+        </div>
       </SettingsRow>
 
       <SettingsRow

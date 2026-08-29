@@ -273,7 +273,9 @@ describe("ServerSettings.sourceControlWritingStyle", () => {
 
     expect(settings.sourceControlWritingStyle).toEqual({
       mode: "repo_conventions",
-      customInstructions: "",
+      commitInstructions: "",
+      changeRequestTitleInstructions: "",
+      changeRequestDescriptionInstructions: "",
       followChangeRequestTemplates: true,
     });
     expect(settings.sourceControlWriterModelSelection).toBeNull();
@@ -283,13 +285,34 @@ describe("ServerSettings.sourceControlWritingStyle", () => {
     const patch = decodeServerSettingsPatch({
       sourceControlWritingStyle: {
         mode: "custom",
-        customInstructions: "  Prefer concise wording.  ",
+        commitInstructions: "  Prefer concise commits.  ",
+        changeRequestTitleInstructions: "  Prefer concise titles.  ",
+        changeRequestDescriptionInstructions: "  Prefer concise descriptions.  ",
       },
     });
 
     expect(patch.sourceControlWritingStyle).toEqual({
       mode: "custom",
-      customInstructions: "Prefer concise wording.",
+      commitInstructions: "Prefer concise commits.",
+      changeRequestTitleInstructions: "Prefer concise titles.",
+      changeRequestDescriptionInstructions: "Prefer concise descriptions.",
+    });
+  });
+
+  it("drops the obsolete shared instruction without migrating it", () => {
+    const settings = decodeServerSettings({
+      sourceControlWritingStyle: {
+        mode: "custom",
+        customInstructions: "Legacy shared instruction.",
+      },
+    });
+
+    expect(settings.sourceControlWritingStyle).toEqual({
+      mode: "custom",
+      commitInstructions: "",
+      changeRequestTitleInstructions: "",
+      changeRequestDescriptionInstructions: "",
+      followChangeRequestTemplates: true,
     });
   });
 });

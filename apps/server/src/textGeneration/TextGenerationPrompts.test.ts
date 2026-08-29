@@ -50,7 +50,7 @@ describe("buildCommitMessagePrompt", () => {
     expect(result.prompt).toContain("Branch: (detached)");
   });
 
-  it("includes policy instructions", () => {
+  it("puts additional commit instructions after the selected style", () => {
     const result = buildCommitMessagePrompt({
       branch: "main",
       stagedSummary: "M a.ts",
@@ -58,13 +58,34 @@ describe("buildCommitMessagePrompt", () => {
       includeBranch: false,
       policy: {
         kind: "custom",
-        commitInstructions: "Use a terse repository-specific subject.",
+        commitInstructions: "Use Conventional Commits.",
+        additionalCommitInstructions: "Use a terse repository-specific subject.",
         inferRepositoryConventions: false,
       },
     });
 
-    expect(result.prompt).toContain("Additional instructions:");
+    expect(result.prompt).toContain("Selected writing style:");
+    expect(result.prompt).toContain("take precedence over the selected writing style");
     expect(result.prompt).toContain("Use a terse repository-specific subject.");
+    expect(result.prompt.indexOf("Use Conventional Commits.")).toBeLessThan(
+      result.prompt.indexOf("Use a terse repository-specific subject."),
+    );
+  });
+
+  it("does not apply commit writing instructions to a generated branch", () => {
+    const result = buildCommitMessagePrompt({
+      branch: "main",
+      stagedSummary: "M a.ts",
+      stagedPatch: "diff",
+      includeBranch: true,
+      policy: {
+        kind: "custom",
+        additionalCommitInstructions: "Prefix the subject with UI.",
+        inferRepositoryConventions: false,
+      },
+    });
+
+    expect(result.prompt).toContain("apply only to subject and body, not branch");
   });
 });
 
@@ -100,16 +121,42 @@ describe("buildPrContentPrompt", () => {
       policy: {
         kind: "custom",
         changeRequestInstructions: "Keep the title in sentence case.",
+        additionalChangeRequestTitleInstructions: "Prefix the title with UI.",
+        additionalChangeRequestDescriptionInstructions: "Lead with user impact.",
         inferRepositoryConventions: false,
       },
     });
 
     expect(result.prompt).toContain("Keep the title in sentence case.");
+    expect(result.prompt).toContain("apply only to title");
+    expect(result.prompt).toContain("apply only to body");
+    expect(result.prompt).toContain("do not override the repository template structure");
+    expect(result.prompt.indexOf("Keep the title in sentence case.")).toBeLessThan(
+      result.prompt.indexOf("Prefix the title with UI."),
+    );
     expect(result.prompt).toContain("follow the repository change request template structure");
     expect(result.prompt).toContain("drop HTML comments from the template");
     expect(result.prompt).toContain("Repository change request template:");
     expect(result.prompt).toContain("<!-- remove me -->\n## What changed\n\n## Verification");
     expect(result.prompt).not.toContain("include headings '## Summary' and '## Testing'");
+  });
+
+  it("allows additional description instructions to replace the default body shape", () => {
+    const result = buildPrContentPrompt({
+      baseBranch: "main",
+      headBranch: "feature/auth",
+      commitSummary: "feat: add login page",
+      diffSummary: "3 files changed",
+      diffPatch: "diff",
+      policy: {
+        kind: "custom",
+        additionalChangeRequestDescriptionInstructions: "Write one short paragraph.",
+        inferRepositoryConventions: false,
+      },
+    });
+
+    expect(result.prompt).toContain("unless additional description instructions say otherwise");
+    expect(result.prompt).toContain("Write one short paragraph.");
   });
 });
 

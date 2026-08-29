@@ -1611,7 +1611,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         serverSettings: {
           sourceControlWritingStyle: {
             mode: "custom" as const,
-            customInstructions: "Use a direct tone.",
+            commitInstructions: "Use a direct tone.",
           },
         },
         textGeneration: {
@@ -1630,7 +1630,9 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.commit.status).toBe("created");
       expect(result.push.status).toBe("skipped_not_requested");
       expect(result.pr.status).toBe("skipped_not_requested");
-      expect(generatedPolicy).toMatchObject({ commitInstructions: "Use a direct tone." });
+      expect(generatedPolicy).toMatchObject({
+        additionalCommitInstructions: "Use a direct tone.",
+      });
       expect(result.toast).toMatchObject({
         description: "Implement stacked git actions",
         cta: {
@@ -1661,7 +1663,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         serverSettings: {
           sourceControlWritingStyle: {
             mode: "custom" as const,
-            customInstructions: "",
+            commitInstructions: "",
           },
         },
         textGeneration: {
@@ -2789,7 +2791,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         serverSettings: {
           sourceControlWritingStyle: {
             mode: "custom" as const,
-            customInstructions: "Lead with user impact.",
+            changeRequestTitleInstructions: "Use a specific title.",
+            changeRequestDescriptionInstructions: "Lead with user impact.",
           },
         },
         textGeneration: {
@@ -2827,7 +2830,8 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.pr.status).toBe("created");
       expect(result.pr.number).toBe(88);
       expect(generatedPolicy).toMatchObject({
-        changeRequestInstructions: "Lead with user impact.",
+        additionalChangeRequestTitleInstructions: "Use a specific title.",
+        additionalChangeRequestDescriptionInstructions: "Lead with user impact.",
       });
       expect(generatedChangeRequestTemplate).toBe("## What changed?\n\n## Verification");
       expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(2);

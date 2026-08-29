@@ -25,6 +25,12 @@ Enable an integration before using any of its features. Test Rig scans it after 
 
 Settings belong to the server environment that owns the repository. If you use more than one environment, configure each one separately.
 
+## Generated writing defaults
+
+Open **Settings** → **Source Control** to choose a writing style for generated commit messages and change requests. You can also add separate instructions for commit messages, change request titles, and change request descriptions. These are global defaults for every project in the current environment.
+
+Additional writing instructions fine-tune the selected style and take precedence when the two conflict. When following a repository change request template, description instructions can change the writing inside the template but do not replace its structure.
+
 ## Git is separate
 
 Git status, diffs, branches, worktrees, checkpoints, fetches, pulls, and pushes do not depend on a hosting-provider switch. They use the repository's configured Git remotes and credentials.

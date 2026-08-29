@@ -498,7 +498,13 @@ export const SourceControlWritingStyleSettings = Schema.Struct({
   mode: SourceControlWritingStyleMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("repo_conventions" as const)),
   ),
-  customInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  commitInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  changeRequestTitleInstructions: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+  ),
+  changeRequestDescriptionInstructions: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+  ),
   followChangeRequestTemplates: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
@@ -729,7 +735,9 @@ export const ServerSettingsPatch = Schema.Struct({
   sourceControlWritingStyle: Schema.optionalKey(
     Schema.Struct({
       mode: Schema.optionalKey(SourceControlWritingStyleMode),
-      customInstructions: Schema.optionalKey(TrimmedString),
+      commitInstructions: Schema.optionalKey(TrimmedString),
+      changeRequestTitleInstructions: Schema.optionalKey(TrimmedString),
+      changeRequestDescriptionInstructions: Schema.optionalKey(TrimmedString),
       followChangeRequestTemplates: Schema.optionalKey(Schema.Boolean),
     }),
   ),

@@ -605,31 +605,45 @@ export const make = Effect.gen(function* () {
 
   const resolveStylePolicy = (cwd: string, style: SourceControlWritingStyleSettings) =>
     Effect.gen(function* () {
+      let policy;
       switch (style.mode) {
         case "conventional_commits":
-          return conventionalCommitsTextGenerationPolicy;
+          policy = conventionalCommitsTextGenerationPolicy;
+          break;
         case "custom":
-          return customTextGenerationPolicy(
-            style.customInstructions
-              ? {
-                  commitInstructions: style.customInstructions,
-                  changeRequestInstructions: style.customInstructions,
-                }
-              : {},
-          );
+          policy = customTextGenerationPolicy({});
+          break;
         case "repo_conventions": {
           const subjects = yield* readRecentCommitSubjects(cwd);
           if (subjects.length === 0) {
-            return repositoryConventionsTextGenerationPolicy;
+            policy = repositoryConventionsTextGenerationPolicy;
+            break;
           }
           const examples = ["Recent commit subjects from this repository:", ...subjects].join("\n");
-          return {
+          policy = {
             ...repositoryConventionsTextGenerationPolicy,
             commitInstructions: `${repositoryConventionsTextGenerationPolicy.commitInstructions}\n\n${examples}`,
             changeRequestInstructions: `${repositoryConventionsTextGenerationPolicy.changeRequestInstructions}\n\n${examples}`,
           };
+          break;
         }
       }
+
+      return {
+        ...policy,
+        ...(style.commitInstructions
+          ? { additionalCommitInstructions: style.commitInstructions }
+          : {}),
+        ...(style.changeRequestTitleInstructions
+          ? { additionalChangeRequestTitleInstructions: style.changeRequestTitleInstructions }
+          : {}),
+        ...(style.changeRequestDescriptionInstructions
+          ? {
+              additionalChangeRequestDescriptionInstructions:
+                style.changeRequestDescriptionInstructions,
+            }
+          : {}),
+      };
     });
   const randomUUIDv4 = (cwd: string) =>
     crypto.randomUUIDv4.pipe(

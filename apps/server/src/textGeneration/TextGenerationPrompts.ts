@@ -19,6 +19,25 @@ function policyInstruction(instruction: string | undefined): ReadonlyArray<strin
   return trimmed ? ["", "Additional instructions:", limitSection(trimmed, 4_000)] : [];
 }
 
+function selectedStyleInstruction(instruction: string | undefined): ReadonlyArray<string> {
+  const trimmed = instruction?.trim();
+  return trimmed ? ["", "Selected writing style:", limitSection(trimmed, 4_000)] : [];
+}
+
+function additionalInstruction(
+  label: string,
+  instruction: string | undefined,
+): ReadonlyArray<string> {
+  const trimmed = instruction?.trim();
+  return trimmed
+    ? [
+        "",
+        `${label} (take precedence over the selected writing style when they conflict):`,
+        limitSection(trimmed, 4_000),
+      ]
+    : [];
+}
+
 // ---------------------------------------------------------------------------
 // Commit message
 // ---------------------------------------------------------------------------
@@ -46,7 +65,13 @@ export function buildCommitMessagePrompt(input: CommitMessagePromptInput) {
       ? ["- branch must be a short semantic git branch fragment for this change"]
       : []),
     "- capture the primary user-visible or developer-visible change",
-    ...policyInstruction(input.policy?.commitInstructions),
+    ...selectedStyleInstruction(input.policy?.commitInstructions),
+    ...additionalInstruction(
+      wantsBranch
+        ? "Additional commit message instructions; apply only to subject and body, not branch"
+        : "Additional commit message instructions",
+      input.policy?.additionalCommitInstructions,
+    ),
     "",
     `Branch: ${input.branch ?? "(detached)"}`,
     "",
@@ -101,7 +126,7 @@ export function buildPrContentPrompt(input: PrContentPromptInput) {
         "- keep the template's markdown structure",
       ]
     : [
-        "- body must be markdown and include headings '## Summary' and '## Testing'",
+        "- unless additional description instructions say otherwise, body must be markdown and include headings '## Summary' and '## Testing'",
         "- under Summary, provide short bullet points",
         "- under Testing, include bullet points with concrete checks or 'Not run' where appropriate",
       ];
@@ -111,7 +136,17 @@ export function buildPrContentPrompt(input: PrContentPromptInput) {
     "Rules:",
     "- title should be concise and specific",
     ...bodyRules,
-    ...policyInstruction(input.policy?.changeRequestInstructions),
+    ...selectedStyleInstruction(input.policy?.changeRequestInstructions),
+    ...additionalInstruction(
+      "Additional change request title instructions; apply only to title",
+      input.policy?.additionalChangeRequestTitleInstructions,
+    ),
+    ...additionalInstruction(
+      changeRequestTemplate
+        ? "Additional change request description instructions; apply only to body and do not override the repository template structure"
+        : "Additional change request description instructions; apply only to body",
+      input.policy?.additionalChangeRequestDescriptionInstructions,
+    ),
     ...(changeRequestTemplate
       ? ["", "Repository change request template:", limitSection(changeRequestTemplate, 8_000)]
       : []),
