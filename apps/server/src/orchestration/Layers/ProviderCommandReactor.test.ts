@@ -24,6 +24,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as PubSub from "effect/PubSub";
@@ -496,6 +497,7 @@ describe("ProviderCommandReactor", () => {
     return {
       engine,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
+      snapshotQuery,
       startSession,
       sendTurn,
       interruptTurn,
@@ -515,6 +517,170 @@ describe("ProviderCommandReactor", () => {
       },
     };
   }
+
+  function prepareSideParent(harness: Awaited<ReturnType<typeof createHarness>>) {
+    return harness.engine.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("side-parent-ready"),
+      threadId: ThreadId.make("thread-1"),
+      session: {
+        threadId: ThreadId.make("thread-1"),
+        status: "ready",
+        providerName: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeMode: "approval-required",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+  }
+
+  const openSideCommand = {
+    type: "thread.side.open" as const,
+    commandId: CommandId.make("open-side"),
+    threadId: ThreadId.make("thread-1"),
+    sideThreadId: ThreadId.make("side-thread"),
+    createdAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  effectIt.effect(
+    "forks on open without a turn and routes the first side message to that session",
+    () =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            startSessionEffect: (session) =>
+              Deferred.succeed(started, undefined).pipe(Effect.as(session)),
+          }),
+        );
+        yield* prepareSideParent(harness);
+        yield* harness.engine.dispatch(openSideCommand);
+        yield* Deferred.await(started);
+        yield* Effect.promise(() => harness.drain());
+        expect(harness.startSession).toHaveBeenCalledTimes(1);
+        expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+          forkFromThreadId: "thread-1",
+          runtimeMode: "approval-required",
+          cwd: "/tmp/provider-project",
+        });
+        expect(harness.sendTurn).not.toHaveBeenCalled();
+        expect(
+          (yield* Effect.promise(() => harness.readModel())).threads.find(
+            (t) => t.id === "side-thread",
+          )?.session?.status,
+        ).toBe("ready");
+
+        // A second open does not fork again or reset the existing child.
+        yield* harness.engine.dispatch({
+          ...openSideCommand,
+          commandId: CommandId.make("open-again"),
+          sideThreadId: ThreadId.make("unused-side"),
+        });
+        expect(harness.startSession).toHaveBeenCalledTimes(1);
+        const sent = yield* Deferred.make<void>();
+        harness.sendTurn.mockImplementation(() =>
+          Deferred.succeed(sent, undefined).pipe(
+            Effect.as({ threadId: ThreadId.make("side-thread"), turnId: asTurnId("side-turn") }),
+          ),
+        );
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("side-message"),
+          threadId: ThreadId.make("side-thread"),
+          message: {
+            messageId: asMessageId("side-message"),
+            role: "user",
+            text: "Explore an alternative",
+            attachments: [],
+          },
+          interactionMode: "default",
+          runtimeMode: "approval-required",
+          createdAt: openSideCommand.createdAt,
+        });
+        yield* Deferred.await(sent);
+        yield* Effect.promise(() => harness.drain());
+        expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+          threadId: "side-thread",
+          sideChat: true,
+        });
+        expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+        expect(harness.generateBranchName).not.toHaveBeenCalled();
+      }),
+  );
+
+  effectIt.effect(
+    "shows fork failure without sending a turn or retrying as a new conversation",
+    () =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            startSessionEffect: () =>
+              Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new ProviderAdapterRequestError({
+                      provider: "codex",
+                      method: "thread/fork",
+                      detail: "Source history unavailable",
+                    }),
+                  ),
+                ),
+              ),
+          }),
+        );
+        yield* prepareSideParent(harness);
+        yield* harness.engine.dispatch(openSideCommand);
+        yield* Deferred.await(started);
+        yield* Effect.promise(() => harness.drain());
+        const side = (yield* Effect.promise(() => harness.readModel())).threads.find(
+          (t) => t.id === "side-thread",
+        );
+        expect(side?.session?.status).toBe("error");
+        expect(side?.session?.lastError).toContain("Source history unavailable");
+        expect(harness.startSession).toHaveBeenCalledTimes(1);
+        expect(harness.sendTurn).not.toHaveBeenCalled();
+      }),
+  );
+
+  effectIt.effect("stops a fork that completes after its side chat was discarded", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          startSessionEffect: (session) =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(release)),
+              Effect.as(session),
+            ),
+        }),
+      );
+      yield* prepareSideParent(harness);
+      yield* harness.engine.dispatch(openSideCommand);
+      yield* Deferred.await(started);
+      yield* harness.engine.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("discard-side"),
+        threadId: ThreadId.make("side-thread"),
+        onlyIfSideOfThreadId: ThreadId.make("thread-1"),
+      });
+      yield* Deferred.succeed(release, undefined);
+      yield* Effect.promise(() => harness.drain());
+      expect(harness.stopSession).toHaveBeenCalledWith({ threadId: "side-thread" });
+      expect(harness.runtimeSessions).toEqual([]);
+      expect(
+        (yield* Effect.promise(() => harness.readModel())).threads.find(
+          (t) => t.id === "side-thread",
+        ),
+      ).toMatchObject({
+        deletedAt: expect.any(String),
+      });
+    }),
+  );
 
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();
@@ -1561,6 +1727,139 @@ describe("ProviderCommandReactor", () => {
     });
     expect(harness.refreshStatus.mock.calls[0]?.[0]).toBe("/tmp/provider-project-worktree");
   });
+
+  effectIt.effect.each(["parent", "kept side"] as const)(
+    "does not generate a branch name for the first %s turn in a shared worktree",
+    (target) =>
+      Effect.gen(function* () {
+        const forkStarted = yield* Deferred.make<void>();
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            startSessionEffect: (session) =>
+              Deferred.succeed(forkStarted, undefined).pipe(Effect.as(session)),
+          }),
+        );
+        yield* prepareSideParent(harness);
+        yield* harness.engine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make("shared-worktree"),
+          threadId: ThreadId.make("thread-1"),
+          branch: "example/team/_worktree/1234abcd",
+          worktreePath: "/tmp/provider-project-worktree",
+        });
+        yield* harness.engine.dispatch(openSideCommand);
+        yield* Deferred.await(forkStarted);
+        yield* Effect.promise(() => harness.drain());
+        if (target === "kept side") {
+          yield* harness.engine.dispatch({
+            type: "thread.side.keep",
+            commandId: CommandId.make("keep-before-first-prompt"),
+            threadId: ThreadId.make("side-thread"),
+          });
+        }
+
+        // Branch naming is forked outside the worker drain. Await that exact job
+        // after it checks checkout ownership, including when it skips generation.
+        const branchJobStarted = yield* Deferred.make<Fiber.Fiber<unknown, unknown>>();
+        const getArchivedShellSnapshot = harness.snapshotQuery.getArchivedShellSnapshot;
+        vi.spyOn(harness.snapshotQuery, "getArchivedShellSnapshot").mockImplementation(() =>
+          Effect.withFiber((fiber) =>
+            Deferred.succeed(branchJobStarted, fiber).pipe(
+              Effect.andThen(getArchivedShellSnapshot()),
+            ),
+          ),
+        );
+        harness.generateBranchName.mockReturnValue(
+          Effect.succeed({ branch: "feature/should-not-be-generated" }),
+        );
+        const threadId = ThreadId.make(target === "parent" ? "thread-1" : "side-thread");
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("first-shared-worktree-prompt"),
+          threadId,
+          message: {
+            messageId: asMessageId("first-shared-worktree-prompt"),
+            role: "user",
+            text: "Explore an alternative implementation.",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: openSideCommand.createdAt,
+        });
+        const branchJob = yield* Deferred.await(branchJobStarted);
+        expect(Exit.isSuccess(yield* Fiber.await(branchJob))).toBe(true);
+        yield* Effect.promise(() => harness.drain());
+
+        expect(harness.generateBranchName).not.toHaveBeenCalled();
+        expect(harness.renameBranch).not.toHaveBeenCalled();
+        expect(
+          (yield* Effect.promise(() => harness.readModel())).threads.find(
+            (thread) => thread.id === threadId,
+          ),
+        ).toMatchObject({
+          branch: "example/team/_worktree/1234abcd",
+          sideOfThreadId: null,
+        });
+      }),
+  );
+
+  effectIt.effect("does not rename a branch when a side chat opens during branch generation", () =>
+    Effect.gen(function* () {
+      const forkStarted = yield* Deferred.make<void>();
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          startSessionEffect: (session) =>
+            session.threadId === "side-thread"
+              ? Deferred.succeed(forkStarted, undefined).pipe(Effect.as(session))
+              : Effect.succeed(session),
+        }),
+      );
+      yield* prepareSideParent(harness);
+      yield* harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("worktree-before-generation"),
+        threadId: ThreadId.make("thread-1"),
+        branch: "example/team/_worktree/1234abcd",
+        worktreePath: "/tmp/provider-project-worktree",
+      });
+      const branchJobStarted = yield* Deferred.make<Fiber.Fiber<unknown, unknown>>();
+      const generatedBranch = yield* Deferred.make<{ readonly branch: string }>();
+      harness.generateBranchName.mockImplementation(() =>
+        Effect.withFiber((fiber) =>
+          Deferred.succeed(branchJobStarted, fiber).pipe(
+            Effect.andThen(Deferred.await(generatedBranch)),
+          ),
+        ),
+      );
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("first-prompt-before-side"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("first-prompt-before-side"),
+          role: "user",
+          text: "Explore an alternative implementation.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: openSideCommand.createdAt,
+      });
+      const branchJob = yield* Deferred.await(branchJobStarted);
+      yield* harness.engine.dispatch(openSideCommand);
+      yield* Deferred.await(forkStarted);
+      yield* Effect.promise(() => harness.drain());
+      yield* Deferred.succeed(generatedBranch, { branch: "feature/generated-before-side" });
+      expect(Exit.isSuccess(yield* Fiber.await(branchJob))).toBe(true);
+
+      expect(harness.generateBranchName).toHaveBeenCalledTimes(1);
+      expect(harness.renameBranch).not.toHaveBeenCalled();
+      expect(
+        (yield* Effect.promise(() => harness.readModel())).threads.map((thread) => thread.branch),
+      ).toEqual(["example/team/_worktree/1234abcd", "example/team/_worktree/1234abcd"]);
+    }),
+  );
 
   it("continues renaming legacy temporary worktree branches", async () => {
     const harness = await createHarness();

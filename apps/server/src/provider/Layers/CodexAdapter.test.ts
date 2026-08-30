@@ -61,6 +61,7 @@ const asItemId = (value: string): ProviderItemId => ProviderItemId.make(value);
 class FakeCodexRuntime implements CodexSessionRuntimeShape {
   private readonly eventQueue = Effect.runSync(Queue.unbounded<ProviderEvent>());
   private readonly now = "2026-01-01T00:00:00.000Z";
+  public startError: CodexErrors.CodexAppServerError | undefined;
 
   public readonly startImpl = vi.fn(() =>
     Promise.resolve({
@@ -122,7 +123,7 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   }
 
   start() {
-    return Effect.promise(() => this.startImpl());
+    return this.startError ? Effect.fail(this.startError) : Effect.promise(() => this.startImpl());
   }
 
   getSession = Effect.promise(() => this.startImpl());
@@ -176,7 +177,10 @@ function makeRuntimeFactory() {
   };
 }
 
-function makeScopedRuntimeFactory(options?: { readonly failConstruction?: boolean }) {
+function makeScopedRuntimeFactory(options?: {
+  readonly failConstruction?: boolean;
+  readonly failStart?: boolean;
+}) {
   const runtimes: Array<FakeCodexRuntime> = [];
   const releasedThreadIds: Array<ThreadId> = [];
 
@@ -197,6 +201,12 @@ function makeScopedRuntimeFactory(options?: { readonly failConstruction?: boolea
       }
 
       const runtime = new FakeCodexRuntime(runtimeOptions);
+      if (options?.failStart) {
+        runtime.startError = new CodexErrors.CodexAppServerRequestError({
+          code: -32603,
+          errorMessage: "thread not found",
+        });
+      }
       runtimes.push(runtime);
       return runtime;
     }),
@@ -239,6 +249,50 @@ const validationLayer = it.layer(
 );
 
 validationLayer("CodexAdapterLive validation", (it) => {
+  it.effect("rejects missing and malformed strict native cursors before creating a runtime", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      validationRuntimeFactory.factory.mockClear();
+      for (const extra of [
+        { requireResume: true },
+        { resumeCursor: { strictResume: true } },
+        { resumeCursor: { threadId: " ", strictResume: true } },
+        { forkFromThreadId: asThreadId("parent") },
+      ]) {
+        const result = yield* adapter
+          .startSession({
+            threadId: asThreadId("side-invalid"),
+            runtimeMode: "full-access",
+            ...extra,
+          })
+          .pipe(Effect.result);
+        NodeAssert.equal(result._tag, "Failure");
+        NodeAssert.equal(result.failure._tag, "ProviderAdapterValidationError");
+      }
+      NodeAssert.equal(validationRuntimeFactory.factory.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("passes only the native source id to a new runtime without sending a turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        threadId: asThreadId("side-valid"),
+        forkFromThreadId: asThreadId("parent"),
+        forkResumeCursor: { threadId: "native-parent" },
+        runtimeMode: "auto-accept-edits",
+        cwd: "/tmp/project",
+      });
+      const runtime = validationRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      NodeAssert.equal(runtime.options.forkThreadId, "native-parent");
+      NodeAssert.equal(runtime.options.resumeCursor, undefined);
+      NodeAssert.equal(runtime.sendTurnImpl.mock.calls.length, 0);
+      yield* adapter.stopSession(asThreadId("side-valid"));
+      validationRuntimeFactory.factory.mockClear();
+    }),
+  );
+
   it.effect("returns validation error for non-codex provider on startSession", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
@@ -1237,6 +1291,37 @@ scopedFailureLayer("CodexAdapterLive scoped startup failure", (it) => {
     }),
   );
 });
+
+it.effect("closes the child runtime and its scope when the native fork request fails", () =>
+  Effect.gen(function* () {
+    const runtimeFactory = makeScopedRuntimeFactory({ failStart: true });
+    const adapter = yield* makeCodexAdapter(decodeCodexSettings({}), {
+      makeRuntime: runtimeFactory.factory,
+    });
+    const threadId = asThreadId("failed-fork");
+    const result = yield* adapter
+      .startSession({
+        threadId,
+        forkFromThreadId: asThreadId("parent"),
+        forkResumeCursor: { threadId: "native-parent" },
+        runtimeMode: "full-access",
+      })
+      .pipe(Effect.result);
+    NodeAssert.equal(result._tag, "Failure");
+    NodeAssert.equal(runtimeFactory.lastRuntime?.closeImpl.mock.calls.length, 1);
+    NodeAssert.deepStrictEqual(runtimeFactory.releasedThreadIds, [threadId]);
+    NodeAssert.equal(yield* adapter.hasSession(threadId), false);
+  }).pipe(
+    Effect.scoped,
+    Effect.provide(
+      Layer.mergeAll(
+        ServerConfig.layerTest(process.cwd(), process.cwd()),
+        ServerSettingsService.layerTest(),
+        providerSessionDirectoryTestLayer,
+      ).pipe(Layer.provideMerge(NodeServices.layer)),
+    ),
+  ),
+);
 
 it.effect("flushes managed native logs when the adapter layer shuts down", () =>
   Effect.gen(function* () {

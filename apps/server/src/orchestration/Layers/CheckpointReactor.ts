@@ -755,6 +755,28 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const currentThread = yield* resolveThreadDetail(event.payload.threadId);
+    const shells = yield* Effect.all([
+      projectionSnapshotQuery.getShellSnapshot(),
+      projectionSnapshotQuery.getArchivedShellSnapshot(),
+    ]);
+    if (
+      !currentThread ||
+      currentThread.deletedAt !== null ||
+      currentThread.sideOfThreadId != null ||
+      shells.some((shell) =>
+        shell.threads.some((other) => other.sideOfThreadId === event.payload.threadId),
+      )
+    ) {
+      yield* appendRevertFailureActivity({
+        threadId: event.payload.threadId,
+        turnCount: event.payload.turnCount,
+        detail: "Discard or keep the side chat before restoring this checkout.",
+        createdAt: now,
+      }).pipe(Effect.catch(() => Effect.void));
+      return;
+    }
+
     const restored = yield* checkpointStore.restoreCheckpoint({
       cwd: sessionRuntime.value.cwd,
       checkpointRef: targetCheckpointRef,

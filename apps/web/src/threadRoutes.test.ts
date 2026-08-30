@@ -10,9 +10,62 @@ import {
   resolveThreadRouteRenderState,
   resolveThreadRouteRef,
   resolveThreadRouteTarget,
+  resolveKeptSideRoute,
 } from "./threadRoutes";
 
 describe("threadRoutes", () => {
+  it("waits for the promoted shell after a successful Keep receipt", () => {
+    const parentRef = scopeThreadRef("env-1" as never, ThreadId.make("parent"));
+    const childRef = scopeThreadRef("env-1" as never, ThreadId.make("side"));
+    const input = {
+      parentRef,
+      childRef,
+      activeThreadRef: parentRef,
+      childShell: {
+        environmentId: childRef.environmentId,
+        id: childRef.threadId,
+        sideOfThreadId: parentRef.threadId,
+      },
+    };
+    expect(resolveKeptSideRoute(input)).toBeNull();
+    expect(
+      resolveKeptSideRoute({ ...input, childShell: { ...input.childShell, sideOfThreadId: null } }),
+    ).toEqual(childRef);
+  });
+
+  it("does not let a late Keep navigate a different parent or environment", () => {
+    const parentRef = scopeThreadRef("env-1" as never, ThreadId.make("parent"));
+    const childRef = scopeThreadRef("env-1" as never, ThreadId.make("side"));
+    const input = {
+      parentRef,
+      childRef,
+      activeThreadRef: parentRef,
+      childShell: {
+        environmentId: childRef.environmentId,
+        id: childRef.threadId,
+        sideOfThreadId: null,
+      },
+    };
+    expect(
+      resolveKeptSideRoute({
+        ...input,
+        activeThreadRef: { ...parentRef, threadId: ThreadId.make("another-parent") },
+      }),
+    ).toBeNull();
+    expect(
+      resolveKeptSideRoute({
+        ...input,
+        activeThreadRef: scopeThreadRef("env-2" as never, parentRef.threadId),
+      }),
+    ).toBeNull();
+    expect(
+      resolveKeptSideRoute({
+        ...input,
+        childShell: { ...input.childShell, environmentId: "env-2" as never },
+      }),
+    ).toBeNull();
+  });
+
   it("builds canonical thread route params from a scoped ref", () => {
     const ref = scopeThreadRef("env-1" as never, ThreadId.make("thread-1"));
 

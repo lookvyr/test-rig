@@ -298,6 +298,7 @@ const DIFF_PANEL_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 interface DiffPanelProps {
   mode?: DiffPanelMode;
   composerDraftTarget: ScopedThreadRef | DraftId;
+  threadRef?: ScopedThreadRef | undefined;
   initialGitScope: "branch" | "unstaged";
 }
 
@@ -306,6 +307,7 @@ export { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 export default function DiffPanel({
   mode = "inline",
   composerDraftTarget,
+  threadRef,
   initialGitScope: initialGitScopeProp,
 }: DiffPanelProps) {
   const { resolvedTheme } = useTheme();
@@ -327,10 +329,11 @@ export default function DiffPanel({
     readonly turnId: TurnId | null;
   } | null>(null);
 
-  const routeThreadRef = useParams({
+  const routedThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
   });
+  const routeThreadRef = threadRef ?? routedThreadRef;
   const activeThreadId = routeThreadRef?.threadId ?? null;
   const activeThread = useThread(routeThreadRef);
   const activeProjectId = activeThread?.projectId ?? null;

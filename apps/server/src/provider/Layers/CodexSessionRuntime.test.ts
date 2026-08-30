@@ -21,6 +21,7 @@ import {
   openCodexThread,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
+type ThreadOpenMethod = "thread/start" | "thread/resume" | "thread/fork";
 
 describe("CodexSessionRuntimeIdentifierGenerationError", () => {
   it("retains identifier purpose and the random source failure", () => {
@@ -393,12 +394,49 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  for (const mode of ["fork", "strict-resume", "missing-strict-cursor"] as const) {
+    it.effect(`never starts a fresh thread after ${mode} fails`, () =>
+      Effect.gen(function* () {
+        const calls: Array<ThreadOpenMethod> = [];
+        const client = {
+          request: <M extends ThreadOpenMethod>(
+            method: M,
+            _payload: CodexRpc.ClientRequestParamsByMethod[M],
+          ) => {
+            calls.push(method);
+            return Effect.fail(
+              new CodexErrors.CodexAppServerRequestError({
+                code: -32603,
+                errorMessage: "thread not found",
+              }),
+            );
+          },
+        };
+        const failure = yield* openCodexThread({
+          client,
+          threadId: ThreadId.make("side-thread"),
+          runtimeMode: "auto-accept-edits",
+          cwd: "/tmp/project",
+          requestedModel: undefined,
+          serviceTier: undefined,
+          resumeThreadId: mode === "strict-resume" ? "child-native" : undefined,
+          ...(mode === "fork" ? { forkThreadId: "parent-native" } : { strictResume: true }),
+        }).pipe(Effect.flip);
+        NodeAssert.ok(isCodexAppServerRequestError(failure));
+        NodeAssert.deepStrictEqual(
+          calls,
+          mode === "fork" ? ["thread/fork"] : mode === "strict-resume" ? ["thread/resume"] : [],
+        );
+      }),
+    );
+  }
+
   it.effect("falls back to thread/start when resume fails recoverably", () =>
     Effect.gen(function* () {
-      const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+      const calls: Array<{ method: ThreadOpenMethod; payload: unknown }> = [];
       const started = makeThreadOpenResponse("fresh-thread");
       const client = {
-        request: <M extends "thread/start" | "thread/resume">(
+        request: <M extends ThreadOpenMethod>(
           method: M,
           payload: CodexRpc.ClientRequestParamsByMethod[M],
         ) => {
@@ -436,7 +474,7 @@ describe("openCodexThread", () => {
   it.effect("propagates non-recoverable resume failures", () =>
     Effect.gen(function* () {
       const client = {
-        request: <M extends "thread/start" | "thread/resume">(
+        request: <M extends ThreadOpenMethod>(
           method: M,
           _payload: CodexRpc.ClientRequestParamsByMethod[M],
         ) => {

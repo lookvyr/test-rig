@@ -21,6 +21,7 @@ import {
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -28,6 +29,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
@@ -90,7 +92,7 @@ function createProviderServiceHarness(
 
   const unsupported = <A>() =>
     Effect.die(new Error("Unsupported provider call in test")) as Effect.Effect<A, never>;
-  const listSessions = () =>
+  const listSessions = vi.fn<ProviderServiceShape["listSessions"]>(() =>
     hasSession
       ? Effect.succeed([
           {
@@ -103,7 +105,8 @@ function createProviderServiceHarness(
             updatedAt: now,
           },
         ] satisfies ReadonlyArray<ProviderSession>)
-      : Effect.succeed([] as ReadonlyArray<ProviderSession>);
+      : Effect.succeed([] as ReadonlyArray<ProviderSession>),
+  );
   const service: ProviderServiceShape = {
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
@@ -137,6 +140,7 @@ function createProviderServiceHarness(
   return {
     service,
     rollbackConversation,
+    listSessions,
     emit,
   };
 }
@@ -1003,6 +1007,74 @@ describe("CheckpointReactor", () => {
       gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 0)),
     ).toBe(true);
   });
+
+  effectIt.effect("rejects an accepted restore if a side chat opens before execution", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("restore-parent-ready"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      });
+      const restoreStarted = yield* Deferred.make<void>();
+      const releaseRestore = yield* Deferred.make<void>();
+      const sessions = harness.provider.listSessions();
+      harness.provider.listSessions.mockClear();
+      harness.provider.listSessions.mockImplementationOnce(() =>
+        Deferred.succeed(restoreStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseRestore)),
+          Effect.andThen(sessions),
+        ),
+      );
+
+      yield* harness.engine.dispatch({
+        type: "thread.checkpoint.revert",
+        commandId: CommandId.make("restore-before-side-open"),
+        threadId: ThreadId.make("thread-1"),
+        turnCount: 0,
+        createdAt,
+      });
+      yield* Deferred.await(restoreStarted);
+      yield* harness.engine.dispatch({
+        type: "thread.side.open",
+        commandId: CommandId.make("side-open-before-restore-executes"),
+        threadId: ThreadId.make("thread-1"),
+        sideThreadId: ThreadId.make("side-thread"),
+        createdAt,
+      });
+      yield* Deferred.succeed(releaseRestore, undefined);
+      yield* Effect.promise(() => harness.drain());
+
+      const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === "thread-1",
+      );
+      expect(thread?.activities).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: "checkpoint.revert.failed",
+            payload: expect.objectContaining({
+              detail: "Discard or keep the side chat before restoring this checkout.",
+            }),
+          }),
+        ]),
+      );
+      expect(harness.provider.rollbackConversation).not.toHaveBeenCalled();
+      expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe("v3\n");
+      const events = yield* Stream.runCollect(harness.engine.readEvents(0));
+      expect(events.some((event) => event.type === "thread.reverted")).toBe(false);
+    }),
+  );
 
   it("executes provider revert and emits thread.reverted for checkpoint revert requests", async () => {
     const harness = await createHarness();

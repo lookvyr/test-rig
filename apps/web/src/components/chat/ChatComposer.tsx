@@ -567,6 +567,7 @@ export interface ChatComposerProps {
 
   // Callbacks
   onSend: (e?: { preventDefault: () => void }) => void;
+  onOpenSideChat?: (() => void) | undefined;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -649,6 +650,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerTerminalContextsRef,
     composerElementContextsRef,
     onSend,
+    onOpenSideChat,
     onInterrupt,
     onImplementPlanInNewThread,
     onRespondToApproval,
@@ -1038,6 +1040,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
+        ...(onOpenSideChat
+          ? ([
+              {
+                id: "slash:side",
+                type: "slash-command",
+                command: "side",
+                label: "/side",
+                description: "Open a side chat with this thread’s context",
+              },
+            ] as const)
+          : []),
         {
           id: "slash:model",
           type: "slash-command",
@@ -1099,6 +1112,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return [];
   }, [
     composerTrigger,
+    onOpenSideChat,
     planModeUiEnabled,
     selectedProvider,
     selectedProviderStatus,
@@ -1677,6 +1691,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "slash-command") {
+        if (item.command === "side") {
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+            focusEditorAfterReplace: false,
+          });
+          if (applied) {
+            setComposerHighlightedItemId(null);
+            onOpenSideChat?.();
+          }
+          return;
+        }
         if (item.command === "model") {
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -1734,7 +1759,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
     },
-    [applyPromptReplacement, handleInteractionModeChange, resolveActiveComposerTrigger],
+    [
+      applyPromptReplacement,
+      handleInteractionModeChange,
+      onOpenSideChat,
+      resolveActiveComposerTrigger,
+    ],
   );
 
   const onComposerMenuItemHighlighted = useCallback(
@@ -2247,6 +2277,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         },
       });
       if (command !== "composer.stash") return;
+      const target = event.target instanceof Element ? event.target : document.activeElement;
+      const targetComposer = target?.closest("[data-chat-composer-form]");
+      const pickerComposer = document.querySelector("[data-composer-model-picker-open]");
+      if (pickerComposer && pickerComposer !== composerFormRef.current) return;
+      if (targetComposer && targetComposer !== composerFormRef.current) return;
+      if (
+        composerFormRef.current?.closest("[data-side-chat]") &&
+        !composerFormRef.current.contains(target)
+      )
+        return;
+      if (event.defaultPrevented) return;
       // Always claim the shortcut so the browser save dialog never opens,
       // even when the composer is in a state that can't stash.
       event.preventDefault();
@@ -2654,6 +2695,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onSubmit={submitComposer}
       className="mx-auto w-full min-w-0 max-w-3xl"
       data-chat-composer-form="true"
+      data-composer-model-picker-open={isComposerModelPickerOpen ? "true" : undefined}
     >
       <div
         className={cn(

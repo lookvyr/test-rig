@@ -42,7 +42,10 @@ import {
   ProviderValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import type {
+  ProviderAdapterShape,
+  ProviderAdapterStartInput,
+} from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../Services/ProviderSessionDirectory.ts";
@@ -88,27 +91,28 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER) {
   const sessions = new Map<ThreadId, ProviderSession>();
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
 
-  const startSession = vi.fn((input: ProviderSessionStartInput) =>
-    Effect.sync(() => {
-      const now = "2026-01-01T00:00:00.000Z";
-      const session: ProviderSession = {
-        provider,
-        ...(input.providerInstanceId !== undefined
-          ? { providerInstanceId: input.providerInstanceId }
-          : {}),
-        status: "ready",
-        runtimeMode: input.runtimeMode,
-        threadId: input.threadId,
-        resumeCursor: input.resumeCursor ?? {
-          opaque: `resume-${String(input.threadId)}`,
-        },
-        cwd: input.cwd ?? process.cwd(),
-        createdAt: now,
-        updatedAt: now,
-      };
-      sessions.set(session.threadId, session);
-      return session;
-    }),
+  const startSession = vi.fn(
+    (input: ProviderAdapterStartInput): Effect.Effect<ProviderSession, ProviderAdapterError> =>
+      Effect.sync(() => {
+        const now = "2026-01-01T00:00:00.000Z";
+        const session: ProviderSession = {
+          provider,
+          ...(input.providerInstanceId !== undefined
+            ? { providerInstanceId: input.providerInstanceId }
+            : {}),
+          status: "ready",
+          runtimeMode: input.runtimeMode,
+          threadId: input.threadId,
+          resumeCursor: input.resumeCursor ?? {
+            opaque: `resume-${String(input.threadId)}`,
+          },
+          cwd: input.cwd ?? process.cwd(),
+          createdAt: now,
+          updatedAt: now,
+        };
+        sessions.set(session.threadId, session);
+        return session;
+      }),
   );
 
   const sendTurn = vi.fn(
@@ -1485,6 +1489,146 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
         NodeFS.rmSync(tempDir, { recursive: true, force: true });
       }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+const forkRouting = makeProviderServiceLayer();
+forkRouting.layer("ProviderService native forks", (it) => {
+  for (const stopParent of [false, true]) {
+    it.effect(
+      `uses current parent settings over a ${stopParent ? "reaped" : "live"} source runtime`,
+      () =>
+        Effect.gen(function* () {
+          const provider = yield* ProviderService.ProviderService;
+          const parentId = asThreadId(`fork-parent-${stopParent}`);
+          const childId = asThreadId(`fork-child-${stopParent}`);
+          const modelSelection = createModelSelection(codexInstanceId, "gpt-5.3-codex");
+          const parent = yield* provider.startSession(parentId, {
+            threadId: parentId,
+            providerInstanceId: codexInstanceId,
+            cwd: "/tmp/previous-checkout",
+            runtimeMode: "full-access",
+            modelSelection,
+          });
+          if (stopParent) yield* provider.stopSession({ threadId: parentId });
+          forkRouting.codex.startSession.mockClear();
+          yield* provider.startSession(childId, {
+            threadId: childId,
+            providerInstanceId: codexInstanceId,
+            forkFromThreadId: parentId,
+            cwd: "/tmp/current-checkout",
+            runtimeMode: "approval-required",
+          });
+          assert.equal(
+            forkRouting.codex.startSession.mock.calls.length,
+            1,
+            "forking does not start or resume the parent",
+          );
+          const input = forkRouting.codex.startSession.mock.calls[0]![0];
+          assert.equal(input.threadId, childId);
+          assert.equal(input.providerInstanceId, codexInstanceId);
+          assert.equal(input.cwd, "/tmp/current-checkout");
+          assert.equal(input.runtimeMode, "approval-required");
+          assert.deepEqual(input.modelSelection, modelSelection);
+          assert.deepEqual(input.forkResumeCursor, parent.resumeCursor);
+          assert.equal(input.resumeCursor, undefined);
+        }),
+    );
+  }
+
+  it.effect(
+    "rejects unsupported providers, another source instance, and missing required resume state",
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        const sourceId = asThreadId("fork-claude-source");
+        yield* provider.startSession(sourceId, {
+          threadId: sourceId,
+          providerInstanceId: claudeAgentInstanceId,
+          runtimeMode: "full-access",
+        });
+        forkRouting.codex.startSession.mockClear();
+        forkRouting.claude.startSession.mockClear();
+        for (const input of [
+          { providerInstanceId: claudeAgentInstanceId, forkFromThreadId: sourceId },
+          { providerInstanceId: codexInstanceId, forkFromThreadId: sourceId },
+          { providerInstanceId: codexInstanceId, requireResume: true },
+        ]) {
+          const result = yield* provider
+            .startSession(asThreadId("invalid-fork"), {
+              ...input,
+              threadId: asThreadId("invalid-fork"),
+              runtimeMode: "full-access",
+            })
+            .pipe(Effect.result);
+          assert.equal(result._tag, "Failure");
+          if (result._tag === "Failure")
+            assert.equal(result.failure._tag, "ProviderValidationError");
+        }
+        assert.equal(forkRouting.codex.startSession.mock.calls.length, 0);
+        assert.equal(forkRouting.claude.startSession.mock.calls.length, 0);
+      }),
+  );
+
+  it.effect("leaves no child directory binding when the native fork fails", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const parentId = asThreadId("failed-fork-parent");
+      const childId = asThreadId("failed-fork-child");
+      yield* provider.startSession(parentId, {
+        threadId: parentId,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: "full-access",
+      });
+      forkRouting.codex.startSession.mockImplementationOnce(() =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: "codex",
+            method: "thread/fork",
+            detail: "Source history is unavailable.",
+          }),
+        ),
+      );
+      const result = yield* provider
+        .startSession(childId, {
+          threadId: childId,
+          providerInstanceId: codexInstanceId,
+          runtimeMode: "full-access",
+          forkFromThreadId: parentId,
+        })
+        .pipe(Effect.result);
+      assert.equal(result._tag, "Failure");
+      assert.isTrue(Option.isNone(yield* directory.getBinding(childId)));
+      assert.isFalse(yield* forkRouting.codex.adapter.hasSession(childId));
+      assert.isTrue(yield* forkRouting.codex.adapter.hasSession(parentId));
+    }),
+  );
+
+  it.effect(
+    "retains strict native identity in persisted cursor updates and idle recovery after Keep",
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+        const threadId = asThreadId("kept-native-fork");
+        const cursor = { threadId: "native-child", strictResume: true };
+        yield* provider.startSession(threadId, {
+          threadId,
+          providerInstanceId: codexInstanceId,
+          runtimeMode: "full-access",
+          resumeCursor: cursor,
+        });
+        yield* provider.sendTurn({ threadId, input: "Side request", sideChat: true });
+        yield* provider.stopSession({ threadId });
+        forkRouting.codex.startSession.mockClear();
+        yield* provider.sendTurn({ threadId, input: "Keep working here", sideChat: false });
+        assert.deepEqual(forkRouting.codex.startSession.mock.calls[0]![0].resumeCursor, cursor);
+        const binding = yield* directory.getBinding(threadId);
+        assert.isTrue(Option.isSome(binding));
+        if (Option.isSome(binding)) assert.deepEqual(binding.value.resumeCursor, cursor);
+        assert.equal(forkRouting.codex.sendTurn.mock.calls.at(-1)![0].sideChat, false);
+      }),
   );
 });
 

@@ -26,6 +26,9 @@ rl.on("line", (line) => {
     return;
   }
   const { id, method } = message;
+  if (script.recordRequests && id !== undefined) {
+    NodeFS.appendFileSync(`${process.env.T3_CODEX_COLLAB_SCRIPT}.requests`, `${line}\n`);
+  }
   if (method === "initialize") {
     write({
       id,
@@ -38,7 +41,7 @@ rl.on("line", (line) => {
     });
     return;
   }
-  if (method === "thread/start" || method === "thread/resume") {
+  if (method === "thread/start" || method === "thread/resume" || method === "thread/fork") {
     write({ id, result: fixture.responses.threadStart });
     return;
   }

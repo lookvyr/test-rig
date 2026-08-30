@@ -1,5 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { DraftId } from "./composerDraftStore";
 
 export type ThreadRouteTarget =
@@ -19,6 +20,25 @@ type DraftThreadRouteState = {
 };
 
 export type ThreadRouteRenderState = "loading" | "ready" | "missing";
+
+/** A Keep receipt can arrive before the shell that makes the child routable. */
+export function resolveKeptSideRoute(input: {
+  parentRef: ScopedThreadRef;
+  childRef: ScopedThreadRef;
+  activeThreadRef: ScopedThreadRef;
+  childShell: Pick<EnvironmentThreadShell, "environmentId" | "id" | "sideOfThreadId"> | null;
+}): ScopedThreadRef | null {
+  if (
+    input.activeThreadRef.environmentId !== input.parentRef.environmentId ||
+    input.activeThreadRef.threadId !== input.parentRef.threadId ||
+    input.childRef.environmentId !== input.parentRef.environmentId ||
+    input.childShell?.environmentId !== input.childRef.environmentId ||
+    input.childShell.id !== input.childRef.threadId ||
+    input.childShell.sideOfThreadId != null
+  )
+    return null;
+  return input.childRef;
+}
 
 export function resolveThreadRouteRenderState(input: {
   bootstrapComplete: boolean;

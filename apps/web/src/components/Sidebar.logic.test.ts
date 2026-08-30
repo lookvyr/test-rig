@@ -1151,6 +1151,23 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 describe("getFallbackThreadIdAfterDelete", () => {
+  it("does not navigate into a hidden side chat after deleting another thread", () => {
+    const parent = makeThread({ id: ThreadId.make("parent") });
+    const side = makeThread({
+      id: ThreadId.make("side"),
+      sideOfThreadId: parent.id,
+      createdAt: "2026-08-30T10:00:00.000Z",
+    });
+    const deleted = makeThread({ id: ThreadId.make("deleted") });
+    expect(
+      getFallbackThreadIdAfterDelete({
+        threads: [parent, side, deleted],
+        deletedThreadId: deleted.id,
+        sortOrder: "created_at",
+      }),
+    ).toBe(parent.id);
+  });
+
   it("returns the top remaining thread in the deleted thread's project sidebar order", () => {
     const fallbackThreadId = getFallbackThreadIdAfterDelete({
       threads: [

@@ -153,6 +153,10 @@ export interface CodexRuntimeInfo {
   readonly reasoningEffort: string;
 }
 
+export const CODEX_SIDE_CHAT_INSTRUCTIONS = `<side_chat>
+This conversation is a side chat forked from another thread. Treat the inherited conversation as reference context. Work only on requests made in this side chat; do not continue the parent's unfinished tasks, goals, or pending approvals on your own. You may use tools and make changes when requested, with the normal permission settings. Both conversations share the same checkout, so file changes are visible to both.
+</side_chat>`;
+
 // Values come from trusted config, but keep the block single-line regardless.
 function toSingleLine(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
@@ -161,12 +165,13 @@ function toSingleLine(value: string): string {
 export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
   runtime: CodexRuntimeInfo,
+  sideChat = false,
 ): string {
   const base =
     interactionMode === "plan"
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
       : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
-  return `${base}
+  return `${base}${sideChat ? `\n\n${CODEX_SIDE_CHAT_INSTRUCTIONS}` : ""}
 
 <runtime_info>In case you're asked: you are running in Test Rig through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
 }

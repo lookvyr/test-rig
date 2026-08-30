@@ -33,6 +33,10 @@ export type UpdateProjectInput = CommandInput<"project.meta.update">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
 export type CreateThreadInput = CommandInput<"thread.create">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
+export type OpenThreadSideInput = CommandInput<"thread.side.open">;
+export type KeepThreadSideInput = CommandInput<"thread.side.keep">;
+export type DiscardThreadSideInput = DeleteThreadInput &
+  Required<Pick<DeleteThreadInput, "onlyIfSideOfThreadId">>;
 export type ArchiveThreadInput = CommandInput<"thread.archive">;
 export type UnarchiveThreadInput = CommandInput<"thread.unarchive">;
 export type SettleThreadInput = CommandInput<"thread.settle">;
@@ -138,6 +142,26 @@ export const deleteThread: (input: DeleteThreadInput) => CommandEffect = Effect.
     commandId: yield* commandId(input),
   });
 });
+
+export const openThreadSide: (input: OpenThreadSideInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.openThreadSide",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({ ...input, ...metadata, type: "thread.side.open" });
+});
+
+export const keepThreadSide: (input: KeepThreadSideInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.keepThreadSide",
+)(function* (input) {
+  return yield* dispatch({
+    ...input,
+    commandId: yield* commandId(input),
+    type: "thread.side.keep",
+  });
+});
+
+export const discardThreadSide = (input: DiscardThreadSideInput): CommandEffect =>
+  deleteThread(input);
 
 export const archiveThread: (input: ArchiveThreadInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.archiveThread",

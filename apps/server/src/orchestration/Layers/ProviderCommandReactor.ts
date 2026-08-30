@@ -55,6 +55,7 @@ type ProviderIntentEvent = Extract<
   OrchestrationEvent,
   {
     type:
+      | "thread.created"
       | "thread.meta-updated"
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
@@ -392,7 +393,7 @@ const make = Effect.gen(function* () {
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
-    if (!thread) {
+    if (!thread || thread.deletedAt !== null) {
       return;
     }
     const session = thread.session;
@@ -464,10 +465,11 @@ const make = Effect.gen(function* () {
     options?: {
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
+      readonly forkFromThreadId?: ThreadId;
     },
   ) {
     const thread = yield* resolveThread(threadId);
-    if (!thread) {
+    if (!thread || thread.deletedAt !== null) {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
 
@@ -538,7 +540,10 @@ const make = Effect.gen(function* () {
       });
     }
     const preferredProvider: ProviderDriverKind = desiredDriverKind;
-    if (options?.pendingTurnStart === true && thread.session?.status !== "running") {
+    if (
+      (options?.pendingTurnStart === true || options?.forkFromThreadId !== undefined) &&
+      thread.session?.status !== "running"
+    ) {
       yield* setThreadSession({
         threadId,
         session: {
@@ -608,11 +613,32 @@ const make = Effect.gen(function* () {
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
         modelSelection: desiredModelSelection,
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+        ...(options?.forkFromThreadId !== undefined
+          ? { forkFromThreadId: options.forkFromThreadId }
+          : thread.sideOfThreadId != null
+            ? { requireResume: true }
+            : {}),
         runtimeMode: desiredRuntimeMode,
       });
 
     const bindSessionToThread = (session: ProviderSession) =>
       Effect.gen(function* () {
+        const current = yield* resolveThread(threadId);
+        const parent = current?.sideOfThreadId
+          ? yield* resolveThread(current.sideOfThreadId)
+          : undefined;
+        if (
+          !current ||
+          current.deletedAt !== null ||
+          (current.sideOfThreadId != null && (!parent || parent.deletedAt !== null))
+        ) {
+          yield* providerService.stopSession({ threadId }).pipe(Effect.ignoreCause({ log: true }));
+          return yield* new ProviderAdapterRequestError({
+            provider: providerErrorLabel(session.provider),
+            method: "thread.side.open",
+            detail: "The conversation was discarded before its provider session was ready.",
+          });
+        }
         if (session.providerInstanceId === undefined) {
           return yield* new ProviderAdapterRequestError({
             provider: providerErrorLabel(session.provider),
@@ -765,11 +791,27 @@ const make = Effect.gen(function* () {
 
     return {
       threadId: input.threadId,
+      sideChat: thread.sideOfThreadId != null,
       ...(normalizedInput ? { input: normalizedInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     };
+  });
+
+  const worktreeIsShared = Effect.fn("worktreeIsShared")(function* (
+    threadId: ThreadId,
+    worktreePath: string,
+  ) {
+    const snapshots = yield* Effect.all([
+      projectionSnapshotQuery.getShellSnapshot(),
+      projectionSnapshotQuery.getArchivedShellSnapshot(),
+    ]);
+    return snapshots.some((snapshot) =>
+      snapshot.threads.some(
+        (other) => other.id !== threadId && other.worktreePath === worktreePath,
+      ),
+    );
   });
 
   const maybeGenerateAndRenameWorktreeBranchForFirstTurn = Effect.fn(
@@ -788,6 +830,7 @@ const make = Effect.gen(function* () {
     if (branchPrefix === null) {
       return;
     }
+    if (yield* worktreeIsShared(input.threadId, input.worktreePath)) return;
 
     const oldBranch = input.branch;
     const cwd = input.worktreePath;
@@ -813,6 +856,15 @@ const make = Effect.gen(function* () {
       const targetBranch = buildGeneratedWorktreeBranchName(generated.branch, branchPrefix);
       if (targetBranch === oldBranch) return;
 
+      const current = yield* resolveThread(input.threadId);
+      if (
+        !current ||
+        current.deletedAt !== null ||
+        current.branch !== oldBranch ||
+        current.worktreePath !== cwd ||
+        (yield* worktreeIsShared(input.threadId, cwd))
+      )
+        return;
       const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
       yield* orchestrationEngine.dispatch({
         type: "thread.meta.update",
@@ -1077,7 +1129,7 @@ const make = Effect.gen(function* () {
 
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
-    if (isFirstUserMessageTurn) {
+    if (isFirstUserMessageTurn && thread.sideOfThreadId == null) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
         resolveThreadWorkspaceCwd({
@@ -1319,6 +1371,25 @@ const make = Effect.gen(function* () {
       eventType: event.type,
     });
     switch (event.type) {
+      case "thread.created": {
+        if (event.payload.sideOfThreadId == null) return;
+        const child = yield* resolveThread(event.payload.threadId);
+        const parent = yield* resolveThread(event.payload.sideOfThreadId);
+        if (!child || child.deletedAt !== null || !parent || parent.deletedAt !== null) return;
+        yield* ensureSessionForThread(child.id, event.occurredAt, {
+          forkFromThreadId: parent.id,
+        }).pipe(
+          Effect.catchCause((cause) => {
+            if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+            return setThreadSessionErrorOnTurnStartFailure({
+              threadId: child.id,
+              detail: `Could not open side chat: ${formatFailureDetail(cause)}. Discard it and try again.`,
+              createdAt: event.occurredAt,
+            });
+          }),
+        );
+        return;
+      }
       case "thread.meta-updated":
         yield* threadTitleRegenerationWorker.enqueue(event);
         return;
@@ -1382,6 +1453,7 @@ const make = Effect.gen(function* () {
     );
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
+        (event.type === "thread.created" && event.payload.sideOfThreadId != null) ||
         (event.type === "thread.meta-updated" && event.payload.regenerateTitle === true) ||
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||

@@ -1,6 +1,6 @@
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { Bot, FileDiff, Files, Globe2, Plus, TerminalSquare, X } from "lucide-react";
+import { Bot, FileDiff, Files, Globe2, MessageSquare, Plus, TerminalSquare, X } from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
@@ -43,6 +43,8 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
+  onAddSideChat?: (() => void) | undefined;
+  sideChatAvailable?: boolean | undefined;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
@@ -53,6 +55,7 @@ const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the Test Rig desktop app.",
   files: "Files are only available when a project is open.",
   diff: "Diff is only available for server threads in Git repositories.",
+  sideChat: "Side chats are available after a Codex conversation has started.",
 } as const;
 
 type TabContextMenuAction = "copy-path" | "close" | "close-others" | "close-to-right" | "close-all";
@@ -91,6 +94,8 @@ function RightPanelEmptyState(props: {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
+  onAddSideChat?: (() => void) | undefined;
+  sideChatAvailable?: boolean | undefined;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
@@ -136,6 +141,18 @@ function RightPanelEmptyState(props: {
       disabledReason: null,
       onClick: props.onAddAgents,
     },
+    ...(props.onAddSideChat
+      ? [
+          {
+            label: "Side chat",
+            description: "Explore an idea with this thread’s context.",
+            icon: MessageSquare,
+            available: props.sideChatAvailable ?? false,
+            disabledReason: SURFACE_DISABLED_REASONS.sideChat,
+            onClick: props.onAddSideChat,
+          },
+        ]
+      : []),
   ] as const;
 
   return (
@@ -213,6 +230,8 @@ function surfaceTitle(
       );
     case "agents":
       return "Agents";
+    case "side-chat":
+      return "Side chat";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -247,6 +266,8 @@ function SurfaceIcon({ surface, theme }: { surface: RightPanelSurface; theme: "l
       return <TerminalSquare className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "side-chat":
+      return <MessageSquare className="size-3 shrink-0" />;
   }
 }
 
@@ -443,6 +464,16 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <FileDiff />
                     Diff
                   </SurfaceMenuItem>
+                  {props.onAddSideChat ? (
+                    <SurfaceMenuItem
+                      available={props.sideChatAvailable ?? false}
+                      disabledReason={SURFACE_DISABLED_REASONS.sideChat}
+                      onClick={props.onAddSideChat}
+                    >
+                      <MessageSquare />
+                      Side chat
+                    </SurfaceMenuItem>
+                  ) : null}
                   <SurfaceMenuItem available onClick={props.onAddAgents}>
                     <Bot />
                     Agents
@@ -462,6 +493,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddAgents={props.onAddAgents}
+            onAddSideChat={props.onAddSideChat}
+            sideChatAvailable={props.sideChatAvailable}
             browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}

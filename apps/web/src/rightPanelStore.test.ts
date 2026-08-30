@@ -18,6 +18,31 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("reopens one side-chat tab alongside other surfaces without changing its draft", async () => {
+    const { useComposerDraftStore } = await import("./composerDraftStore");
+    const childRef = scopeThreadRef(refA.environmentId, ThreadId.make("side-child"));
+    useComposerDraftStore.getState().setPrompt(childRef, "An unfinished side question");
+    const panel = useRightPanelStore.getState();
+    panel.openBrowser(refA, "browser-tab");
+    panel.open(refA, "side-chat");
+    panel.open(refA, "side-chat");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.map(
+        (surface) => surface.kind,
+      ),
+    ).toEqual(["preview", "side-chat"]);
+    panel.closeSurface(refA, "side-chat");
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("preview");
+    panel.open(refA, "side-chat");
+    expect(useComposerDraftStore.getState().getComposerDraft(childRef)?.prompt).toBe(
+      "An unfinished side question",
+    );
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe(
+      "side-chat",
+    );
+    useComposerDraftStore.getState().clearComposerContent(childRef);
+  });
+
   it("drops the legacy singleton terminal surface during migration", () => {
     expect(
       migratePersistedRightPanelState({

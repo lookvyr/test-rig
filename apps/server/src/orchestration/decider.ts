@@ -378,12 +378,128 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
-    case "thread.delete": {
-      yield* requireThread({
+    case "thread.side.open": {
+      const parent = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      if (
+        parent.deletedAt !== null ||
+        parent.archivedAt !== null ||
+        parent.sideOfThreadId != null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Side chats can only be opened from an active, ordinary thread.",
+        });
+      }
+      if (
+        readModel.threads.some(
+          (thread) => thread.sideOfThreadId === parent.id && thread.deletedAt === null,
+        )
+      ) {
+        return [];
+      }
+      if (parent.session?.providerName !== "codex") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Side chats require an existing Codex conversation.",
+        });
+      }
+      yield* requireThreadAbsent({ readModel, command, threadId: command.sideThreadId });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.sideThreadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.created",
+        payload: {
+          threadId: command.sideThreadId,
+          projectId: parent.projectId,
+          sideOfThreadId: parent.id,
+          title: "Side chat",
+          modelSelection: parent.modelSelection,
+          runtimeMode: parent.runtimeMode,
+          interactionMode: parent.interactionMode,
+          branch: parent.branch,
+          worktreePath: parent.worktreePath,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.side.keep": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      if (
+        thread.deletedAt !== null ||
+        thread.archivedAt !== null ||
+        thread.sideOfThreadId == null
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only an active side chat can be kept as a thread.",
+        });
+      }
+      if (
+        thread.session?.providerName !== "codex" ||
+        !["ready", "running", "stopped", "interrupted"].includes(thread.session.status)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The side chat must connect successfully before it can be kept.",
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: thread.id,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.meta-updated",
+        payload: { threadId: thread.id, sideOfThreadId: null, updatedAt: occurredAt },
+      };
+    }
+
+    case "thread.delete": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (
+        command.onlyIfSideOfThreadId !== undefined &&
+        thread.sideOfThreadId !== command.onlyIfSideOfThreadId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This side chat has already been kept as a thread and cannot be discarded.",
+        });
+      }
+      if (thread.deletedAt !== null) {
+        return [];
+      }
+      const sides = readModel.threads.filter(
+        (side) => side.sideOfThreadId === thread.id && side.deletedAt === null,
+      );
+      if (sides.length > 0) {
+        return yield* decideCommandSequence({
+          readModel,
+          commands: [
+            ...sides.map((side) => ({
+              type: "thread.delete" as const,
+              commandId: command.commandId,
+              threadId: side.id,
+            })),
+            command,
+          ],
+        });
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -1051,11 +1167,23 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.checkpoint.revert": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      if (
+        thread.sideOfThreadId != null ||
+        readModel.threads.some(
+          (side) => side.sideOfThreadId === thread.id && side.deletedAt === null,
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Discard or keep the side chat before restoring a checkpoint in the parent thread.",
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",

@@ -568,11 +568,53 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           (persistedBinding?.providerInstanceId === resolvedInstanceId
             ? persistedBinding.resumeCursor
             : undefined);
-        const effectiveCwd =
+        if (input.requireResume && effectiveResumeCursor == null) {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            "Cannot continue this conversation because its provider resume state is missing.",
+          );
+        }
+        let effectiveCwd =
           input.cwd ??
           (persistedBinding?.providerInstanceId === resolvedInstanceId
             ? readPersistedCwd(persistedBinding.runtimePayload)
             : undefined);
+        const adapter = yield* registry.getByInstance(resolvedInstanceId);
+        let forkResumeCursor: unknown;
+        let effectiveModelSelection = input.modelSelection;
+        if (input.forkFromThreadId !== undefined) {
+          if (resolvedProvider !== "codex") {
+            return yield* toValidationError(
+              "ProviderService.startSession",
+              `Native conversation forks are not supported by '${resolvedProvider}' yet.`,
+            );
+          }
+          if (input.forkFromThreadId === threadId || effectiveResumeCursor != null) {
+            return yield* toValidationError(
+              "ProviderService.startSession",
+              "A fork must create a new conversation, without an existing resume cursor.",
+            );
+          }
+          const source = Option.getOrUndefined(yield* directory.getBinding(input.forkFromThreadId));
+          if (source?.providerInstanceId !== resolvedInstanceId) {
+            return yield* toValidationError(
+              "ProviderService.startSession",
+              "The source conversation must have history in the same provider instance.",
+            );
+          }
+          const sourceSession = (yield* adapter.listSessions()).find(
+            (session) => session.threadId === input.forkFromThreadId,
+          );
+          forkResumeCursor = sourceSession?.resumeCursor ?? source.resumeCursor;
+          effectiveCwd ??= sourceSession?.cwd ?? readPersistedCwd(source.runtimePayload);
+          effectiveModelSelection ??= readPersistedModelSelection(source.runtimePayload);
+          if (forkResumeCursor == null || effectiveCwd === undefined) {
+            return yield* toValidationError(
+              "ProviderService.startSession",
+              "The source conversation does not have saved provider history and a checkout yet.",
+            );
+          }
+        }
         yield* Effect.annotateCurrentSpan({
           "provider.kind": resolvedProvider,
           "provider.resume_cursor.source":
@@ -592,14 +634,17 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 : "none",
           "provider.cwd.effective": effectiveCwd ?? "",
         });
-        const adapter = yield* registry.getByInstance(resolvedInstanceId);
         yield* prepareMcpSession(threadId, resolvedInstanceId);
         const session = yield* adapter
           .startSession({
             ...input,
             providerInstanceId: resolvedInstanceId,
+            ...(effectiveModelSelection !== undefined
+              ? { modelSelection: effectiveModelSelection }
+              : {}),
             ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
             ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
+            ...(forkResumeCursor !== undefined ? { forkResumeCursor } : {}),
           })
           .pipe(Effect.onError(() => clearMcpSession(threadId)));
 
@@ -618,10 +663,20 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* stopStaleSessionsForThread({
           threadId,
           currentInstanceId: resolvedInstanceId,
-        });
-        yield* upsertSessionBinding(sessionWithInstance, threadId, {
-          modelSelection: input.modelSelection,
-        });
+        }).pipe(
+          Effect.andThen(
+            upsertSessionBinding(sessionWithInstance, threadId, {
+              modelSelection: effectiveModelSelection,
+            }),
+          ),
+          Effect.onError(() =>
+            input.forkFromThreadId === undefined
+              ? Effect.void
+              : adapter
+                  .stopSession(threadId)
+                  .pipe(Effect.ignore, Effect.andThen(clearMcpSession(threadId))),
+          ),
+        );
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
           runtimeMode: input.runtimeMode,

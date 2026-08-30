@@ -42,6 +42,11 @@ export interface ProviderThreadSnapshot {
   readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>;
 }
 
+export type ProviderAdapterStartInput = ProviderSessionStartInput & {
+  /** Resolved by ProviderService from the source thread in the same provider instance. */
+  readonly forkResumeCursor?: unknown;
+};
+
 export interface ProviderAdapterShape<TError> {
   /**
    * Provider kind implemented by this adapter.
@@ -53,7 +58,7 @@ export interface ProviderAdapterShape<TError> {
    * Start a provider-backed session.
    */
   readonly startSession: (
-    input: ProviderSessionStartInput,
+    input: ProviderAdapterStartInput,
   ) => Effect.Effect<ProviderSession, TError>;
 
   /**

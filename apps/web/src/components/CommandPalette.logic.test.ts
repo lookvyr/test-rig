@@ -264,6 +264,23 @@ describe("buildThreadActionItems", () => {
     expect(item?.description).toBe("T3 Code · #feat/search");
   });
 
+  it("reveals the same side chat in search only after it is kept", () => {
+    const side = makeThread({ id: ThreadId.make("side"), sideOfThreadId: ThreadId.make("parent") });
+    const input = {
+      threads: [side],
+      projectTitleById: new Map([[PROJECT_ID, "Project"]]),
+      sortOrder: "updated_at" as const,
+      icon: null,
+      runThread: async () => undefined,
+    };
+    expect(buildThreadActionItems(input)).toEqual([]);
+    expect(
+      buildThreadActionItems({ ...input, threads: [{ ...side, sideOfThreadId: null }] }).map(
+        (item) => item.value,
+      ),
+    ).toEqual(["thread:side"]);
+  });
+
   it("filters archived threads out of thread search items", () => {
     const items = buildThreadActionItems({
       threads: [

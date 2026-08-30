@@ -749,7 +749,8 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
 }
 
 export function getFallbackThreadIdAfterDelete<
-  T extends Pick<Thread, "id" | "projectId" | "createdAt" | "updatedAt"> & ThreadSortInput,
+  T extends Pick<Thread, "id" | "projectId" | "createdAt" | "updatedAt" | "sideOfThreadId"> &
+    ThreadSortInput,
 >(input: {
   threads: readonly T[];
   deletedThreadId: T["id"];
@@ -767,6 +768,7 @@ export function getFallbackThreadIdAfterDelete<
       threads.filter(
         (thread) =>
           thread.projectId === deletedThread.projectId &&
+          !thread.sideOfThreadId &&
           thread.id !== deletedThreadId &&
           !deletedThreadIds?.has(thread.id),
       ),

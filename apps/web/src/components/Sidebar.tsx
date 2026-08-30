@@ -1250,7 +1250,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       });
     };
     const visibleProjectThreads = sortThreads(
-      projectThreads.filter((thread) => thread.archivedAt === null),
+      projectThreads.filter((thread) => thread.archivedAt === null && !thread.sideOfThreadId),
       threadSortOrder,
     );
     const projectStatus = resolveProjectStatusIndicator(
@@ -3222,7 +3222,7 @@ export default function Sidebar() {
   }, []);
 
   const visibleThreads = useMemo(
-    () => sidebarThreads.filter((thread) => thread.archivedAt === null),
+    () => sidebarThreads.filter((thread) => thread.archivedAt === null && !thread.sideOfThreadId),
     [sidebarThreads],
   );
   const sortedProjects = useMemo(() => {
@@ -3262,7 +3262,7 @@ export default function Sidebar() {
       sortedProjects.flatMap((project) => {
         const projectThreads = sortThreads(
           (threadsByProjectKey.get(project.projectKey) ?? []).filter(
-            (thread) => thread.archivedAt === null,
+            (thread) => thread.archivedAt === null && !thread.sideOfThreadId,
           ),
           sidebarThreadSortOrder,
         );

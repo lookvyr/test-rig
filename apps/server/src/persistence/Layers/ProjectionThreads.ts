@@ -14,7 +14,7 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection } from "@t3tools/contracts";
+import { ModelSelection, ThreadId } from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
@@ -33,6 +33,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
         INSERT INTO projection_threads (
           thread_id,
           project_id,
+          side_of_thread_id,
           title,
           model_selection_json,
           runtime_mode,
@@ -59,6 +60,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
         VALUES (
           ${row.threadId},
           ${row.projectId},
+          ${row.sideOfThreadId ?? null},
           ${row.title},
           ${JSON.stringify(row.modelSelection)},
           ${row.runtimeMode},
@@ -85,6 +87,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
         ON CONFLICT (thread_id)
         DO UPDATE SET
           project_id = excluded.project_id,
+          side_of_thread_id = excluded.side_of_thread_id,
           title = excluded.title,
           model_selection_json = excluded.model_selection_json,
           runtime_mode = excluded.runtime_mode,
@@ -118,6 +121,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
         SELECT
           thread_id AS "threadId",
           project_id AS "projectId",
+          side_of_thread_id AS "sideOfThreadId",
           title,
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
@@ -153,6 +157,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
         SELECT
           thread_id AS "threadId",
           project_id AS "projectId",
+          side_of_thread_id AS "sideOfThreadId",
           title,
           model_selection_json AS "modelSelection",
           runtime_mode AS "runtimeMode",
@@ -190,6 +195,16 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
       `,
   });
 
+  const listSideThreadRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: Schema.Struct({ threadId: ThreadId }),
+    execute: () => sql`
+      SELECT thread_id AS "threadId"
+      FROM projection_threads
+      WHERE side_of_thread_id IS NOT NULL AND deleted_at IS NULL
+    `,
+  });
+
   const upsert: ProjectionThreadRepositoryShape["upsert"] = (row) =>
     upsertProjectionThreadRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.upsert:query")),
@@ -214,6 +229,13 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
     upsert,
     getById,
     listByProjectId,
+    listSideThreadIds: () =>
+      listSideThreadRows(undefined).pipe(
+        Effect.map((rows) => rows.map((row) => row.threadId)),
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionThreadRepository.listSideThreadIds:query"),
+        ),
+      ),
     deleteById,
   } satisfies ProjectionThreadRepositoryShape;
 });

@@ -70,6 +70,7 @@ const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
   CodexSessionRuntimeThreadIdMissingError,
 );
 const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
+const hasStrictResumeMarker = Schema.is(Schema.Struct({ strictResume: Schema.Literal(true) }));
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -1653,6 +1654,27 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           });
         }
 
+        if (
+          (input.requireResume || hasStrictResumeMarker(input.resumeCursor)) &&
+          !isCodexResumeCursorSchema(input.resumeCursor)
+        ) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: "Cannot resume forked conversation without a valid native thread id.",
+          });
+        }
+        if (
+          input.forkFromThreadId !== undefined &&
+          (!isCodexResumeCursorSchema(input.forkResumeCursor) || input.resumeCursor !== undefined)
+        ) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: "A fork requires a valid source cursor and no existing child cursor.",
+          });
+        }
+
         const existing = sessions.get(input.threadId);
         if (existing && !existing.stopped) {
           yield* Effect.suspend(() => stopSessionInternal(existing));
@@ -1672,7 +1694,16 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(options?.environment ? { environment: options.environment } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)
-            ? { resumeCursor: input.resumeCursor }
+            ? {
+                resumeCursor: {
+                  ...input.resumeCursor,
+                  ...(input.requireResume ? { strictResume: true as const } : {}),
+                },
+              }
+            : {}),
+          ...(input.forkFromThreadId !== undefined &&
+          isCodexResumeCursorSchema(input.forkResumeCursor)
+            ? { forkThreadId: input.forkResumeCursor.threadId }
             : {}),
           runtimeMode: input.runtimeMode,
           ...(input.modelSelection?.instanceId === boundInstanceId
@@ -1825,6 +1856,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           : {}),
         ...(serviceTier ? { serviceTier } : {}),
         ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+        ...(input.sideChat !== undefined ? { sideChat: input.sideChat } : {}),
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
       .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));

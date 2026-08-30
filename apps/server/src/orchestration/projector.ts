@@ -282,6 +282,7 @@ export function projectEvent(
           {
             id: payload.threadId,
             projectId: payload.projectId,
+            sideOfThreadId: payload.sideOfThreadId ?? null,
             title: payload.title,
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
@@ -423,6 +424,9 @@ export function projectEvent(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
+            ...(payload.sideOfThreadId !== undefined
+              ? { sideOfThreadId: payload.sideOfThreadId }
+              : {}),
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             ...(payload.titleRegeneration !== undefined
               ? { titleRegeneration: payload.titleRegeneration }

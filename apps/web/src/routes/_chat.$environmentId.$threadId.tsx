@@ -2,6 +2,8 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import ChatView from "../components/ChatView";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useRightPanelStore } from "../rightPanelStore";
 import { threadHasStarted } from "../components/ChatView.logic";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
 import { resolveThreadRouteRef, resolveThreadRouteRenderState } from "../threadRoutes";
@@ -68,13 +70,24 @@ function ChatThreadRouteView() {
   }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, threadRef]);
 
   useEffect(() => {
+    if (!threadRef || !serverThreadShell?.sideOfThreadId) return;
+    const parentRef = scopeThreadRef(threadRef.environmentId, serverThreadShell.sideOfThreadId);
+    useRightPanelStore.getState().open(parentRef, "side-chat");
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId: parentRef.environmentId, threadId: parentRef.threadId },
+      replace: true,
+    });
+  }, [navigate, serverThreadShell?.sideOfThreadId, threadRef]);
+
+  useEffect(() => {
     if (!threadRef || !serverThreadStarted || !draftThread) {
       return;
     }
     finalizePromotedDraftThreadByRef(threadRef);
   }, [draftThread, serverThreadStarted, threadRef]);
 
-  if (!threadRef) {
+  if (!threadRef || serverThreadShell?.sideOfThreadId) {
     return null;
   }
 

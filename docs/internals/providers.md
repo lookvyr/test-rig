@@ -51,6 +51,27 @@ Provider output comes back as internal commands such as `thread.message.assistan
 `thread.session.set`, which clients observe through `orchestration.subscribeThread`. See
 [overview.md](./overview.md) for the command/event loop.
 
+## Side chats
+
+`thread.side.open` creates one hidden child with `sideOfThreadId` pointing to its parent.
+It inherits the parent's current model, permission mode, and checkout. The provider command
+reactor opens a separate Codex runtime using native `thread/fork`, without starting a turn or
+continuing a goal. Native history supplies context; the child starts with an empty visible
+timeline. Claude and OpenCode forks are explicitly unsupported for now.
+
+Side chats use the ordinary thread commands, subscriptions, approvals, and checkpoints. Their
+native resume cursor is strict: a missing or rejected cursor must never fall back to a fresh
+conversation, including after Keep. Per-turn side-chat instructions stop applying after Keep.
+The checkout is shared, so file changes and diffs are not isolated by conversation. Automatic
+branch naming skips shared worktrees, and checkpoint restore is blocked for a temporary side
+or its parent while the side exists.
+
+Closing the panel preserves the child. `thread.side.keep` clears the relationship on the same
+record; conditional `thread.delete` discards only a still-temporary child. Parent deletion
+cascades to temporary children. The deletion reactor expires remaining temporary children
+once at backend startup, before other reactors and client commands start. Hidden children
+remain in backing state for ownership checks but are excluded from navigation and search.
+
 ## Server-side workers
 
 Provider work flows through three queue-backed workers. All three are built with
