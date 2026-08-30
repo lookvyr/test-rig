@@ -55,13 +55,31 @@ Provider output comes back as internal commands such as `thread.message.assistan
 
 `thread.side.open` creates one hidden child with `sideOfThreadId` pointing to its parent.
 It inherits the parent's current model, permission mode, and checkout. The provider command
-reactor opens a separate Codex runtime using native `thread/fork`, without starting a turn or
-continuing a goal. Native history supplies context; the child starts with an empty visible
-timeline. Claude and OpenCode forks are explicitly unsupported for now.
+reactor opens a separate runtime without starting a turn or continuing a goal. Codex uses native
+`thread/fork`; Claude uses the Agent SDK's `forkSession`, then resumes the persisted child.
+Native history supplies context; the child starts with an empty visible timeline. OpenCode forks
+are explicitly unsupported.
+
+Claude's session helpers read `CLAUDE_CONFIG_DIR` from the process environment, so the fork runs
+in a short-lived subprocess with the selected provider instance's environment. The adapter tracks
+the current top-level native message UUID and forks through that exact boundary. Missing or
+incomplete boundaries fail without substituting older history. Compaction invalidates the boundary
+until a subsequent top-level message establishes it again. The latest submitted prompt UUID must
+also appear at or before the fork boundary, so an older in-flight response cannot hide a queued
+follow-up. Claude saves queued prompts as attachments with a separate UUID. The SDK's transcript
+import API supplies temporary in-memory metadata to resolve that UUID and verify ancestry within
+the retained prefix for both ordinary and queued requests. It does not retain prompt
+or tool contents. If compaction removes the request from that ancestry, another parent exchange
+is needed before forking. Stopped sessions and idle resumed sessions select the saved
+tail: persisted cursors can predate the last response and are not trusted as current boundaries.
+There is no transcript polling or replay of
+normalized messages. The child is persisted before opening completes, so Keep also works before
+the first side-chat message.
 
 Side chats use the ordinary thread commands, subscriptions, approvals, and checkpoints. Their
 native resume cursor is strict: a missing or rejected cursor must never fall back to a fresh
-conversation, including after Keep. Per-turn side-chat instructions stop applying after Keep.
+conversation, including after Keep. Claude confirms native resumption before reporting the child
+ready. Per-turn side-chat instructions stop applying after Keep.
 The checkout is shared, so file changes and diffs are not isolated by conversation. Automatic
 branch naming skips shared worktrees, and checkpoint restore is blocked for a temporary side
 or its parent while the side exists.

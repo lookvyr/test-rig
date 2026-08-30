@@ -35,7 +35,11 @@ import * as TestClock from "effect/testing/TestClock";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
+import {
+  ProviderAdapterProcessError,
+  ProviderAdapterRequestError,
+  ProviderAdapterValidationError,
+} from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
@@ -59,6 +63,8 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setModelCalls: Array<string | undefined> = [];
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
+  public initializationCalls = 0;
+  public initializationError: Error | undefined;
   public closeCalls = 0;
 
   emit(message: SDKMessage): void {
@@ -115,6 +121,12 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     this.setMaxThinkingTokensCalls.push(maxThinkingTokens);
   };
 
+  readonly initializationResult = async (): Promise<unknown> => {
+    this.initializationCalls += 1;
+    if (this.initializationError) throw this.initializationError;
+    return {};
+  };
+
   readonly close = (): void => {
     this.closeCalls += 1;
     this.finish();
@@ -161,8 +173,14 @@ function makeHarness(config?: {
   readonly baseDir?: string;
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
+  readonly forkSession?: ClaudeAdapterLiveOptions["forkSession"];
+  readonly queries?: ReadonlyArray<FakeClaudeQuery>;
 }) {
-  const query = new FakeClaudeQuery();
+  const query = config?.queries?.[0] ?? new FakeClaudeQuery();
+  const createInputs: Array<{
+    readonly prompt: AsyncIterable<SDKUserMessage>;
+    readonly options: ClaudeQueryOptions;
+  }> = [];
   let createInput:
     | {
         readonly prompt: AsyncIterable<SDKUserMessage>;
@@ -172,9 +190,12 @@ function makeHarness(config?: {
 
   const adapterOptions: ClaudeAdapterLiveOptions = {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
+    ...(config?.forkSession ? { forkSession: config.forkSession } : {}),
     createQuery: (input) => {
       createInput = input;
-      return query;
+      const runtime = config?.queries?.[createInputs.length] ?? query;
+      createInputs.push(input);
+      return runtime;
     },
     ...(config?.nativeEventLogger
       ? {
@@ -207,6 +228,7 @@ function makeHarness(config?: {
     ),
     query,
     getLastCreateQueryInput: () => createInput,
+    getCreateQueryInputs: () => createInputs,
   };
 }
 
@@ -271,6 +293,39 @@ async function readFirstPromptMessage(
 
 const THREAD_ID = ThreadId.make("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
+const PARENT_NATIVE_ID = "550e8400-e29b-41d4-a716-446655440000";
+const CHILD_NATIVE_ID = "7368d0c7-40a3-4d8a-bcc1-ac80c49f2719";
+const PARENT_MESSAGE_ID = "c345e093-8c2a-470f-b014-3c5652453ba2";
+const CHILD_MESSAGE_ID = "9157aafb-65eb-4e14-bc32-508cd9d64b7c";
+const TOOL_RESULT_MESSAGE_ID = "9b7e7f5a-a24e-4e79-93e2-05f8f6b0e452";
+
+// A following hook response proves the preceding SDK frame finished processing,
+// including cursor updates that happen after its visible runtime events.
+const emitAndDrainSdkMessage = Effect.fn("emitAndDrainSdkMessage")(function* (
+  adapter: ClaudeAdapterShape,
+  query: FakeClaudeQuery,
+  message: SDKMessage,
+) {
+  const hookId = `drain-${message.type}-${message.uuid}`;
+  query.emit(message);
+  query.emit({
+    type: "system",
+    subtype: "hook_response",
+    hook_id: hookId,
+    hook_name: "SessionStart:resume",
+    hook_event: "SessionStart",
+    output: "",
+    stdout: "",
+    stderr: "",
+    outcome: "success",
+    session_id: message.session_id ?? PARENT_NATIVE_ID,
+    uuid: hookId,
+  } as unknown as SDKMessage);
+  return yield* adapter.streamEvents.pipe(
+    Stream.takeUntil((event) => event.type === "hook.completed" && event.payload.hookId === hookId),
+    Stream.runCollect,
+  );
+});
 
 describe("ClaudeAdapterLive", () => {
   it.effect("returns validation error for non-claude provider on startSession", () => {
@@ -2073,6 +2128,141 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "logs routine command lifecycle messages without warnings or fork cursor changes",
+    () => {
+      const nativePayloads: Array<unknown> = [];
+      const harness = makeHarness({
+        nativeEventLogger: {
+          filePath: "memory://claude-native-events",
+          write: (record) => {
+            nativePayloads.push((record as { event: { payload: unknown } }).event.payload);
+            return Effect.void;
+          },
+          close: () => Effect.void,
+        },
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          resumeCursor: { resume: PARENT_NATIVE_ID },
+        });
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Investigate this approach" });
+        const prompt = yield* Effect.promise(() =>
+          readFirstPromptMessage(harness.getLastCreateQueryInput()),
+        );
+        const cursor = (yield* adapter.listSessions())[0]?.resumeCursor;
+
+        for (const state of ["queued", "started", "completed", "cancelled"]) {
+          const message = {
+            type: "command_lifecycle",
+            command_uuid: prompt?.uuid,
+            state,
+            uuid: `${state}-notice`,
+            session_id: PARENT_NATIVE_ID,
+          };
+          const events = yield* emitAndDrainSdkMessage(
+            adapter,
+            harness.query,
+            message as unknown as SDKMessage,
+          );
+          assert.deepEqual(
+            events.filter(
+              (event) =>
+                event.type === "runtime.warning" ||
+                event.type === "runtime.error" ||
+                event.type === "turn.completed",
+            ),
+            [],
+          );
+          assert.deepEqual((yield* adapter.listSessions())[0]?.resumeCursor, cursor);
+          assert.include(nativePayloads, message);
+        }
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect("keeps failed and unknown command lifecycle notices visible", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      for (const detail of [
+        { type: "command_lifecycle", state: "refused", command_uuid: PARENT_MESSAGE_ID },
+        { type: "command_lifecycle", state: "discarded", command_uuid: PARENT_MESSAGE_ID },
+        { type: "command_lifecycle", state: "unknown-state", command_uuid: PARENT_MESSAGE_ID },
+        { type: "command_lifecycle", state: "queued" },
+        { type: "unknown-message", state: "completed", command_uuid: PARENT_MESSAGE_ID },
+      ]) {
+        const message = { ...detail, uuid: "notice", session_id: PARENT_NATIVE_ID };
+        const events = yield* emitAndDrainSdkMessage(
+          adapter,
+          harness.query,
+          message as unknown as SDKMessage,
+        );
+        const warnings = events.filter((event) => event.type === "runtime.warning");
+        assert.equal(warnings.length, 1);
+        assert.include(warnings[0]?.payload.message, detail.type);
+        assert.include(warnings[0]?.payload.message, detail.state);
+        assert.deepEqual(warnings[0]?.payload.detail, message);
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("still reports a failed result after a cancelled command lifecycle notice", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Investigate this approach" });
+      yield* emitAndDrainSdkMessage(adapter, harness.query, {
+        type: "command_lifecycle",
+        command_uuid: PARENT_MESSAGE_ID,
+        state: "cancelled",
+        uuid: "cancelled-notice",
+        session_id: PARENT_NATIVE_ID,
+      } as unknown as SDKMessage);
+      const events = yield* emitAndDrainSdkMessage(adapter, harness.query, {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        errors: ["Model request failed"],
+        uuid: "failed-result",
+        session_id: PARENT_NATIVE_ID,
+      } as unknown as SDKMessage);
+      assert.deepEqual(
+        events
+          .filter((event) => event.type === "runtime.error")
+          .map((event) => event.payload.message),
+        ["Model request failed"],
+      );
+      assert.equal(
+        events.find((event) => event.type === "turn.completed")?.payload.state,
+        "failed",
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("consumes undeclared and UX-internal system subtypes without warning rows", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -3292,6 +3482,807 @@ describe("ClaudeAdapterLive", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect.each([
+    { runtimeMode: "full-access" as const, permissionMode: "bypassPermissions" },
+    { runtimeMode: "approval-required" as const, permissionMode: undefined },
+  ])(
+    "opens a durable native fork with inherited $runtimeMode and no prompt",
+    ({ runtimeMode, permissionMode }) => {
+      const forkInputs: Array<{
+        sessionId: string;
+        cwd: string;
+        upToMessageId?: string;
+        afterMessageId?: string;
+      }> = [];
+      const harness = makeHarness({
+        forkSession: (input) =>
+          Effect.sync(() => {
+            forkInputs.push(input);
+            return CHILD_NATIVE_ID;
+          }),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const session = yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode,
+          cwd: "/tmp/shared-side-checkout",
+          forkFromThreadId: THREAD_ID,
+          forkResumeCursor: {
+            threadId: THREAD_ID,
+            resume: PARENT_NATIVE_ID,
+            resumeSessionAt: "old-assistant-checkpoint",
+            forkAtMessageId: PARENT_MESSAGE_ID,
+            forkAfterMessageId: PARENT_MESSAGE_ID,
+            turnCount: 4,
+          },
+        });
+        assert.deepEqual(forkInputs, [
+          {
+            sessionId: PARENT_NATIVE_ID,
+            cwd: "/tmp/shared-side-checkout",
+            afterMessageId: PARENT_MESSAGE_ID,
+          },
+        ]);
+        assert.deepEqual(session.resumeCursor, {
+          threadId: RESUME_THREAD_ID,
+          resume: CHILD_NATIVE_ID,
+          strictResume: true,
+          turnCount: 0,
+        });
+        const createInput = harness.getLastCreateQueryInput();
+        assert.equal(session.runtimeMode, runtimeMode);
+        assert.equal(createInput?.options.cwd, "/tmp/shared-side-checkout");
+        assert.equal(createInput?.options.permissionMode, permissionMode);
+        assert.equal(
+          createInput?.options.allowDangerouslySkipPermissions,
+          runtimeMode === "full-access" ? true : undefined,
+        );
+        assert.equal(createInput?.options.resume, CHILD_NATIVE_ID);
+        assert.equal(createInput?.options.sessionId, undefined);
+        assert.equal(createInput?.options.forkSession, undefined);
+        assert.equal(createInput?.options.resumeSessionAt, undefined);
+        assert.equal(harness.query.initializationCalls, 1);
+
+        const firstPrompt = yield* Effect.promise(() => readFirstPromptMessage(createInput)).pipe(
+          Effect.forkChild,
+        );
+        yield* adapter.stopSession(RESUME_THREAD_ID);
+        assert.equal(yield* Fiber.join(firstPrompt), undefined);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect("does not start a fresh query when native forking fails", () => {
+    const harness = makeHarness({
+      forkSession: () =>
+        Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: "claudeAgent",
+            method: "session/fork",
+            detail: "The requested parent message has not reached native history.",
+          }),
+        ),
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const error = yield* adapter
+        .startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          forkFromThreadId: THREAD_ID,
+          forkResumeCursor: { resume: PARENT_NATIVE_ID, forkAtMessageId: PARENT_MESSAGE_ID },
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(error, ProviderAdapterRequestError);
+      assert.deepEqual(harness.getCreateQueryInputs(), []);
+      assert.equal(yield* adapter.hasSession(RESUME_THREAD_ID), false);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect.each([
+    { label: "missing required cursor", resumeCursor: undefined, requireResume: true },
+    {
+      label: "missing strict native ID",
+      resumeCursor: { strictResume: true },
+      requireResume: false,
+    },
+    {
+      label: "malformed strict native ID",
+      resumeCursor: { strictResume: true, resume: "not-a-uuid" },
+      requireResume: false,
+    },
+    { label: "empty required native ID", resumeCursor: { resume: "" }, requireResume: true },
+  ])("fails closed for $label", ({ resumeCursor, requireResume }) => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const error = yield* adapter
+        .startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          ...(resumeCursor === undefined ? {} : { resumeCursor }),
+          requireResume,
+        })
+        .pipe(Effect.flip);
+      assert.instanceOf(error, ProviderAdapterValidationError);
+      assert.deepEqual(harness.getCreateQueryInputs(), []);
+      assert.equal(yield* adapter.hasSession(RESUME_THREAD_ID), false);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect.each(["fork", "resume", "unsupported initialization"] as const)(
+    "closes a $0 query whose strict initialization fails",
+    (operation) => {
+      const query = new FakeClaudeQuery();
+      query.initializationError = new Error("Native session could not be loaded");
+      if (operation === "unsupported initialization") {
+        Object.defineProperty(query, "initializationResult", { value: undefined });
+      }
+      const harness = makeHarness({
+        queries: [query],
+        forkSession: () => Effect.succeed(CHILD_NATIVE_ID),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const error = yield* adapter
+          .startSession({
+            threadId: RESUME_THREAD_ID,
+            provider: ProviderDriverKind.make("claudeAgent"),
+            runtimeMode: "full-access",
+            cwd: "/tmp/shared-side-checkout",
+            ...(operation === "fork"
+              ? {
+                  forkFromThreadId: THREAD_ID,
+                  forkResumeCursor: {
+                    resume: PARENT_NATIVE_ID,
+                    forkAtMessageId: PARENT_MESSAGE_ID,
+                  },
+                }
+              : { resumeCursor: { resume: CHILD_NATIVE_ID, strictResume: true } }),
+          })
+          .pipe(Effect.flip);
+        assert.instanceOf(error, ProviderAdapterProcessError);
+        assert.equal(query.initializationCalls, operation === "unsupported initialization" ? 0 : 1);
+        assert.equal(query.closeCalls, 1);
+        assert.equal(harness.getCreateQueryInputs().length, 1);
+        assert.equal(yield* adapter.hasSession(RESUME_THREAD_ID), false);
+        assert.deepEqual(yield* adapter.listSessions(), []);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect(
+    "uses the native tail for a legacy stopped parent without reusing its stale assistant cursor",
+    () => {
+      const forkInputs: Array<{
+        sessionId: string;
+        cwd: string;
+        upToMessageId?: string;
+        afterMessageId?: string;
+      }> = [];
+      const harness = makeHarness({
+        forkSession: (input) =>
+          Effect.sync(() => {
+            forkInputs.push(input);
+            return CHILD_NATIVE_ID;
+          }),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          forkFromThreadId: THREAD_ID,
+          forkResumeCursor: { resume: PARENT_NATIVE_ID, resumeSessionAt: "stale-subagent-uuid" },
+        });
+        assert.deepEqual(forkInputs, [
+          { sessionId: PARENT_NATIVE_ID, cwd: "/tmp/shared-side-checkout" },
+        ]);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect.each([false, true])(
+    "uses the native tail after stopping a parent with a stale cursor (native command: $0)",
+    (sendNativeCommand) => {
+      const forkInputs: Array<{
+        sessionId: string;
+        cwd: string;
+        upToMessageId?: string;
+        afterMessageId?: string;
+      }> = [];
+      const parentQuery = new FakeClaudeQuery();
+      const harness = makeHarness({
+        queries: [parentQuery, new FakeClaudeQuery()],
+        forkSession: (input) =>
+          Effect.sync(() => {
+            forkInputs.push(input);
+            return CHILD_NATIVE_ID;
+          }),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          resumeCursor: { resume: PARENT_NATIVE_ID },
+        });
+        const sent = yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "Explain the completed work",
+        });
+        const prompt = yield* Effect.promise(() =>
+          readFirstPromptMessage(harness.getLastCreateQueryInput()),
+        );
+        const promptUuid = prompt?.uuid;
+        assert.isDefined(promptUuid);
+        assert.propertyVal(sent.resumeCursor, "forkAtMessageId", prompt?.uuid);
+        let persistedCursor = sent.resumeCursor;
+        if (sendNativeCommand) {
+          const command = yield* adapter.sendTurn({ threadId: THREAD_ID, input: "/status" });
+          yield* Effect.promise(() => readFirstPromptMessage(harness.getLastCreateQueryInput()));
+          persistedCursor = command.resumeCursor;
+          assert.propertyVal(persistedCursor, "forkAtMessageId", null);
+        }
+        yield* emitAndDrainSdkMessage(adapter, parentQuery, {
+          type: "assistant",
+          parent_tool_use_id: null,
+          session_id: PARENT_NATIVE_ID,
+          uuid: PARENT_MESSAGE_ID,
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "text", text: "The final reply missing from the older cursor" }],
+          },
+        } as unknown as SDKMessage);
+        assert.propertyVal(
+          (yield* adapter.listSessions())[0]?.resumeCursor,
+          "forkAtMessageId",
+          PARENT_MESSAGE_ID,
+        );
+        yield* adapter.stopSession(THREAD_ID);
+        yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          forkFromThreadId: THREAD_ID,
+          forkResumeCursor: persistedCursor,
+        });
+        assert.deepEqual(forkInputs, [
+          {
+            sessionId: PARENT_NATIVE_ID,
+            cwd: "/tmp/shared-side-checkout",
+            afterMessageId: promptUuid!,
+          },
+        ]);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect.each([PARENT_MESSAGE_ID, null] as const)(
+    "uses the native tail after an idle resume instead of restoring stale boundary $0",
+    (forkAtMessageId) => {
+      const forkInputs: Array<{
+        sessionId: string;
+        cwd: string;
+        upToMessageId?: string;
+        afterMessageId?: string;
+      }> = [];
+      const harness = makeHarness({
+        queries: [new FakeClaudeQuery(), new FakeClaudeQuery()],
+        forkSession: (input) =>
+          Effect.sync(() => {
+            forkInputs.push(input);
+            return CHILD_NATIVE_ID;
+          }),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const persistedCursor = {
+          resume: PARENT_NATIVE_ID,
+          forkAtMessageId,
+          forkAfterMessageId: PARENT_MESSAGE_ID,
+        };
+        const resumed = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          resumeCursor: persistedCursor,
+        });
+        assert.notProperty(resumed.resumeCursor, "forkAtMessageId");
+        assert.propertyVal(resumed.resumeCursor, "forkAfterMessageId", PARENT_MESSAGE_ID);
+        yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          forkFromThreadId: THREAD_ID,
+          forkResumeCursor: persistedCursor,
+        });
+        assert.deepEqual(forkInputs, [
+          {
+            sessionId: PARENT_NATIVE_ID,
+            cwd: "/tmp/shared-side-checkout",
+            afterMessageId: PARENT_MESSAGE_ID,
+          },
+        ]);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect(
+    "forks an active parent through its outgoing prompt and tracks only complete top-level frames",
+    () => {
+      const forkInputs: Array<{
+        sessionId: string;
+        cwd: string;
+        upToMessageId?: string;
+        afterMessageId?: string;
+      }> = [];
+      const parentQuery = new FakeClaudeQuery();
+      const harness = makeHarness({
+        queries: [parentQuery, new FakeClaudeQuery()],
+        forkSession: (input) =>
+          Effect.sync(() => {
+            forkInputs.push(input);
+            return CHILD_NATIVE_ID;
+          }),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          resumeCursor: { resume: PARENT_NATIVE_ID },
+        });
+        const parentInput = harness.getLastCreateQueryInput();
+        yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "A new question before the assistant responds",
+        });
+        const prompt = yield* Effect.promise(() => readFirstPromptMessage(parentInput));
+        assert.match(prompt?.uuid ?? "", /^[0-9a-f-]{36}$/u);
+        const outgoingCursor = (yield* adapter.listSessions()).find(
+          (session) => session.threadId === THREAD_ID,
+        )?.resumeCursor;
+        yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          forkFromThreadId: THREAD_ID,
+          forkResumeCursor: outgoingCursor,
+        });
+        assert.equal(forkInputs[0]?.upToMessageId, prompt?.uuid);
+        assert.equal(forkInputs[0]?.afterMessageId, prompt?.uuid);
+
+        yield* emitAndDrainSdkMessage(adapter, parentQuery, {
+          type: "assistant",
+          parent_tool_use_id: null,
+          session_id: PARENT_NATIVE_ID,
+          uuid: PARENT_MESSAGE_ID,
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "text", text: "Checking the file." }],
+          },
+        } as unknown as SDKMessage);
+        yield* emitAndDrainSdkMessage(adapter, parentQuery, {
+          type: "assistant",
+          parent_tool_use_id: "agent-tool-1",
+          session_id: PARENT_NATIVE_ID,
+          uuid: CHILD_MESSAGE_ID,
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "text", text: "Subagent result" }],
+          },
+        } as unknown as SDKMessage);
+        const afterSubagent = (yield* adapter.listSessions()).find(
+          (session) => session.threadId === THREAD_ID,
+        )?.resumeCursor;
+        assert.propertyVal(afterSubagent, "forkAtMessageId", PARENT_MESSAGE_ID);
+        assert.propertyVal(afterSubagent, "forkAfterMessageId", prompt?.uuid);
+        assert.propertyVal(afterSubagent, "resumeSessionAt", PARENT_MESSAGE_ID);
+
+        yield* emitAndDrainSdkMessage(adapter, parentQuery, {
+          type: "user",
+          parent_tool_use_id: null,
+          session_id: PARENT_NATIVE_ID,
+          uuid: TOOL_RESULT_MESSAGE_ID,
+          message: {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "read-1", content: "File contents" }],
+          },
+        } as unknown as SDKMessage);
+        yield* emitAndDrainSdkMessage(adapter, parentQuery, {
+          type: "user",
+          parent_tool_use_id: "agent-tool-1",
+          session_id: PARENT_NATIVE_ID,
+          uuid: CHILD_MESSAGE_ID,
+          message: {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "agent-read-1", content: "Agent file" }],
+          },
+        } as unknown as SDKMessage);
+        yield* emitAndDrainSdkMessage(adapter, parentQuery, {
+          type: "user",
+          parent_tool_use_id: null,
+          isReplay: true,
+          session_id: PARENT_NATIVE_ID,
+          uuid: PARENT_MESSAGE_ID,
+          message: { role: "user", content: "Earlier replayed prompt" },
+        } as unknown as SDKMessage);
+        yield* emitAndDrainSdkMessage(adapter, parentQuery, {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: PARENT_NATIVE_ID,
+          uuid: CHILD_MESSAGE_ID,
+        } as unknown as SDKMessage);
+        const afterResult = (yield* adapter.listSessions()).find(
+          (session) => session.threadId === THREAD_ID,
+        )?.resumeCursor;
+        assert.propertyVal(afterResult, "forkAtMessageId", TOOL_RESULT_MESSAGE_ID);
+        assert.propertyVal(afterResult, "forkAfterMessageId", prompt?.uuid);
+        assert.propertyVal(afterResult, "resume", PARENT_NATIVE_ID);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect(
+    "keeps the latest steered prompt requirement when an older assistant snapshot arrives",
+    () => {
+      const forkInputs: Array<{
+        sessionId: string;
+        cwd: string;
+        upToMessageId?: string;
+        afterMessageId?: string;
+      }> = [];
+      const parentQuery = new FakeClaudeQuery();
+      const harness = makeHarness({
+        queries: [parentQuery, new FakeClaudeQuery()],
+        forkSession: (input) =>
+          Effect.sync(() => {
+            forkInputs.push(input);
+            return CHILD_NATIVE_ID;
+          }),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          resumeCursor: { resume: PARENT_NATIVE_ID },
+        });
+        const parentInput = harness.getLastCreateQueryInput();
+        const original = yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "Investigate the first approach",
+        });
+        const firstPrompt = yield* Effect.promise(() => readFirstPromptMessage(parentInput));
+        const steered = yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "Consider this new constraint too",
+        });
+        const latestPrompt = yield* Effect.promise(() => readFirstPromptMessage(parentInput));
+        assert.equal(steered.turnId, original.turnId);
+        assert.notEqual(latestPrompt?.uuid, firstPrompt?.uuid);
+
+        yield* emitAndDrainSdkMessage(adapter, parentQuery, {
+          type: "assistant",
+          parent_tool_use_id: null,
+          session_id: PARENT_NATIVE_ID,
+          uuid: PARENT_MESSAGE_ID,
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "text", text: "A snapshot from the original request" }],
+          },
+        } as unknown as SDKMessage);
+        const cursor = (yield* adapter.listSessions())[0]?.resumeCursor;
+        assert.propertyVal(cursor, "forkAtMessageId", PARENT_MESSAGE_ID);
+        assert.propertyVal(cursor, "forkAfterMessageId", latestPrompt?.uuid);
+        yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          forkFromThreadId: THREAD_ID,
+          forkResumeCursor: cursor,
+        });
+        // The native helper rejects snapshots whose endpoint precedes this prompt.
+        assert.equal(forkInputs[0]?.upToMessageId, PARENT_MESSAGE_ID);
+        assert.equal(forkInputs[0]?.afterMessageId, latestPrompt?.uuid);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect.each(["/compact preserve the key facts", "/status"])(
+    "sends native command $0 unchanged without using its submitted UUID as a fork requirement",
+    (command) => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          resumeCursor: {
+            resume: PARENT_NATIVE_ID,
+            forkAtMessageId: PARENT_MESSAGE_ID,
+            forkAfterMessageId: PARENT_MESSAGE_ID,
+          },
+        });
+        yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: command,
+          sideChat: true,
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            "claude-sonnet-4-6",
+            [{ id: "effort", value: "ultrathink" }],
+          ),
+        });
+        const prompt = yield* Effect.promise(() =>
+          readFirstPromptMessage(harness.getLastCreateQueryInput()),
+        );
+        assert.deepEqual(prompt?.message.content, [{ type: "text", text: command }]);
+        const cursor = (yield* adapter.listSessions())[0]?.resumeCursor;
+        assert.propertyVal(cursor, "forkAtMessageId", null);
+        assert.propertyVal(cursor, "forkAfterMessageId", PARENT_MESSAGE_ID);
+        assert.notEqual(prompt?.uuid, PARENT_MESSAGE_ID);
+
+        yield* emitAndDrainSdkMessage(adapter, harness.query, {
+          type: "assistant",
+          parent_tool_use_id: null,
+          session_id: PARENT_NATIVE_ID,
+          uuid: TOOL_RESULT_MESSAGE_ID,
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "text", text: "The next complete native message" }],
+          },
+        } as unknown as SDKMessage);
+        assert.propertyVal(
+          (yield* adapter.listSessions())[0]?.resumeCursor,
+          "forkAtMessageId",
+          TOOL_RESULT_MESSAGE_ID,
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect.each(["missing UUID", "malformed UUID", "compacting", "compact boundary"] as const)(
+    "does not reuse an earlier boundary after $0",
+    (transition) => {
+      let forkCalls = 0;
+      const harness = makeHarness({
+        forkSession: () =>
+          Effect.sync(() => {
+            forkCalls += 1;
+            return CHILD_NATIVE_ID;
+          }),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          resumeCursor: { resume: PARENT_NATIVE_ID, forkAtMessageId: PARENT_MESSAGE_ID },
+        });
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Continue the parent" });
+        const prompt = yield* Effect.promise(() =>
+          readFirstPromptMessage(harness.getLastCreateQueryInput()),
+        );
+        const message =
+          transition === "missing UUID" || transition === "malformed UUID"
+            ? {
+                type: "user",
+                parent_tool_use_id: null,
+                session_id: PARENT_NATIVE_ID,
+                ...(transition === "malformed UUID" ? { uuid: "not-a-message-uuid" } : {}),
+                message: {
+                  role: "user",
+                  content: [{ type: "tool_result", tool_use_id: "read-1", content: "New result" }],
+                },
+              }
+            : {
+                type: "system",
+                subtype: transition === "compacting" ? "status" : "compact_boundary",
+                status: "compacting",
+                compact_metadata: { trigger: "auto", pre_tokens: 200000 },
+                session_id: PARENT_NATIVE_ID,
+                uuid: CHILD_MESSAGE_ID,
+              };
+        yield* emitAndDrainSdkMessage(adapter, harness.query, message as unknown as SDKMessage);
+        const sourceCursor = (yield* adapter.listSessions())[0]?.resumeCursor;
+        assert.propertyVal(sourceCursor, "forkAtMessageId", null);
+        assert.propertyVal(sourceCursor, "forkAfterMessageId", prompt?.uuid);
+        const error = yield* adapter
+          .startSession({
+            threadId: RESUME_THREAD_ID,
+            provider: ProviderDriverKind.make("claudeAgent"),
+            runtimeMode: "full-access",
+            cwd: "/tmp/shared-side-checkout",
+            forkFromThreadId: THREAD_ID,
+            forkResumeCursor: sourceCursor,
+          })
+          .pipe(Effect.flip);
+        assert.instanceOf(error, ProviderAdapterValidationError);
+        assert.equal(forkCalls, 0);
+        assert.equal(harness.getCreateQueryInputs().length, 1);
+
+        yield* emitAndDrainSdkMessage(adapter, harness.query, {
+          type: "assistant",
+          parent_tool_use_id: null,
+          session_id: PARENT_NATIVE_ID,
+          uuid: TOOL_RESULT_MESSAGE_ID,
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "text", text: "A complete response after the transition" }],
+          },
+        } as unknown as SDKMessage);
+        assert.propertyVal(
+          (yield* adapter.listSessions())[0]?.resumeCursor,
+          "forkAtMessageId",
+          TOOL_RESULT_MESSAGE_ID,
+        );
+        assert.propertyVal(
+          (yield* adapter.listSessions())[0]?.resumeCursor,
+          "forkAfterMessageId",
+          prompt?.uuid,
+        );
+        yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Continue after the transition" });
+        const nextPrompt = yield* Effect.promise(() =>
+          readFirstPromptMessage(harness.getLastCreateQueryInput()),
+        );
+        assert.notEqual(nextPrompt?.uuid, prompt?.uuid);
+        assert.propertyVal(
+          (yield* adapter.listSessions())[0]?.resumeCursor,
+          "forkAfterMessageId",
+          nextPrompt?.uuid,
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
+  it.effect(
+    "resumes the same child after Keep and stops adding side guidance without reforking",
+    () => {
+      let forkCalls = 0;
+      const firstQuery = new FakeClaudeQuery();
+      const resumedQuery = new FakeClaudeQuery();
+      const harness = makeHarness({
+        queries: [firstQuery, resumedQuery],
+        forkSession: () =>
+          Effect.sync(() => {
+            forkCalls += 1;
+            return CHILD_NATIVE_ID;
+          }),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          forkFromThreadId: THREAD_ID,
+          forkResumeCursor: { resume: PARENT_NATIVE_ID, forkAtMessageId: PARENT_MESSAGE_ID },
+        });
+        yield* adapter.sendTurn({
+          threadId: RESUME_THREAD_ID,
+          input: "Explore this alternative",
+          sideChat: true,
+        });
+        const sidePrompt = yield* Effect.promise(() =>
+          readFirstPromptText(harness.getLastCreateQueryInput()),
+        );
+        assert.match(sidePrompt ?? "", /inherited conversation as reference context/u);
+        assert.match(sidePrompt ?? "", /Explore this alternative$/u);
+        yield* emitAndDrainSdkMessage(adapter, firstQuery, {
+          type: "assistant",
+          parent_tool_use_id: null,
+          session_id: CHILD_NATIVE_ID,
+          uuid: CHILD_MESSAGE_ID,
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "text", text: "The alternative works." }],
+          },
+        } as unknown as SDKMessage);
+        yield* emitAndDrainSdkMessage(adapter, firstQuery, {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: CHILD_NATIVE_ID,
+          uuid: TOOL_RESULT_MESSAGE_ID,
+        } as unknown as SDKMessage);
+        const cursor = (yield* adapter.listSessions())[0]?.resumeCursor;
+        assert.propertyVal(cursor, "strictResume", true);
+        assert.propertyVal(cursor, "resume", CHILD_NATIVE_ID);
+        assert.propertyVal(cursor, "forkAtMessageId", CHILD_MESSAGE_ID);
+        yield* adapter.stopSession(RESUME_THREAD_ID);
+
+        // Keep clears the app relation, so later starts have only the child cursor.
+        const resumed = yield* adapter.startSession({
+          threadId: RESUME_THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/shared-side-checkout",
+          resumeCursor: cursor,
+        });
+        assert.equal(harness.getLastCreateQueryInput()?.options.resume, CHILD_NATIVE_ID);
+        assert.equal(harness.getLastCreateQueryInput()?.options.resumeSessionAt, undefined);
+        assert.equal(resumedQuery.initializationCalls, 1);
+        assert.propertyVal(resumed.resumeCursor, "strictResume", true);
+        yield* adapter.sendTurn({
+          threadId: RESUME_THREAD_ID,
+          input: "Continue as an ordinary thread",
+          sideChat: false,
+        });
+        const normalPrompt = yield* Effect.promise(() =>
+          readFirstPromptText(harness.getLastCreateQueryInput()),
+        );
+        assert.equal(normalPrompt, "Continue as an ordinary thread");
+        assert.propertyVal((yield* adapter.listSessions())[0]?.resumeCursor, "strictResume", true);
+        assert.equal(forkCalls, 1);
+        assert.equal(harness.getCreateQueryInputs().length, 2);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect("passes Claude resume ids without pinning a stale assistant checkpoint", () => {
     const harness = makeHarness();

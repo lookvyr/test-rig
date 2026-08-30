@@ -1411,7 +1411,8 @@ function ChatViewContent(props: ChatViewProps) {
     sideThreadShell ||
     (isServerThread &&
       !activeThread?.sideOfThreadId &&
-      activeThread?.session?.providerName === "codex" &&
+      (activeThread?.session?.providerName === "codex" ||
+        activeThread?.session?.providerName === "claudeAgent") &&
       activeThread.session.status !== "starting" &&
       activeThread.messages.length > 0),
   );
@@ -4704,7 +4705,7 @@ function ChatViewContent(props: ChatViewProps) {
       if (!sideChatAvailable) {
         toastManager.add({
           type: "info",
-          title: "Side chats require a started Codex conversation.",
+          title: "Side chats require a started Codex or Claude conversation.",
         });
         return;
       }

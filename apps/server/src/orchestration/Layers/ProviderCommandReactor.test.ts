@@ -518,7 +518,10 @@ describe("ProviderCommandReactor", () => {
     };
   }
 
-  function prepareSideParent(harness: Awaited<ReturnType<typeof createHarness>>) {
+  function prepareSideParent(
+    harness: Awaited<ReturnType<typeof createHarness>>,
+    providerName: "codex" | "claudeAgent" = "codex",
+  ) {
     return harness.engine.dispatch({
       type: "thread.session.set",
       commandId: CommandId.make("side-parent-ready"),
@@ -526,8 +529,8 @@ describe("ProviderCommandReactor", () => {
       session: {
         threadId: ThreadId.make("thread-1"),
         status: "ready",
-        providerName: "codex",
-        providerInstanceId: ProviderInstanceId.make("codex"),
+        providerName,
+        providerInstanceId: ProviderInstanceId.make(providerName),
         runtimeMode: "approval-required",
         activeTurnId: null,
         lastError: null,
@@ -545,24 +548,29 @@ describe("ProviderCommandReactor", () => {
     createdAt: "2026-01-01T00:00:00.000Z",
   };
 
-  effectIt.effect(
-    "forks on open without a turn and routes the first side message to that session",
-    () =>
+  effectIt.effect.each(["codex", "claudeAgent"] as const)(
+    "forks $0 on open without a turn and routes the first side message to that session",
+    (providerName) =>
       Effect.gen(function* () {
         const started = yield* Deferred.make<void>();
         const harness = yield* Effect.promise(() =>
           createHarness({
+            threadModelSelection: {
+              instanceId: ProviderInstanceId.make(providerName),
+              model: providerName === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5",
+            },
             startSessionEffect: (session) =>
               Deferred.succeed(started, undefined).pipe(Effect.as(session)),
           }),
         );
-        yield* prepareSideParent(harness);
+        yield* prepareSideParent(harness, providerName);
         yield* harness.engine.dispatch(openSideCommand);
         yield* Deferred.await(started);
         yield* Effect.promise(() => harness.drain());
         expect(harness.startSession).toHaveBeenCalledTimes(1);
         expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
           forkFromThreadId: "thread-1",
+          providerInstanceId: providerName,
           runtimeMode: "approval-required",
           cwd: "/tmp/provider-project",
         });

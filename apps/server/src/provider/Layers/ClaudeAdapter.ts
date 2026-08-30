@@ -95,8 +95,18 @@ import {
 } from "../Errors.ts";
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { makeClaudeSessionForker, type ClaudeForkSessionInput } from "./ClaudeSessionFork.ts";
+import { SIDE_CHAT_INSTRUCTIONS } from "../SideChatInstructions.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
+const hasStrictResumeMarker = Schema.is(Schema.Struct({ strictResume: Schema.Literal(true) }));
+const isRoutineCommandLifecycle = Schema.is(
+  Schema.Struct({
+    type: Schema.Literal("command_lifecycle"),
+    command_uuid: Schema.String,
+    state: Schema.Literals(["queued", "started", "completed", "cancelled"]),
+  }),
+);
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -125,6 +135,9 @@ interface ClaudeResumeState {
   readonly resume?: string;
   readonly resumeSessionAt?: string;
   readonly turnCount?: number;
+  readonly strictResume?: true;
+  readonly forkAtMessageId?: string | null;
+  readonly forkAfterMessageId?: string;
 }
 
 interface ClaudeTurnState {
@@ -244,11 +257,17 @@ interface ClaudeSessionContext {
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   lastKnownTotalProcessedTokens: number | undefined;
   lastAssistantUuid: string | undefined;
+  /** Undefined for legacy history; null means the current native boundary is uncertain. */
+  forkAtMessageId: string | null | undefined;
+  /** Older in-flight responses must not hide the latest submitted request. */
+  forkAfterMessageId: string | undefined;
+  readonly strictResume: boolean;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
 }
 
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
+  readonly initializationResult?: () => Promise<unknown>;
   readonly interrupt: () => Promise<void>;
   /** SDK Query.stopTask — present on real queries; optional for test doubles. */
   readonly stopTask?: (taskId: string) => Promise<void>;
@@ -262,6 +281,9 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
 export interface ClaudeAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly forkSession?: (
+    input: ClaudeForkSessionInput,
+  ) => Effect.Effect<string, ProviderAdapterError>;
   readonly createQuery?: (input: {
     readonly prompt: AsyncIterable<SDKUserMessage>;
     readonly options: ClaudeQueryOptions;
@@ -633,6 +655,8 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     sessionId?: unknown;
     resumeSessionAt?: unknown;
     turnCount?: unknown;
+    forkAtMessageId?: unknown;
+    forkAfterMessageId?: unknown;
   };
 
   const threadIdCandidate = typeof cursor.threadId === "string" ? cursor.threadId : undefined;
@@ -655,6 +679,18 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     ...(threadId ? { threadId } : {}),
     ...(resume ? { resume } : {}),
     ...(resumeSessionAt ? { resumeSessionAt } : {}),
+    ...(hasStrictResumeMarker(resumeCursor) ? { strictResume: true as const } : {}),
+    ...(typeof cursor.forkAfterMessageId === "string" && isUuid(cursor.forkAfterMessageId)
+      ? { forkAfterMessageId: cursor.forkAfterMessageId }
+      : {}),
+    ...(cursor.forkAtMessageId !== undefined
+      ? {
+          forkAtMessageId:
+            typeof cursor.forkAtMessageId === "string" && isUuid(cursor.forkAtMessageId)
+              ? cursor.forkAtMessageId
+              : null,
+        }
+      : {}),
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
       : {}),
@@ -1178,6 +1214,8 @@ function buildPromptText(
   input: ProviderSendTurnInput,
   boundInstanceId: ProviderInstanceId,
 ): string {
+  const prompt = input.input?.trim() ?? "";
+  if (prompt.startsWith("/")) return prompt;
   const rawEffort =
     input.modelSelection?.instanceId === boundInstanceId
       ? getModelSelectionStringOptionValue(input.modelSelection, "effort")
@@ -1187,7 +1225,8 @@ function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel);
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
-  return applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort);
+  const text = input.sideChat ? `${SIDE_CHAT_INSTRUCTIONS}\n\n${prompt}` : prompt;
+  return applyClaudePromptEffortPrefix(text, promptEffort);
 }
 
 function buildUserMessage(input: {
@@ -1654,6 +1693,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         prompt: input.prompt,
         options: input.options,
       }) as ClaudeQueryRuntime);
+  const forkSession = options?.forkSession ?? (yield* makeClaudeSessionForker(claudeEnvironment));
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
@@ -1744,6 +1784,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ...(context.resumeSessionId ? { resume: context.resumeSessionId } : {}),
       ...(context.lastAssistantUuid ? { resumeSessionAt: context.lastAssistantUuid } : {}),
       turnCount: context.turns.length,
+      ...(context.strictResume ? { strictResume: true as const } : {}),
+      ...(context.forkAfterMessageId ? { forkAfterMessageId: context.forkAfterMessageId } : {}),
+      ...(context.forkAtMessageId !== undefined
+        ? { forkAtMessageId: context.forkAtMessageId }
+        : {}),
     };
 
     context.session = {
@@ -1942,7 +1987,15 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (!hasDurableClaudeSessionId(message)) {
       return;
     }
+    if ("parent_tool_use_id" in message && message.parent_tool_use_id != null) return;
     const nextThreadId = message.session_id;
+    if (context.strictResume && nextThreadId !== context.resumeSessionId) {
+      return yield* new ProviderAdapterProcessError({
+        provider: PROVIDER,
+        threadId: context.session.threadId,
+        detail: "Claude returned a different conversation instead of resuming this fork.",
+      });
+    }
     context.resumeSessionId = message.session_id;
     yield* updateResumeCursor(context);
 
@@ -2848,8 +2901,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       if (owningAgent && snapshotModel) {
         owningAgent.model = snapshotModel;
       }
-      context.lastAssistantUuid = message.uuid;
-      yield* updateResumeCursor(context);
       return;
     }
 
@@ -3488,7 +3539,30 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     message: SDKMessage,
   ) {
     yield* logNativeSdkMessage(context, message);
+    if (
+      (message.type === "user" || message.type === "assistant") &&
+      message.parent_tool_use_id == null &&
+      !("isReplay" in message && message.isReplay)
+    ) {
+      context.forkAtMessageId =
+        typeof message.uuid === "string" && isUuid(message.uuid) ? message.uuid : null;
+      yield* updateResumeCursor(context);
+    } else if (
+      message.type === "system" &&
+      ((message.subtype === "status" && message.status === "compacting") ||
+        message.subtype === "compact_boundary")
+    ) {
+      context.forkAtMessageId = null;
+      yield* updateResumeCursor(context);
+    }
     yield* ensureThreadId(context, message);
+
+    // Newer CLIs emit these for UUID-stamped prompts before the SDK types model
+    // them. Results/errors remain authoritative, including failed cancellations;
+    // a lifecycle completion is not proof that the prompt reached saved history.
+    if (isRoutineCommandLifecycle(message)) {
+      return;
+    }
 
     switch (message.type) {
       case "stream_event":
@@ -3704,18 +3778,66 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const startSession: ClaudeAdapterShape["startSession"] = Effect.fn("startSession")(
     function* (input) {
-      if (input.forkFromThreadId !== undefined || input.forkResumeCursor !== undefined) {
-        return yield* new ProviderAdapterValidationError({
-          provider: PROVIDER,
-          operation: "startSession",
-          issue: "Native conversation forks are not supported by Claude yet.",
-        });
-      }
       if (input.provider !== undefined && input.provider !== PROVIDER) {
         return yield* new ProviderAdapterValidationError({
           provider: PROVIDER,
           operation: "startSession",
           issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
+        });
+      }
+
+      let resumeState = readClaudeResumeState(input.resumeCursor);
+      const isFork = input.forkFromThreadId !== undefined || input.forkResumeCursor !== undefined;
+      const strictResume =
+        isFork || input.requireResume === true || resumeState?.strictResume === true;
+      if (isFork) {
+        const source = input.forkFromThreadId ? sessions.get(input.forkFromThreadId) : undefined;
+        const sourceState = readClaudeResumeState(
+          source?.session.resumeCursor ?? input.forkResumeCursor,
+        );
+        if (
+          !input.forkFromThreadId ||
+          input.forkFromThreadId === input.threadId ||
+          input.resumeCursor !== undefined ||
+          !sourceState?.resume ||
+          !input.cwd
+        ) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: "A Claude side chat requires saved parent history and a checkout.",
+          });
+        }
+        // Persisted cursors are captured when sending a prompt, not on every
+        // response. Only a live source can supply a current stream boundary.
+        const forkAtMessageId = source ? sourceState.forkAtMessageId : undefined;
+        if (
+          forkAtMessageId === null ||
+          (forkAtMessageId === undefined && source?.turnState !== undefined)
+        ) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue:
+              "Claude has not established a complete conversation snapshot yet. Try again after its next response.",
+          });
+        }
+        const childId = yield* forkSession({
+          sessionId: sourceState.resume,
+          cwd: input.cwd,
+          ...(forkAtMessageId ? { upToMessageId: forkAtMessageId } : {}),
+          ...(sourceState.forkAfterMessageId
+            ? { afterMessageId: sourceState.forkAfterMessageId }
+            : {}),
+        });
+        resumeState = { resume: childId, strictResume: true, turnCount: 0 };
+      }
+      if (strictResume && !resumeState?.resume) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "startSession",
+          issue:
+            "Cannot continue this conversation because its Claude resume state is missing or invalid.",
         });
       }
 
@@ -3741,7 +3863,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       const startedAt = yield* nowIso;
-      const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
       const newSessionId = existingResumeSessionId === undefined ? yield* randomUUIDv4 : undefined;
@@ -4177,6 +4298,32 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           }),
       });
 
+      if (strictResume) {
+        yield* Effect.tryPromise(async () => {
+          if (!queryRuntime.initializationResult) {
+            throw new Error("The Claude runtime cannot confirm native conversation resumption.");
+          }
+          await queryRuntime.initializationResult();
+        }).pipe(
+          Effect.timeout("30 seconds"),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterProcessError({
+                provider: PROVIDER,
+                threadId,
+                detail: "Could not resume the saved Claude conversation.",
+                cause,
+              }),
+          ),
+          Effect.onError(() =>
+            Effect.gen(function* () {
+              yield* Queue.shutdown(promptQueue);
+              yield* Effect.sync(() => queryRuntime.close());
+            }),
+          ),
+        );
+      }
+
       const session: ProviderSession = {
         threadId,
         provider: PROVIDER,
@@ -4191,6 +4338,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(sessionId ? { resume: sessionId } : {}),
           ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
           turnCount: resumeState?.turnCount ?? 0,
+          ...(strictResume ? { strictResume: true as const } : {}),
+          ...(resumeState?.forkAfterMessageId
+            ? { forkAfterMessageId: resumeState.forkAfterMessageId }
+            : {}),
         },
         createdAt: startedAt,
         updatedAt: startedAt,
@@ -4219,6 +4370,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastKnownTokenUsage: undefined,
         lastKnownTotalProcessedTokens: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
+        forkAtMessageId: undefined,
+        forkAfterMessageId: resumeState?.forkAfterMessageId,
+        strictResume,
         lastThreadStartedId: undefined,
         stopped: false,
       };
@@ -4389,11 +4543,24 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
-    const message = yield* buildUserMessageEffect(input, {
+    const builtMessage = yield* buildUserMessageEffect(input, {
       fileSystem,
       attachmentsDir: serverConfig.attachmentsDir,
       boundInstanceId,
     });
+    const message: SDKUserMessage = {
+      ...builtMessage,
+      uuid: (yield* randomUUIDv4) as NonNullable<SDKUserMessage["uuid"]>,
+    };
+    if (input.input?.trim().startsWith("/")) {
+      // Native commands may not persist the submitted UUID. Wait for their next
+      // native message rather than using a boundary from before the command.
+      context.forkAtMessageId = null;
+    } else {
+      context.forkAtMessageId = message.uuid;
+      context.forkAfterMessageId = message.uuid;
+    }
+    yield* updateResumeCursor(context);
 
     yield* Queue.offer(context.promptQueue, {
       type: "message",

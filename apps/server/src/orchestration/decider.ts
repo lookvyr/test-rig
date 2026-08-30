@@ -401,10 +401,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       ) {
         return [];
       }
-      if (parent.session?.providerName !== "codex") {
+      if (
+        parent.session?.providerName !== "codex" &&
+        parent.session?.providerName !== "claudeAgent"
+      ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "Side chats require an existing Codex conversation.",
+          detail: "Side chats require an existing Codex or Claude conversation.",
         });
       }
       yield* requireThreadAbsent({ readModel, command, threadId: command.sideThreadId });
@@ -445,7 +448,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       if (
-        thread.session?.providerName !== "codex" ||
+        (thread.session?.providerName !== "codex" &&
+          thread.session?.providerName !== "claudeAgent") ||
         !["ready", "running", "stopped", "interrupted"].includes(thread.session.status)
       ) {
         return yield* new OrchestrationCommandInvariantError({

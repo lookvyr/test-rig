@@ -583,7 +583,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         let forkResumeCursor: unknown;
         let effectiveModelSelection = input.modelSelection;
         if (input.forkFromThreadId !== undefined) {
-          if (resolvedProvider !== "codex") {
+          if (resolvedProvider !== "codex" && resolvedProvider !== "claudeAgent") {
             return yield* toValidationError(
               "ProviderService.startSession",
               `Native conversation forks are not supported by '${resolvedProvider}' yet.`,

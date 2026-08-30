@@ -525,7 +525,11 @@ export function SideChatPanel(props: {
                   activeProposedPlan={null}
                   runtimeMode={runtimeMode}
                   interactionMode={interactionMode}
-                  lockedProvider={ProviderDriverKind.make("codex")}
+                  lockedProvider={
+                    thread?.session?.providerName
+                      ? ProviderDriverKind.make(thread.session.providerName)
+                      : null
+                  }
                   providerStatuses={[...providers]}
                   activeProjectDefaultModelSelection={project?.defaultModelSelection}
                   activeThreadModelSelection={thread?.modelSelection}
