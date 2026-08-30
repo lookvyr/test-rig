@@ -530,7 +530,7 @@ it.effect("refreshes the current branch after an external checkout", () =>
       const { initialBranch } = yield* initRepoWithCommit(cwd);
       yield* git(cwd, ["branch", "external-checkout"]);
 
-      const initialRefs = yield* driver.listRefs({ cwd, refresh: true });
+      const initialRefs = yield* driver.listRefs({ cwd, refresh: true, refreshId: "initial" });
       assert.isTrue(initialRefs.refs.find((ref) => ref.name === initialBranch)?.current);
 
       // Raw execute intentionally bypasses the driver's mutation invalidation,
@@ -541,9 +541,12 @@ it.effect("refreshes the current branch after an external checkout", () =>
         args: ["checkout", "external-checkout"],
         timeoutMs: 10_000,
       });
-      yield* TestClock.adjust("6 seconds");
 
-      const refreshedRefs = yield* driver.listRefs({ cwd, refresh: true });
+      const refreshedRefs = yield* driver.listRefs({
+        cwd,
+        refresh: true,
+        refreshId: "after-checkout",
+      });
       assert.isTrue(refreshedRefs.refs.find((ref) => ref.name === "external-checkout")?.current);
       assert.isFalse(refreshedRefs.refs.find((ref) => ref.name === initialBranch)?.current);
     }),

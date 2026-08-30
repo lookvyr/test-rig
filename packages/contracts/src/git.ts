@@ -128,6 +128,7 @@ export const VcsListRefsInput = Schema.Struct({
   includeMatchingRemoteRefs: Schema.optional(Schema.Boolean),
   refKind: Schema.optional(Schema.Literals(["all", "local", "remote"])),
   refresh: Schema.optional(Schema.Boolean),
+  refreshId: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(128))),
   limit: Schema.optional(
     PositiveInt.check(Schema.isLessThanOrEqualTo(GIT_LIST_BRANCHES_MAX_LIMIT)),
   ),

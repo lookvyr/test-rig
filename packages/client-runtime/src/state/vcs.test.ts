@@ -275,16 +275,19 @@ describe("cached VCS refs", () => {
     ),
   );
 
-  it.effect("invalidates persisted refs when ref-affecting commands settle", () =>
+  it.effect("only invalidates persisted refs for ref-affecting commands", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const expectedError = new EnvironmentRpcUnavailableError({
           environmentId: TARGET.environmentId,
           message: "pull failed after fetching refs",
         });
+        const listRefsInputs = yield* Ref.make<ReadonlyArray<VcsListRefsInput>>([]);
         const client = {
           [WS_METHODS.vcsPull]: () => Effect.fail(expectedError),
           [WS_METHODS.vcsRefreshStatus]: () => Effect.void,
+          [WS_METHODS.vcsListRefs]: (input: VcsListRefsInput) =>
+            Ref.update(listRefsInputs, (current) => [...current, input]).pipe(Effect.as(LIVE_REFS)),
         } as unknown as WsRpcProtocolClient;
         const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
           target: TARGET,
@@ -318,6 +321,20 @@ describe("cached VCS refs", () => {
         const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
           Effect.sync(() => registry.dispose()),
         );
+
+        const refsResult = yield* Effect.promise(() =>
+          atoms.refreshRefs.run(registry, {
+            environmentId: TARGET.environmentId,
+            input: { cwd: "/repo", refresh: true, refreshId: "refresh-1", limit: 1 },
+          }),
+        );
+
+        expect(AsyncResult.isSuccess(refsResult)).toBe(true);
+        expect(yield* Ref.get(listRefsInputs)).toEqual([
+          { cwd: "/repo", refresh: true, refreshId: "refresh-1", limit: 1 },
+        ]);
+        expect(yield* Ref.get(clears)).toBe(0);
+        expect(registry.get(vcsRefsCacheStateAtom(TARGET)).revision).toBe(0);
 
         const result = yield* Effect.promise(() =>
           atoms.pull.run(registry, {

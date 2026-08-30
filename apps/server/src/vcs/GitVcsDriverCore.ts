@@ -130,6 +130,7 @@ class GitRefsSnapshotCacheKey extends Data.Class<{
 class GitRefsRefreshCacheKey extends Data.Class<{
   gitCommonDir: string;
   generation: number;
+  refreshId: string | null;
 }> {}
 
 interface GitRepositoryPaths {
@@ -2716,6 +2717,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const resolveListRefsSnapshot = Effect.fn("resolveListRefsSnapshot")(function* (
     gitCommonDir: string,
     refresh: boolean,
+    refreshId: string | null,
   ) {
     while (true) {
       const generation = currentListRefsGeneration(gitCommonDir);
@@ -2728,7 +2730,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             // coalescing TTL would otherwise have elapsed.
             yield* Cache.get(
               listRefsRefreshSnapshotCache,
-              new GitRefsRefreshCacheKey({ gitCommonDir, generation }),
+              new GitRefsRefreshCacheKey({ gitCommonDir, generation, refreshId }),
             )
           : yield* Cache.get(
               listRefsSnapshotCache,
@@ -2753,6 +2755,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       new GitRefsRefreshCacheKey({
         gitCommonDir: repositoryPaths.gitCommonDir,
         generation: previousGeneration,
+        refreshId: null,
       }),
     );
     yield* Cache.invalidate(repositoryPathsRefreshCache, repositoryPathsCacheKey);
@@ -2780,6 +2783,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const snapshot = yield* resolveListRefsSnapshot(
         repositoryPaths.gitCommonDir,
         input.refresh === true,
+        input.refreshId ?? null,
       );
       const hasCurrentWorktreeBranch =
         repositoryPaths.worktreeRoot !== null &&

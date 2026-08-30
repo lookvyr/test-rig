@@ -32,7 +32,7 @@ import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import { vcsEnvironment } from "../state/vcs";
-import { cn } from "../lib/utils";
+import { cn, randomUUID } from "../lib/utils";
 import {
   parsePullRequestReference,
   pullRequestReferenceProviderKind,
@@ -114,6 +114,12 @@ export function BranchToolbarBranchSelector({
     reportFailure: false,
   });
   const createRefMutation = useAtomCommand(vcsEnvironment.createRef, {
+    reportFailure: false,
+  });
+  const refreshRefs = useAtomCommand(vcsEnvironment.refreshRefs, {
+    reportFailure: false,
+  });
+  const refreshVcsStatus = useAtomCommand(vcsEnvironment.refreshStatus, {
     reportFailure: false,
   });
   // ---------------------------------------------------------------------------
@@ -339,6 +345,7 @@ export function BranchToolbarBranchSelector({
         ? queriedActiveBranch.isRemote === true
         : null;
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
+  const [isBranchRefreshPending, startBranchRefreshTransition] = useTransition();
   const totalBranchCount = branchRefState.data?.totalCount ?? 0;
   const branchStatusText = isInitialBranchesLoadPending
     ? "Loading refs..."
@@ -395,6 +402,43 @@ export function BranchToolbarBranchSelector({
       await action();
       branchRefState.refresh();
       branchStatusQuery.refresh();
+    });
+  };
+
+  const refreshBranches = () => {
+    if (!branchCwd || isBranchActionPending || isBranchRefreshPending) return;
+
+    startBranchRefreshTransition(async () => {
+      const refsResult = await refreshRefs({
+        environmentId,
+        input: { cwd: branchCwd, refresh: true, refreshId: randomUUID(), limit: 1 },
+      });
+      if (refsResult._tag === "Failure") {
+        if (!isAtomCommandInterrupted(refsResult)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to refresh branches.",
+              description: toBranchActionErrorMessage(squashAtomCommandFailure(refsResult)),
+            }),
+          );
+        }
+        return;
+      }
+
+      const statusResult = await refreshVcsStatus({
+        environmentId,
+        input: { cwd: branchCwd },
+      });
+      if (statusResult._tag === "Failure" && !isAtomCommandInterrupted(statusResult)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to refresh branches.",
+            description: toBranchActionErrorMessage(squashAtomCommandFailure(statusResult)),
+          }),
+        );
+      }
     });
   };
 
@@ -693,7 +737,9 @@ export function BranchToolbarBranchSelector({
 
     const hasSecondaryWorktree =
       refName.worktreePath && activeProjectCwd && refName.worktreePath !== activeProjectCwd;
-    const badge = refName.current
+    const isCurrentBranch =
+      currentGitBranch === null ? refName.current : itemValue === currentGitBranch;
+    const badge = isCurrentBranch
       ? "current"
       : hasSecondaryWorktree
         ? "worktree"
@@ -792,7 +838,7 @@ export function BranchToolbarBranchSelector({
               className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
             />
             <ComboboxInput
-              className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
+              className="[&_input]:h-6.5 [&_input]:px-5 [&_input]:font-sans [&_input]:leading-6.5"
               inputClassName="rounded-none bg-transparent text-sm"
               placeholder="Search refs..."
               showTrigger={false}
@@ -801,6 +847,38 @@ export function BranchToolbarBranchSelector({
               value={branchQuery}
               onChange={(event) => setBranchQuery(event.target.value)}
             />
+            <span
+              aria-hidden="true"
+              className="absolute top-1 right-6 h-4 border-l border-border/60"
+            />
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    className="absolute -top-0.5 -right-1 size-6 text-muted-foreground"
+                    aria-label={isBranchRefreshPending ? "Refreshing branches" : "Refresh branches"}
+                    disabled={
+                      branchCwd === null ||
+                      isInitialBranchesLoadPending ||
+                      isBranchActionPending ||
+                      isBranchRefreshPending
+                    }
+                    onClick={refreshBranches}
+                  />
+                }
+              >
+                <RefreshCwIcon
+                  aria-hidden="true"
+                  className={cn("size-3.5", isBranchRefreshPending && "animate-spin")}
+                />
+              </TooltipTrigger>
+              <TooltipPopup side="top">
+                {isBranchRefreshPending ? "Refreshing branches…" : "Refresh branches"}
+              </TooltipPopup>
+            </Tooltip>
           </div>
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
