@@ -46,6 +46,8 @@ const PUSH_TIMEOUT_MS = 5 * 60_000;
 // Worktree creation checks out the full tree and can exceed the default on
 // large repositories. Keep it bounded while allowing realistic repositories.
 const WORKTREE_ADD_TIMEOUT_MS = 5 * 60_000;
+// Removing dependency-heavy worktrees can take minutes of filesystem work.
+const WORKTREE_REMOVE_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_000_000;
 const OUTPUT_TRUNCATED_MARKER = "\n\n[truncated]";
 const PREPARED_COMMIT_PATCH_MAX_OUTPUT_BYTES = 49_000;
@@ -2965,7 +2967,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     args.push(input.path);
     yield* executeGit("GitVcsDriver.removeWorktree", input.cwd, args, {
-      timeoutMs: 15_000,
+      timeoutMs: WORKTREE_REMOVE_TIMEOUT_MS,
       fallbackErrorDetail: "git worktree remove failed",
     });
   });

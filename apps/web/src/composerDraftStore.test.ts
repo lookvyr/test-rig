@@ -60,6 +60,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
   clearComposerDraftsEnvironment,
+  composerDraftHasUserContent,
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThread,
   markPromotedDraftThreadByRef,
@@ -987,17 +988,24 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("keep me");
   });
 
-  it("finalizes a promoted draft after the canonical thread route is active", () => {
+  it("moves composer edits made during promotion to the canonical thread", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, { threadId });
-    store.setPrompt(draftId, "promote me");
     markPromotedDraftThread(threadId);
+    store.setPrompt(draftId, "typed during setup");
+    const image = makeImage({ id: "during-setup", previewUrl: "blob:during-setup" });
+    store.addImage(draftId, image);
+    const revokeSpy = vi.spyOn(URL, "revokeObjectURL");
 
     finalizePromotedDraftThreadByRef(scopeThreadRef(TEST_ENVIRONMENT_ID, threadId));
 
     expect(useComposerDraftStore.getState().getDraftThreadByProjectRef(projectRef)).toBeNull();
     expect(useComposerDraftStore.getState().getDraftThread(draftId)).toBeNull();
     expect(draftByKey(draftId)).toBeUndefined();
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("typed during setup");
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.images).toEqual([image]);
+    expect(revokeSpy).not.toHaveBeenCalledWith(image.previewUrl);
+    revokeSpy.mockRestore();
   });
 
   it("finalizes a matching materialized draft even when promotion was not pre-marked", () => {
@@ -1010,6 +1018,7 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(useComposerDraftStore.getState().getDraftThreadByProjectRef(projectRef)).toBeNull();
     expect(useComposerDraftStore.getState().getDraftThread(draftId)).toBeNull();
     expect(draftByKey(draftId)).toBeUndefined();
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("promote me");
   });
 
   it("updates branch context on an existing draft thread", () => {
@@ -1149,6 +1158,28 @@ describe("composerDraftStore project draft thread mapping", () => {
       envMode: "worktree",
       startFromOrigin: true,
     });
+  });
+});
+
+describe("composerDraftStore unsent content", () => {
+  it("ignores model settings and whitespace but tracks text and image drafts", () => {
+    resetComposerDraftStore();
+    const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("unsent-content"));
+    const store = useComposerDraftStore.getState();
+    const hasContent = () => composerDraftHasUserContent(store.getComposerDraft(threadRef));
+
+    expect(hasContent()).toBe(false);
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.4"));
+    store.setPrompt(threadRef, "   ");
+    expect(hasContent()).toBe(false);
+    store.setPrompt(threadRef, "follow up");
+    expect(hasContent()).toBe(true);
+    store.clearComposerContent(threadRef);
+    expect(hasContent()).toBe(false);
+    store.addImage(threadRef, makeImage({ id: "unsent-image", previewUrl: "blob:unsent-image" }));
+    expect(hasContent()).toBe(true);
+    store.clearComposerContent(threadRef);
+    expect(hasContent()).toBe(false);
   });
 });
 
