@@ -84,6 +84,7 @@ interface AnnotatableCodeViewProps {
   options: NonNullable<CodeViewProps<DiffCommentAnnotationGroup>["options"]>;
   viewerRef?: Ref<AnnotatableCodeViewHandle>;
   className?: string;
+  renderHeaderFilenameSuffix?: (fileDiff: FileDiffMetadata) => ReactNode;
   renderHeaderPrefix: (
     fileDiff: FileDiffMetadata,
     fileKey: string,
@@ -105,6 +106,7 @@ export function AnnotatableCodeView({
   viewerRef,
   className,
   renderHeaderPrefix,
+  renderHeaderFilenameSuffix,
 }: AnnotatableCodeViewProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
@@ -254,6 +256,9 @@ export function AnnotatableCodeView({
         item.type === "diff"
           ? renderHeaderPrefix(item.fileDiff, item.id, item.collapsed === true)
           : null
+      }
+      renderHeaderFilenameSuffix={(item) =>
+        item.type === "diff" ? renderHeaderFilenameSuffix?.(item.fileDiff) : null
       }
       renderAnnotation={(annotation) => {
         const hasDraft = annotation.metadata.entries.some((entry) => entry.kind === "draft");

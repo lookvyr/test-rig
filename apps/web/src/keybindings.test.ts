@@ -1,3 +1,4 @@
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { assert, describe, it } from "vite-plus/test";
 
 import {
@@ -851,4 +852,46 @@ describe("plus key parsing", () => {
       }),
     );
   });
+});
+
+describe("thread and panel default shortcuts", () => {
+  for (const platform of ["MacIntel", "Linux"]) {
+    it(`respects terminal focus on ${platform}`, () => {
+      const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
+      for (const [key, command] of [
+        ["p", "thread.pin"],
+        ["s", "thread.settle"],
+      ] as const) {
+        const shortcut = event({ ...modifier, key, shiftKey: true });
+        assert.strictEqual(
+          resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+            context: { terminalFocus: false },
+          }),
+          command,
+        );
+        assert.isNull(
+          resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+            context: { terminalFocus: true },
+          }),
+        );
+      }
+      const close = event({ ...modifier, key: "w" });
+      assert.strictEqual(
+        resolveShortcutCommand(close, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { terminalFocus: false },
+        }),
+        "rightPanel.close",
+      );
+      assert.strictEqual(
+        resolveShortcutCommand(close, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { terminalFocus: true },
+        }),
+        "terminal.close",
+      );
+    });
+  }
 });

@@ -166,6 +166,7 @@ import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import { preventRepeatedTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
@@ -1074,6 +1075,7 @@ function ChatViewContent(props: ChatViewProps) {
   const threadSyncPhase = routeKind === "server" ? (props.threadSyncPhase ?? null) : null;
   const threadDetailLoading = threadSyncPhase === "loading";
   const handleNewThread = useNewThreadHandler();
+  const { settleThread, pinThread, unpinThread } = useThreadActions();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -3817,6 +3819,8 @@ function ChatViewContent(props: ChatViewProps) {
       bitbucket: false,
     },
   });
+  const supportsPinning = serverConfig?.environment.capabilities.threadPinning === true;
+  const activeThreadPinned = supportsPinning && activeThreadShell?.pinnedAt != null;
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true;
   const supportsSnooze = serverConfig?.environment.capabilities.threadSnooze === true;
   const nowMinute = useNowMinute();
@@ -4401,10 +4405,60 @@ function ChatViewContent(props: ChatViewProps) {
       });
       if (!command) return;
 
+      if (command === "thread.settle") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat || !isServerThread || !activeThreadRef || !supportsSettlement) return;
+        if (activeThreadSettled) {
+          void handleUnsettleActiveThread();
+          return;
+        }
+
+        void settleThread(activeThreadRef).then((result) => {
+          if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to settle thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        });
+        return;
+      }
+
+      if (command === "thread.pin") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat || !isServerThread || !activeThreadRef || !supportsPinning) return;
+        const pinned = activeThreadPinned;
+        void (pinned ? unpinThread(activeThreadRef) : pinThread(activeThreadRef)).then((result) => {
+          if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: pinned ? "Failed to unpin thread" : "Failed to pin thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        });
+        return;
+      }
+
       if (command === "terminal.toggle") {
         event.preventDefault();
         event.stopPropagation();
         toggleTerminalVisibility();
+        return;
+      }
+
+      if (command === "rightPanel.close") {
+        if (!activeRightPanelSurface) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) closeRightPanelSurface(activeRightPanelSurface);
         return;
       }
 
@@ -4496,6 +4550,17 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeProject,
     activeRightPanelSurface,
+    activeThreadRef,
+    activeThreadPinned,
+    activeThreadSettled,
+    closeRightPanelSurface,
+    handleUnsettleActiveThread,
+    isServerThread,
+    pinThread,
+    settleThread,
+    supportsPinning,
+    supportsSettlement,
+    unpinThread,
     addTerminalSurface,
     terminalUiState.terminalOpen,
     terminalUiState.activeTerminalId,

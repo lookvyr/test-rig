@@ -39,6 +39,10 @@ Test Rig refreshes remote branch status in the background. The default fetch int
 
 The background-activity policy can pause a scheduled fetch while the machine is locked, on battery, or in another restricted state. The fetch interval controls how often a refresh becomes eligible to run.
 
+## Copy a diff file path
+
+Use the copy button beside a filename in the diff panel to copy its repository-relative path. Renamed files use the new path; deleted files use their former path.
+
 ## Worktree branch names
 
 Set the prefix for new worktree branches under **Settings** → **General** → **New threads** →

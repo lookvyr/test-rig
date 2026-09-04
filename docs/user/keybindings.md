@@ -3,8 +3,8 @@
 Edit keybindings from **Settings** → **Keybindings**. That page lists every command, its current
 shortcut, whether it is a default or your own, and warns about conflicts.
 
-The same configuration lives in `~/.t3/userdata/keybindings.json` on the machine running the
-server, if you prefer editing it directly. T3 Code writes the built-in defaults into that file on
+The same configuration lives in `~/.test-rig/userdata/keybindings.json` on the machine running the
+server, if you prefer editing it directly. Test Rig writes the built-in defaults into that file on
 first run, and adds any new defaults on later startups unless a rule of yours already claims the
 command or the shortcut.
 
@@ -61,6 +61,14 @@ environment mode always come from your configured defaults, not from the thread 
 at. To keep a worktree, use the explicit "new thread in this worktree" action in the branch
 toolbar. The only difference between the two commands: with the current sidebar and more than one
 project, `chat.new` opens a project chooser first.
+
+## Thread and panel shortcuts
+
+- `mod+shift+p` (`thread.pin`) pins or unpins the active thread.
+- `mod+shift+s` (`thread.settle`) settles the active thread or restores it to active. Threads that are running or waiting for input cannot be settled.
+- `mod+w` (`rightPanel.close`) closes the active right-panel tab. When no panel is open, the normal window or browser close behavior applies.
+
+These defaults yield to terminal focus: `mod+w` closes the focused terminal, and the thread shortcuts are inactive. Pin and settle apply to saved threads in environments that support those actions.
 
 ## `when` Conditions
 

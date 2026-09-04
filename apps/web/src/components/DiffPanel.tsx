@@ -1,3 +1,4 @@
+import { DiffFilePathCopyButton } from "./DiffFilePathCopyButton";
 import { useAtomValue } from "@effect/atom-react";
 import type { FileDiffContentsLoader } from "@pierre/diffs";
 import { useParams } from "@tanstack/react-router";
@@ -1126,6 +1127,9 @@ export default function DiffPanel({
                   sectionId={reviewSectionId}
                   sectionTitle={reviewSectionTitle}
                   composerDraftTarget={composerDraftTarget}
+                  renderHeaderFilenameSuffix={(fileDiff) => (
+                    <DiffFilePathCopyButton filePath={resolveFileDiffPath(fileDiff)} />
+                  )}
                   renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
                     const filePath = resolveFileDiffPath(fileDiff);
                     return (
