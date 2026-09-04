@@ -13,6 +13,7 @@ const emptyCatalog = {
   profiles: [],
   credentials: [],
 } as const;
+const encodeLegacyCatalog = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeCatalog = Schema.decodeUnknownSync(Schema.fromJsonString(ConnectionCatalogDocument));
 
 afterEach(() => {
@@ -58,7 +59,7 @@ describe("makeCatalogStore", () => {
       const writes: string[] = [];
       const store = yield* makeCatalogStore({
         read: Effect.succeed(
-          JSON.stringify({
+          encodeLegacyCatalog({
             schemaVersion: 1,
             targets: [
               {
@@ -77,7 +78,7 @@ describe("makeCatalogStore", () => {
 
       expect(yield* store.read).toEqual(emptyCatalog);
       expect(writes).toHaveLength(1);
-      expect(JSON.parse(writes[0]!)).toEqual(emptyCatalog);
+      expect(decodeCatalog(writes[0]!)).toEqual(emptyCatalog);
       expect(writes[0]).not.toContain("removed-token");
     }),
   );

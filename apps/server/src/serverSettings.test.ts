@@ -20,6 +20,7 @@ import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ServerConfig from "./config.ts";
 import * as ServerSettingsModule from "./serverSettings.ts";
 
+const encodeLegacySettings = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 
@@ -212,7 +213,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const fileSystem = yield* FileSystem.FileSystem;
       yield* fileSystem.writeFileString(
         serverConfig.settingsPath,
-        JSON.stringify({
+        encodeLegacySettings({
           providers: {
             cursor: {
               enabled: true,

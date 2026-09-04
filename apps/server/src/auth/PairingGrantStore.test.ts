@@ -128,7 +128,7 @@ it.layer(NodeServices.layer)("PairingGrantStore.layer", (it) => {
           ${"historical-proof-grant"},
           ${"historical-proof-token"},
           ${"one-time-token"},
-          ${JSON.stringify(["orchestration:read"])},
+          ${'["orchestration:read"]'},
           ${"legacy-relay"},
           NULL,
           ${"client-proof-key-thumbprint"},
