@@ -1,0 +1,7 @@
+{
+  "title": "Review notification summary",
+  "state": "open",
+  "isDraft": true,
+  "files": ["review-summary.mjs", "review-summary.test.mjs"],
+  "comments": []
+}
