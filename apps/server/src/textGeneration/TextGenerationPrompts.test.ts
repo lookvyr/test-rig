@@ -107,7 +107,9 @@ describe("buildPrContentPrompt", () => {
     expect(result.prompt).toContain("3 files changed");
     expect(result.prompt).toContain("Diff patch:");
     expect(result.prompt).toContain("export function login()");
-    expect(result.prompt).toContain("include headings '## Summary' and '## Testing'");
+    expect(result.prompt).toContain("concise prose without preset sections");
+    expect(result.prompt).not.toContain("Summary");
+    expect(result.prompt).not.toContain("Testing");
   });
 
   it("follows a repository PR template instead of the default body headings", () => {
@@ -155,8 +157,47 @@ describe("buildPrContentPrompt", () => {
       },
     });
 
-    expect(result.prompt).toContain("unless additional description instructions say otherwise");
+    expect(result.prompt).not.toContain("Summary");
+    expect(result.prompt).not.toContain("Testing");
+    expect(result.prompt).not.toContain("bullet points");
     expect(result.prompt).toContain("Write one short paragraph.");
+  });
+
+  it("keeps explicitly requested section headings in custom instructions", () => {
+    const instruction = "Use ## Summary and ## Testing sections.";
+    const result = buildPrContentPrompt({
+      baseBranch: "main",
+      headBranch: "feature/auth",
+      commitSummary: "Add login",
+      diffSummary: "3 files changed",
+      diffPatch: "diff",
+      policy: {
+        kind: "custom",
+        additionalChangeRequestDescriptionInstructions: instruction,
+        inferRepositoryConventions: false,
+      },
+    });
+
+    expect(result.prompt).toContain(instruction);
+    expect(result.prompt).not.toContain("under Summary");
+    expect(result.prompt).not.toContain("under Testing");
+  });
+
+  it("preserves repository instructions beyond the custom-instruction size limit", () => {
+    const result = buildPrContentPrompt({
+      baseBranch: "main",
+      headBranch: "feature/auth",
+      commitSummary: "Add login",
+      diffSummary: "3 files changed",
+      diffPatch: "diff",
+      policy: {
+        kind: "repo_conventions",
+        changeRequestInstructions: `${"Repository context. ".repeat(300)}Use the repository format.`,
+        inferRepositoryConventions: true,
+      },
+    });
+
+    expect(result.prompt).toContain("Use the repository format.");
   });
 });
 

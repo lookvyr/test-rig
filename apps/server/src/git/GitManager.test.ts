@@ -1764,6 +1764,130 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  for (const writer of ["codex", "claudeAgent", "opencode"] as const) {
+    it.effect(`includes repository instruction files for the ${writer} writer`, () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        NodeFS.writeFileSync(
+          NodePath.join(repoDir, "AGENTS.md"),
+          "Use lowercase source control text.",
+        );
+        NodeFS.writeFileSync(
+          NodePath.join(repoDir, "CLAUDE.md"),
+          "Keep pull request bodies brief.",
+        );
+        let generatedPolicy: TextGeneration.CommitMessageGenerationInput["policy"];
+        const { manager } = yield* makeManager({
+          serverSettings: {
+            textGenerationModelSelection: {
+              instanceId: ProviderInstanceId.make(writer),
+              model: "test-model",
+            },
+            sourceControlWritingStyle: { mode: "repo_conventions" },
+          },
+          textGeneration: {
+            generateCommitMessage: (input) => {
+              generatedPolicy = input.policy;
+              return Effect.succeed({ subject: "Follow local instructions", body: "" });
+            },
+          },
+        });
+        yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
+        for (const instructions of [
+          generatedPolicy?.commitInstructions,
+          generatedPolicy?.changeRequestInstructions,
+        ]) {
+          expect(instructions).toContain("Recent commit subjects from this repository:");
+          expect(instructions).toContain("Local AGENTS.md:\nUse lowercase source control text.");
+          if (writer === "claudeAgent") {
+            expect(instructions).toContain("Local CLAUDE.md:\nKeep pull request bodies brief.");
+          } else {
+            expect(instructions).not.toContain("CLAUDE.md");
+          }
+        }
+      }),
+    );
+  }
+
+  for (const mode of ["custom", "conventional_commits"] as const) {
+    it.effect(`does not add repository files to ${mode} writing instructions`, () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        NodeFS.writeFileSync(NodePath.join(repoDir, "AGENTS.md"), "Repository-only writing rule.");
+        NodeFS.writeFileSync(NodePath.join(repoDir, "CLAUDE.md"), "Claude-only writing rule.");
+        let generatedPolicy: TextGeneration.CommitMessageGenerationInput["policy"];
+        const { manager } = yield* makeManager({
+          serverSettings: {
+            textGenerationModelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "test-model",
+            },
+            sourceControlWritingStyle: {
+              mode,
+              commitInstructions: "Write in my own style.",
+              changeRequestDescriptionInstructions: "Write one paragraph.",
+            },
+          },
+          textGeneration: {
+            generateCommitMessage: (input) => {
+              generatedPolicy = input.policy;
+              return Effect.succeed({ subject: "Follow selected style", body: "" });
+            },
+          },
+        });
+        yield* runStackedAction(manager, { cwd: repoDir, action: "commit" });
+        expect(generatedPolicy).toMatchObject({
+          kind: mode,
+          inferRepositoryConventions: false,
+          additionalCommitInstructions: "Write in my own style.",
+          additionalChangeRequestDescriptionInstructions: "Write one paragraph.",
+        });
+        expect(generatedPolicy?.commitInstructions ?? "").not.toContain("writing rule");
+        expect(generatedPolicy?.changeRequestInstructions ?? "").not.toContain("writing rule");
+      }),
+    );
+  }
+
+  for (const fileKind of ["oversized", "directory", "outside-symlink"] as const) {
+    it.effect(`ignores an ${fileKind} repository instruction file`, () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const instructionPath = NodePath.join(repoDir, "AGENTS.md");
+        if (fileKind === "oversized") {
+          NodeFS.writeFileSync(instructionPath, "x".repeat(20_001));
+        } else if (fileKind === "directory") {
+          NodeFS.mkdirSync(instructionPath);
+        } else {
+          const outsideDir = yield* makeTempDir("t3code-outside-instructions-");
+          const outsidePath = NodePath.join(outsideDir, "AGENTS.md");
+          NodeFS.writeFileSync(outsidePath, "Outside repository instructions.");
+          NodeFS.symlinkSync(outsidePath, instructionPath);
+        }
+        NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "Changed content.\n");
+        let generatedPolicy: TextGeneration.CommitMessageGenerationInput["policy"];
+        const { manager } = yield* makeManager({
+          serverSettings: { sourceControlWritingStyle: { mode: "repo_conventions" } },
+          textGeneration: {
+            generateCommitMessage: (input) => {
+              generatedPolicy = input.policy;
+              return Effect.succeed({ subject: "Ignore unavailable instructions", body: "" });
+            },
+          },
+        });
+        yield* runStackedAction(manager, {
+          cwd: repoDir,
+          action: "commit",
+          filePaths: ["README.md"],
+        });
+        expect(generatedPolicy?.commitInstructions).toContain("Recent commit subjects");
+        expect(generatedPolicy?.commitInstructions).not.toContain("Local AGENTS.md");
+      }),
+    );
+  }
+
   it.effect("uses custom commit message when provided", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
@@ -2765,83 +2889,96 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("creates PR when one does not already exist", () =>
-    Effect.gen(function* () {
-      const repoDir = yield* makeTempDir("t3code-git-manager-");
-      yield* initRepo(repoDir);
-      NodeFS.mkdirSync(NodePath.join(repoDir, ".github"));
-      NodeFS.writeFileSync(
-        NodePath.join(repoDir, ".github", "pull_request_template.md"),
-        "## What changed?\n\n## Verification",
-      );
-      yield* runGit(repoDir, ["add", ".github/pull_request_template.md"]);
-      yield* runGit(repoDir, ["commit", "-m", "Add pull request template"]);
-      yield* runGit(repoDir, ["checkout", "-b", "feature-create-pr"]);
-      const remoteDir = yield* createBareRemote();
-      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-      NodeFS.writeFileSync(NodePath.join(repoDir, "changes.txt"), "change\n");
-      yield* runGit(repoDir, ["add", "changes.txt"]);
-      yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "feature-create-pr"]);
-      yield* runGit(repoDir, ["config", "branch.feature-create-pr.gh-merge-base", "main"]);
-      let generatedPolicy: TextGeneration.PrContentGenerationInput["policy"] = undefined;
-      let generatedChangeRequestTemplate: string | undefined;
+  for (const followChangeRequestTemplates of [true, false]) {
+    it.effect(
+      `creates PR with template following ${followChangeRequestTemplates ? "enabled" : "disabled"}`,
+      () =>
+        Effect.gen(function* () {
+          const repoDir = yield* makeTempDir("t3code-git-manager-");
+          yield* initRepo(repoDir);
+          NodeFS.mkdirSync(NodePath.join(repoDir, ".github"));
+          NodeFS.writeFileSync(
+            NodePath.join(repoDir, ".github", "pull_request_template.md"),
+            "## What changed?\n\n## Verification",
+          );
+          yield* runGit(repoDir, ["add", ".github/pull_request_template.md"]);
+          yield* runGit(repoDir, ["commit", "-m", "Add pull request template"]);
+          yield* runGit(repoDir, ["checkout", "-b", "feature-create-pr"]);
+          const remoteDir = yield* createBareRemote();
+          yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+          NodeFS.writeFileSync(NodePath.join(repoDir, "changes.txt"), "change\n");
+          yield* runGit(repoDir, ["add", "changes.txt"]);
+          yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
+          yield* runGit(repoDir, ["push", "-u", "origin", "feature-create-pr"]);
+          yield* runGit(repoDir, ["config", "branch.feature-create-pr.gh-merge-base", "main"]);
+          let generatedPolicy: TextGeneration.PrContentGenerationInput["policy"] = undefined;
+          let generatedChangeRequestTemplate: string | undefined;
 
-      const { manager, ghCalls, createdPrBodies } = yield* makeManager({
-        serverSettings: {
-          sourceControlWritingStyle: {
-            mode: "custom" as const,
-            changeRequestTitleInstructions: "Use a specific title.",
-            changeRequestDescriptionInstructions: "Lead with user impact.",
-          },
-        },
-        textGeneration: {
-          generatePrContent: (input) => {
-            generatedPolicy = input.policy;
-            generatedChangeRequestTemplate = input.changeRequestTemplate;
-            return Effect.succeed({
-              title: "Add stacked git actions",
-              body: '{"title":"Add stacked git actions","body":"## What changed?\\nAdded stacked git actions."}',
-            });
-          },
-        },
-        ghScenario: {
-          prListSequence: [
-            "[]",
-            // @effect-diagnostics-next-line preferSchemaOverJson:off
-            JSON.stringify([
-              {
-                number: 88,
-                title: "Add stacked git actions",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/88",
-                baseRefName: "main",
-                headRefName: "feature-create-pr",
+          const { manager, ghCalls, createdPrBodies } = yield* makeManager({
+            serverSettings: {
+              sourceControlWritingStyle: {
+                mode: "custom" as const,
+                followChangeRequestTemplates,
+                changeRequestTitleInstructions: "Use a specific title.",
+                changeRequestDescriptionInstructions: "Lead with user impact.",
               },
-            ]),
-          ],
-        },
-      });
-      const result = yield* runStackedAction(manager, {
-        cwd: repoDir,
-        action: "commit_push_pr",
-      });
+            },
+            textGeneration: {
+              generatePrContent: (input) => {
+                generatedPolicy = input.policy;
+                generatedChangeRequestTemplate = input.changeRequestTemplate;
+                return Effect.succeed({
+                  title: "Add stacked git actions",
+                  body: followChangeRequestTemplates
+                    ? '{"title":"Add stacked git actions","body":"## What changed?\\nAdded stacked git actions."}'
+                    : "Added stacked git actions.",
+                });
+              },
+            },
+            ghScenario: {
+              prListSequence: [
+                "[]",
+                // @effect-diagnostics-next-line preferSchemaOverJson:off
+                JSON.stringify([
+                  {
+                    number: 88,
+                    title: "Add stacked git actions",
+                    url: "https://github.com/pingdotgg/codething-mvp/pull/88",
+                    baseRefName: "main",
+                    headRefName: "feature-create-pr",
+                  },
+                ]),
+              ],
+            },
+          });
+          const result = yield* runStackedAction(manager, {
+            cwd: repoDir,
+            action: "commit_push_pr",
+          });
 
-      expect(result.branch.status).toBe("skipped_not_requested");
-      expect(result.pr.status).toBe("created");
-      expect(result.pr.number).toBe(88);
-      expect(generatedPolicy).toMatchObject({
-        additionalChangeRequestTitleInstructions: "Use a specific title.",
-        additionalChangeRequestDescriptionInstructions: "Lead with user impact.",
-      });
-      expect(generatedChangeRequestTemplate).toBe("## What changed?\n\n## Verification");
-      expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(2);
-      expect(
-        ghCalls.some((call) => call.includes("pr create --base main --head feature-create-pr")),
-      ).toBe(true);
-      expect(createdPrBodies).toEqual(["## What changed?\nAdded stacked git actions."]);
-      expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
-    }),
-  );
+          expect(result.branch.status).toBe("skipped_not_requested");
+          expect(result.pr.status).toBe("created");
+          expect(result.pr.number).toBe(88);
+          expect(generatedPolicy).toMatchObject({
+            additionalChangeRequestTitleInstructions: "Use a specific title.",
+            additionalChangeRequestDescriptionInstructions: "Lead with user impact.",
+          });
+          expect(generatedChangeRequestTemplate).toBe(
+            followChangeRequestTemplates ? "## What changed?\n\n## Verification" : undefined,
+          );
+          expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(2);
+          expect(
+            ghCalls.some((call) => call.includes("pr create --base main --head feature-create-pr")),
+          ).toBe(true);
+          expect(createdPrBodies).toEqual([
+            followChangeRequestTemplates
+              ? "## What changed?\nAdded stacked git actions."
+              : "Added stacked git actions.",
+          ]);
+          expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
+        }),
+    );
+  }
 
   it.effect("generates PR content against the remote base when the local base is stale", () =>
     Effect.gen(function* () {

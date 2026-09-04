@@ -29,6 +29,10 @@ Settings belong to the server environment that owns the repository. If you use m
 
 Open **Settings** → **Source Control** to choose a writing style for generated commit messages and change requests. You can also add separate instructions for commit messages, change request titles, and change request descriptions. These are global defaults for every project in the current environment.
 
+Repository conventions includes recent commit subjects and local `AGENTS.md` instructions. When Claude is the selected writer, it also includes local `CLAUDE.md` instructions. Test Rig adds these files to its writing prompt only when Repository conventions is selected.
+
+PR descriptions have no built-in section headings. Your writing instructions determine the structure; without a requested structure, Test Rig asks for concise prose. **Follow change request templates** is independent of the writing style: when enabled and a template is found, that template supplies the structure.
+
 Additional writing instructions fine-tune the selected style and take precedence when the two conflict. When following a repository change request template, description instructions can change the writing inside the template but do not replace its structure.
 
 ## Git is separate
@@ -52,6 +56,8 @@ With `example/team`, Test Rig creates `example/team/_worktree/a1b2c3d4`, then re
 
 The setting applies only to new worktrees. It does not rename existing branches or folders, or
 affect synthetic branches for cross-repository pull requests.
+
+When **Start from origin** is enabled for a new worktree, Test Rig fetches origin and uses the selected branch there. If origin or that branch is absent, it uses the selected local branch. A fetch failure is reported instead of silently using stale local state.
 
 ## Available provider actions
 

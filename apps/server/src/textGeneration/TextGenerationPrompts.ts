@@ -21,7 +21,7 @@ function policyInstruction(instruction: string | undefined): ReadonlyArray<strin
 
 function selectedStyleInstruction(instruction: string | undefined): ReadonlyArray<string> {
   const trimmed = instruction?.trim();
-  return trimmed ? ["", "Selected writing style:", limitSection(trimmed, 4_000)] : [];
+  return trimmed ? ["", "Selected writing style:", limitSection(trimmed, 20_000)] : [];
 }
 
 function additionalInstruction(
@@ -126,9 +126,8 @@ export function buildPrContentPrompt(input: PrContentPromptInput) {
         "- keep the template's markdown structure",
       ]
     : [
-        "- unless additional description instructions say otherwise, body must be markdown and include headings '## Summary' and '## Testing'",
-        "- under Summary, provide short bullet points",
-        "- under Testing, include bullet points with concrete checks or 'Not run' where appropriate",
+        "- body must be markdown; use the supplied writing instructions to determine its structure and formatting",
+        "- when no structure is specified, use concise prose without preset sections",
       ];
   const prompt = [
     "You write source control change request content.",

@@ -5381,6 +5381,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               bootstrapGitOperations.push("fetch");
             }),
         );
+        const remoteBranchExists = vi.fn(
+          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteBranchExists"]>[0]) =>
+            Effect.sync(() => {
+              bootstrapGitOperations.push("remote-branch-exists");
+              return true;
+            }),
+        );
         const fetchedOriginCommit = "0123456789abcdef0123456789abcdef01234567";
         const resolveRemoteTrackingCommit = vi.fn(
           (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["resolveRemoteTrackingCommit"]>[0]) =>
@@ -5423,6 +5430,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           layers: {
             gitVcsDriver: {
               remoteExists,
+              remoteBranchExists,
               fetchRemote,
               resolveRemoteTrackingCommit,
               createWorktree,
@@ -5507,6 +5515,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cwd: "/tmp/project",
           remoteName: "origin",
         });
+        assert.deepEqual(remoteBranchExists.mock.calls[0]?.[0], {
+          cwd: "/tmp/project",
+          refName: "main",
+          remoteName: "origin",
+        });
         assert.deepEqual(resolveRemoteTrackingCommit.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           refName: "main",
@@ -5515,6 +5528,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(bootstrapGitOperations, [
           "remote-exists",
           "fetch",
+          "remote-branch-exists",
           "resolve-remote-commit",
           "create-worktree",
         ]);
@@ -5542,17 +5556,32 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect(
-    "falls back to the local base branch when startFromOrigin is set but no origin remote exists",
-    () =>
+  for (const scenario of ["no-origin", "local-only", "fetch-failed"] as const) {
+    const hasOrigin = scenario !== "no-origin";
+    const fetchFails = scenario === "fetch-failed";
+    it.effect(`handles worktree bootstrap with ${scenario}`, () =>
       Effect.gen(function* () {
         const dispatchedCommands: Array<OrchestrationCommand> = [];
         const remoteExists = vi.fn(
           (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteExists"]>[0]) =>
+            Effect.succeed(hasOrigin),
+        );
+        const remoteBranchExists = vi.fn(
+          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteBranchExists"]>[0]) =>
             Effect.succeed(false),
         );
         const fetchRemote = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["fetchRemote"]>[0]) => Effect.void,
+          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["fetchRemote"]>[0]) =>
+            fetchFails
+              ? Effect.fail(
+                  new GitCommandError({
+                    operation: "fetchRemote",
+                    command: "git fetch origin",
+                    cwd: "/tmp/project",
+                    detail: "Synthetic fetch failure",
+                  }),
+                )
+              : Effect.void,
         );
         const resolveRemoteTrackingCommit = vi.fn(
           (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["resolveRemoteTrackingCommit"]>[0]) =>
@@ -5575,6 +5604,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           layers: {
             gitVcsDriver: {
               remoteExists,
+              remoteBranchExists,
               fetchRemote,
               resolveRemoteTrackingCommit,
               createWorktree,
@@ -5592,7 +5622,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
         const createdAt = "2026-01-01T00:00:00.000Z";
         const wsUrl = yield* getWsServerUrl("/ws");
-        yield* Effect.scoped(
+        const result = yield* Effect.scoped(
           withWsRpcClient(wsUrl, (client) =>
             client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
               type: "thread.turn.start",
@@ -5628,13 +5658,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               createdAt,
             }),
           ),
-        );
+        ).pipe(Effect.result);
 
+        if (fetchFails) {
+          assert.equal(result._tag, "Failure");
+          assert.equal(createWorktree.mock.calls.length, 0);
+          assert.equal(remoteBranchExists.mock.calls.length, 0);
+          assert.equal(resolveRemoteTrackingCommit.mock.calls.length, 0);
+          assert.isFalse(
+            dispatchedCommands.some((command) => command.type === "thread.turn.start"),
+          );
+          return;
+        }
+        assert.equal(result._tag, "Success");
         assert.deepEqual(remoteExists.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           remoteName: "origin",
         });
-        assert.equal(fetchRemote.mock.calls.length, 0);
+        assert.equal(fetchRemote.mock.calls.length, hasOrigin ? 1 : 0);
+        assert.equal(remoteBranchExists.mock.calls.length, hasOrigin ? 1 : 0);
         assert.equal(resolveRemoteTrackingCommit.mock.calls.length, 0);
         assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
@@ -5644,7 +5686,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           path: null,
         });
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
+    );
+  }
 
   it.effect("records setup-script failures without aborting bootstrap turn start", () =>
     Effect.gen(function* () {
