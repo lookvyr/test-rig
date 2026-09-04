@@ -35,3 +35,11 @@ serialized per workspace; known PRs, lookup failure backoff, background policy,
 and hosting-integration switches remain effective. Local remote-tracking refs
 identify branches pushed under their own name while still tracking the default
 branch. Saved-branch PR lookup and automatic pulling are outside this port.
+
+[#9068](https://github.com/pingdotgg/t3code/pull/9068) retains the Electron debugger
+object for each browser-preview control session, preventing garbage collection
+from detaching active control and allowing cleanup after its webview is destroyed.
+The regression test uses Test Rig's existing tab-close lifecycle.
+
+[#8889](https://github.com/pingdotgg/t3code/pull/8889) adds an expand/collapse-all
+control to the Files tree using its existing model and native directory handles.

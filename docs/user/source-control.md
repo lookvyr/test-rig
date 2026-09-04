@@ -49,6 +49,8 @@ After a turn finishes on a feature branch, Test Rig checks again for a newly cre
 
 The Files panel and current workspace diff refresh after the active thread finishes a turn. Refreshes keep the file tree's expanded folders and the diff's scroll position and collapsed files. The Files refresh button also reloads the open text file. Pending edits in the file editor remain protected while a refresh runs.
 
+Use **Expand all folders** beside the Files search button to open every folder in the tree. Once all folders are expanded, the button becomes **Collapse all folders**. Collapsing folders keeps your selected file open.
+
 ## Copy a diff file path
 
 Use the copy button beside a filename in the diff panel to copy its repository-relative path. Renamed files use the new path; deleted files use their former path.

@@ -18,6 +18,7 @@ import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
+const encodeLegacyCatalog = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeConnectionCatalog = Schema.decodeEffect(
   Schema.fromJsonString(ConnectionCatalogDocument),
 );
@@ -155,7 +156,7 @@ describe("DesktopConnectionCatalogStore", () => {
         yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
         yield* fileSystem.writeFileString(
           `${environment.stateDir}/saved-environments.json`,
-          JSON.stringify({
+          encodeLegacyCatalog({
             version: 1,
             records: records.map((record) =>
               record.environmentId === "bearer-environment"
@@ -232,7 +233,7 @@ describe("DesktopConnectionCatalogStore", () => {
         yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
         yield* fileSystem.writeFileString(
           `${environment.stateDir}/saved-environments.json`,
-          JSON.stringify({
+          encodeLegacyCatalog({
             version: 1,
             records: [
               {
