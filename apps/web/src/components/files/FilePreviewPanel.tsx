@@ -14,13 +14,15 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle } from "lucide-react";
 import * as Schema from "effect/Schema";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlState } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { useClientSettings } from "~/hooks/useSettings";
+import { useOnTurnCompleted } from "~/hooks/useOnTurnCompleted";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { useTheme } from "~/hooks/useTheme";
 import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
 import { DIFF_SURFACE_THEME_UNSAFE_CSS, resolveDiffThemeName } from "~/lib/diffRendering";
@@ -56,10 +58,16 @@ import { LocalCommentAnnotation } from "./LocalCommentAnnotation";
 import { projectFileCacheKey, projectFileEditorCacheKey } from "./fileContentRevision";
 import { fileBreadcrumbs } from "./filePath";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
+import {
+  captureFileScrollAnchor,
+  restoreFileScrollAnchor,
+  type FileScrollAnchor,
+} from "./fileScrollAnchor";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
   confirmProjectFileQueryData,
   getOptimisticProjectFileQueryData,
+  getProjectEntriesQueryAtom,
   setProjectFileQueryData,
   useProjectFileQuery,
 } from "./projectFilesQueryState";
@@ -497,6 +505,28 @@ function EditableFileSurface({
     [addReviewComment, composerDraftTarget, cwd, environmentId, relativePath, saveCoordinator],
   );
 
+  const fileCacheKey = projectFileEditorCacheKey(
+    environmentId,
+    cwd,
+    relativePath,
+    contents,
+    editor.getFile(),
+  );
+  // Layout cleanup captures the old visible line before Pierre resets its measurements.
+  const scrollAnchorRef = useRef<FileScrollAnchor | null>(null);
+  useLayoutEffect(() => {
+    const root = surfaceRef.current;
+    if (!root) return;
+    const anchor = scrollAnchorRef.current;
+    const frame = anchor
+      ? requestAnimationFrame(() => restoreFileScrollAnchor(root, anchor))
+      : null;
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      scrollAnchorRef.current = captureFileScrollAnchor(root);
+    };
+  }, [fileCacheKey]);
+
   useEffect(
     () => () => {
       editor.cleanUp();
@@ -652,13 +682,7 @@ function EditableFileSurface({
             file={{
               name: relativePath,
               contents,
-              cacheKey: projectFileEditorCacheKey(
-                environmentId,
-                cwd,
-                relativePath,
-                contents,
-                editor.getFile(),
-              ),
+              cacheKey: fileCacheKey,
             }}
             options={{
               disableFileHeader: true,
@@ -780,6 +804,13 @@ export default function FilePreviewPanel({
   });
   const isImage = relativePath !== null && isWorkspaceImagePreviewPath(relativePath);
   const file = useProjectFileQuery(environmentId, cwd, relativePath, !isImage);
+  const refreshSelectedFile = () => {
+    if (relativePath && !isImage) file.refresh();
+  };
+  useOnTurnCompleted(threadRef, () => {
+    appAtomRegistry.refresh(getProjectEntriesQueryAtom(environmentId, cwd));
+    refreshSelectedFile();
+  });
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   // Reading markdown rendered is a preference, not a property of one file. Keeping
   // it on the panel meant a thread switch dropped it and forced source back.
@@ -1066,6 +1097,7 @@ export default function FilePreviewPanel({
               selectedPath={relativePath}
               selectedPathRevealId={revealRequestId}
               onOpenFile={onOpenFile}
+              onRefreshSelectedFile={refreshSelectedFile}
             />
           </aside>
         ) : null}

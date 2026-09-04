@@ -1016,6 +1016,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
         assert.equal(status.isRepo, true);
         assert.equal(status.branch, "feature/remote-status");
+        assert.equal(status.defaultBranch, "main");
         assert.equal(status.hasUpstream, true);
         assert.equal(status.aheadCount, 0);
         assert.equal(status.behindCount, 0);

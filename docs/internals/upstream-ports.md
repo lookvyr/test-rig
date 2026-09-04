@@ -20,3 +20,18 @@ These changes were selected from T3 Code nightly
 
 Test Rig also removes the built-in PR description section headings. Explicit writing
 instructions and enabled repository templates still determine the body structure.
+
+Batch 3 adapts [#8968](https://github.com/pingdotgg/t3code/pull/8968) to preserve
+file-tree paths and stable diff identities across refreshes, and
+[#7490](https://github.com/pingdotgg/t3code/pull/7490) to reload the selected text
+file from the Files refresh button. Both workspace panels also refresh on the
+active thread's completed-turn projection, including interrupted or failed turns.
+The editable file surface preserves its visible line when refreshed contents reset
+the renderer's line-height measurements.
+
+[#9125](https://github.com/pingdotgg/t3code/pull/9125) retries cached missing PRs
+after turns through the existing status broadcaster. Remote cache writes are
+serialized per workspace; known PRs, lookup failure backoff, background policy,
+and hosting-integration switches remain effective. Local remote-tracking refs
+identify branches pushed under their own name while still tracking the default
+branch. Saved-branch PR lookup and automatic pulling are outside this port.

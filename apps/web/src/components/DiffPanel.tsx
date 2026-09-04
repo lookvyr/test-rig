@@ -29,9 +29,11 @@ import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
 import { cn } from "~/lib/utils";
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
+import { useOnTurnCompleted } from "../hooks/useOnTurnCompleted";
 import { useTheme } from "../hooks/useTheme";
 import {
-  buildFileDiffRenderKey,
+  buildFileDiffContentVersion,
+  buildFileDiffIdentityKey,
   getDiffCollapseIconClassName,
   getDiffLineStat,
   getRenderablePatch,
@@ -325,10 +327,6 @@ export default function DiffPanel({
   }));
   const [codeViewRevision, setCodeViewRevision] = useState(0);
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
-  const lastCompletedTurnRefreshRef = useRef<{
-    readonly threadKey: string | null;
-    readonly turnId: TurnId | null;
-  } | null>(null);
 
   const routedThreadRef = useParams({
     strict: false,
@@ -492,9 +490,6 @@ export default function DiffPanel({
   const refreshBranchDiffPreview = branchDiffPreview.refresh;
   const canRefreshGitDiff =
     isGitRepo && selectedTurnId === null && activeThread != null && activeCwd != null;
-  const activeThreadRefreshKey = routeThreadRef
-    ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}`
-    : null;
 
   useEffect(() => {
     if (!canRefreshGitDiff) return;
@@ -503,28 +498,14 @@ export default function DiffPanel({
     return () => window.removeEventListener("focus", refreshOnFocus);
   }, [canRefreshGitDiff, refreshBranchDiffPreview]);
 
-  useEffect(() => {
-    const current = {
-      threadKey: activeThreadRefreshKey,
-      turnId: latestTurn?.turnId ?? null,
-    };
-    const previous = lastCompletedTurnRefreshRef.current;
-    if (!canRefreshGitDiff) {
-      return;
-    }
-    if (previous === null || previous.threadKey !== current.threadKey) {
-      lastCompletedTurnRefreshRef.current = current;
-      return;
-    }
-    if (previous.turnId === current.turnId) return;
-    refreshBranchDiffPreview();
-    lastCompletedTurnRefreshRef.current = current;
-  }, [activeThreadRefreshKey, canRefreshGitDiff, latestTurn?.turnId, refreshBranchDiffPreview]);
+  useOnTurnCompleted(routeThreadRef, () => {
+    if (canRefreshGitDiff) refreshBranchDiffPreview();
+  });
 
   const selectedGitSource = branchDiffPreview.data?.sources.find(
     (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
   );
-  const loadDiffFiles = useMemo<FileDiffContentsLoader | undefined>(() => {
+  const currentLoadDiffFiles = useMemo<FileDiffContentsLoader | undefined>(() => {
     const preview = branchDiffPreview.data;
     if (selectedTurnId !== null || !activeThread || !preview || !selectedGitSource) {
       return undefined;
@@ -576,6 +557,13 @@ export default function DiffPanel({
     selectedGitSource,
     selectedTurnId,
   ]);
+  const loadDiffFilesRef = useRef(currentLoadDiffFiles);
+  loadDiffFilesRef.current = currentLoadDiffFiles;
+  const loadDiffFiles = useCallback<FileDiffContentsLoader>(async (fileDiff) => {
+    const loader = loadDiffFilesRef.current;
+    if (!loader) throw new Error("Diff file contents are unavailable for this selection.");
+    return loader(fileDiff);
+  }, []);
   const localBranchRefs = useEnvironmentQuery(
     selectedTurnId === null &&
       selectedGitScope === "branch" &&
@@ -656,17 +644,19 @@ export default function DiffPanel({
     () =>
       renderableFiles.map((fileDiff) => ({
         fileDiff,
-        fileKey: buildFileDiffRenderKey(fileDiff),
+        fileKey: buildFileDiffIdentityKey(fileDiff),
+        fileVersion: buildFileDiffContentVersion(fileDiff),
       })),
     [renderableFiles],
   );
   const codeViewFiles = useMemo(
     () =>
-      renderableFileEntries.map(({ fileDiff, fileKey }) => {
+      renderableFileEntries.map(({ fileDiff, fileKey, fileVersion }) => {
         return {
           fileDiff,
           filePath: resolveFileDiffPath(fileDiff),
           fileKey,
+          fileVersion,
           collapsed: collapsedDiffFileKeys.has(fileKey),
         };
       }),
@@ -1171,7 +1161,7 @@ export default function DiffPanel({
                     themeType: resolvedTheme as DiffThemeType,
                     unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
                     stickyHeaders: true,
-                    ...(loadDiffFiles ? { loadDiffFiles } : {}),
+                    ...(currentLoadDiffFiles ? { loadDiffFiles } : {}),
                     itemMetrics: {
                       diffHeaderHeight: 32,
                       hunkSeparatorHeight: 24,
