@@ -17,3 +17,15 @@ test("reports the newest comment and number of changed files", () => {
   assert.equal(summary.filesChanged, 3);
   assert.equal(summary.status, "open");
 });
+
+test("a closed draft reports closed", () => {
+  const summary = summarizeReview({
+    title: "Closed review",
+    state: "closed",
+    isDraft: true,
+    files: [],
+    comments: [],
+  });
+  assert.equal(summary.status, "closed");
+  assert.equal(summary.latestComment, null);
+});

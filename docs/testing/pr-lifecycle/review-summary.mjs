@@ -5,7 +5,12 @@ export function summarizeReview(pullRequest) {
   );
   return {
     title: pullRequest.title,
-    status: pullRequest.isDraft ? "draft" : pullRequest.state,
+    status:
+      pullRequest.state !== "open"
+        ? pullRequest.state
+        : pullRequest.isDraft
+          ? "draft"
+          : "open",
     filesChanged: pullRequest.files.length,
     latestComment: comments.at(-1)?.body ?? null,
   };

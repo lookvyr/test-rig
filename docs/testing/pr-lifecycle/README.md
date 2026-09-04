@@ -12,3 +12,10 @@ Review focus:
 
 The test PR will receive comments and a follow-up commit, then be closed without
 merging. All content is synthetic.
+
+## Review round 2
+
+Closed state now takes precedence over the draft flag and has a regression test.
+The example data is named `examples.json`; the temporary checklist was removed.
+Verify that the workspace shows four files after refresh and marks first-revision
+local notes as belonging to an older revision.
