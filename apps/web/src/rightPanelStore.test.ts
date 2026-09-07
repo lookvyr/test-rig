@@ -1,3 +1,5 @@
+import { createJSONStorage } from "zustand/middleware";
+import { createMemoryStorage } from "./lib/storage";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
@@ -18,6 +20,67 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("opens the requested PR in one descriptor while preserving other panels and threads", () => {
+    const panel = useRightPanelStore.getState();
+    panel.openBrowser(refA, "browser-tab");
+    panel.openFile(refA, "src/main.ts", 9);
+    panel.openPullRequest(refA, "workspace-A");
+    panel.open(refA, "agents");
+    panel.openPullRequest(refB, "separate-thread");
+    const others = selectThreadRightPanelState(
+      useRightPanelStore.getState().byThreadKey,
+      refA,
+    ).surfaces.filter((surface) => surface.kind !== "pull-request");
+    panel.openPullRequest(refA, "workspace-B");
+    panel.openPullRequest(refA, "workspace-A");
+    const result = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(result.surfaces.filter((surface) => surface.kind !== "pull-request")).toEqual(others);
+    expect(result.surfaces.map((surface) => surface.kind)).toEqual([
+      "preview",
+      "file",
+      "pull-request",
+      "agents",
+    ]);
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: "pull-request",
+      kind: "pull-request",
+      workspaceKey: "workspace-A",
+    });
+    expect(
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refB),
+    ).toMatchObject({ workspaceKey: "separate-thread" });
+  });
+
+  it("persists the explicit PR and retains it when a hidden panel is reopened", async () => {
+    const originalOptions = useRightPanelStore.persist.getOptions();
+    const storage = createJSONStorage(() => createMemoryStorage())!;
+    useRightPanelStore.persist.setOptions({ storage });
+    try {
+      const panel = useRightPanelStore.getState();
+      panel.openPullRequest(refA, "workspace-B");
+      panel.openPullRequest(refA, "workspace-A");
+      panel.close(refA);
+      const saved = await storage.getItem(originalOptions.name!);
+      useRightPanelStore.setState({ byThreadKey: {} });
+      await storage.setItem(originalOptions.name!, saved!);
+      await useRightPanelStore.persist.rehydrate();
+      expect(
+        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
+      ).toBe(false);
+      panel.open(refA, "pull-request");
+      expect(
+        selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+      ).toEqual({ id: "pull-request", kind: "pull-request", workspaceKey: "workspace-A" });
+      panel.closeSurface(refA, "pull-request");
+      panel.openPullRequest(refA, "workspace-A");
+      expect(
+        selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
+      ).toMatchObject({ workspaceKey: "workspace-A" });
+    } finally {
+      useRightPanelStore.persist.setOptions(originalOptions);
+    }
+  });
+
   it("reopens one side-chat tab alongside other surfaces without changing its draft", async () => {
     const { useComposerDraftStore } = await import("./composerDraftStore");
     const childRef = scopeThreadRef(refA.environmentId, ThreadId.make("side-child"));

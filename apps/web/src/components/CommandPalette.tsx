@@ -34,6 +34,7 @@ import {
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
+  GitPullRequestIcon,
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
@@ -1506,6 +1507,17 @@ function OpenCommandPaletteDialog(props: {
         themeHalves,
         initialAppearance: resolvedTheme,
       });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:pull-requests",
+    searchTerms: ["Open pull requests", "PR", "review", "GitHub", "queue"],
+    title: "Open pull requests",
+    icon: <GitPullRequestIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/pull-requests" });
     },
   });
 

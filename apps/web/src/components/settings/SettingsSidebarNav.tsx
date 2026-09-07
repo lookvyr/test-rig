@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
+import { PullRequestsSidebarItem } from "../sidebar/SidebarChrome";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Kbd } from "../ui/kbd";
@@ -299,6 +300,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       <SidebarFooter className="p-[var(--sidebar-content-inset)]">
         <div className="flex items-center gap-1">
           <SidebarMenu className="min-w-0 flex-1">
+            <PullRequestsSidebarItem />
             <SidebarMenuItem>
               <SidebarMenuButton onClick={handleBackClick}>
                 <ArrowLeftIcon />

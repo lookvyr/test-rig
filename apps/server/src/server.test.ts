@@ -126,6 +126,8 @@ import * as VcsDriver from "./vcs/VcsDriver.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
+import { GitPullRequestWorkspaceError } from "@t3tools/contracts";
+import * as GitHubPullRequestWorkspace from "./sourceControl/GitHubPullRequestWorkspace.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -379,6 +381,9 @@ const buildAppUnderTest = (options?: {
     vcsDriverRegistry?: Partial<VcsDriverRegistry.VcsDriverRegistry["Service"]>;
     gitVcsDriver?: Partial<GitVcsDriver.GitVcsDriver["Service"]>;
     gitManager?: Partial<GitManager.GitManager["Service"]>;
+    pullRequestWorkspace?: Partial<
+      GitHubPullRequestWorkspace.GitHubPullRequestWorkspace["Service"]
+    >;
     sourceControlRepositoryService?: Partial<
       SourceControlRepositoryService.SourceControlRepositoryService["Service"]
     >;
@@ -687,7 +692,14 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(gitManagerLayer),
       Layer.provide(gitVcsDriverLayer),
-      Layer.provide(gitWorkflowLayer),
+      Layer.provide(
+        Layer.merge(
+          gitWorkflowLayer,
+          Layer.mock(GitHubPullRequestWorkspace.GitHubPullRequestWorkspace)({
+            ...options?.layers?.pullRequestWorkspace,
+          }),
+        ),
+      ),
       Layer.provide(reviewLayer),
       Layer.provide(vcsProvisioningLayer),
       Layer.provide(
@@ -3291,6 +3303,49 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assertFailure(result, externalLauncherError);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes bounded pull request workspace reads and safe errors", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          pullRequestWorkspace: {
+            listPullRequests: (input) => {
+              assert.equal(input.state, "merged");
+              assert.equal(input.involvement, "authored");
+              return Effect.succeed({
+                repository: "https://github.com/owner/repo",
+                pullRequests: [],
+                truncated: false,
+              });
+            },
+            getPullRequestDetails: () =>
+              Effect.fail(
+                new GitPullRequestWorkspaceError({ message: "GitHub integration is disabled." }),
+              ),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitListPullRequests]({
+            cwd: "/repo",
+            state: "merged",
+            involvement: "authored",
+          }),
+        ),
+      );
+      assert.equal(result.repository, "https://github.com/owner/repo");
+      const error = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitGetPullRequestDetails]({ cwd: "/repo", reference: "7" }).pipe(
+            Effect.flip,
+          ),
+        ),
+      );
+      assert.equal(error._tag, "GitPullRequestWorkspaceError");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

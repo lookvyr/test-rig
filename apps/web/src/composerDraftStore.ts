@@ -1581,6 +1581,12 @@ function normalizePersistedDraftThreads(
       if (parsedThreadRef) {
         environmentIdByThreadId.set(parsedThreadRef.threadId, parsedThreadRef.environmentId);
       }
+      // Logical identities can contain colons without being scoped project refs.
+      // A session already associated with this identity owns its routing fields;
+      // only legacy mappings should infer or repair environment/project metadata.
+      if (draftThreadsByThreadKey[threadKey]?.logicalProjectKey === logicalProjectKey) {
+        continue;
+      }
       if (!projectRef) {
         const existingDraftThread = draftThreadsByThreadKey[threadKey];
         if (existingDraftThread && !existingDraftThread.logicalProjectKey) {

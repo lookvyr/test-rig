@@ -1,6 +1,16 @@
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { Bot, FileDiff, Files, Globe2, MessageSquare, Plus, TerminalSquare, X } from "lucide-react";
+import {
+  Bot,
+  FileDiff,
+  Files,
+  Globe2,
+  GitPullRequest,
+  MessageSquare,
+  Plus,
+  TerminalSquare,
+  X,
+} from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
@@ -43,6 +53,7 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
+  onAddPullRequest?: (() => void) | undefined;
   onAddSideChat?: (() => void) | undefined;
   sideChatAvailable?: boolean | undefined;
   browserAvailable: boolean;
@@ -94,6 +105,7 @@ function RightPanelEmptyState(props: {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddAgents: () => void;
+  onAddPullRequest?: (() => void) | undefined;
   onAddSideChat?: (() => void) | undefined;
   sideChatAvailable?: boolean | undefined;
   browserAvailable: boolean;
@@ -141,6 +153,18 @@ function RightPanelEmptyState(props: {
       disabledReason: null,
       onClick: props.onAddAgents,
     },
+    ...(props.onAddPullRequest
+      ? [
+          {
+            label: "Pull request",
+            description: "Review the linked pull request.",
+            icon: GitPullRequest,
+            available: true,
+            disabledReason: null,
+            onClick: props.onAddPullRequest,
+          },
+        ]
+      : []),
     ...(props.onAddSideChat
       ? [
           {
@@ -200,7 +224,7 @@ function RightPanelEmptyState(props: {
             return (
               <DisabledReasonTooltip
                 key={action.label}
-                reason={action.disabledReason}
+                reason={action.disabledReason ?? "This surface is unavailable."}
                 trigger={disabledCard}
               />
             );
@@ -230,6 +254,8 @@ function surfaceTitle(
       );
     case "agents":
       return "Agents";
+    case "pull-request":
+      return "Pull request";
     case "side-chat":
       return "Side chat";
     case "preview": {
@@ -266,6 +292,8 @@ function SurfaceIcon({ surface, theme }: { surface: RightPanelSurface; theme: "l
       return <TerminalSquare className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "pull-request":
+      return <GitPullRequest className="size-3 shrink-0" />;
     case "side-chat":
       return <MessageSquare className="size-3 shrink-0" />;
   }
@@ -464,6 +492,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <FileDiff />
                     Diff
                   </SurfaceMenuItem>
+                  {props.onAddPullRequest ? (
+                    <SurfaceMenuItem available onClick={props.onAddPullRequest}>
+                      <GitPullRequest />
+                      Pull request
+                    </SurfaceMenuItem>
+                  ) : null}
                   {props.onAddSideChat ? (
                     <SurfaceMenuItem
                       available={props.sideChatAvailable ?? false}
@@ -493,6 +527,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddAgents={props.onAddAgents}
+            onAddPullRequest={props.onAddPullRequest}
             onAddSideChat={props.onAddSideChat}
             sideChatAvailable={props.sideChatAvailable}
             browserAvailable={props.browserAvailable}

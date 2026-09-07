@@ -90,6 +90,7 @@ import { readWorkflowScript } from "./orchestration/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
+import * as GitHubPullRequestWorkspace from "./sourceControl/GitHubPullRequestWorkspace.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
@@ -354,6 +355,7 @@ const makeWsRpcLayer = (
       const keybindings = yield* Keybindings.Keybindings;
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
+      const pullRequestWorkspace = yield* GitHubPullRequestWorkspace.GitHubPullRequestWorkspace;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -1751,6 +1753,18 @@ const makeWsRpcLayer = (
                 ),
             ),
             { "rpc.aggregate": "vcs" },
+          ),
+        [WS_METHODS.gitListPullRequests]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitListPullRequests,
+            pullRequestWorkspace.listPullRequests(input),
+            { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.gitGetPullRequestDetails]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitGetPullRequestDetails,
+            pullRequestWorkspace.getPullRequestDetails(input),
+            { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.gitResolvePullRequest]: (input) =>
           observeRpcEffect(

@@ -1,6 +1,6 @@
-import { SettingsIcon } from "lucide-react";
+import { GitPullRequestIcon, SettingsIcon } from "lucide-react";
 import { memo, useCallback } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { APP_BASE_NAME } from "../../branding";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
@@ -91,6 +91,26 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   );
 }
 
+export function PullRequestsSidebarItem() {
+  const navigate = useNavigate();
+  const active = useLocation({ select: (location) => location.pathname === "/pull-requests" });
+  const { isMobile, setOpenMobile } = useSidebar();
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={active}
+        onClick={() => {
+          if (isMobile) setOpenMobile(false);
+          void navigate({ to: "/pull-requests" });
+        }}
+      >
+        <GitPullRequestIcon />
+        <span>Pull requests</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -105,6 +125,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
       <SidebarProviderUpdatePill />
       <SidebarMenu>
+        <PullRequestsSidebarItem />
         <SidebarMenuItem>
           <SidebarMenuButton onClick={handleSettingsClick}>
             <SettingsIcon />

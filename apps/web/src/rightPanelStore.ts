@@ -22,6 +22,7 @@ export const RIGHT_PANEL_KINDS = [
   "terminal",
   "agents",
   "side-chat",
+  "pull-request",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -46,7 +47,8 @@ export type RightPanelSurface =
       revealRequestId: number;
     }
   | { id: "agents"; kind: "agents" }
-  | { id: "side-chat"; kind: "side-chat" };
+  | { id: "side-chat"; kind: "side-chat" }
+  | { id: "pull-request"; kind: "pull-request"; workspaceKey?: string };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v9 removed the "plan" surface kind (plans render inline in the transcript).
@@ -61,6 +63,7 @@ export interface ThreadRightPanelState {
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
   open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
+  openPullRequest: (ref: ScopedThreadRef, workspaceKey: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
@@ -102,6 +105,8 @@ const singletonSurface = (
       return { id: "files", kind };
     case "agents":
       return { id: "agents", kind };
+    case "pull-request":
+      return { id: "pull-request", kind };
     case "side-chat":
       return { id: "side-chat", kind };
   }
@@ -270,6 +275,16 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               return upsertSurface(current, existing ?? browserSurface(null));
             }
             return upsertSurface(current, singletonSurface(kind));
+          }),
+        })),
+      openPullRequest: (ref, workspaceKey) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
+            const surface = { id: "pull-request", kind: "pull-request", workspaceKey } as const;
+            const surfaces = current.surfaces.map((entry) =>
+              entry.kind === "pull-request" ? surface : entry,
+            );
+            return upsertSurface({ ...current, surfaces }, surface);
           }),
         })),
       openBrowser: (ref, tabId) =>

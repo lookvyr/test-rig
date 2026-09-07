@@ -1,4 +1,10 @@
 import type {
+  GitListPullRequestsInput,
+  GitListPullRequestsResult,
+  GitGetPullRequestDetailsInput,
+  GitGetPullRequestDetailsResult,
+} from "./pullRequests.ts";
+import type {
   VcsCreateRefInput,
   VcsCreateRefResult,
   VcsCreateWorktreeInput,
@@ -1121,6 +1127,10 @@ export interface EnvironmentApi {
     ) => () => void;
   };
   git: {
+    listPullRequests: (input: GitListPullRequestsInput) => Promise<GitListPullRequestsResult>;
+    getPullRequestDetails: (
+      input: GitGetPullRequestDetailsInput,
+    ) => Promise<GitGetPullRequestDetailsResult>;
     resolvePullRequest: (input: GitPullRequestRefInput) => Promise<GitResolvePullRequestResult>;
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,

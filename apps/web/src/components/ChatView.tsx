@@ -71,6 +71,11 @@ import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
 import {
+  findPullRequestWorkspaceForThread,
+  usePullRequestWorkspaceStore,
+} from "../pullRequestWorkspaceStore";
+import { PullRequestInspector } from "./pull-requests/PullRequestInspector";
+import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
@@ -1496,6 +1501,18 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const activeRightPanelSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
+  );
+  const pullRequestSurface = rightPanelState.surfaces.find(
+    (surface) => surface.kind === "pull-request",
+  );
+  const linkedPullRequest = usePullRequestWorkspaceStore((state) =>
+    activeThreadRef
+      ? findPullRequestWorkspaceForThread(
+          state.entriesByKey,
+          activeThreadRef,
+          pullRequestSurface?.workspaceKey,
+        )
+      : null,
   );
   const activeFileSurface =
     activeRightPanelSurface?.kind === "file" ? activeRightPanelSurface : null;
@@ -5733,6 +5750,39 @@ function ChatViewContent(props: ChatViewProps) {
       ) : (
         <div className="p-4 text-sm text-muted-foreground">Opening side chat…</div>
       )
+    ) : activeRightPanelSurface?.kind === "pull-request" ? (
+      linkedPullRequest?.linkedTarget &&
+      activeProject?.workspaceRoot === linkedPullRequest.scope.cwd ? (
+        <PullRequestInspector
+          key={`${linkedPullRequest.scope.environmentId}:${linkedPullRequest.scope.reference}`}
+          selection={{
+            ...linkedPullRequest.scope,
+            projectId: linkedPullRequest.linkedTarget.projectId,
+            projectName: activeProject?.title ?? "Project",
+          }}
+          onAddToMessage={(context) => {
+            const composer = composerRef.current;
+            const prompt = composer?.getSendContext().prompt ?? "";
+            if (prompt.includes(context)) {
+              focusComposer();
+            } else if (!composer?.insertTextAtEnd(prompt.length ? `\n\n${context}` : context)) {
+              toastManager.add({
+                type: "error",
+                title: "Could not add review feedback",
+                description:
+                  "The conversation is not ready for input. Your selected notes are saved.",
+              });
+            }
+          }}
+          onClose={() =>
+            useRightPanelStore.getState().closeSurface(activeThreadRef, "pull-request")
+          }
+        />
+      ) : (
+        <div className="p-4 text-sm text-muted-foreground">
+          The linked pull request is unavailable for this project folder.
+        </div>
+      )
     ) : activeRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
@@ -6217,6 +6267,11 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           onAddAgents={addAgentsSurface}
+          onAddPullRequest={
+            linkedPullRequest
+              ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
+              : undefined
+          }
           onAddSideChat={() => void addSideChatSurface()}
           sideChatAvailable={sideChatAvailable}
           browserAvailable={isPreviewSupportedInRuntime()}
@@ -6247,6 +6302,11 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             onAddAgents={addAgentsSurface}
+            onAddPullRequest={
+              linkedPullRequest
+                ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
+                : undefined
+            }
             onAddSideChat={() => void addSideChatSurface()}
             sideChatAvailable={sideChatAvailable}
             browserAvailable={isPreviewSupportedInRuntime()}

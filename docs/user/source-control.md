@@ -146,3 +146,7 @@ Provider documentation:
 - [GitHub CLI](https://cli.github.com/)
 - [GitLab CLI](https://gitlab.com/gitlab-org/cli)
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/)
+
+Browse GitHub pull requests across your projects from **Pull requests** above
+Settings. See [Pull requests](./pull-requests.md) for local review notes and
+opening an unsent conversation draft.
