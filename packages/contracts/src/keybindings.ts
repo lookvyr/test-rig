@@ -20,6 +20,20 @@ export const THREAD_JUMP_KEYBINDING_COMMANDS = [
 ] as const;
 export type ThreadJumpKeybindingCommand = (typeof THREAD_JUMP_KEYBINDING_COMMANDS)[number];
 
+export const PULL_REQUEST_JUMP_KEYBINDING_COMMANDS = [
+  "pullRequest.jump.1",
+  "pullRequest.jump.2",
+  "pullRequest.jump.3",
+  "pullRequest.jump.4",
+  "pullRequest.jump.5",
+  "pullRequest.jump.6",
+  "pullRequest.jump.7",
+  "pullRequest.jump.8",
+  "pullRequest.jump.9",
+] as const;
+export type PullRequestJumpKeybindingCommand =
+  (typeof PULL_REQUEST_JUMP_KEYBINDING_COMMANDS)[number];
+
 export const MODEL_PICKER_JUMP_KEYBINDING_COMMANDS = [
   "modelPicker.jump.1",
   "modelPicker.jump.2",
@@ -73,6 +87,8 @@ const STATIC_KEYBINDING_COMMANDS = [
   "chat.new",
   "chat.newLocal",
   "editor.openFavorite",
+  "pullRequest.open",
+  ...PULL_REQUEST_JUMP_KEYBINDING_COMMANDS,
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
 ] as const;

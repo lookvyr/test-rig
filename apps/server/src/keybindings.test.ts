@@ -200,6 +200,9 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(defaultsByCommand.get("thread.next"), "mod+shift+]");
       assert.equal(defaultsByCommand.get("thread.jump.1"), "mod+1");
       assert.equal(defaultsByCommand.get("thread.jump.9"), "mod+9");
+      assert.equal(defaultsByCommand.get("pullRequest.open"), "mod+alt+p");
+      assert.equal(defaultsByCommand.get("pullRequest.jump.1"), "mod+alt+1");
+      assert.equal(defaultsByCommand.get("pullRequest.jump.9"), "mod+alt+9");
       assert.equal(defaultsByCommand.get("modelPicker.toggle"), "mod+shift+m");
       assert.equal(defaultsByCommand.get("themeEditor.toggle"), "mod+alt+shift+t");
       assert.equal(defaultsByCommand.get("filePicker.toggle"), "mod+p");

@@ -67,6 +67,7 @@ import {
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
 import { useShortcutModifierState } from "../shortcutModifierState";
+import { JumpHintBadge } from "./JumpHintBadge";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -197,23 +198,6 @@ function threadTimeLabel(thread: SidebarThreadSummary): string {
 function settledTimeLabel(thread: SidebarThreadSummary): string {
   const timestamp = resolveSettledTimestamp(thread);
   return timestamp === null ? "" : compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
-}
-
-// Floats at the row's right edge, vertically centered, while the jump
-// modifier is held. An overlay pill instead of an inline slot: the hint
-// must neither displace the status/time label (holding ⌘ used to blank
-// out "Working") nor shift any layout when it appears. pointer-events-none
-// so it never swallows clicks meant for the settle/un-settle buttons it
-// can overlap.
-function JumpHintBadge(props: { label: string }) {
-  return (
-    <span
-      aria-hidden
-      className="pointer-events-none absolute right-1.5 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/95 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground shadow-sm"
-    >
-      {props.label}
-    </span>
-  );
 }
 
 // Self-ticking so only this span re-renders each second, not the whole row.
@@ -1975,7 +1959,6 @@ export default function SidebarV2() {
     }
     return mapping;
   }, [keybindings, orderedThreadKeys]);
-  const [showJumpHints, setShowJumpHints] = useState(false);
 
   // Settled threads are live shells, so opening one is plain navigation:
   // history stays readable without un-settling, and sending a message or
@@ -2799,14 +2782,9 @@ export default function SidebarV2() {
   // match a thread-jump binding. Adding Shift (screenshots) or Alt no
   // longer matches ⌘1..9, so the overlay hides for chords like ⌘⇧4.
   const shortcutModifiers = useShortcutModifierState();
-  const shouldShowJumpHintsNow = shouldShowThreadJumpHintsForModifiers(
-    shortcutModifiers,
-    keybindings,
-    { platform: navigator.platform },
-  );
-  useEffect(() => {
-    setShowJumpHints(shouldShowJumpHintsNow);
-  }, [shouldShowJumpHintsNow]);
+  const showJumpHints = shouldShowThreadJumpHintsForModifiers(shortcutModifiers, keybindings, {
+    platform: navigator.platform,
+  });
 
   const attachListAutoAnimateRef = useCallback((node: HTMLUListElement | null) => {
     if (!node) return;

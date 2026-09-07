@@ -42,6 +42,7 @@ import { type GhosttyColor, type GhosttyTheme } from "~/terminal/ghostty/core";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { isTerminalLinkActivation, resolvePathLinkTarget } from "../terminal-links";
 import {
+  resolveShortcutCommand,
   isDiffToggleShortcut,
   isTerminalClearShortcut,
   isTerminalNewShortcut,
@@ -585,6 +586,7 @@ export function TerminalViewport({
           return false;
         }
         if (
+          resolveShortcutCommand(event, currentKeybindings, options) === "pullRequest.open" ||
           isTerminalToggleShortcut(event, currentKeybindings, options) ||
           isTerminalSplitShortcut(event, currentKeybindings, options) ||
           isTerminalSplitVerticalShortcut(event, currentKeybindings, options) ||

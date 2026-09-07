@@ -3,6 +3,8 @@ import {
   type KeybindingShortcut,
   type KeybindingWhenNode,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
+  PULL_REQUEST_JUMP_KEYBINDING_COMMANDS,
+  type PullRequestJumpKeybindingCommand,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
   type ModelPickerJumpKeybindingCommand,
@@ -267,6 +269,31 @@ export function shortcutLabelForCommand(
 
 export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCommand | null {
   return THREAD_JUMP_KEYBINDING_COMMANDS[index] ?? null;
+}
+
+export function pullRequestJumpCommandForIndex(
+  index: number,
+): PullRequestJumpKeybindingCommand | null {
+  return PULL_REQUEST_JUMP_KEYBINDING_COMMANDS[index] ?? null;
+}
+
+export function pullRequestJumpIndexFromCommand(command: string): number | null {
+  const index = PULL_REQUEST_JUMP_KEYBINDING_COMMANDS.indexOf(
+    command as PullRequestJumpKeybindingCommand,
+  );
+  return index === -1 ? null : index;
+}
+
+export function shouldShowPullRequestJumpHint(
+  modifiers: ShortcutModifierStateLike,
+  keybindings: ResolvedKeybindingsConfig,
+  command: PullRequestJumpKeybindingCommand,
+  options?: ShortcutMatchOptions,
+): boolean {
+  const shortcut = findEffectiveShortcutForCommand(keybindings, command, options);
+  return (
+    shortcut !== null && matchesShortcutModifiers(modifiers, shortcut, resolvePlatform(options))
+  );
 }
 
 export function threadJumpIndexFromCommand(command: string): number | null {

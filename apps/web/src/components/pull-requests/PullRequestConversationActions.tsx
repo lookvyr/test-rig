@@ -1,18 +1,24 @@
 import type { GitGetPullRequestDetailsResult } from "@t3tools/contracts";
-import { ArrowRightIcon } from "lucide-react";
-import { useState } from "react";
-import { usePullRequestHandoff } from "../../hooks/usePullRequestHandoff";
+import { ArrowRightIcon, GitBranchIcon, MessageSquareIcon } from "lucide-react";
 import {
-  type PullRequestWorkspaceEntry,
-  usePullRequestWorkspaceStore,
-} from "../../pullRequestWorkspaceStore";
+  type PullRequestDraftDestination,
+  usePullRequestHandoff,
+} from "../../hooks/usePullRequestHandoff";
+import type { PullRequestWorkspaceEntry } from "../../pullRequestWorkspaceStore";
 import { useThreadShells } from "../../state/entities";
 import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
-import { PullRequestSelect } from "./PullRequestSelect";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import type { PullRequestSelection } from "./workspaceStore";
 
-/** Conversation selection belongs to the global PR workspace, not a linked thread. */
+/** Choosing a destination prepares its draft; opening the saved link only navigates. */
 export function PullRequestConversationActions({
   selection,
   details,
@@ -21,7 +27,7 @@ export function PullRequestConversationActions({
 }: {
   selection: PullRequestSelection;
   details: GitGetPullRequestDetailsResult;
-  entry: Pick<PullRequestWorkspaceEntry, "instructions" | "linkedTarget">;
+  entry: Pick<PullRequestWorkspaceEntry, "linkedTarget">;
   canPrepare: boolean;
 }) {
   const pr = details.pullRequest;
@@ -43,108 +49,87 @@ export function PullRequestConversationActions({
       thread.archivedAt === null &&
       thread.sideOfThreadId == null,
   );
-  const [prepareOpen, setPrepareOpen] = useState(false);
-  const [destination, setDestination] = useState("new");
-  const chosenThread = destinations.find((thread) => thread.id === destination);
-  const setInstructions = usePullRequestWorkspaceStore((state) => state.setInstructions);
-  const beginPreparation = () => {
-    setDestination(
-      destinations.find((thread) => thread.id === entry.linkedTarget?.threadId)?.id ?? "new",
-    );
-    if (!entry.instructions)
-      setInstructions(
-        scope,
-        `Review ${details.repository} #${pr.number}. Explain the change and investigate the selected findings.`,
-      );
-    setPrepareOpen(true);
+  const linkedThread = destinations.find((thread) => thread.id === entry.linkedTarget?.threadId);
+  const otherThreads = destinations.filter((thread) => thread.id !== entry.linkedTarget?.threadId);
+  const prepareDraft = (destination: PullRequestDraftDestination) => {
+    if (handoff.isPending || !canPrepare) return;
+    void handoff.prepareDraft(destination);
   };
 
   return (
     <div className="space-y-2">
-      {prepareOpen ? (
-        <>
-          <label htmlFor="pr-destination" className="text-xs font-medium">
-            Destination
-          </label>
-          <PullRequestSelect
-            id="pr-destination"
-            disabled={handoff.isPending}
-            className="w-full"
-            value={destination}
-            onChange={(event) => setDestination(event.target.value)}
-          >
-            <option value="new">New conversation in a worktree</option>
-            {destinations.map((thread) => (
-              <option key={thread.id} value={thread.id}>
-                {thread.title}
-              </option>
-            ))}
-          </PullRequestSelect>
-          <p className="text-[11px] text-muted-foreground">
-            {destination === "new"
-              ? "Creates a worktree for this pull request."
-              : "Uses the existing conversation and its current checkout."}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/20 p-3">
+        <MessageSquareIcon className="size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1 basis-32">
+          <p className="text-[11px] font-medium text-muted-foreground">Review thread</p>
+          <p className="truncate text-xs" title={linkedThread?.title}>
+            {entry.linkedTarget
+              ? (linkedThread?.title ??
+                (entry.linkedTarget.draftId
+                  ? `PR #${pr.number} review draft`
+                  : "Unavailable thread"))
+              : "No thread linked"}
           </p>
-          <label htmlFor="pr-handoff-instructions" className="text-xs font-medium">
-            Instructions to add
-          </label>
-          <Textarea
-            id="pr-handoff-instructions"
-            value={entry.instructions}
-            onChange={(event) => setInstructions(scope, event.target.value)}
-            className="min-h-24 text-xs"
-          />
-          <p className="text-[11px] text-muted-foreground">
-            PR context and selected notes are added to an unsent message. Review it before sending.
-          </p>
-          <Button
-            className="w-full"
-            size="sm"
-            disabled={handoff.isPending || !canPrepare || (destination !== "new" && !chosenThread)}
-            onClick={() => {
-              if (destination === "new") void handoff.prepareDraft({ kind: "new" });
-              else if (chosenThread)
-                void handoff.prepareDraft({ kind: "existing", threadId: chosenThread.id });
-            }}
-          >
-            {handoff.isPending ? "Preparing draft…" : "Open draft"}
-            <ArrowRightIcon />
-          </Button>
-          <Button
-            className="w-full"
-            variant="ghost"
-            size="sm"
-            disabled={handoff.isPending}
-            onClick={() => setPrepareOpen(false)}
-          >
-            Cancel
-          </Button>
-        </>
-      ) : entry.linkedTarget ? (
-        <>
-          <Button
-            className="w-full"
-            size="sm"
-            disabled={handoff.isPending}
-            onClick={() => void handoff.openLinkedConversation()}
-          >
-            Open conversation
-            <ArrowRightIcon />
-          </Button>
-          <Button
-            className="w-full"
-            variant="ghost"
-            size="sm"
-            disabled={handoff.isPending}
-            onClick={beginPreparation}
-          >
-            Change conversation…
-          </Button>
-        </>
-      ) : (
-        <Button className="w-full" size="sm" onClick={beginPreparation}>
-          Prepare agent draft
-        </Button>
+        </div>
+        <div className="ml-auto flex items-center gap-1">
+          {entry.linkedTarget && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={handoff.isPending}
+              onClick={() => void handoff.openLinkedConversation()}
+            >
+              Open
+              <ArrowRightIcon />
+            </Button>
+          )}
+          <Menu>
+            <MenuTrigger
+              disabled={handoff.isPending || !canPrepare}
+              render={<Button size="sm" variant={entry.linkedTarget ? "ghost" : "outline"} />}
+            >
+              {entry.linkedTarget ? "Change…" : "Choose review thread…"}
+            </MenuTrigger>
+            <MenuPopup align="end" className="w-80 max-w-[calc(100vw-2rem)]">
+              <MenuItem onClick={() => prepareDraft({ kind: "new" })}>
+                <GitBranchIcon />
+                <span className="min-w-0">
+                  <span className="block">New PR worktree</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Create a thread on this pull request’s branch
+                  </span>
+                </span>
+              </MenuItem>
+              {otherThreads.length > 0 && (
+                <>
+                  <MenuSeparator />
+                  <MenuGroup>
+                    <MenuGroupLabel>Existing threads · current checkout</MenuGroupLabel>
+                    {otherThreads.map((thread) => (
+                      <MenuItem
+                        key={thread.id}
+                        onClick={() => prepareDraft({ kind: "existing", threadId: thread.id })}
+                      >
+                        <MessageSquareIcon />
+                        <span className="truncate" title={thread.title}>
+                          {thread.title}
+                        </span>
+                      </MenuItem>
+                    ))}
+                  </MenuGroup>
+                </>
+              )}
+              <p className="px-2 py-2 text-xs text-muted-foreground">
+                Choosing a thread opens an unsent draft with PR context and selected notes.
+              </p>
+            </MenuPopup>
+          </Menu>
+        </div>
+      </div>
+      {handoff.isPending && (
+        <p role="status" className="text-xs text-muted-foreground">
+          Opening review thread…
+        </p>
       )}
       {handoff.error && (
         <p role="alert" className="text-xs text-destructive">

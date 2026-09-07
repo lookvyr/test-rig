@@ -6,7 +6,8 @@ import {
   type GitGetPullRequestDetailsResult,
   type GitListPullRequestsResult,
 } from "@t3tools/contracts";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 
 const state = vi.hoisted(() => ({
   refresh: vi.fn(),
@@ -61,11 +62,27 @@ vi.mock("react/compiler-runtime", () => ({
   c: (size: number) => Array.from({ length: size }, () => Symbol.for("react.memo_cache_sentinel")),
 }));
 vi.mock("../../state/query", () => ({
+  useEnvironmentQueries: (targets: unknown[]) =>
+    targets.map(() => ({
+      data: state.listData,
+      error: null,
+      isPending: false,
+      refresh: state.refresh,
+    })),
   useEnvironmentQuery: (target: { kind: string }) => ({
     data: target.kind === "list" ? state.listData : state.data,
     error: null,
     isPending: false,
     refresh: state.refresh,
+  }),
+}));
+vi.mock("@effect/atom-react", () => ({ useAtomValue: () => DEFAULT_RESOLVED_KEYBINDINGS }));
+vi.mock("../../shortcutModifierState", () => ({
+  useShortcutModifierState: () => ({
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
   }),
 }));
 vi.mock("../../state/git", () => ({
@@ -141,6 +158,8 @@ function details(headSha: string): GitGetPullRequestDetailsResult {
   };
 }
 beforeEach(() => {
+  vi.stubGlobal("window", new EventTarget());
+  vi.stubGlobal("navigator", { platform: "MacIntel" });
   state.refresh.mockClear();
   state.version = 0;
   state.ref = null;
@@ -154,6 +173,7 @@ beforeEach(() => {
   });
   usePullRequestWorkspaceStore.setState({ entriesByKey: {} });
 });
+afterEach(() => vi.unstubAllGlobals());
 describe("pull request refresh lifecycle", () => {
   it("global and inspector refresh use the same revision for visible list and details", () => {
     const first = elements(PullRequestWorkspace());
@@ -221,6 +241,31 @@ describe("pull request refresh lifecycle", () => {
     expect(
       usePullRequestWorkspaceStore.getState().entriesByKey[pullRequestWorkspaceKey(scope)],
     ).toMatchObject({ tab: "code", noteDraft: { body: "Keep editing", headSha: "before" } });
+  });
+  it("always renders Summary even when an older workspace selected Code or Timeline", () => {
+    for (const tab of ["code", "timeline"] as const) {
+      usePullRequestWorkspaceStore.getState().setTab(scope, tab);
+      const contents = elements(PullRequestInspector({ selection, onClose: () => {} })).find(
+        (element) => element.props.details !== undefined,
+      )!;
+      const renderContents = contents.type as (props: typeof contents.props) => ReactNode;
+      const controls = elements(renderContents(contents.props));
+      expect(
+        controls.find((element) => element.props.role === "tabpanel")?.props["aria-labelledby"],
+      ).toBe("pr-tab-summary");
+      expect(
+        controls.find((element) => element.props.id === "pr-tab-summary")?.props["aria-selected"],
+      ).toBe(true);
+      for (const label of ["Diff", "Activity"]) {
+        const trigger = controls.find((element) => element.props.children === label)!;
+        const button = trigger.props.render as ReactElement<Record<string, unknown>>;
+        expect(button.props["aria-disabled"]).toBe("true");
+        expect(button.props.onClick).toBeUndefined();
+      }
+      expect(controls.filter((element) => element.props.children === "Coming soon")).toHaveLength(
+        2,
+      );
+    }
   });
   it("standalone conversation inspector refresh falls back to its detail query", () => {
     const button = elements(PullRequestInspector({ selection, onClose: () => {} })).find(

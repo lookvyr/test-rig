@@ -3345,9 +3345,10 @@ export default function Sidebar() {
       context: sidebarShortcutContext,
     },
   );
-  const visibleThreadJumpLabelByKey = showThreadJumpHints
-    ? threadJumpLabelByKey
-    : EMPTY_THREAD_JUMP_LABELS;
+  const visibleThreadJumpLabelByKey =
+    showThreadJumpHints && shouldShowThreadJumpHintsNow
+      ? threadJumpLabelByKey
+      : EMPTY_THREAD_JUMP_LABELS;
   const orderedSidebarThreadKeys = visibleSidebarThreadKeys;
   const prewarmedSidebarThreadKeys = useMemo(
     () => getSidebarThreadIdsToPrewarm(visibleSidebarThreadKeys),

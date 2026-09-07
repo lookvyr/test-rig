@@ -377,6 +377,7 @@ function overlayModeForCommand(command: string | null): SearchOverlayMode | null
 }
 
 export function CommandPalette({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
   const [state, dispatch] = useReducer(reduceCommandPaletteUiState, {
     open: false,
     mode: "command",
@@ -444,6 +445,13 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         });
         return;
       }
+      if (command === "pullRequest.open") {
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+        void navigate({ to: "/pull-requests" });
+        return;
+      }
       const mode = overlayModeForCommand(command);
       if (mode === null) {
         return;
@@ -454,7 +462,17 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, previewOpen, resolvedTheme, terminalOpen, theme, themeHalves, toggleMode]);
+  }, [
+    keybindings,
+    navigate,
+    previewOpen,
+    resolvedTheme,
+    setOpen,
+    terminalOpen,
+    theme,
+    themeHalves,
+    toggleMode,
+  ]);
 
   useEffect(
     () =>
@@ -1515,6 +1533,7 @@ function OpenCommandPaletteDialog(props: {
     value: "action:pull-requests",
     searchTerms: ["Open pull requests", "PR", "review", "GitHub", "queue"],
     title: "Open pull requests",
+    shortcutCommand: "pullRequest.open",
     icon: <GitPullRequestIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/pull-requests" });

@@ -5,6 +5,7 @@ import {
   MAX_KEYBINDINGS_COUNT,
   MAX_WHEN_EXPRESSION_DEPTH,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
+  PULL_REQUEST_JUMP_KEYBINDING_COMMANDS,
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
@@ -47,6 +48,12 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
+  { key: "mod+alt+p", command: "pullRequest.open" },
+  ...PULL_REQUEST_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
+    key: `mod+alt+${index + 1}`,
+    command,
+    when: "pullRequestsView",
+  })),
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({

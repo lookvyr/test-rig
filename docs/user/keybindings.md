@@ -70,11 +70,17 @@ project, `chat.new` opens a project chooser first.
 
 These defaults yield to terminal focus: `mod+w` closes the focused terminal, and the thread shortcuts are inactive. Pin and settle apply to saved threads in environments that support those actions.
 
+`mod+alt+p` (`pullRequest.open`) opens the Pull Requests workspace. In that view,
+`mod+alt+1` through `mod+alt+9` (`pullRequest.jump.1` through `pullRequest.jump.9`)
+select the first nine pull requests in the filtered, displayed order. Hold those
+modifiers to see the row badges. The sidebar's `mod+1` through `mod+9` thread
+shortcuts remain available; releasing Alt/Option switches the badges back to them.
+
 ## `when` Conditions
 
 A `when` expression is evaluated against context keys describing the current UI state. The keys
 the app supplies today are `terminalFocus`, `terminalOpen`, `previewFocus`, `previewOpen`, and
-`modelPickerOpen`. The set is open and grows over time, so treat that as the current list rather
+`modelPickerOpen`, and `pullRequestsView`. The set is open and grows over time, so treat that as the current list rather
 than a fixed one. Any key the running app does not supply evaluates to `false`.
 
 Operators: `!` (not), `&&` (and), `||` (or), and parentheses.

@@ -1,5 +1,11 @@
 import * as Schema from "effect/Schema";
-import { type PointerEvent as ReactPointerEvent, useCallback, useRef, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { getLocalStorageItem, setLocalStorageItem } from "./useLocalStorage";
 
@@ -75,6 +81,8 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
   const releasePointer = useCallback((pointerId: number) => {
     const state = dragStateRef.current;
     if (!state) return;
+    // Releasing capture can itself emit lostpointercapture.
+    dragStateRef.current = null;
     if (state.rafId !== null) {
       cancelAnimationFrame(state.rafId);
     }
@@ -87,7 +95,6 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     }
     document.body.style.removeProperty("cursor");
     document.body.style.removeProperty("user-select");
-    dragStateRef.current = null;
   }, []);
 
   const onPointerDown = useCallback(
@@ -134,7 +141,7 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
   );
 
   const onPointerUp = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
+    (event: Pick<PointerEvent, "pointerId">) => {
       const state = dragStateRef.current;
       if (!state || state.pointerId !== event.pointerId) return;
       const finalWidth = clamp(state.pending);
@@ -151,7 +158,7 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
   );
 
   const onPointerCancel = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
+    (event: Pick<PointerEvent, "pointerId">) => {
       const state = dragStateRef.current;
       if (!state || state.pointerId !== event.pointerId) return;
       // Don't persist a cancelled drag; revert to the start width.
@@ -160,6 +167,27 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     },
     [releasePointer],
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const cancelDrag = () => {
+      const state = dragStateRef.current;
+      if (state) onPointerCancel({ pointerId: state.pointerId });
+    };
+    // Capture at the window: a removed handle cannot receive its own release.
+    window.addEventListener("pointerup", onPointerUp, true);
+    window.addEventListener("pointercancel", onPointerCancel, true);
+    window.addEventListener("lostpointercapture", onPointerCancel, true);
+    window.addEventListener("blur", cancelDrag);
+    return () => {
+      window.removeEventListener("pointerup", onPointerUp, true);
+      window.removeEventListener("pointercancel", onPointerCancel, true);
+      window.removeEventListener("lostpointercapture", onPointerCancel, true);
+      window.removeEventListener("blur", cancelDrag);
+      const state = dragStateRef.current;
+      if (state) releasePointer(state.pointerId);
+    };
+  }, [onPointerCancel, onPointerUp, releasePointer]);
 
   return {
     width: clampedWidth,
