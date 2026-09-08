@@ -6,12 +6,14 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as References from "effect/References";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as Electron from "electron";
+import * as NodeEvents from "node:events";
 import { vi } from "vite-plus/test";
 
 vi.mock("electron", async (importOriginal) => ({
@@ -63,6 +65,8 @@ function makeFakeBrowserWindow() {
   const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>();
   const webContents = {
     copyImageAt: vi.fn(),
+    focus: vi.fn(),
+    isDestroyed: vi.fn(() => false),
     getURL: vi.fn(() => "test-rig-dev://app/"),
     isLoadingMainFrame: vi.fn(() => false),
     on: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) => {
@@ -183,6 +187,8 @@ function makeTestLayer(input: {
     bounds: DesktopAppSettings.DesktopWindowBounds,
   ) => Effect.Effect<void>;
   readonly openedExternalUrls?: unknown[];
+  readonly onCopyText?: (text: string) => Effect.Effect<void>;
+  readonly onPopupTemplate?: (input: ElectronMenu.ElectronMenuTemplateInput) => Effect.Effect<void>;
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -244,14 +250,18 @@ function makeTestLayer(input: {
         desktopAppSettingsLayer,
         desktopServerExposureLayer,
         DesktopState.layer,
-        electronMenuLayer,
+        Layer.succeed(ElectronMenu.ElectronMenu, {
+          setApplicationMenu: () => Effect.void,
+          showContextMenu: () => Effect.succeed(Option.none()),
+          popupTemplate: input.onPopupTemplate ?? (() => Effect.void),
+        }),
         Layer.succeed(ElectronShell.ElectronShell, {
           openExternal: (url) =>
             Effect.sync(() => {
               input.openedExternalUrls?.push(url);
               return true;
             }),
-          copyText: () => Effect.void,
+          copyText: input.onCopyText ?? (() => Effect.void),
         } satisfies ElectronShell.ElectronShell["Service"]),
         electronThemeLayer,
         electronWindowLayer,
@@ -363,6 +373,126 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
   });
 
 describe("DesktopWindow", () => {
+  it.effect("shows native context menus for browser guests and the main renderer", () =>
+    Effect.gen(function* () {
+      const host = makeFakeBrowserWindow();
+      let focusedContents: unknown = host.window.webContents;
+      const makeContents = () => {
+        const contents = Object.assign(new NodeEvents.EventEmitter(), {
+          isDestroyed: vi.fn(() => false),
+          focus: vi.fn(() => {
+            focusedContents = contents;
+          }),
+          copyImageAt: vi.fn(),
+          replaceMisspelling: vi.fn(),
+        });
+        return contents;
+      };
+      const guest = makeContents();
+      const menus = yield* Queue.unbounded<{
+        input: ElectronMenu.ElectronMenuTemplateInput;
+        focusedContents: unknown;
+      }>();
+      const copiedTexts = yield* Queue.unbounded<string>();
+      const layer = makeTestLayer({
+        window: host.window,
+        createCount: yield* Ref.make(0),
+        mainWindow: yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none()),
+        onCopyText: (text) => Queue.offer(copiedTexts, text).pipe(Effect.asVoid),
+        onPopupTemplate: (input) =>
+          Queue.offer(menus, { input, focusedContents }).pipe(Effect.asVoid),
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        const attach = host.webContentsListeners.get("did-attach-webview");
+        assert.isDefined(attach);
+        attach({}, guest);
+        attach({}, guest);
+        assert.equal(guest.listenerCount("context-menu"), 1);
+
+        const hostContents = host.window.webContents;
+        vi.mocked(hostContents.focus).mockImplementation(() => {
+          focusedContents = hostContents;
+        });
+        for (const contents of [guest, hostContents]) {
+          const emitMenu = (event: unknown, params: unknown) => {
+            if (contents === guest) guest.emit("context-menu", event, params);
+            else host.webContentsListeners.get("context-menu")?.(event, params);
+          };
+          const frame = { routingId: 7 } as Electron.WebFrameMain;
+          const preventDefault = vi.fn();
+          const params = {
+            frame,
+            x: 12,
+            y: 34,
+            misspelledWord: "helo",
+            dictionarySuggestions: ["hello"],
+            linkURL: "",
+            mediaType: "none",
+            editFlags: { canCut: false, canCopy: true, canPaste: true, canSelectAll: true },
+          };
+          focusedContents = host.window.webContents;
+          emitMenu({ preventDefault }, params);
+          const menu = yield* Queue.take(menus);
+          assert.strictEqual(menu.input.window, host.window);
+          assert.strictEqual(menu.input.frame, frame);
+          assert.strictEqual(menu.focusedContents, contents);
+          assert.equal(preventDefault.mock.calls.length, 1);
+          assert.deepEqual(
+            menu.input.template.filter((item) => item.role),
+            [
+              { role: "cut", enabled: false },
+              { role: "copy", enabled: true },
+              { role: "paste", enabled: true },
+              { role: "selectAll", enabled: true },
+            ],
+          );
+          const correction = menu.input.template.find((item) => item.label === "hello");
+          assert.isDefined(correction?.click);
+          correction.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
+          assert.deepEqual(vi.mocked(contents.replaceMisspelling).mock.calls, [["hello"]]);
+
+          emitMenu(
+            { preventDefault },
+            {
+              ...params,
+              frame: null,
+              misspelledWord: "",
+              dictionarySuggestions: [],
+              mediaType: "image",
+              linkURL: "https://example.com/image.png",
+            },
+          );
+          const imageMenu = (yield* Queue.take(menus)).input;
+          assert.isUndefined(imageMenu.frame);
+          const copyImage = imageMenu.template.find((item) => item.label === "Copy Image");
+          const copyLink = imageMenu.template.find((item) => item.label === "Copy Link");
+          assert.isDefined(copyImage?.click);
+          assert.isDefined(copyLink?.click);
+          copyImage.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
+          copyLink.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
+          assert.deepEqual(vi.mocked(contents.copyImageAt).mock.calls, [[12, 34]]);
+          assert.equal(yield* Queue.take(copiedTexts), "https://example.com/image.png");
+
+          vi.mocked(contents.isDestroyed).mockReturnValue(true);
+          correction.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
+          copyImage.click({} as Electron.MenuItem, undefined, {} as Electron.KeyboardEvent);
+          assert.equal(vi.mocked(contents.replaceMisspelling).mock.calls.length, 1);
+          assert.equal(vi.mocked(contents.copyImageAt).mock.calls.length, 1);
+          emitMenu({ preventDefault }, params);
+          assert.equal(yield* Queue.size(menus), 0);
+          vi.mocked(contents.isDestroyed).mockReturnValue(false);
+          host.isDestroyed.mockReturnValue(true);
+          emitMenu({ preventDefault }, params);
+          assert.equal(yield* Queue.size(menus), 0);
+          host.isDestroyed.mockReturnValue(false);
+        }
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it("restores bounds only when the window fits within a connected display", () => {
     const persistedBounds = { x: 2040, y: 80, width: 1320, height: 880 };
     const displays = [

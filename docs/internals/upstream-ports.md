@@ -43,3 +43,8 @@ The regression test uses Test Rig's existing tab-close lifecycle.
 
 [#8889](https://github.com/pingdotgg/t3code/pull/8889) adds an expand/collapse-all
 control to the Files tree using its existing model and native directory handles.
+
+[#10670](https://github.com/pingdotgg/t3code/pull/10670) shares the desktop native
+context menu with embedded browser tabs and targets the clicked contents and
+frame. Test Rig keeps its existing same-tab handling of popup links, so this port
+does not add separate popup-window handling.
