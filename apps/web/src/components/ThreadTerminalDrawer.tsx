@@ -712,11 +712,21 @@ export function TerminalViewport({
         clearSelectionAction();
         selectionGestureActiveRef.current = event.button === 0;
       };
+      const handleContextMenu = (event: MouseEvent) => {
+        // Mouse-reporting terminal apps already prevent this event. Otherwise,
+        // use the terminal selection rather than the browser's canvas selection.
+        if (event.defaultPrevented || !terminal.hasSelection()) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void showSelectionAction();
+      };
       window.addEventListener("mouseup", handleMouseUp);
       mount.addEventListener("pointerdown", handlePointerDown);
+      mount.addEventListener("contextmenu", handleContextMenu);
       setupCleanups.push(() => {
         window.removeEventListener("mouseup", handleMouseUp);
         mount.removeEventListener("pointerdown", handlePointerDown);
+        mount.removeEventListener("contextmenu", handleContextMenu);
       });
 
       const themeObserver = new MutationObserver(() => {

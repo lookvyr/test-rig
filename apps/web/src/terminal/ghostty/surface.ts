@@ -1307,6 +1307,15 @@ export class GhosttyTerminalSurface {
     this.focus();
   };
 
+  private readonly onCopy = (event: ClipboardEvent) => {
+    const text = this.getSelection();
+    if (!text || !event.clipboardData) return;
+    // Native Edit > Copy (also Cmd+C while the selection menu is open) bypasses keydown.
+    // The selected text lives in Ghostty, not in the hidden textarea's value.
+    event.clipboardData.setData("text/plain", text);
+    event.preventDefault();
+  };
+
   private readonly onContextMenu = (event: MouseEvent) => {
     if (shouldReportTerminalMouse(this.core.isMouseTracking(), event)) {
       event.preventDefault();
@@ -1383,6 +1392,7 @@ export class GhosttyTerminalSurface {
     this.input.addEventListener("focus", this.onFocus);
     this.input.addEventListener("blur", this.onBlur);
     this.input.addEventListener("input", this.onInput);
+    this.input.addEventListener("copy", this.onCopy);
     this.input.addEventListener("paste", this.onPaste);
     this.input.addEventListener("compositionstart", this.onCompositionStart);
     this.input.addEventListener("compositionend", this.onCompositionEnd);
@@ -1407,6 +1417,7 @@ export class GhosttyTerminalSurface {
     this.input.removeEventListener("focus", this.onFocus);
     this.input.removeEventListener("blur", this.onBlur);
     this.input.removeEventListener("input", this.onInput);
+    this.input.removeEventListener("copy", this.onCopy);
     this.input.removeEventListener("paste", this.onPaste);
     this.input.removeEventListener("compositionstart", this.onCompositionStart);
     this.input.removeEventListener("compositionend", this.onCompositionEnd);

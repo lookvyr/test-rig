@@ -76,6 +76,13 @@ select the first nine pull requests in the filtered, displayed order. Hold those
 modifiers to see the row badges. The sidebar's `mod+1` through `mod+9` thread
 shortcuts remain available; releasing Alt/Option switches the badges back to them.
 
+## Copying terminal output
+
+Select terminal output and press `cmd+c` on macOS or `ctrl+shift+c` on Windows/Linux.
+You can also choose **Copy** from the selection menu or right-click the selected output.
+On desktop, **Edit** → **Copy** copies the focused terminal's selection.
+`ctrl+c` still interrupts the running terminal command.
+
 ## `when` Conditions
 
 A `when` expression is evaluated against context keys describing the current UI state. The keys
