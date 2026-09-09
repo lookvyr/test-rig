@@ -6,7 +6,6 @@ import {
   type GitGetPullRequestDetailsInput,
   type GitGetPullRequestDetailsResult,
   type GitPullRequestSummary,
-  type GitPullRequestTimelineEntry,
 } from "@t3tools/contracts";
 import { GitHubCli } from "./GitHubCli.ts";
 import { SourceControlProviderRegistry } from "./SourceControlProviderRegistry.ts";
@@ -49,18 +48,6 @@ const RawPullRequest = Schema.Struct({
   deletions: Schema.Int,
   changed_files: Schema.Int,
   labels: Schema.Array(Label),
-});
-const RawComment = Schema.Struct({
-  id: Schema.Int,
-  user: User,
-  body: Schema.NullOr(Schema.String),
-  html_url: Schema.NullOr(Schema.String),
-  created_at: Schema.optional(Schema.String),
-  submitted_at: Schema.optional(Schema.NullOr(Schema.String)),
-  state: Schema.optional(Schema.String),
-  path: Schema.optional(Schema.String),
-  line: Schema.optional(Schema.NullOr(Schema.Int)),
-  side: Schema.optional(Schema.Literals(["LEFT", "RIGHT"])),
 });
 const RawFile = Schema.Struct({
   filename: Schema.String,
@@ -237,27 +224,9 @@ export const make = Effect.gen(function* () {
       if (!Number.isSafeInteger(Number(reference)) || Number(reference) < 1)
         return yield* failure("Enter a valid pull request number.");
       const raw = yield* api(input.cwd, repo, `pulls/${reference}`, RawPullRequest);
-      // Every collection is explicitly bounded; full pages are conservatively marked incomplete.
-      const [comments, reviews, reviewComments, files, checks, statuses] = yield* Effect.all(
+      // Collection requests are bounded; omitted files and check results are reported below.
+      const [files, checks, statuses] = yield* Effect.all(
         [
-          api(
-            input.cwd,
-            repo,
-            `issues/${reference}/comments?per_page=${LIMIT}`,
-            Schema.Array(RawComment),
-          ),
-          api(
-            input.cwd,
-            repo,
-            `pulls/${reference}/reviews?per_page=${LIMIT}`,
-            Schema.Array(RawComment),
-          ),
-          api(
-            input.cwd,
-            repo,
-            `pulls/${reference}/comments?per_page=${LIMIT}`,
-            Schema.Array(RawComment),
-          ),
           api(input.cwd, repo, `pulls/${reference}/files?per_page=${LIMIT}`, Schema.Array(RawFile)),
           api(input.cwd, repo, `commits/${raw.head.sha}/check-runs?per_page=${LIMIT}`, RawChecks),
           api(input.cwd, repo, `commits/${raw.head.sha}/status?per_page=${LIMIT}`, RawStatuses),
@@ -269,22 +238,6 @@ export const make = Effect.gen(function* () {
         return yield* failure(
           "The pull request changed while loading. Refresh to load its latest revision.",
         );
-      const timeline = (
-        rows: ReadonlyArray<typeof RawComment.Type>,
-        kind: GitPullRequestTimelineEntry["kind"],
-      ): GitPullRequestTimelineEntry[] =>
-        rows.map((row) => ({
-          id: `${kind}:${row.id}`,
-          kind,
-          author: author(row.user),
-          body: row.body ?? "",
-          createdAt: row.created_at ?? row.submitted_at ?? "",
-          url: row.html_url ?? raw.html_url,
-          state: row.state ?? null,
-          path: row.path ?? null,
-          line: row.line ?? null,
-          side: row.line == null ? null : (row.side ?? null),
-        }));
       return {
         repository: repo.url,
         pullRequest: {
@@ -319,11 +272,8 @@ export const make = Effect.gen(function* () {
             url: status.target_url,
           })),
         ],
-        timeline: [
-          ...timeline(comments, "comment"),
-          ...timeline(reviews, "review"),
-          ...timeline(reviewComments, "review-comment"),
-        ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+        // Retain the wire field; activity is not loaded by the Summary view.
+        timeline: [],
         files: files.map((file) => ({
           path: file.filename,
           previousPath: file.previous_filename ?? null,
@@ -333,9 +283,6 @@ export const make = Effect.gen(function* () {
           patch: file.patch ?? null,
         })),
         truncated:
-          comments.length >= LIMIT ||
-          reviews.length >= LIMIT ||
-          reviewComments.length >= LIMIT ||
           raw.changed_files > files.length ||
           checks.total_count > checks.check_runs.length ||
           statuses.total_count > statuses.statuses.length,

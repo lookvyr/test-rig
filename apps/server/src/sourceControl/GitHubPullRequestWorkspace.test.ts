@@ -163,75 +163,86 @@ it.effect("rejects malformed and byte-truncated responses with safe errors", () 
     }
   }),
 );
-it.effect(
-  "assembles head checks, review timeline, and files with unchanged patch coordinates",
-  () =>
-    Effect.gen(function* () {
-      const patch = "@@ -1 +1 @@\n-old\n+new";
+it.effect("loads summary checks and files without requesting unused comments or reviews", () =>
+  Effect.gen(function* () {
+    const patch = "@@ -1 +1 @@\n-old\n+new";
+    const f = fixture({
+      response: (args) => {
+        const endpoint = args.at(-1)!;
+        if (endpoint.endsWith("pulls/7")) return JSON.stringify(raw);
+        if (endpoint.includes("/files?"))
+          return JSON.stringify([
+            { filename: "a.ts", status: "modified", additions: 1, deletions: 1, patch },
+          ]);
+        if (endpoint.includes("/check-runs?"))
+          return JSON.stringify({
+            total_count: 1,
+            check_runs: [
+              { name: "test", status: "completed", conclusion: "success", html_url: null },
+            ],
+          });
+        if (endpoint.includes("/status?")) return JSON.stringify({ total_count: 0, statuses: [] });
+        throw new Error(`Unexpected GitHub request: ${endpoint}`);
+      },
+    });
+    const service = yield* f.workspace;
+    const result = yield* service.getPullRequestDetails({ cwd: "/repo", reference: "#7" });
+    assert.equal(result.pullRequest.headSha, "abc");
+    assert.equal(result.files[0]?.patch, patch);
+    assert.deepEqual(result.timeline, []);
+    assert.equal(result.checks[0]?.conclusion, "success");
+    assert.isFalse(result.truncated);
+    assert.equal(f.calls.length, 5);
+    assert.isTrue(f.calls.every((args) => args[0] === "api"));
+  }),
+);
+
+it.effect("reports incomplete files, check runs, and statuses", () =>
+  Effect.gen(function* () {
+    for (const incomplete of ["files", "checks", "statuses"] as const) {
       const f = fixture({
         response: (args) => {
           const endpoint = args.at(-1)!;
-          if (endpoint.endsWith("pulls/7")) return JSON.stringify(raw);
-          if (endpoint.includes("/files?"))
-            return JSON.stringify([
-              { filename: "a.ts", status: "modified", additions: 1, deletions: 1, patch },
-            ]);
+          if (endpoint.endsWith("pulls/7"))
+            return JSON.stringify({ ...raw, changed_files: incomplete === "files" ? 1 : 0 });
           if (endpoint.includes("/check-runs?"))
-            return JSON.stringify({
-              total_count: 1,
-              check_runs: [
-                { name: "test", status: "completed", conclusion: "success", html_url: null },
-              ],
-            });
+            return JSON.stringify({ total_count: incomplete === "checks" ? 1 : 0, check_runs: [] });
           if (endpoint.includes("/status?"))
-            return JSON.stringify({ total_count: 0, statuses: [] });
-          if (endpoint.includes("/reviews?"))
-            return JSON.stringify([
-              {
-                id: 1,
-                user: { login: "bob" },
-                body: "Looks good",
-                html_url: summary.url,
-                submitted_at: "2026-01-03",
-                state: "APPROVED",
-              },
-            ]);
+            return JSON.stringify({ total_count: incomplete === "statuses" ? 1 : 0, statuses: [] });
           return "[]";
         },
       });
       const service = yield* f.workspace;
-      const result = yield* service.getPullRequestDetails({ cwd: "/repo", reference: "#7" });
-      assert.equal(result.pullRequest.headSha, "abc");
-      assert.equal(result.files[0]?.patch, patch);
-      assert.equal(result.timeline[0]?.kind, "review");
-      assert.equal(result.checks[0]?.conclusion, "success");
-      assert.isFalse(result.truncated);
-      assert.equal(f.calls.length, 8);
-      assert.isTrue(f.calls.every((args) => args[0] === "api"));
-    }),
-);
-
-it.effect("rejects a head change while the file patches are loading", () =>
-  Effect.gen(function* () {
-    let reads = 0;
-    const f = fixture({
-      response: (args) => {
-        const endpoint = args.at(-1)!;
-        if (endpoint.endsWith("pulls/7"))
-          return JSON.stringify({
-            ...raw,
-            head: { ...raw.head, sha: ++reads === 1 ? "abc" : "def" },
-          });
-        if (endpoint.includes("/check-runs?"))
-          return JSON.stringify({ total_count: 0, check_runs: [] });
-        if (endpoint.includes("/status?")) return JSON.stringify({ total_count: 0, statuses: [] });
-        return "[]";
-      },
-    });
-    const service = yield* f.workspace;
-    const error = yield* Effect.flip(
-      service.getPullRequestDetails({ cwd: "/repo", reference: "7" }),
-    );
-    assert.include(error.message, "changed while loading");
+      const result = yield* service.getPullRequestDetails({ cwd: "/repo", reference: "7" });
+      assert.isTrue(result.truncated, incomplete);
+    }
   }),
 );
+
+for (const revision of ["head", "base"] as const) {
+  it.effect(`rejects a ${revision} change while the file patches are loading`, () =>
+    Effect.gen(function* () {
+      let reads = 0;
+      const f = fixture({
+        response: (args) => {
+          const endpoint = args.at(-1)!;
+          if (endpoint.endsWith("pulls/7"))
+            return JSON.stringify({
+              ...raw,
+              [revision]: { ...raw[revision], sha: ++reads === 1 ? raw[revision].sha : "def" },
+            });
+          if (endpoint.includes("/check-runs?"))
+            return JSON.stringify({ total_count: 0, check_runs: [] });
+          if (endpoint.includes("/status?"))
+            return JSON.stringify({ total_count: 0, statuses: [] });
+          return "[]";
+        },
+      });
+      const service = yield* f.workspace;
+      const error = yield* Effect.flip(
+        service.getPullRequestDetails({ cwd: "/repo", reference: "7" }),
+      );
+      assert.include(error.message, "changed while loading");
+    }),
+  );
+}

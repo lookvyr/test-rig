@@ -22,7 +22,7 @@ if prompted. A remote environment uses its own connection and repository paths.
 Filter the queue by project, state, or your involvement, and search the loaded
 results by title, number, author, repository, or URL. Use **Refresh** to fetch
 current information. Either refresh button in the workspace updates both the
-queue and the selected review, including new comments and changed files. The
+queue and the selected review, including check results and changed files. The
 workspace tells you when results are incomplete.
 
 After a pull request closes, refreshing removes it from the **Open** queue. Find
