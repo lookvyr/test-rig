@@ -47,6 +47,8 @@ After a turn finishes on a feature branch, Test Rig checks again for a newly cre
 
 ## Refreshing workspace views
 
+Working tree and Branch changes use the selected thread's checkout, including projects stored outside the folder where Test Rig was built or started. Working tree includes staged, unstaged, and untracked files that Git does not ignore; Branch changes compares committed changes against the selected base branch.
+
 The Files panel and current workspace diff refresh after the active thread finishes a turn. Refreshes keep the file tree's expanded folders and the diff's scroll position and collapsed files. The Files refresh button also reloads the open text file. Pending edits in the file editor remain protected while a refresh runs.
 
 Use **Expand all folders** beside the Files search button to open every folder in the tree. Once all folders are expanded, the button becomes **Collapse all folders**. Collapsing folders keeps your selected file open.

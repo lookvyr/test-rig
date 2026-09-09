@@ -25,6 +25,8 @@ vp run build:desktop
 vp run start:desktop
 ```
 
+To update, close the app, update your source checkout and dependencies, then build and start it again. Projects, conversations, and settings are stored separately in `~/.test-rig/userdata` by default, so rebuilding does not reset them. Keep the same `TEST_RIG_HOME` value if you use a custom state directory. Development mode normally uses `~/.test-rig/dev` instead.
+
 On macOS, `vp run dist:desktop:dmg` creates a DMG in `./release`. See the maintainer
 [scripts reference](../internals/scripts.md) for other platforms.
 
