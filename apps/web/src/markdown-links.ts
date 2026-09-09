@@ -1,5 +1,9 @@
 import { formatWorkspaceRelativePath } from "./filePathDisplay";
 import { resolvePathLinkTarget, splitPathAndPosition } from "./terminal-links";
+import { BrowserScreenshotFileName } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+
+const isBrowserScreenshotFileName = Schema.is(BrowserScreenshotFileName);
 
 const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
 const WINDOWS_UNC_PATH_PATTERN = /^\\\\/;
@@ -106,6 +110,22 @@ export function rewriteMarkdownFileUriHref(href: string | undefined): string | n
   const target = parseFileUrlHref(normalizedHref, { decodePath: false });
   if (!target) return null;
   return `${target.path}${target.hash}`;
+}
+
+/** Saved browser screenshots resolve through the connected environment's asset API. */
+export function resolveMarkdownBrowserScreenshotFileName(src: string | undefined): string | null {
+  if (!src) return null;
+  const href = normalizeMarkdownLinkDestination(src);
+  const localPath = rewriteMarkdownFileUriHref(href) ?? href;
+  const normalized = safeDecode(localPath).replaceAll("\\", "/");
+  if (
+    (!normalized.startsWith("/") && !/^[A-Za-z]:\//.test(normalized)) ||
+    normalized.startsWith("//")
+  ) {
+    return null;
+  }
+  const match = /\/browser-artifacts\/([^/]+)$/.exec(normalized);
+  return match?.[1] && isBrowserScreenshotFileName(match[1]) ? match[1] : null;
 }
 
 function looksLikePosixFilesystemPath(path: string): boolean {

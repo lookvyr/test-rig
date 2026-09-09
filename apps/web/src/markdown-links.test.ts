@@ -5,7 +5,35 @@ import {
   resolveMarkdownFileLinkMeta,
   resolveMarkdownFileLinkTarget,
   rewriteMarkdownFileUriHref,
+  resolveMarkdownBrowserScreenshotFileName,
 } from "./markdown-links";
+
+describe("resolveMarkdownBrowserScreenshotFileName", () => {
+  const name = "browser-screenshot-example-test-abc-123.png";
+  it("recognizes saved screenshot paths on Mac, Linux, and Windows", () => {
+    for (const src of [
+      `/Users/test/App Data/browser-artifacts/${name}`,
+      `/home/test/.test-rig/userdata/browser-artifacts/${name}`,
+      `C:\\Users\\test\\browser-artifacts\\${name}`,
+      `file:///C:/Users/test/browser-artifacts/${name}`,
+      `</tmp/app%20data/browser-artifacts/${name}>`,
+      `/browser-artifacts/${name}`,
+    ])
+      expect(resolveMarkdownBrowserScreenshotFileName(src)).toBe(name);
+  });
+  it("leaves remote images and unrelated local files alone", () => {
+    for (const src of [
+      `https://example.test/browser-artifacts/${name}`,
+      `//example.test/browser-artifacts/${name}`,
+      `/tmp/images/${name}`,
+      "/tmp/browser-artifacts/../secret.png",
+      "/tmp/browser-artifacts/report.png",
+      "/tmp/browser-artifacts/browser-screenshot-test.svg",
+      "/tmp/browser-artifacts/browser-screenshot-test%2fother.png",
+    ])
+      expect(resolveMarkdownBrowserScreenshotFileName(src)).toBeNull();
+  });
+});
 
 describe("rewriteMarkdownFileUriHref", () => {
   it("rewrites file uri hrefs into direct path hrefs", () => {

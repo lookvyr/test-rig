@@ -4,6 +4,11 @@ import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 const ASSET_PATH_MAX_LENGTH = 1024;
 
+export const BrowserScreenshotFileName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(200),
+  Schema.isPattern(/^browser-screenshot-[a-z0-9-]+\.png$/),
+);
+
 export const AssetResource = Schema.Union([
   Schema.TaggedStruct("workspace-file", {
     threadId: ThreadId,
@@ -11,6 +16,9 @@ export const AssetResource = Schema.Union([
   }),
   Schema.TaggedStruct("attachment", {
     attachmentId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  }),
+  Schema.TaggedStruct("browser-screenshot", {
+    fileName: BrowserScreenshotFileName,
   }),
   Schema.TaggedStruct("project-favicon", {
     cwd: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
@@ -133,6 +141,15 @@ export class AssetAttachmentNotFoundError extends Schema.TaggedErrorClass<AssetA
   }
 }
 
+export class AssetBrowserScreenshotNotFoundError extends Schema.TaggedErrorClass<AssetBrowserScreenshotNotFoundError>()(
+  "AssetBrowserScreenshotNotFoundError",
+  { resource: AssetResource },
+) {
+  override get message(): string {
+    return "Browser screenshot was not found.";
+  }
+}
+
 export class AssetProjectFaviconResolutionError extends Schema.TaggedErrorClass<AssetProjectFaviconResolutionError>()(
   "AssetProjectFaviconResolutionError",
   {
@@ -190,6 +207,7 @@ export const AssetAccessError = Schema.Union([
   AssetWorkspaceAssetNotFoundError,
   AssetWorkspaceResolutionError,
   AssetAttachmentNotFoundError,
+  AssetBrowserScreenshotNotFoundError,
   AssetProjectFaviconResolutionError,
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,

@@ -1,6 +1,8 @@
 import type { AssetResource } from "@t3tools/contracts";
 import {
   AssetAttachmentNotFoundError,
+  AssetBrowserScreenshotNotFoundError,
+  BrowserScreenshotFileName,
   AssetPreviewTypeValidationError,
   AssetProjectFaviconInspectionError,
   AssetProjectFaviconNotFoundError,
@@ -79,6 +81,12 @@ const AssetClaimsSchema = Schema.Union([
     version: Schema.Literal(1),
     kind: Schema.Literal("attachment"),
     attachmentId: Schema.String,
+    expiresAt: Schema.Number,
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("browser-screenshot"),
+    fileName: BrowserScreenshotFileName,
     expiresAt: Schema.Number,
   }),
   Schema.Struct({
@@ -276,6 +284,27 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       fileName = path.basename(attachmentPath);
       break;
     }
+    case "browser-screenshot": {
+      const config = yield* ServerConfig.ServerConfig;
+      const screenshotPath = yield* resolveCanonicalWorkspaceFile({
+        workspaceRoot: config.browserArtifactsDir,
+        relativePath: input.resource.fileName,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new AssetWorkspaceAssetInspectionError({
+              resource: input.resource,
+              cause,
+            }),
+        ),
+      );
+      if (!screenshotPath) {
+        return yield* new AssetBrowserScreenshotNotFoundError({ resource: input.resource });
+      }
+      fileName = input.resource.fileName;
+      claims = { version: 1, kind: "browser-screenshot", fileName, expiresAt };
+      break;
+    }
     case "project-favicon": {
       const workspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(input.resource.cwd).pipe(
         Effect.mapError(
@@ -421,6 +450,16 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     return Option.isSome(info) && info.value.type === "File"
       ? ({ kind: "file", path: attachmentPath } satisfies ResolvedAsset)
       : null;
+  }
+
+  if (claims.kind === "browser-screenshot") {
+    if (decodeRelativePath(relativePath) !== claims.fileName) return null;
+    const config = yield* ServerConfig.ServerConfig;
+    const screenshotPath = yield* resolveCanonicalWorkspaceFileForRequest({
+      workspaceRoot: config.browserArtifactsDir,
+      relativePath: claims.fileName,
+    });
+    return screenshotPath ? ({ kind: "file", path: screenshotPath } satisfies ResolvedAsset) : null;
   }
 
   if (claims.kind === "project-favicon") {

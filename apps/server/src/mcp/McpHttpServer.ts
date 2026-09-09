@@ -1,15 +1,22 @@
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import type * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import type * as Path from "effect/Path";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import type { PreviewAutomationSnapshot } from "@t3tools/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
+import type * as ServerConfig from "../config.ts";
+import { saveScreenshot, snapshotMetadata } from "./PreviewSnapshot.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
@@ -22,6 +29,8 @@ import {
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
+
+const encodeJsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -118,7 +127,7 @@ const previewSnapshotFailure = <E>(cause: Cause.Cause<E>) => {
         failureCount: failures.length,
       },
     },
-    content: [{ type: "text", text: "Preview snapshot failed." }],
+    content: [{ type: "text", text: `Preview snapshot failed: ${errorTag}.` }],
   });
   return Effect.logWarning("preview snapshot failed", {
     operation: "snapshot",
@@ -130,6 +139,9 @@ const previewSnapshotFailure = <E>(cause: Cause.Cause<E>) => {
 const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot")(function* () {
   const server = yield* McpServer.McpServer;
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+  const saveServices = yield* Effect.context<
+    ServerConfig.ServerConfig | FileSystem.FileSystem | Path.Path | Crypto.Crypto
+  >();
   const built = yield* PreviewSnapshotToolkit;
   const tool = PreviewSnapshotTool;
   yield* server.addTool({
@@ -161,42 +173,38 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
           Effect.flatMap(Effect.fromOption),
           Effect.provideService(PreviewAutomationBroker.PreviewAutomationBroker, broker),
           Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+          Effect.flatMap(({ encodedResult }) =>
+            Effect.gen(function* () {
+              const snapshot = encodedResult as PreviewAutomationSnapshot;
+              const png =
+                payload?.includeImage === false && payload?.save !== true
+                  ? undefined
+                  : new Uint8Array(Buffer.from(snapshot.screenshot.data, "base64"));
+              const screenshotPath =
+                payload?.save === true ? yield* saveScreenshot(snapshot.url, png!) : undefined;
+              const metadata = snapshotMetadata(snapshot, screenshotPath);
+              return new McpSchema.CallToolResult({
+                isError: false,
+                structuredContent: metadata,
+                content: [
+                  { type: "text", text: encodeJsonText(metadata) },
+                  ...(payload?.includeImage === false
+                    ? []
+                    : [
+                        {
+                          type: "image" as const,
+                          data: png!,
+                          mimeType: snapshot.screenshot.mimeType,
+                        },
+                      ]),
+                ],
+              });
+            }),
+          ),
+          Effect.provide(saveServices),
           Effect.matchCauseEffect({
             onFailure: previewSnapshotFailure,
-            onSuccess: ({ encodedResult }) => {
-              const snapshot = encodedResult as {
-                readonly screenshot: {
-                  readonly mimeType: "image/png";
-                  readonly data: string;
-                  readonly width: number;
-                  readonly height: number;
-                };
-                readonly [key: string]: unknown;
-              };
-              const { screenshot, ...page } = snapshot;
-              const metadata = {
-                ...page,
-                screenshot: {
-                  mimeType: screenshot.mimeType,
-                  width: screenshot.width,
-                  height: screenshot.height,
-                },
-              };
-              return Effect.succeed(
-                new McpSchema.CallToolResult({
-                  isError: false,
-                  structuredContent: metadata,
-                  content: [
-                    { type: "text", text: JSON.stringify(metadata) },
-                    {
-                      type: "image",
-                      data: new Uint8Array(Buffer.from(screenshot.data, "base64")),
-                      mimeType: screenshot.mimeType,
-                    },
-                  ],
-                }),
-              );
-            },
+            onSuccess: Effect.succeed,
           }),
         );
       }),

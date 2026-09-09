@@ -70,7 +70,11 @@ const handlers = {
     invokeTargeted<PreviewAutomationResizeResult>("resize", input, input.timeoutMs),
   preview_set_appearance: (input) =>
     invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
-  preview_snapshot: (input) => invokeTargeted<PreviewAutomationSnapshot>("snapshot", input ?? {}),
+  preview_snapshot: (input) => {
+    // Saving and response selection belong to MCP; the desktop captures the full snapshot.
+    const { includeImage: _includeImage, save: _save, ...target } = input ?? {};
+    return invokeTargeted<PreviewAutomationSnapshot>("snapshot", target);
+  },
   preview_click: (input) =>
     invokeTargeted<void>("click", input, input.timeoutMs).pipe(Effect.as(null)),
   preview_type: (input) =>
@@ -78,7 +82,9 @@ const handlers = {
   preview_press: (input) => invokeTargeted<void>("press", input).pipe(Effect.as(null)),
   preview_scroll: (input) => invokeTargeted<void>("scroll", input).pipe(Effect.as(null)),
   preview_evaluate: (input) =>
-    invokeTargeted<unknown>("evaluate", input).pipe(Effect.map((result) => result ?? null)),
+    invokeTargeted<unknown>("evaluate", input).pipe(
+      Effect.map((value) => ({ value: value ?? null })),
+    ),
   preview_wait_for: (input) =>
     invokeTargeted<void>("waitFor", input, input.timeoutMs).pipe(Effect.as(null)),
   preview_recording_start: (input) =>

@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ThreadId } from "@t3tools/contracts";
+import { AssetResource, ThreadId } from "@t3tools/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as TestClock from "effect/testing/TestClock";
+import * as Schema from "effect/Schema";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -16,6 +17,8 @@ import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { ASSET_ROUTE_PREFIX, issueAssetUrl, resolveAsset } from "./AssetAccess.ts";
+
+const isAssetResource = Schema.is(AssetResource);
 
 const configLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-asset-access-test-",
@@ -31,6 +34,50 @@ const testLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 describe("AssetAccess", () => {
+  it("limits browser screenshot resources to generated PNG names", () => {
+    for (const fileName of [
+      "../secret.png",
+      "/tmp/secret.png",
+      "secret.png",
+      "browser-screenshot-test.svg",
+    ])
+      expect(isAssetResource({ _tag: "browser-screenshot", fileName })).toBe(false);
+  });
+
+  it.effect(
+    "serves only the signed browser screenshot and rejects links outside its directory",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const config = yield* ServerConfig.ServerConfig;
+        const fileName = "browser-screenshot-example-test-123.png";
+        const filePath = path.join(config.browserArtifactsDir, fileName);
+        yield* fs.makeDirectory(config.browserArtifactsDir, { recursive: true });
+        yield* fs.writeFile(filePath, new Uint8Array([137, 80, 78, 71]));
+        const result = yield* issueAssetUrl({ resource: { _tag: "browser-screenshot", fileName } });
+        const token = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length).split("/")[0]!;
+        expect(yield* resolveAsset(token, fileName)).toEqual({
+          kind: "file",
+          path: yield* fs.realPath(filePath),
+        });
+        expect(yield* resolveAsset(token, "browser-screenshot-other.png")).toBeNull();
+        expect(yield* resolveAsset(`${token}tampered`, fileName)).toBeNull();
+        yield* fs.remove(filePath);
+        expect(yield* resolveAsset(token, fileName)).toBeNull();
+        const outside = yield* fs.makeTempFileScoped({
+          prefix: "test-rig-outside-image-",
+          suffix: ".png",
+        });
+        yield* fs.symlink(outside, filePath);
+        expect(yield* resolveAsset(token, fileName)).toBeNull();
+        const error = yield* issueAssetUrl({
+          resource: { _tag: "browser-screenshot", fileName },
+        }).pipe(Effect.flip);
+        expect(error._tag).toBe("AssetBrowserScreenshotNotFoundError");
+      }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("issues workspace URLs that resolve the entry file and sibling assets", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

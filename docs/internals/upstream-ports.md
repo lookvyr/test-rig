@@ -48,3 +48,14 @@ control to the Files tree using its existing model and native directory handles.
 context menu with embedded browser tabs and targets the clicked contents and
 frame. Test Rig keeps its existing same-tab handling of popup links, so this port
 does not add separate popup-window handling.
+
+[#10501](https://github.com/pingdotgg/t3code/pull/10501) adapts browser snapshots
+for agent use. MCP text and structured metadata share a 60 KB encoded JSON cap,
+exclude the full accessibility tree, shorten labels and diagnostics, and preserve
+complete selectors while reporting omissions. The desktop snapshot contract is
+unchanged. `includeImage=false` omits the image response; `save=true` writes a PNG
+under the environment's `browser-artifacts` directory and returns `screenshotPath`
+and `screenshotMarkdown`. Test Rig displays those saved screenshots through its
+existing signed asset API, scoped to generated PNG names and the connected
+message environment. `preview_evaluate` returns an object containing `value` so
+arrays, scalars, objects, and null are valid MCP structured results.

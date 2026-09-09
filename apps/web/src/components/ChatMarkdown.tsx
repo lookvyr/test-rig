@@ -8,7 +8,7 @@ import {
   Minimize2Icon,
   WrapTextIcon,
 } from "lucide-react";
-import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -71,6 +71,7 @@ import {
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
+  resolveMarkdownBrowserScreenshotFileName,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
@@ -79,6 +80,7 @@ import { useRightPanelStore } from "../rightPanelStore";
 import { useActiveEnvironmentId } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { assetEnvironment } from "../state/assets";
+import { useAssetUrlState } from "../assets/assetUrls";
 import { usePreparedConnection } from "../state/session";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -91,6 +93,25 @@ import {
   openUrlInPreview,
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
+
+function MarkdownBrowserScreenshot({
+  environmentId,
+  fileName,
+  alt = "Browser screenshot",
+  ...props
+}: React.ImgHTMLAttributes<HTMLImageElement> & { environmentId: EnvironmentId; fileName: string }) {
+  const resource = useMemo(() => ({ _tag: "browser-screenshot" as const, fileName }), [fileName]);
+  const image = useAssetUrlState(environmentId, resource);
+  if (image._tag === "Failure") return <span>{alt} (screenshot unavailable)</span>;
+  return (
+    <img
+      {...props}
+      alt={alt}
+      src={image._tag === "Success" ? image.url : undefined}
+      loading="lazy"
+    />
+  );
+}
 
 interface ChatMarkdownProps {
   text: string;
@@ -1289,7 +1310,9 @@ function ChatMarkdown({
     ];
     return buildFileLinkParentSuffixByPath(filePaths);
   }, [inlineCodeFileLinkMetaByText, markdownFileLinkMetaByHref]);
-  const markdownUrlTransform = useCallback((href: string) => {
+  const markdownUrlTransform = useCallback((href: string, key: string) => {
+    const screenshot = key === "src" ? resolveMarkdownBrowserScreenshotFileName(href) : null;
+    if (screenshot) return `/browser-artifacts/${screenshot}`;
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   }, []);
   // Re-emit highlighted content as markdown so copying out of the rendered
@@ -1389,6 +1412,21 @@ function ChatMarkdown({
     };
 
     return {
+      img({ node: _node, src, ...props }) {
+        const fileName = resolveMarkdownBrowserScreenshotFileName(
+          typeof src === "string" ? src : undefined,
+        );
+        const screenshotEnvironmentId = threadRef?.environmentId ?? environmentId;
+        return fileName && screenshotEnvironmentId ? (
+          <MarkdownBrowserScreenshot
+            {...props}
+            environmentId={screenshotEnvironmentId}
+            fileName={fileName}
+          />
+        ) : (
+          <img {...props} src={src} />
+        );
+      },
       p({ node: _node, children, ...props }) {
         return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
       },
@@ -1562,6 +1600,7 @@ function ChatMarkdown({
     };
   }, [
     cwd,
+    environmentId,
     diffThemeName,
     fileLinkParentSuffixByPath,
     inlineCodeFileLinkMetaByText,

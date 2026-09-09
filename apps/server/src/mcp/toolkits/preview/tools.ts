@@ -104,8 +104,17 @@ export const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = readonlyBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a page before interacting. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab. Returns page state, semantic elements, diagnostics, action history, and a PNG screenshot.",
-    parameters: PreviewAutomationTabTargetInput,
+      "Inspect a page before interacting. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab. Returns bounded page text, interactive elements with selectors, recent diagnostics, and a PNG screenshot. Omission notes explain trimmed data; use preview_evaluate for targeted inspection. Set includeImage=false for text-only output. Set save=true to save the PNG and return its local screenshotPath and portable screenshotMarkdown. Include screenshotMarkdown verbatim in your reply to show the saved image in chat.",
+    parameters: Schema.Struct({
+      ...PreviewAutomationTabTargetInput.fields,
+      includeImage: Schema.optional(Schema.Boolean).annotate({
+        description: "Include the PNG image in the tool response. Defaults to true.",
+      }),
+      save: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Save the PNG locally and return its absolute screenshotPath. Defaults to false.",
+      }),
+    }),
     success: PreviewAutomationSnapshot,
     failure: PreviewAutomationError,
     dependencies,
@@ -159,9 +168,9 @@ export const PreviewScrollTool = safeBrowserTool(
 export const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Returns a serializable result up to 64 KB; the expression may mutate page state.",
+      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Returns {value} with a serializable result up to 64 KB, or null for undefined. The expression may mutate page state.",
     parameters: PreviewAutomationEvaluateInput,
-    success: Schema.Unknown,
+    success: Schema.Struct({ value: Schema.Unknown }),
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Evaluate JavaScript in preview"),
