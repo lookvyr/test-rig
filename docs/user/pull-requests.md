@@ -36,6 +36,12 @@ in the file tree to see where the changes are. Drag the panel divider to resize
 the review, or expand it to fill the workspace. Browsing does not check out a
 branch or create a thread.
 
+Descriptions render Markdown headings, lists, task lists, tables, and supported
+HTML, including expandable sections. Fenced code blocks with a language such as
+`ts`, `typescript`, or `gherkin` use the same syntax highlighting, copy button,
+and line wrapping as chat. Unknown languages remain readable as plain text.
+Images appear as **View image** links that you can open explicitly.
+
 **Diff** and **Activity** are coming soon. Use **Open in GitHub** to view the
 complete diff, commits, comments, and reviews.
 
