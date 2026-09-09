@@ -226,6 +226,28 @@ function buildUserTimelineEntry(text: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("renders turn navigation only when there are multiple user turns", () => {
+    const first = buildUserTimelineEntry("First turn");
+    const second = {
+      ...buildUserTimelineEntry("Second turn"),
+      id: "entry-2",
+      message: {
+        ...buildUserTimelineEntry("Second turn").message,
+        id: MessageId.make("message-2"),
+      },
+    };
+    const multiple = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[first, second]} />,
+    );
+    expect(multiple).toContain('aria-label="Previous turn"');
+    expect(multiple).toContain('aria-label="Next turn"');
+    const single = renderToStaticMarkup(
+      <MessagesTimeline {...buildProps()} timelineEntries={[first]} />,
+    );
+    expect(single).not.toContain('aria-label="Previous turn"');
+    expect(single).not.toContain('aria-label="Next turn"');
+  });
+
   it("uses the larger leading inset only when the top fade is enabled", () => {
     const timelineEntries = [buildUserTimelineEntry("Hello")];
 
@@ -303,6 +325,7 @@ describe("MessagesTimeline", () => {
     const {
       resolveTimelineIsAtEnd,
       resolveTimelineMinimapHasPersistentGutter,
+      resolveTimelineMinimapCurrentIndex,
       resolveTimelineMinimapHeightStyle,
       resolveTimelineMinimapHitStripWidth,
       resolveTimelineMinimapIndexFromPointer,
@@ -359,6 +382,21 @@ describe("MessagesTimeline", () => {
         pointerY: 999,
       }),
     ).toBe(100);
+    expect(resolveTimelineMinimapCurrentIndex({ scrollTop: 100, itemTops: [80, 120, 220] })).toBe(
+      1,
+    );
+    expect(resolveTimelineMinimapCurrentIndex({ scrollTop: 150, itemTops: [80, 120, 220] })).toBe(
+      1,
+    );
+    expect(resolveTimelineMinimapCurrentIndex({ scrollTop: 0, itemTops: [80] })).toBeNull();
+    // A prompt lower in the viewport still belongs to the next turn.
+    expect(resolveTimelineMinimapCurrentIndex({ scrollTop: 500, itemTops: [0, 700, 900] })).toBe(0);
+    // Jumping leaves the selected prompt at the same 24px offset used by scrolling.
+    expect(resolveTimelineMinimapCurrentIndex({ scrollTop: 676, itemTops: [0, 700, 900] })).toBe(1);
+    expect(resolveTimelineMinimapCurrentIndex({ scrollTop: 1000, itemTops: [0, null, 900] })).toBe(
+      2,
+    );
+    expect(resolveTimelineMinimapCurrentIndex({ scrollTop: 0, itemTops: [] })).toBeNull();
     expect(resolveTimelineMinimapHasPersistentGutter(832)).toBe(false);
     expect(resolveTimelineMinimapHasPersistentGutter(863)).toBe(false);
     expect(resolveTimelineMinimapHasPersistentGutter(864)).toBe(true);

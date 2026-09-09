@@ -81,6 +81,21 @@ export function resolveTimelineMinimapIndexFromPointer(input: {
   return Math.max(0, Math.min(input.itemCount - 1, Math.round(progress * (input.itemCount - 1))));
 }
 
+export const TIMELINE_TURN_SCROLL_OFFSET = 24;
+
+export function resolveTimelineMinimapCurrentIndex(input: {
+  readonly scrollTop: number;
+  readonly itemTops: ReadonlyArray<number | null>;
+}): number | null {
+  let currentIndex: number | null = null;
+  for (const [index, top] of input.itemTops.entries()) {
+    if (top === null) continue;
+    if (top > input.scrollTop + TIMELINE_TURN_SCROLL_OFFSET) break;
+    currentIndex = index;
+  }
+  return currentIndex;
+}
+
 export function resolveTimelineMinimapHasPersistentGutter(viewportWidth: number): boolean {
   if (!Number.isFinite(viewportWidth) || viewportWidth <= 0) {
     return false;

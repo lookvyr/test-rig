@@ -14,3 +14,14 @@ shortcut again to restore it directly. If there are several entries or images
 are still being prepared, the shortcut opens the stash menu. You can always open
 that menu from the stash badge, navigate with the arrow keys, and restore with
 Enter. Custom keybindings for the stash action also use this behavior.
+
+## Moving between turns
+
+In a conversation with multiple turns, move the pointer beside the conversation
+minimap to reveal **Previous turn** and **Next turn**. These move from your current
+reading position to the adjacent user message. A control is disabled when there
+is no turn in that direction; **Next turn** also stops at the end of the conversation. You can still select a minimap marker to jump
+directly to a particular turn.
+
+The controls share the minimap's side gutter and appear when there is room beside
+the conversation.

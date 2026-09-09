@@ -62,6 +62,9 @@ at. To keep a worktree, use the explicit "new thread in this worktree" action in
 toolbar. The only difference between the two commands: with the current sidebar and more than one
 project, `chat.new` opens a project chooser first.
 
+`thread.stop` interrupts the running turn in the active conversation. It has no default
+shortcut; assign one in **Settings** → **Keybindings**.
+
 ## Thread and panel shortcuts
 
 - `mod+shift+p` (`thread.pin`) pins or unpins the active thread.

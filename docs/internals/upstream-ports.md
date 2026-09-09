@@ -59,3 +59,17 @@ and `screenshotMarkdown`. Test Rig displays those saved screenshots through its
 existing signed asset API, scoped to generated PNG names and the connected
 message environment. `preview_evaluate` returns an object containing `value` so
 arrays, scalars, objects, and null are valid MCP structured results.
+
+[#10689](https://github.com/pingdotgg/t3code/pull/10689) gives provider sessions a
+full inactivity window after a turn settles. Cleanup uses the newer of the
+runtime binding's last activity and the projected session timestamp, retaining
+the active-turn guard. Tests drive sweep completion with a clock receipt.
+
+[#4308](https://github.com/pingdotgg/t3code/pull/4308) adds the unbound `thread.stop`
+command through the existing interrupt action. Settings lists commands without
+default bindings. The main conversation shortcut yields while a side chat has
+focus.
+
+[#8531](https://github.com/pingdotgg/t3code/pull/8531) adds previous/next turn
+controls to the existing minimap, preserving Test Rig's composer inset and
+virtualized scrolling.

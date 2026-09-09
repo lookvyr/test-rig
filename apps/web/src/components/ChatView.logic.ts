@@ -125,6 +125,15 @@ export function shouldWriteThreadErrorToCurrentServerThread(input: {
   );
 }
 
+export function buildRunningThreadTurnInterruptInput(
+  thread: Pick<Thread, "id" | "session"> | null | undefined,
+): { threadId: ThreadId; turnId?: TurnId } | null {
+  if (thread?.session?.status !== "running") {
+    return null;
+  }
+  return buildThreadTurnInterruptInput(thread);
+}
+
 export function buildThreadTurnInterruptInput(thread: Pick<Thread, "id" | "session">): {
   threadId: ThreadId;
   turnId?: TurnId;

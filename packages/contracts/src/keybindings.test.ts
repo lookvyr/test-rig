@@ -101,6 +101,13 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedModelPickerJump.command, "modelPicker.jump.1");
 
+    const parsedStop = yield* decode(KeybindingRule, {
+      key: "mod+escape",
+      command: "thread.stop",
+      when: "!terminalFocus",
+    });
+    assert.strictEqual(parsedStop.command, "thread.stop");
+
     const parsedThreadPrevious = yield* decode(KeybindingRule, {
       key: "mod+shift+[",
       command: "thread.previous",
