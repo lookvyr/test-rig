@@ -1,5 +1,14 @@
 # Browser
 
+Enter a website address or search terms in the browser's address bar, then press
+Enter. Search terms open Google results in the current tab. Searches are sent
+only when you submit them; typing does not request search suggestions.
+
+Addresses such as `example.com` and `localhost:3000` open directly. For a
+single-word internal hostname, include `http://` or `https://` to distinguish it
+from a search. Invalid addresses show an error and remain in the address bar so
+you can correct them.
+
 In the desktop app, right-click inside a browser tab to open its native context
 menu. Cut, Copy, Paste, and Select All are available when the clicked page allows
 them. The menu also offers Copy Link for supported links, Copy Image for images,

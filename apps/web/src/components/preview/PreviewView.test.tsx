@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
   rememberPreviewUrl: vi.fn(),
   readPreparedConnection: vi.fn(() => ({ httpBaseUrl: "http://172.25.85.75:3773" })),
-  submittedUrl: null as ((url: string) => void) | null,
+  submittedUrl: null as ((url: string) => boolean) | null,
+  toast: vi.fn(),
+  activeTabId: "tab-1" as string | null,
+  openSession: vi.fn(),
   emptyStateUrl: null as ((url: string) => void) | null,
   togglePictureInPicture: null as (() => void) | null,
   toggleNativePictureInPicture: null as (() => void) | null,
@@ -52,7 +55,7 @@ vi.mock("~/previewStateStore", () => ({
   rememberPreviewUrl: mocks.rememberPreviewUrl,
   updatePreviewServerSnapshot: vi.fn(),
   useThreadPreviewState: () => ({
-    activeTabId: "tab-1",
+    activeTabId: mocks.activeTabId,
     desktopByTabId: {
       "tab-1": {
         hasWebContents: true,
@@ -147,7 +150,7 @@ vi.mock("~/rightPanelStore", () => ({
 
 vi.mock("~/components/ui/toast", () => ({
   stackedThreadToast: vi.fn(),
-  toastManager: { add: vi.fn() },
+  toastManager: { add: mocks.toast },
 }));
 
 vi.mock("./previewBridge", () => ({
@@ -163,7 +166,7 @@ vi.mock("./previewBridge", () => ({
 
 vi.mock("./PreviewChromeRow", () => ({
   PreviewChromeRow: (props: {
-    onSubmit: (url: string) => void;
+    onSubmit: (url: string) => boolean;
     onPickElement?: () => void;
     onPictureInPicture?: () => void;
     pictureInPicture?: boolean;
@@ -199,6 +202,7 @@ vi.mock("./AgentBrowserCursor", () => ({ AgentBrowserCursor: () => null }));
 vi.mock("~/browser/BrowserSurfaceSlot", () => ({ BrowserSurfaceSlot: () => null }));
 vi.mock("./useLoadingProgress", () => ({ useLoadingProgress: () => 0 }));
 vi.mock("./usePreviewSession", () => ({ usePreviewSession: vi.fn() }));
+vi.mock("./openPreviewSession", () => ({ openPreviewSession: mocks.openSession }));
 
 import { PreviewView } from "./PreviewView";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
@@ -215,6 +219,9 @@ describe("PreviewView navigation", () => {
     mocks.rememberPreviewUrl.mockClear();
     mocks.readPreparedConnection.mockClear();
     mocks.submittedUrl = null;
+    mocks.toast.mockClear();
+    mocks.activeTabId = "tab-1";
+    mocks.openSession.mockReset();
     mocks.emptyStateUrl = null;
     mocks.togglePictureInPicture = null;
     mocks.toggleNativePictureInPicture = null;
@@ -232,6 +239,54 @@ describe("PreviewView navigation", () => {
     mocks.toggleAnnotation = null;
     mocks.pictureInPicture = false;
     mocks.showEmptyState = false;
+  });
+
+  it("submits search terms to the active browser tab", async () => {
+    renderToStaticMarkup(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);
+
+    expect(mocks.submittedUrl?.("responsive design examples")).toBe(true);
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      TEST_RUNTIME_TAB_ID,
+      "https://www.google.com/search?q=responsive+design+examples",
+    );
+  });
+
+  it("keeps invalid input editable and reports an error without navigating", () => {
+    renderToStaticMarkup(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);
+
+    expect(mocks.submittedUrl?.("https://example.com:bad/private?token=secret")).toBe(false);
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(mocks.toast).toHaveBeenCalledWith({
+      type: "error",
+      title: "Unable to open address",
+      description: "Check the URL. Only http:// and https:// addresses are supported.",
+    });
+  });
+
+  it("leaves desktop load failures to navigation state, avoiding false errors on abort", async () => {
+    const failure = new Error("ERR_ABORTED");
+    mocks.navigate.mockRejectedValueOnce(failure);
+    renderToStaticMarkup(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);
+
+    expect(mocks.submittedUrl?.("example.com")).toBe(true);
+    await mocks.navigate.mock.results[0]?.value.catch(() => undefined);
+    await Promise.resolve();
+    expect(mocks.toast).not.toHaveBeenCalled();
+  });
+
+  it("reports a failure to open the initial browser session", async () => {
+    mocks.activeTabId = null;
+    mocks.openSession.mockRejectedValueOnce(new Error("Browser unavailable"));
+    renderToStaticMarkup(<PreviewView threadRef={TEST_THREAD_REF} visible />);
+
+    expect(mocks.submittedUrl?.("example.com")).toBe(true);
+    await vi.waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith({
+        type: "error",
+        title: "Unable to load page",
+        description: "Check the address and your connection, then try again.",
+      }),
+    );
   });
 
   it.each([

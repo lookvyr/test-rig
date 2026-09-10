@@ -8,7 +8,6 @@ import {
   type PreviewViewportSetting,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { type ComposerImageAttachment, useComposerDraftStore } from "~/composerDraftStore";
@@ -29,6 +28,7 @@ import { previewBridge } from "./previewBridge";
 import { subscribePreviewAction } from "./previewActionBus";
 import { openPreviewSession } from "./openPreviewSession";
 import { PreviewChromeRow } from "./PreviewChromeRow";
+import { resolvePreviewAddress } from "./previewAddress";
 import { PreviewEmptyState } from "./PreviewEmptyState";
 import { PreviewMoreMenu } from "./PreviewMoreMenu";
 import {
@@ -136,25 +136,42 @@ export function PreviewView({
         await previewBridge.navigate(runtimeTabId, resolvedUrl);
         rememberPreviewUrl(threadRef, resolvedUrl);
       } else {
-        await openPreviewSession({
+        const result = await openPreviewSession({
           openPreview: open,
           threadRef,
           url: resolvedUrl,
         });
+        if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       }
     },
     [open, runtimeTabId, threadRef],
   );
 
   const handleSubmitUrl = useCallback(
-    async (next: string) => {
+    (next: string) => {
+      let resolvedUrl: string;
       try {
-        await navigateToResolvedUrl(normalizePreviewUrl(next));
+        resolvedUrl = resolvePreviewAddress(next);
       } catch {
-        // Server-side `failed` event renders the unreachable view.
+        toastManager.add({
+          type: "error",
+          title: "Unable to open address",
+          description: "Check the URL. Only http:// and https:// addresses are supported.",
+        });
+        return false;
       }
+      void navigateToResolvedUrl(resolvedUrl).catch(() => {
+        // Desktop navigation state presents load failures and ignores aborted loads.
+        if (runtimeTabId && previewBridge) return;
+        toastManager.add({
+          type: "error",
+          title: "Unable to load page",
+          description: "Check the address and your connection, then try again.",
+        });
+      });
+      return true;
     },
-    [navigateToResolvedUrl],
+    [navigateToResolvedUrl, runtimeTabId],
   );
 
   const handleOpenServerUrl = useCallback(
@@ -633,7 +650,7 @@ export function PreviewView({
         onBack={handleBack}
         onForward={handleForward}
         onRefresh={handleRefresh}
-        onSubmit={(next) => void handleSubmitUrl(next)}
+        onSubmit={handleSubmitUrl}
         onOpenInBrowser={tabId ? handleOpenInBrowser : undefined}
         onCapture={previewBridge && tabId ? handleCapture : undefined}
         captureDisabled={!desktopOverlay || isUnreachable}

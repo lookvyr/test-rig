@@ -34,7 +34,8 @@ interface Props {
   onBack: () => void;
   onForward: () => void;
   onRefresh: () => void;
-  onSubmit: (url: string) => void;
+  /** Return false to keep invalid input focused for correction. */
+  onSubmit: (input: string) => boolean;
   /** When provided, renders an "Open in browser" affordance to the right. */
   onOpenInBrowser?: (() => void) | undefined;
   onCapture?: ((record: boolean) => void) | undefined;
@@ -103,8 +104,7 @@ export function PreviewChromeRow({
     event?.preventDefault();
     const next = draft.trim();
     if (next.length === 0) return;
-    onSubmit(next);
-    inputRef.current?.blur();
+    if (onSubmit(next)) inputRef.current?.blur();
   };
 
   return (
@@ -193,7 +193,8 @@ export function PreviewChromeRow({
                       inputRef.current?.blur();
                     }
                   }}
-                  placeholder="Search or enter URL"
+                  aria-label="Search Google or enter URL"
+                  placeholder="Search Google or enter URL"
                   spellCheck={false}
                   disabled={inputDisabled}
                   data-preview-url-input
