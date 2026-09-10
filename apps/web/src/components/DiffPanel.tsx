@@ -63,7 +63,6 @@ import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./Dif
 import { DiffStatLabel } from "./chat/DiffStatLabel";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { Button } from "./ui/button";
-import { toastManager } from "./ui/toast";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
 import {
@@ -514,6 +513,18 @@ export default function DiffPanel({
         })
       : null,
   );
+  const unstagedFilesPreview = useEnvironmentQuery(
+    !isTurnScope && selectedGitScope === "working-tree" && activeThread && activeCwd
+      ? reviewEnvironment.diffPreview({
+          environmentId: activeThread.environmentId,
+          input: { cwd: activeCwd, sourceKind: "unstaged", includePatch: false },
+        })
+      : null,
+  );
+  const nothingToStage =
+    unstagedFilesPreview.error === null &&
+    unstagedFilesPreview.data?.sources.find((source) => source.kind === "unstaged")?.files
+      ?.length === 0;
   const branchDiffPreview = useEnvironmentQuery(
     !isTurnScope && activeThread && activeCwd
       ? reviewEnvironment.diffPreview({
@@ -716,10 +727,12 @@ export default function DiffPanel({
   const refreshBranchDiffPreview = useCallback(() => {
     branchDiffPreview.refresh();
     stagedFilesPreview.refresh();
+    unstagedFilesPreview.refresh();
     if (singleFileMode) fileDiffPreview.refresh();
   }, [
     branchDiffPreview.refresh,
     stagedFilesPreview.refresh,
+    unstagedFilesPreview.refresh,
     fileDiffPreview.refresh,
     singleFileMode,
   ]);
@@ -936,15 +949,6 @@ export default function DiffPanel({
       if (result._tag !== "Success") throw squashAtomCommandFailure(result);
       refreshBranchDiffPreview();
       gitStatusQuery.refresh();
-      toastManager.add({
-        type: "success",
-        title: `${staged ? "Staged" : "Unstaged"} ${files.length} ${files.length === 1 ? "file" : "files"}`,
-        description:
-          staged && selectedGitScope === "working-tree"
-            ? "Uncommitted shows both staged and unstaged changes."
-            : undefined,
-        data: { threadRef: routeThreadRef },
-      });
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Unable to update staged files.");
     } finally {
@@ -1411,16 +1415,29 @@ export default function DiffPanel({
             </div>
             <div className="flex items-center gap-1">
               {canStageFiles && (
-                <>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    disabled={staging || isGitActionRunning}
-                    onClick={() => void stageFiles(reviewFiles, selectedGitScope !== "staged")}
+                <Tooltip disabled={!nothingToStage}>
+                  <TooltipTrigger
+                    closeOnClick={false}
+                    render={
+                      <span className="inline-flex" tabIndex={nothingToStage ? 0 : undefined} />
+                    }
                   >
-                    {selectedGitScope === "staged" ? "Unstage all" : "Stage all"}
-                  </Button>
-                </>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      disabled={
+                        staging ||
+                        isGitActionRunning ||
+                        unstagedFilesPreview.isPending ||
+                        nothingToStage
+                      }
+                      onClick={() => void stageFiles(reviewFiles, selectedGitScope !== "staged")}
+                    >
+                      {selectedGitScope === "staged" ? "Unstage all" : "Stage all"}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipPopup>All changes are staged. Nothing left to stage.</TooltipPopup>
+                </Tooltip>
               )}
               <Button
                 size="icon-sm"
