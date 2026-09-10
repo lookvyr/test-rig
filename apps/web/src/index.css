@@ -1477,6 +1477,11 @@ code {
   -webkit-app-region: no-drag;
 }
 
+/* Native drag regions swallow outside clicks that should dismiss an open menu. */
+body:has([data-slot="menu-popup"][data-open]) .drag-region {
+  -webkit-app-region: no-drag;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: var(--app-scrollbar-width);
