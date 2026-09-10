@@ -892,6 +892,39 @@ describe("plus key parsing", () => {
 
 describe("thread and panel default shortcuts", () => {
   for (const platform of ["MacIntel", "Linux"]) {
+    it(`opens browser tabs from chat, browser, or terminal focus on ${platform}`, () => {
+      const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
+      const shortcut = event({ ...modifier, key: "t" });
+      for (const context of [{}, { previewFocus: true }, { terminalFocus: true }]) {
+        assert.strictEqual(
+          resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
+          "preview.new",
+        );
+      }
+      const overridden: ResolvedKeybindingsConfig = [
+        ...DEFAULT_RESOLVED_KEYBINDINGS,
+        {
+          command: "terminal.new",
+          shortcut: modShortcut("t"),
+          whenAst: whenIdentifier("terminalFocus"),
+        },
+      ];
+      assert.strictEqual(
+        resolveShortcutCommand(shortcut, overridden, {
+          platform,
+          context: { terminalFocus: true },
+        }),
+        "terminal.new",
+      );
+      assert.strictEqual(
+        resolveShortcutCommand(shortcut, overridden, {
+          platform,
+          context: { terminalFocus: false },
+        }),
+        "preview.new",
+      );
+    });
+
     it(`respects terminal focus on ${platform}`, () => {
       const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
       for (const [key, command] of [

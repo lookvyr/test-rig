@@ -121,6 +121,9 @@ export function PreviewView({
   const refreshDisabled = navStatus._tag === "Idle";
   const isUnreachable = navStatus._tag === "LoadFailed";
   const showEmptyState = shouldShowPreviewEmptyState(snapshot);
+  useEffect(() => {
+    if (visible && showEmptyState) setFocusUrlNonce((value) => (value ?? 0) + 1);
+  }, [visible, showEmptyState, tabId]);
   const controller = desktopOverlay?.controller ?? "none";
   const loadProgress = useLoadingProgress(loading);
   const viewport = snapshot?.viewport ?? FILL_PREVIEW_VIEWPORT;

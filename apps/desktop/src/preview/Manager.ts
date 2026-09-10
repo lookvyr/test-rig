@@ -400,19 +400,27 @@ interface ExpectedAgentInput {
 
 const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
   key: string;
-  meta: boolean;
   shift: boolean;
-  control: boolean;
 }> = Object.freeze([
   // mod+shift+J → preview.toggle
-  { key: "j", meta: true, shift: true, control: false },
+  { key: "j", shift: true },
   // mod+K → command palette
-  { key: "k", meta: true, shift: false, control: false },
+  { key: "k", shift: false },
   // mod+, → settings (macOS convention)
-  { key: ",", meta: true, shift: false, control: false },
+  { key: ",", shift: false },
   // mod+W → close tab/panel
-  { key: "w", meta: true, shift: false, control: false },
+  { key: "w", shift: false },
+  // mod+T → new browser tab
+  { key: "t", shift: false },
 ]);
+
+export const isPreviewAppShortcut = (input: Electron.Input, platform: NodeJS.Platform): boolean =>
+  input.type === "keyDown" &&
+  !input.alt &&
+  (platform === "darwin" ? input.meta && !input.control : input.control && !input.meta) &&
+  APP_FORWARDED_SHORTCUTS.some(
+    (shortcut) => shortcut.key === input.key.toLowerCase() && shortcut.shift === input.shift,
+  );
 
 export const isPreviewRefreshShortcut = (input: Electron.Input): boolean =>
   input.type === "keyDown" &&
@@ -1216,16 +1224,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     if (managed) yield* Scope.close(managed.scope, Exit.void).pipe(Effect.ignore);
   });
 
-  const isAppShortcut = (input: Electron.Input): boolean =>
-    input.type === "keyDown" &&
-    APP_FORWARDED_SHORTCUTS.some(
-      (shortcut) =>
-        shortcut.key.toLowerCase() === input.key.toLowerCase() &&
-        shortcut.meta === input.meta &&
-        shortcut.shift === input.shift &&
-        shortcut.control === input.control,
-    );
-
   const computeNavStatus = (wc: Electron.WebContents): PreviewNavStatus => {
     const url = wc.getURL();
     const title = wc.getTitle();
@@ -1366,7 +1364,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       input: Electron.Input,
     ) {
       const mainWindow = yield* Ref.get(mainWindowRef);
-      if (!isAppShortcut(input) || Option.isNone(mainWindow) || mainWindow.value.isDestroyed()) {
+      if (
+        !isPreviewAppShortcut(input, hostPlatform) ||
+        Option.isNone(mainWindow) ||
+        mainWindow.value.isDestroyed()
+      ) {
         return;
       }
       event.preventDefault();
@@ -1378,6 +1380,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           ...(input.shift ? (["shift"] as const) : []),
           ...(input.control ? (["control"] as const) : []),
           ...(input.alt ? (["alt"] as const) : []),
+          ...(input.isAutoRepeat ? (["isautorepeat"] as const) : []),
         ],
       });
     });

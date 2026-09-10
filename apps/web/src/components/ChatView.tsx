@@ -3059,7 +3059,18 @@ function ChatViewContent(props: ChatViewProps) {
   }, [handleInteractionModeChange, interactionMode]);
   const createBrowserSurface = useCallback(() => {
     if (!activeThreadRef) return;
-    void addBrowserSurface({ threadRef: activeThreadRef, openPreview });
+    if (!isPreviewSupportedInRuntime()) {
+      toastManager.add({
+        type: "info",
+        title: "Browser is desktop-only",
+        description: "Open Test Rig in the desktop app to use the integrated browser.",
+      });
+      return;
+    }
+    void addBrowserSurface({ threadRef: activeThreadRef, openPreview }).then((result) => {
+      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+      toastManager.add({ type: "error", title: "Unable to open browser tab" });
+    });
   }, [activeThreadRef, openPreview]);
   const addDiffSurface = useCallback(() => {
     if (!activeThreadRef || !isServerThread || !isGitRepo) return;
@@ -4495,6 +4506,13 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (command === "preview.new") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) createBrowserSurface();
+        return;
+      }
+
       if (command === "rightPanel.close") {
         if (!activeRightPanelSurface) return;
         event.preventDefault();
@@ -4620,6 +4638,7 @@ function ChatViewContent(props: ChatViewProps) {
     closeTerminal,
     closePanelTerminal,
     createNewTerminal,
+    createBrowserSurface,
     setTerminalOpen,
     runProjectScript,
     splitTerminal,
