@@ -9,6 +9,7 @@ import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,
   GitStackedAction,
+  ReviewDiffFile,
   SourceControlCloneProtocol,
   SourceControlProviderDiscoveryItem,
   SourceControlProviderKind,
@@ -101,6 +102,9 @@ interface GitActionsControlProps {
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
+  stagedOnly?: boolean;
+  stagedFiles?: readonly ReviewDiffFile[] | undefined;
+  onActionComplete?: () => void;
 }
 
 interface PendingDefaultBranchAction {
@@ -294,7 +298,7 @@ function getMenuActionDisabledReason({
 
   if (item.id === "push") {
     if (!hasBranch) {
-      return "Detached HEAD: checkout a refName before pushing.";
+      return "Detached HEAD: checkout a branch before pushing.";
     }
     if (hasChanges) {
       return "Commit or stash local changes before pushing.";
@@ -315,7 +319,7 @@ function getMenuActionDisabledReason({
     return `View ${terminology.singular} is currently unavailable.`;
   }
   if (!hasBranch) {
-    return `Detached HEAD: checkout a refName before creating a ${terminology.singular}.`;
+    return `Detached HEAD: checkout a branch before creating a ${terminology.singular}.`;
   }
   if (hasChanges) {
     return `Commit local changes before creating a ${terminology.singular}.`;
@@ -995,6 +999,9 @@ export default function GitActionsControl({
   gitCwd,
   activeThreadRef,
   draftId,
+  stagedOnly = false,
+  stagedFiles,
+  onActionComplete,
 }: GitActionsControlProps) {
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
@@ -1132,7 +1139,25 @@ export default function GitActionsControl({
   // Default to true while loading so we don't flash init controls.
   const isRepo = gitStatus?.isRepo ?? true;
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
-  const gitStatusForActions = gitStatus;
+  const gitStatusForActions = useMemo(
+    () =>
+      gitStatus && stagedOnly
+        ? {
+            ...gitStatus,
+            hasWorkingTreeChanges: (stagedFiles?.length ?? 0) > 0,
+            workingTree: {
+              files: (stagedFiles ?? []).map((file) => ({
+                path: file.path,
+                insertions: file.additions,
+                deletions: file.deletions,
+              })),
+              insertions: (stagedFiles ?? []).reduce((sum, file) => sum + file.additions, 0),
+              deletions: (stagedFiles ?? []).reduce((sum, file) => sum + file.deletions, 0),
+            },
+          }
+        : gitStatus,
+    [gitStatus, stagedOnly, stagedFiles],
+  );
 
   const allFiles = gitStatusForActions?.workingTree.files ?? [];
   const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
@@ -1188,21 +1213,49 @@ export default function GitActionsControl({
       ),
     [activeSourceControlProviderEnabled, gitStatusForActions, hasPrimaryRemote, isGitActionRunning],
   );
-  const quickAction = useMemo(
-    () =>
-      resolveQuickAction(gitStatusForActions, isGitActionRunning, isDefaultRef, hasPrimaryRemote, {
+  const quickAction = useMemo(() => {
+    if (stagedOnly && (allFiles.length > 0 || !gitStatusForActions?.aheadCount)) {
+      return {
+        label:
+          allFiles.length > 0
+            ? `Commit ${allFiles.length} ${allFiles.length === 1 ? "file" : "files"}`
+            : "Commit",
+        disabled: isGitActionRunning || allFiles.length === 0,
+        kind: "run_action",
+        action: "commit",
+        ...(allFiles.length === 0 ? { hint: "Stage files to commit them." } : {}),
+      } satisfies GitQuickAction;
+    }
+    if (stagedOnly) {
+      const pushItem = gitActionMenuItems.find((item) => item.id === "push");
+      return {
+        label: "Push",
+        disabled: !pushItem || pushItem.disabled,
+        kind: "run_action",
+        action: "push",
+      } satisfies GitQuickAction;
+    }
+    return resolveQuickAction(
+      gitStatusForActions,
+      isGitActionRunning,
+      isDefaultRef,
+      hasPrimaryRemote,
+      {
         changeRequestsEnabled: activeSourceControlProviderEnabled,
         publishEnabled: hasEnabledSourceControlProvider,
-      }),
-    [
-      activeSourceControlProviderEnabled,
-      gitStatusForActions,
-      hasEnabledSourceControlProvider,
-      hasPrimaryRemote,
-      isDefaultRef,
-      isGitActionRunning,
-    ],
-  );
+      },
+    );
+  }, [
+    activeSourceControlProviderEnabled,
+    gitStatusForActions,
+    hasEnabledSourceControlProvider,
+    hasPrimaryRemote,
+    isDefaultRef,
+    isGitActionRunning,
+    stagedOnly,
+    allFiles.length,
+    gitActionMenuItems,
+  ]);
   const quickActionDisabledReason = quickAction.disabled
     ? (quickAction.hint ?? "This action is currently unavailable.")
     : null;
@@ -1443,6 +1496,7 @@ export default function GitActionsControl({
         ...(commitMessage ? { commitMessage } : {}),
         ...(featureBranch ? { featureBranch } : {}),
         ...(filePaths ? { filePaths } : {}),
+        ...(stagedOnly ? { stagedOnly: true } : {}),
         onProgress: applyProgressEvent,
       });
 
@@ -1467,6 +1521,7 @@ export default function GitActionsControl({
       }
 
       const actionResult = result.value;
+      onActionComplete?.();
       syncThreadBranchAfterGitAction(actionResult);
       const closeResultToast = () => {
         toastManager.close(resolvedProgressToastId);
@@ -1574,6 +1629,10 @@ export default function GitActionsControl({
   };
 
   const runQuickAction = () => {
+    if (stagedOnly && quickAction.action === "commit") {
+      setIsCommitDialogOpen(true);
+      return;
+    }
     if (quickAction.kind === "open_pr") {
       void openExistingPr();
       return;
@@ -1753,7 +1812,13 @@ export default function GitActionsControl({
                   quickAction={quickAction}
                   SourceControlIcon={SourceControlIcon}
                 />
-                <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+                <span
+                  className={
+                    stagedOnly
+                      ? "ml-0.5"
+                      : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
+                  }
+                >
                   {quickAction.label}
                 </span>
               </PopoverTrigger>
@@ -1770,7 +1835,13 @@ export default function GitActionsControl({
               onClick={runQuickAction}
             >
               <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
-              <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+              <span
+                className={
+                  stagedOnly
+                    ? "ml-0.5"
+                    : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
+                }
+              >
                 {quickAction.label}
               </span>
             </Button>
@@ -1846,7 +1917,7 @@ export default function GitActionsControl({
               ) : null}
               {gitStatusForActions?.refName === null && (
                 <p className="px-2 py-1.5 text-xs text-warning">
-                  Detached HEAD: create and checkout a refName to enable push and pull request
+                  Detached HEAD: create and checkout a branch to enable push and pull request
                   actions.
                 </p>
               )}
@@ -1881,7 +1952,11 @@ export default function GitActionsControl({
         <DialogPopup>
           <DialogHeader>
             <DialogTitle>{COMMIT_DIALOG_TITLE}</DialogTitle>
-            <DialogDescription>{COMMIT_DIALOG_DESCRIPTION}</DialogDescription>
+            <DialogDescription>
+              {stagedOnly
+                ? "Commit the staged changes. Leave the message blank to auto-generate one."
+                : COMMIT_DIALOG_DESCRIPTION}
+            </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-4">
             <div className="space-y-3 rounded-xl bg-zinc-25 p-3 text-sm ring-1 ring-black/5 dark:bg-white/[0.035] dark:ring-white/5">
@@ -1892,7 +1967,7 @@ export default function GitActionsControl({
                     {gitStatusForActions?.refName ?? "(detached HEAD)"}
                   </span>
                   {isDefaultRef && (
-                    <span className="text-right text-warning">Warning: default refName</span>
+                    <span className="text-right text-warning">Warning: default branch</span>
                   )}
                 </span>
               </div>
@@ -1910,14 +1985,16 @@ export default function GitActionsControl({
                         }}
                       />
                     )}
-                    <span className="text-muted-foreground">Files</span>
+                    <span className="text-muted-foreground">
+                      {stagedOnly ? "Staged files" : "Files"}
+                    </span>
                     {!allSelected && !isEditingFiles && (
                       <span className="text-muted-foreground">
                         ({selectedFiles.length} of {allFiles.length})
                       </span>
                     )}
                   </div>
-                  {allFiles.length > 0 && (
+                  {!stagedOnly && allFiles.length > 0 && (
                     <Button
                       variant="ghost"
                       size="xs"
@@ -2024,7 +2101,7 @@ export default function GitActionsControl({
               disabled={noneSelected}
               onClick={runDialogActionOnNewBranch}
             >
-              Commit on new refName
+              Commit on new branch
             </Button>
             <Button size="sm" disabled={noneSelected} onClick={runDialogAction}>
               Commit
@@ -2052,7 +2129,7 @@ export default function GitActionsControl({
         <DialogPopup className="max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {pendingDefaultBranchActionCopy?.title ?? "Run action on default refName?"}
+              {pendingDefaultBranchActionCopy?.title ?? "Run action on default branch?"}
             </DialogTitle>
             <DialogDescription>{pendingDefaultBranchActionCopy?.description}</DialogDescription>
           </DialogHeader>

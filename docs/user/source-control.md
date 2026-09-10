@@ -47,7 +47,24 @@ After a turn finishes on a feature branch, Test Rig checks again for a newly cre
 
 ## Refreshing workspace views
 
-Working tree and Branch changes use the selected thread's checkout, including projects stored outside the folder where Test Rig was built or started. Working tree includes staged, unstaged, and untracked files that Git does not ignore; Branch changes compares committed changes against the selected base branch.
+The review panel uses the selected thread's checkout, including projects stored outside the folder where Test Rig was built or started. Its header identifies the project and current branch.
+
+Choose the changes to inspect:
+
+- **Uncommitted** combines staged, unstaged, and untracked files that Git does not ignore.
+- **Unstaged** compares the working files with the Git index, including untracked files.
+- **Staged** shows exactly what is currently in the Git index.
+- **Branch** compares committed changes with the merge base of a branch you choose. You can choose a base even when automatic detection cannot find one.
+- **Committed** shows a selected commit. Choose from recent commits or enter a commit SHA or ref. Merge commits compare against their first parent.
+- **Latest turn** follows the newest completed turn. **Turn** keeps a particular turn selected. Turn reviews compare checkpoint snapshots; they are not a claim that every change was authored by the agent.
+
+Use **Show changed files** to search paths and navigate the changed-file tree. The tree stays beside the diff in a wide panel and opens over it in a narrow panel. Arrow keys browse files; Enter opens the selected file and closes the narrow file list. Previous/next controls also move between files. Selecting a collapsed file expands it.
+
+Small reviews show a continuous diff. Large Git reviews show one file at a time while keeping the complete changed-file list available. A file that exceeds the preview limit is marked individually. Split/stacked views, line wrapping, whitespace filtering, syntax colors, and line comments remain available.
+
+Use **Stage** or **Unstage** beside a file to change its index state. **Stage all** and **Unstage all** apply to the files in the current review scope. Staging a file includes all its current changes; hunk selection is not available here.
+
+The review header's **Commit** action commits only staged changes. Its confirmation lists the staged files, and later unstaged edits in those files remain untouched. This differs from the general chat Git menu, which still offers its existing file-selection workflow. After committing, **Push** sends existing commits to the configured remote.
 
 The Files panel and current workspace diff refresh after the active thread finishes a turn. Refreshes keep the file tree's expanded folders and the diff's scroll position and collapsed files. The Files refresh button also reloads the open text file. Pending edits in the file editor remain protected while a refresh runs.
 

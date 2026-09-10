@@ -138,8 +138,8 @@ function RightPanelEmptyState(props: {
       onClick: props.onAddFiles,
     },
     {
-      label: "Diff",
-      description: "Review changes in this thread.",
+      label: "Review",
+      description: "Review Git changes and turn snapshots.",
       icon: FileDiff,
       available: props.diffAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.diff,
@@ -242,7 +242,7 @@ function surfaceTitle(
 ): string {
   switch (surface.kind) {
     case "diff":
-      return "Diff";
+      return "Review";
     case "files":
       return "Files";
     case "file":

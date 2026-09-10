@@ -588,9 +588,14 @@ describe("vcsActionState", () => {
           successfulActionId,
         );
         const failedTransportActionId = createVcsActionTransportId(targetKey, failedActionId);
+        const stagedOnlyRequests: Array<boolean | undefined> = [];
         const client = {
-          [WS_METHODS.gitRunStackedAction]: (input: { readonly actionId: string }) =>
-            input.actionId === successfulTransportActionId
+          [WS_METHODS.gitRunStackedAction]: (input: {
+            readonly actionId: string;
+            readonly stagedOnly?: boolean;
+          }) => {
+            stagedOnlyRequests.push(input.stagedOnly);
+            return input.actionId === successfulTransportActionId
               ? Stream.make(
                   progress({
                     kind: "action_finished",
@@ -609,7 +614,8 @@ describe("vcsActionState", () => {
                     phase: "push",
                     message: "push failed after creating the branch",
                   }),
-                ),
+                );
+          },
         } as unknown as WsRpcProtocolClient;
         const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
           target,
@@ -655,6 +661,7 @@ describe("vcsActionState", () => {
           manager.runStackedAction(targetKey).run(registry, {
             actionId: successfulActionId,
             action,
+            stagedOnly: true,
           }),
         );
 
@@ -672,6 +679,7 @@ describe("vcsActionState", () => {
         expect(AsyncResult.isFailure(failedResult)).toBe(true);
         expect(registry.get(state).revision).toBe(2);
         expect(removed).toEqual([`${environmentId}:*`, `${environmentId}:*`]);
+        expect(stagedOnlyRequests).toEqual([true, undefined]);
       }),
     ),
   );

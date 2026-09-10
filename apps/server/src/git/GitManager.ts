@@ -1566,9 +1566,14 @@ export const make = Effect.gen(function* () {
       /** When true, also produce a semantic feature branch name. */
       includeBranch?: boolean;
       filePaths?: readonly string[];
+      stagedOnly?: boolean;
       settings: SourceControlTextGenerationSettings;
     }) {
-      const context = yield* gitCore.prepareCommitContext(input.cwd, input.filePaths);
+      const context = yield* gitCore.prepareCommitContext(
+        input.cwd,
+        input.filePaths,
+        input.stagedOnly,
+      );
       if (!context) {
         return null;
       }
@@ -1618,6 +1623,7 @@ export const make = Effect.gen(function* () {
     filePaths?: readonly string[],
     progressReporter?: GitActionProgressReporter,
     actionId?: string,
+    stagedOnly?: boolean,
   ) {
     const emit = (event: GitActionProgressPayload) =>
       progressReporter && actionId
@@ -1644,6 +1650,7 @@ export const make = Effect.gen(function* () {
         branch,
         ...(commitMessage ? { commitMessage } : {}),
         ...(filePaths ? { filePaths } : {}),
+        ...(stagedOnly ? { stagedOnly } : {}),
         settings,
       });
     }
@@ -2073,12 +2080,14 @@ export const make = Effect.gen(function* () {
     branch: string | null,
     commitMessage?: string,
     filePaths?: readonly string[],
+    stagedOnly?: boolean,
   ) {
     const suggestion = yield* resolveCommitAndBranchSuggestion({
       cwd,
       branch,
       ...(commitMessage ? { commitMessage } : {}),
       ...(filePaths ? { filePaths } : {}),
+      ...(stagedOnly ? { stagedOnly } : {}),
       includeBranch: true,
       settings,
     });
@@ -2221,6 +2230,7 @@ export const make = Effect.gen(function* () {
             initialStatus.branch,
             input.commitMessage,
             input.filePaths,
+            input.stagedOnly,
           );
           branchStep = result.branchStep;
           commitMessageForStep = result.resolvedCommitMessage;
@@ -2251,6 +2261,7 @@ export const make = Effect.gen(function* () {
                   input.filePaths,
                   options?.progressReporter,
                   progress.actionId,
+                  input.stagedOnly,
                 ),
               ),
             )

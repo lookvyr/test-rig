@@ -4,12 +4,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import {
+  GitCommandError,
   VcsUnsupportedOperationError,
   type ReviewDiffFileContentsInput,
   type ReviewDiffFileContentsResult,
   type ReviewDiffPreviewError,
   type ReviewDiffPreviewInput,
   type ReviewDiffPreviewResult,
+  type ReviewSetFilesStagedInput,
 } from "@t3tools/contracts";
 
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -24,6 +26,9 @@ export class ReviewService extends Context.Service<
     readonly getDiffFileContents: (
       input: ReviewDiffFileContentsInput,
     ) => Effect.Effect<ReviewDiffFileContentsResult, ReviewDiffPreviewError>;
+    readonly setFilesStaged: (
+      input: ReviewSetFilesStagedInput,
+    ) => Effect.Effect<void, ReviewDiffPreviewError>;
   }
 >()("t3/review/ReviewService") {}
 
@@ -76,9 +81,75 @@ export const make = Effect.gen(function* () {
     return yield* git.getReviewDiffFileContents(input);
   });
 
+  const setFilesStaged: ReviewService["Service"]["setFilesStaged"] = Effect.fn(
+    "ReviewService.setFilesStaged",
+  )(function* (input) {
+    const operation = "ReviewService.setFilesStaged";
+    const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
+    if (handle?.kind !== "git") {
+      return yield* new VcsUnsupportedOperationError({
+        operation,
+        kind: handle?.kind ?? "unknown",
+        detail: "Staging files requires a Git repository.",
+      });
+    }
+
+    const filePaths = [...new Set(input.filePaths)];
+    if (
+      filePaths.length === 0 ||
+      filePaths.some(
+        (filePath) =>
+          !filePath ||
+          filePath.includes("\0") ||
+          filePath.startsWith("/") ||
+          /^[A-Za-z]:[\\/]/.test(filePath) ||
+          filePath.split("/").some((part) => part === ".." || part === "." || part === ""),
+      )
+    ) {
+      return yield* new GitCommandError({
+        operation,
+        command: "git",
+        cwd: input.cwd,
+        detail: "Select repository-relative file paths to stage or unstage.",
+      });
+    }
+
+    const entries = yield* git.execute({
+      operation,
+      cwd: handle.repository.rootPath,
+      args: [
+        "--literal-pathspecs",
+        ...(input.staged
+          ? ["ls-files", "--cached", "--others", "--exclude-standard", "-z"]
+          : ["diff", "--cached", "--name-only", "--no-renames", "-z"]),
+        "--",
+        ...filePaths,
+      ],
+    });
+    const existing = new Set(entries.stdout.split("\0"));
+    // A previously staged rename no longer has its old path in the index.
+    // Ignore that obsolete path, and never expand a directory selection.
+    const selectedFilePaths = filePaths.filter((filePath) => existing.has(filePath));
+    if (selectedFilePaths.length === 0) return;
+
+    // Reset only changes the index, including before the first commit. Literal
+    // pathspecs preserve filenames containing brackets, stars, or leading colons.
+    yield* git.execute({
+      operation,
+      cwd: handle.repository.rootPath,
+      args: [
+        "--literal-pathspecs",
+        ...(input.staged ? ["add", "-A"] : ["reset", "--quiet"]),
+        "--",
+        ...selectedFilePaths,
+      ],
+    });
+  });
+
   return ReviewService.of({
     getDiffPreview,
     getDiffFileContents,
+    setFilesStaged,
   });
 });
 

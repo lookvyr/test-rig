@@ -35,4 +35,10 @@ describe("RPC authorization scopes", () => {
       );
     }
   });
+
+  it("requires Git operation permission to change staging", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.reviewSetFilesStaged)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
 });

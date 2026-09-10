@@ -595,6 +595,7 @@ function runStackedAction(
     commitMessage?: string;
     featureBranch?: boolean;
     filePaths?: readonly string[];
+    stagedOnly?: boolean;
   },
   options?: Parameters<GitManager.GitManager["Service"]["runStackedAction"]>[1],
 ) {
@@ -2173,6 +2174,46 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(statusStdout).toContain("b.txt");
       expect(statusStdout).not.toContain("a.txt");
     }),
+  );
+
+  it.effect(
+    "commits only the existing index in review mode, including on a new feature branch",
+    () =>
+      Effect.gen(function* () {
+        for (const featureBranch of [false, true]) {
+          const repoDir = yield* makeTempDir("test-rig-staged-commit-");
+          yield* initRepo(repoDir);
+          NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "staged version\n");
+          yield* runGit(repoDir, ["add", "README.md"]);
+          NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "newer unstaged version\n");
+          NodeFS.writeFileSync(NodePath.join(repoDir, "untracked.txt"), "not selected\n");
+          const { manager } = yield* makeManager();
+          const result = yield* runStackedAction(manager, {
+            cwd: repoDir,
+            action: "commit",
+            commitMessage: "Commit reviewed changes",
+            stagedOnly: true,
+            featureBranch,
+          });
+          expect(result.commit.status).toBe("created");
+          expect((yield* runGit(repoDir, ["show", "HEAD:README.md"])).stdout).toBe(
+            "staged version\n",
+          );
+          expect(NodeFS.readFileSync(NodePath.join(repoDir, "README.md"), "utf8")).toBe(
+            "newer unstaged version\n",
+          );
+          expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toContain(
+            "untracked.txt",
+          );
+          const noStagedChanges = yield* runStackedAction(manager, {
+            cwd: repoDir,
+            action: "commit",
+            commitMessage: "Nothing staged",
+            stagedOnly: true,
+          });
+          expect(noStagedChanges.commit.status).toBe("skipped_no_changes");
+        }
+      }),
   );
 
   it.effect("creates feature branch, commits, and pushes with featureBranch option", () =>

@@ -67,6 +67,137 @@ const seedRepositories = Effect.fn("ReviewService.test.seedRepositories")(functi
 
 describe("ReviewService", () => {
   it.effect(
+    "stages selected files and unstages without changing working files or other staged work",
+    () =>
+      Effect.gen(function* () {
+        const { startup, project, baseDir } = yield* makeFixturePaths();
+        yield* Effect.gen(function* () {
+          yield* seedRepositories(startup, project);
+          const review = yield* ReviewService.ReviewService;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          yield* review.setFilesStaged({ cwd: project, filePaths: ["tracked.txt"], staged: true });
+          assert.equal(
+            (yield* git(project, ["show", ":tracked.txt"])).stdout,
+            "unstaged project change\n",
+          );
+          yield* fs.writeFileString(path.join(project, "tracked.txt"), "newer unstaged work\n");
+          yield* review.setFilesStaged({ cwd: project, filePaths: ["tracked.txt"], staged: false });
+          assert.equal(
+            (yield* git(project, ["show", ":tracked.txt"])).stdout,
+            "committed project change\n",
+          );
+          assert.equal(
+            yield* fs.readFileString(path.join(project, "tracked.txt")),
+            "newer unstaged work\n",
+          );
+          assert.equal(
+            (yield* git(project, ["diff", "--cached", "--name-only"])).stdout,
+            "staged.txt\n",
+          );
+          assert.equal((yield* git(startup, ["diff", "--cached", "--name-only"])).stdout, "");
+        }).pipe(Effect.provide(makeLayer(startup, baseDir)));
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("stages literal filenames, additions, deletions, and both sides of a rename", () =>
+    Effect.gen(function* () {
+      const { startup, project, baseDir } = yield* makeFixturePaths();
+      yield* Effect.gen(function* () {
+        yield* seedRepositories(startup, project);
+        const review = yield* ReviewService.ReviewService;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.writeFileString(path.join(project, "[a].txt"), "literal\n");
+        yield* fs.writeFileString(path.join(project, "a.txt"), "do not stage\n");
+        yield* fs.writeFileString(path.join(project, ":(glob)*"), "also literal\n");
+        yield* review.setFilesStaged({
+          cwd: project,
+          filePaths: ["[a].txt", ":(glob)*"],
+          staged: true,
+        });
+        assert.include((yield* git(project, ["ls-files", "-z"])).stdout, "[a].txt\0");
+        assert.notInclude((yield* git(project, ["ls-files", "-z"])).stdout, "\0a.txt\0");
+        yield* fs.rename(path.join(project, "tracked.txt"), path.join(project, "renamed.txt"));
+        yield* review.setFilesStaged({
+          cwd: project,
+          filePaths: ["tracked.txt", "renamed.txt"],
+          staged: true,
+        });
+        yield* review.setFilesStaged({
+          cwd: project,
+          filePaths: ["tracked.txt", "renamed.txt"],
+          staged: true,
+        });
+        assert.equal(
+          (yield* git(project, ["show", ":renamed.txt"])).stdout,
+          "unstaged project change\n",
+        );
+        assert.notInclude((yield* git(project, ["ls-files", "-z"])).stdout, "tracked.txt\0");
+        yield* review.setFilesStaged({
+          cwd: project,
+          filePaths: ["tracked.txt", "renamed.txt"],
+          staged: false,
+        });
+        assert.equal(
+          (yield* git(project, ["show", ":tracked.txt"])).stdout,
+          "committed project change\n",
+        );
+        assert.equal(
+          yield* fs.readFileString(path.join(project, "renamed.txt")),
+          "unstaged project change\n",
+        );
+      }).pipe(Effect.provide(makeLayer(startup, baseDir)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "unstages additions before the first commit while preserving newer working contents",
+    () =>
+      Effect.gen(function* () {
+        const { startup, project, baseDir } = yield* makeFixturePaths();
+        yield* Effect.gen(function* () {
+          const review = yield* ReviewService.ReviewService;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          yield* git(project, ["init"]);
+          yield* fs.writeFileString(path.join(project, "new.txt"), "initial\n");
+          yield* review.setFilesStaged({ cwd: project, filePaths: ["new.txt"], staged: true });
+          yield* fs.writeFileString(path.join(project, "new.txt"), "newer\n");
+          yield* review.setFilesStaged({ cwd: project, filePaths: ["new.txt"], staged: false });
+          assert.equal((yield* git(project, ["ls-files"])).stdout, "");
+          assert.equal(yield* fs.readFileString(path.join(project, "new.txt")), "newer\n");
+        }).pipe(Effect.provide(makeLayer(startup, baseDir)));
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects whole-repository and escaping paths before changing the index", () =>
+    Effect.gen(function* () {
+      const { startup, project, baseDir } = yield* makeFixturePaths();
+      yield* Effect.gen(function* () {
+        yield* seedRepositories(startup, project);
+        const review = yield* ReviewService.ReviewService;
+        for (const filePath of [
+          ".",
+          "../tracked.txt",
+          "/tracked.txt",
+          "dir/../tracked.txt",
+          "file\0name",
+        ]) {
+          const error = yield* review
+            .setFilesStaged({ cwd: project, filePaths: [filePath], staged: true })
+            .pipe(Effect.flip);
+          assert.equal(error._tag, "GitCommandError");
+        }
+        assert.equal(
+          (yield* git(project, ["diff", "--cached", "--name-only"])).stdout,
+          "staged.txt\n",
+        );
+      }).pipe(Effect.provide(makeLayer(startup, baseDir)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
     "reads working-tree and branch diffs from a project outside the server startup directory",
     () =>
       Effect.gen(function* () {
@@ -83,7 +214,7 @@ describe("ReviewService", () => {
           assert.include(working?.diff ?? "", "+untracked project change");
           assert.include(branch?.diff ?? "", "+committed project change");
           assert.equal(branch?.baseRef, "main");
-          assert.equal(branch?.headRef, "feature");
+          assert.equal(branch?.headRef, (yield* git(project, ["rev-parse", "HEAD"])).stdout.trim());
           assert.notInclude(branch?.diff ?? "", "unstaged project change");
           for (const source of preview.sources) assert.notInclude(source.diff, "startup-only.txt");
         }).pipe(Effect.provide(makeLayer(startup, baseDir)));

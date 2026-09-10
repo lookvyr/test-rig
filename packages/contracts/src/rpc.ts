@@ -57,6 +57,7 @@ import {
   ReviewDiffPreviewError,
   ReviewDiffPreviewInput,
   ReviewDiffPreviewResult,
+  ReviewSetFilesStagedInput,
 } from "./review.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
@@ -201,6 +202,7 @@ export const WS_METHODS = {
   // Review methods
   reviewGetDiffPreview: "review.getDiffPreview",
   reviewGetDiffFileContents: "review.getDiffFileContents",
+  reviewSetFilesStaged: "review.setFilesStaged",
 
   // Terminal methods
   terminalOpen: "terminal.open",
@@ -552,6 +554,11 @@ export const WsReviewGetDiffFileContentsRpc = Rpc.make(WS_METHODS.reviewGetDiffF
   error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
 });
 
+export const WsReviewSetFilesStagedRpc = Rpc.make(WS_METHODS.reviewSetFilesStaged, {
+  payload: ReviewSetFilesStagedInput,
+  error: Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),
+});
+
 export const WsTerminalOpenRpc = Rpc.make(WS_METHODS.terminalOpen, {
   payload: TerminalOpenInput,
   success: TerminalSessionSnapshot,
@@ -824,6 +831,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsInitRpc,
   WsReviewGetDiffPreviewRpc,
   WsReviewGetDiffFileContentsRpc,
+  WsReviewSetFilesStagedRpc,
   WsTerminalOpenRpc,
   WsTerminalAttachRpc,
   WsTerminalWriteRpc,
