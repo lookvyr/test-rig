@@ -3,6 +3,7 @@ import GitActionsControl from "./GitActionsControl";
 import { useSourceControlActionRunning } from "~/lib/sourceControlActions";
 import { ReviewFileNavigator, type ReviewFile } from "./diffs/ReviewFileNavigator";
 import { sortReviewFiles, resolveReviewFilePath } from "./diffs/reviewFileTree";
+import { getReviewFileStageActions } from "./diffs/reviewFileStageActions";
 import { useAtomValue } from "@effect/atom-react";
 import type { FileDiffContentsLoader } from "@pierre/diffs";
 import { useParams } from "@tanstack/react-router";
@@ -521,10 +522,13 @@ export default function DiffPanel({
         })
       : null,
   );
-  const nothingToStage =
-    unstagedFilesPreview.error === null &&
-    unstagedFilesPreview.data?.sources.find((source) => source.kind === "unstaged")?.files
-      ?.length === 0;
+  const stagedFileManifest = stagedFilesPreview.error
+    ? undefined
+    : stagedFilesPreview.data?.sources.find((source) => source.kind === "staged")?.files;
+  const unstagedFileManifest = unstagedFilesPreview.error
+    ? undefined
+    : unstagedFilesPreview.data?.sources.find((source) => source.kind === "unstaged")?.files;
+  const nothingToStage = unstagedFileManifest?.length === 0;
   const branchDiffPreview = useEnvironmentQuery(
     !isTurnScope && activeThread && activeCwd
       ? reviewEnvironment.diffPreview({
@@ -930,7 +934,10 @@ export default function DiffPanel({
     useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
   };
 
-  const stageFiles = async (files: readonly ReviewFile[], staged: boolean) => {
+  const stageFiles = async (
+    files: readonly Pick<ReviewFile, "path" | "oldPath">[],
+    staged: boolean,
+  ) => {
     if (!activeThread || !activeCwd || staging || isGitActionRunning || files.length === 0) return;
     setStaging(true);
     setActionError(null);
@@ -996,9 +1003,7 @@ export default function DiffPanel({
             gitCwd={activeCwd}
             activeThreadRef={routeThreadRef}
             stagedOnly
-            stagedFiles={
-              stagedFilesPreview.data?.sources.find((source) => source.kind === "staged")?.files
-            }
+            stagedFiles={stagedFileManifest}
             onActionComplete={refreshBranchDiffPreview}
           />
         )}
@@ -1517,28 +1522,48 @@ export default function DiffPanel({
                     sectionId={reviewSectionId}
                     sectionTitle={reviewSectionTitle}
                     composerDraftTarget={composerDraftTarget}
-                    renderHeaderFilenameSuffix={(fileDiff) => (
-                      <span className="inline-flex items-center gap-1">
-                        <DiffFilePathCopyButton filePath={resolveFileDiffPath(fileDiff)} />
-                        {canStageFiles && (
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            disabled={staging || isGitActionRunning}
-                            aria-label={`${selectedGitScope === "staged" ? "Unstage" : "Stage"} ${resolveFileDiffPath(fileDiff)}`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              const file = reviewFiles.find(
-                                (candidate) => candidate.path === resolveFileDiffPath(fileDiff),
-                              );
-                              if (file) void stageFiles([file], selectedGitScope !== "staged");
-                            }}
-                          >
-                            {selectedGitScope === "staged" ? "Unstage" : "Stage"}
-                          </Button>
-                        )}
-                      </span>
-                    )}
+                    renderHeaderFilenameSuffix={(fileDiff) => {
+                      const filePath = resolveFileDiffPath(fileDiff);
+                      const file = reviewFiles.find((candidate) => candidate.path === filePath);
+                      const actions =
+                        canStageFiles &&
+                        file &&
+                        (selectedGitScope === "working-tree" ||
+                          selectedGitScope === "unstaged" ||
+                          selectedGitScope === "staged")
+                          ? getReviewFileStageActions(
+                              file,
+                              selectedGitScope,
+                              stagedFileManifest,
+                              unstagedFileManifest,
+                            )
+                          : [];
+                      return (
+                        <span className="inline-flex items-center gap-1">
+                          <DiffFilePathCopyButton filePath={filePath} />
+                          {actions.map((action) => (
+                            <Button
+                              key={action.label}
+                              size="xs"
+                              variant="ghost"
+                              disabled={
+                                staging ||
+                                isGitActionRunning ||
+                                (selectedGitScope === "working-tree" &&
+                                  (stagedFilesPreview.isPending || unstagedFilesPreview.isPending))
+                              }
+                              aria-label={`${action.label} ${filePath}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void stageFiles(action.files, action.staged);
+                              }}
+                            >
+                              {action.label}
+                            </Button>
+                          ))}
+                        </span>
+                      );
+                    }}
                     renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
                       const filePath = resolveFileDiffPath(fileDiff);
                       return (
