@@ -13,7 +13,7 @@ function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
     "flex shrink-0 items-center justify-between gap-2",
     mode === "embedded" ? "px-2" : "px-4",
     shouldUseDragRegion
-      ? "drag-region min-h-[52px] border-b border-border wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]"
+      ? "drag-region min-h-[52px] border-b border-border wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]"
       : "border-b border-border",
   );
 }
@@ -23,8 +23,6 @@ export function DiffPanelShell(props: {
   header: ReactNode;
   children: ReactNode;
 }) {
-  const shouldUseDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
-
   return (
     <div
       className={cn(
@@ -34,13 +32,7 @@ export function DiffPanelShell(props: {
           : "w-full",
       )}
     >
-      {shouldUseDragRegion ? (
-        <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
-      ) : (
-        <div className={getDiffPanelHeaderRowClassName(props.mode)} data-surface-subheader>
-          {props.header}
-        </div>
-      )}
+      <div className={getDiffPanelHeaderRowClassName(props.mode)}>{props.header}</div>
       {props.children}
     </div>
   );
