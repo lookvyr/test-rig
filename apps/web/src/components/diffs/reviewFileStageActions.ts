@@ -8,6 +8,44 @@ function actionTargets(files: readonly FilePaths[]): readonly FilePaths[] {
   return files.map((file) => (file.status === "copied" ? { path: file.path } : file));
 }
 
+export function getReviewBulkStageActions(
+  scope: "working-tree" | "unstaged" | "staged",
+  scopeFiles: readonly FilePaths[],
+  stagedFiles: readonly FilePaths[] | undefined,
+  unstagedFiles: readonly FilePaths[] | undefined,
+): ReadonlyArray<{
+  label: "Stage all" | "Stage remaining" | "Unstage all";
+  staged: boolean;
+  files: readonly FilePaths[];
+}> {
+  if (scope !== "working-tree") {
+    return scopeFiles.length
+      ? [
+          {
+            label: scope === "staged" ? "Unstage all" : "Stage all",
+            staged: scope !== "staged",
+            files: actionTargets(scopeFiles),
+          },
+        ]
+      : [];
+  }
+  if (!stagedFiles || !unstagedFiles) return [];
+  return [
+    ...(unstagedFiles.length
+      ? [
+          {
+            label: stagedFiles.length ? ("Stage remaining" as const) : ("Stage all" as const),
+            staged: true,
+            files: actionTargets(unstagedFiles),
+          },
+        ]
+      : []),
+    ...(stagedFiles.length
+      ? [{ label: "Unstage all" as const, staged: false, files: actionTargets(stagedFiles) }]
+      : []),
+  ];
+}
+
 export function getReviewFileStageActions(
   file: FilePaths,
   scope: "working-tree" | "unstaged" | "staged",

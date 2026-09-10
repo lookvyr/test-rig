@@ -62,7 +62,9 @@ Use **Show changed files** to search paths and navigate the changed-file tree. T
 
 Small reviews show a continuous diff. Large Git reviews show one file at a time while keeping the complete changed-file list available. A file that exceeds the preview limit is marked individually. Split/stacked views, line wrapping, whitespace filtering, syntax colors, and line comments remain available.
 
-Use **Stage** or **Unstage** beside a file to change its index state. **Stage all** and **Unstage all** apply to the files in the current review scope. Staging a file includes all its current changes; hunk selection is not available here.
+Use **Stage** or **Unstage** beside a file to change its index state. In Uncommitted, a partially staged file offers both actions. Staging a file includes all its current changes; hunk selection is not available here.
+
+In **Uncommitted**, the bulk button shows **Stage all** when nothing is staged, **Unstage all** when everything is staged, or **Stage remaining** when staged and unstaged changes coexist. In that mixed state, the adjacent arrow also offers **Unstage all**. These actions cover the repository's staged or unstaged changes, including files outside the file navigator's search results. The **Unstaged** and **Staged** views keep **Stage all** and **Unstage all**, respectively, for their own scope.
 
 The review header's **Commit** action commits only staged changes. Its confirmation lists the staged files, and later unstaged edits in those files remain untouched. This differs from the general chat Git menu, which still offers its existing file-selection workflow. After committing, **Push** sends existing commits to the configured remote.
 

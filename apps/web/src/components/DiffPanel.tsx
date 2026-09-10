@@ -3,7 +3,10 @@ import GitActionsControl from "./GitActionsControl";
 import { useSourceControlActionRunning } from "~/lib/sourceControlActions";
 import { ReviewFileNavigator, type ReviewFile } from "./diffs/ReviewFileNavigator";
 import { sortReviewFiles, resolveReviewFilePath } from "./diffs/reviewFileTree";
-import { getReviewFileStageActions } from "./diffs/reviewFileStageActions";
+import {
+  getReviewBulkStageActions,
+  getReviewFileStageActions,
+} from "./diffs/reviewFileStageActions";
 import { useAtomValue } from "@effect/atom-react";
 import type { FileDiffContentsLoader } from "@pierre/diffs";
 import { useParams } from "@tanstack/react-router";
@@ -64,6 +67,7 @@ import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./Dif
 import { DiffStatLabel } from "./chat/DiffStatLabel";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { Button } from "./ui/button";
+import { Group, GroupSeparator } from "./ui/group";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
 import {
@@ -528,7 +532,6 @@ export default function DiffPanel({
   const unstagedFileManifest = unstagedFilesPreview.error
     ? undefined
     : unstagedFilesPreview.data?.sources.find((source) => source.kind === "unstaged")?.files;
-  const nothingToStage = unstagedFileManifest?.length === 0;
   const branchDiffPreview = useEnvironmentQuery(
     !isTurnScope && activeThread && activeCwd
       ? reviewEnvironment.diffPreview({
@@ -968,6 +971,28 @@ export default function DiffPanel({
     selectedGitScope !== "branch" &&
     selectedGitScope !== "commit" &&
     reviewFiles.length > 0;
+  const bulkStageActions = useMemo(
+    () =>
+      !isTurnScope &&
+      (selectedGitScope === "working-tree" ||
+        selectedGitScope === "unstaged" ||
+        selectedGitScope === "staged")
+        ? getReviewBulkStageActions(
+            selectedGitScope,
+            reviewFiles,
+            stagedFileManifest,
+            unstagedFileManifest,
+          )
+        : [],
+    [isTurnScope, selectedGitScope, reviewFiles, stagedFileManifest, unstagedFileManifest],
+  );
+  const [primaryStageAction, secondaryStageAction] = bulkStageActions;
+  const bulkStagingDisabled =
+    staging ||
+    isGitActionRunning ||
+    branchDiffPreview.isPending ||
+    (selectedGitScope === "working-tree" &&
+      (stagedFilesPreview.isPending || unstagedFilesPreview.isPending));
   const recentCommits = branchDiffPreview.data?.commits ?? [];
   const matchingCommits = recentCommits.filter((commit) =>
     `${commit.sha} ${commit.subject}`.toLowerCase().includes(commitQuery.toLowerCase().trim()),
@@ -1419,30 +1444,51 @@ export default function DiffPanel({
               )}
             </div>
             <div className="flex items-center gap-1">
-              {canStageFiles && (
-                <Tooltip disabled={!nothingToStage}>
-                  <TooltipTrigger
-                    closeOnClick={false}
-                    render={
-                      <span className="inline-flex" tabIndex={nothingToStage ? 0 : undefined} />
+              {primaryStageAction && (
+                <Group aria-label="Bulk staging actions" className="shrink-0">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    disabled={bulkStagingDisabled}
+                    onClick={() =>
+                      void stageFiles(primaryStageAction.files, primaryStageAction.staged)
                     }
                   >
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      disabled={
-                        staging ||
-                        isGitActionRunning ||
-                        unstagedFilesPreview.isPending ||
-                        nothingToStage
-                      }
-                      onClick={() => void stageFiles(reviewFiles, selectedGitScope !== "staged")}
-                    >
-                      {selectedGitScope === "staged" ? "Unstage all" : "Stage all"}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipPopup>All changes are staged. Nothing left to stage.</TooltipPopup>
-                </Tooltip>
+                    {primaryStageAction.label}
+                  </Button>
+                  {secondaryStageAction && (
+                    <>
+                      <GroupSeparator />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              size="icon-xs"
+                              variant="ghost"
+                              aria-label="More staging actions"
+                            />
+                          }
+                          disabled={bulkStagingDisabled}
+                        >
+                          <ChevronDownIcon className="size-3.5" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            disabled={bulkStagingDisabled}
+                            onClick={() =>
+                              void stageFiles(
+                                secondaryStageAction.files,
+                                secondaryStageAction.staged,
+                              )
+                            }
+                          >
+                            {secondaryStageAction.label}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </>
+                  )}
+                </Group>
               )}
               <Button
                 size="icon-sm"

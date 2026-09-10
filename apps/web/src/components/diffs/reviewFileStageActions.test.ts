@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { getReviewFileStageActions } from "./reviewFileStageActions";
+import { getReviewBulkStageActions, getReviewFileStageActions } from "./reviewFileStageActions";
 
 describe("review file staging actions", () => {
   const file = { path: "src/app.ts" };
@@ -53,6 +53,49 @@ describe("review file staging actions", () => {
     ]);
     expect(getReviewFileStageActions(file, "staged", [file], [file])).toEqual([
       { label: "Unstage", staged: false, files: [file] },
+    ]);
+  });
+});
+
+describe("review bulk staging actions", () => {
+  const staged = { path: "staged.ts" };
+  const unstaged = { path: "unstaged.ts" };
+  it("shows Stage all with no dropdown when nothing is staged", () => {
+    expect(getReviewBulkStageActions("working-tree", [], [], [unstaged])).toEqual([
+      { label: "Stage all", staged: true, files: [unstaged] },
+    ]);
+  });
+  it("shows Unstage all with no dropdown when everything is staged", () => {
+    expect(getReviewBulkStageActions("working-tree", [], [staged], [])).toEqual([
+      { label: "Unstage all", staged: false, files: [staged] },
+    ]);
+  });
+  it("offers Stage remaining and Unstage all for mixed changes using their own manifests", () => {
+    expect(getReviewBulkStageActions("working-tree", [staged], [staged], [unstaged])).toEqual([
+      { label: "Stage remaining", staged: true, files: [unstaged] },
+      { label: "Unstage all", staged: false, files: [staged] },
+    ]);
+  });
+  it("treats one partially staged file as a mixed state", () => {
+    expect(
+      getReviewBulkStageActions("working-tree", [staged], [staged], [staged]).map(
+        (action) => action.label,
+      ),
+    ).toEqual(["Stage remaining", "Unstage all"]);
+  });
+  it("does not offer actions for an empty or unknown state", () => {
+    expect(getReviewBulkStageActions("working-tree", [], [], [])).toEqual([]);
+    expect(getReviewBulkStageActions("working-tree", [staged], [staged], undefined)).toEqual([]);
+    expect(getReviewBulkStageActions("working-tree", [unstaged], undefined, [unstaged])).toEqual(
+      [],
+    );
+  });
+  it("keeps the dedicated tabs focused on their scope", () => {
+    expect(getReviewBulkStageActions("unstaged", [unstaged], [staged], undefined)).toEqual([
+      { label: "Stage all", staged: true, files: [unstaged] },
+    ]);
+    expect(getReviewBulkStageActions("staged", [staged], [staged], undefined)).toEqual([
+      { label: "Unstage all", staged: false, files: [staged] },
     ]);
   });
 });
