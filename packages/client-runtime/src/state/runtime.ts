@@ -519,17 +519,20 @@ function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
         return runInEnvironment(target.environmentId, options.execute(target.input));
       })
       .pipe(
+        // Retain the RPC result, but remount the SWR observer so returning to an
+        // inactive query revalidates stale data instead of reusing a mounted wrapper.
+        Atom.setIdleTTL(idleTtlMs),
         Atom.swr({
           staleTime: options.staleTimeMs ?? 30_000,
           revalidateOnMount: true,
         }),
-        Atom.setIdleTTL(idleTtlMs),
+        Atom.setIdleTTL(0),
       );
     return (
       options.refreshIntervalMs === undefined
         ? queryAtom
         : queryAtom.pipe(Atom.withRefresh(options.refreshIntervalMs))
-    ).pipe(Atom.setIdleTTL(idleTtlMs), Atom.withLabel(`${options.label}:${key}`));
+    ).pipe(Atom.setIdleTTL(0), Atom.withLabel(`${options.label}:${key}`));
   });
   return (target) => family(environmentRpcKey(target));
 }

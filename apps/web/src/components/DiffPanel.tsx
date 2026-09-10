@@ -63,6 +63,7 @@ import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./Dif
 import { DiffStatLabel } from "./chat/DiffStatLabel";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { Button } from "./ui/button";
+import { toastManager } from "./ui/toast";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
 import {
@@ -935,6 +936,15 @@ export default function DiffPanel({
       if (result._tag !== "Success") throw squashAtomCommandFailure(result);
       refreshBranchDiffPreview();
       gitStatusQuery.refresh();
+      toastManager.add({
+        type: "success",
+        title: `${staged ? "Staged" : "Unstaged"} ${files.length} ${files.length === 1 ? "file" : "files"}`,
+        description:
+          staged && selectedGitScope === "working-tree"
+            ? "Uncommitted shows both staged and unstaged changes."
+            : undefined,
+        data: { threadRef: routeThreadRef },
+      });
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Unable to update staged files.");
     } finally {
