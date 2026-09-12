@@ -2,6 +2,8 @@ import { DiffFilePathCopyButton } from "./DiffFilePathCopyButton";
 import GitActionsControl from "./GitActionsControl";
 import { useSourceControlActionRunning } from "~/lib/sourceControlActions";
 import { ReviewFileNavigator, type ReviewFile } from "./diffs/ReviewFileNavigator";
+import { RightPanelResizeHandle } from "./preview/RightPanelResizeHandle";
+import { useResizableWidth } from "../hooks/useResizableWidth";
 import { sortReviewFiles, resolveReviewFilePath } from "./diffs/reviewFileTree";
 import {
   getReviewBulkStageActions,
@@ -340,7 +342,17 @@ export default function DiffPanel({
   const [baseRefQuery, setBaseRefQuery] = useState("");
   const [commitQuery, setCommitQuery] = useState("");
   const [filesVisibility, setShowFiles] = useState<boolean | null>(null);
-  const [wideReview, setWideReview] = useState(false);
+  const [reviewWidth, setReviewWidth] = useState(0);
+  const wideReview = reviewWidth >= 700;
+  const { width: filesWidth, handlers: filesResizeHandlers } = useResizableWidth({
+    storageKey: "test-rig:review-files-width",
+    defaultWidth: 240,
+    minWidth: 160,
+    maxWidth: reviewWidth
+      ? Math.max(160, Math.min(600, reviewWidth - (wideReview ? 320 : 32)))
+      : 600,
+    edge: "left",
+  });
   const showFiles = filesVisibility ?? wideReview;
   const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<CollapsedDiffFilesState>(() => ({
     scopeKey: null,
@@ -861,7 +873,7 @@ export default function DiffPanel({
   useEffect(() => {
     const element = reviewBodyRef.current;
     if (!element) return;
-    const update = () => setWideReview(element.clientWidth >= 700);
+    const update = () => setReviewWidth(element.clientWidth);
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
@@ -1684,9 +1696,14 @@ export default function DiffPanel({
             </div>
             {showFiles && reviewFiles.length > 0 && (
               <aside
-                className="absolute inset-y-0 right-0 z-10 w-60 border-l border-border bg-background shadow-lg @[700px]/review:static @[700px]/review:w-60 @[700px]/review:shrink-0 @[700px]/review:shadow-none"
+                className="absolute inset-y-0 right-0 z-10 border-l border-border bg-background shadow-lg @[700px]/review:relative @[700px]/review:shrink-0 @[700px]/review:shadow-none"
+                style={{ width: filesWidth }}
                 aria-label="Changed files"
               >
+                <RightPanelResizeHandle
+                  handlers={filesResizeHandlers}
+                  ariaLabel="Resize changed files"
+                />
                 <ReviewFileNavigator
                   files={reviewFiles}
                   selectedPath={activeFilePath}

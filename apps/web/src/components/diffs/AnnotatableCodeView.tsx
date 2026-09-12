@@ -11,7 +11,7 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useCallback, useMemo, useState, type ReactNode, type Ref } from "react";
 
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
-import { fnv1a32 } from "~/lib/diffRendering";
+import { fnv1a32, getDiffLineStat } from "~/lib/diffRendering";
 import {
   buildDiffReviewComment,
   restoreDiffReviewCommentRange,
@@ -249,6 +249,11 @@ export function AnnotatableCodeView({
       onSelectedLinesChange={setSelectedLines}
       options={{
         ...options,
+        unsafeCSS: `${options.unsafeCSS ?? ""}
+          [data-metadata] > :is([data-additions-count], [data-deletions-count]) {
+            display: none;
+          }
+        `,
         enableGutterUtility: !hasOpenComment,
         enableLineSelection: !hasOpenComment,
         onGutterUtilityClick: beginComment,
@@ -261,6 +266,20 @@ export function AnnotatableCodeView({
       renderHeaderFilenameSuffix={(item) =>
         item.type === "diff" ? renderHeaderFilenameSuffix?.(item.fileDiff) : null
       }
+      renderHeaderMetadata={(item) => {
+        if (item.type !== "diff") return null;
+        // Render from the current item; the virtualized viewer caches its built-in header.
+        const { additions, deletions } = getDiffLineStat([item.fileDiff]);
+        return (
+          <span
+            className="inline-flex gap-1 text-[11px] tabular-nums"
+            aria-label={`${additions} additions, ${deletions} deletions`}
+          >
+            {deletions > 0 && <span className="text-destructive">−{deletions}</span>}
+            {additions > 0 && <span className="text-success-foreground">+{additions}</span>}
+          </span>
+        );
+      }}
       renderAnnotation={(annotation) => {
         const hasDraft = annotation.metadata.entries.some((entry) => entry.kind === "draft");
         return (

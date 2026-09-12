@@ -4,6 +4,7 @@ import { cn } from "~/lib/utils";
 interface Props {
   handlers: ResizableWidthHandlers;
   className?: string;
+  ariaLabel?: string;
 }
 
 /**
@@ -14,11 +15,12 @@ interface Props {
  * - Visual indicator is a 1px line that lights up on hover/active to mirror
  *   VS Code / Cursor.
  */
-export function RightPanelResizeHandle({ handlers, className }: Props) {
+export function RightPanelResizeHandle({ handlers, className, ariaLabel }: Props) {
   return (
     <div
       role="separator"
       aria-orientation="vertical"
+      aria-label={ariaLabel}
       className={cn(
         "group absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize select-none",
         className,

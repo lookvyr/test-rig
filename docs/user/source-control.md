@@ -58,7 +58,7 @@ Choose the changes to inspect:
 - **Committed** shows a selected commit. Choose from recent commits or enter a commit SHA or ref. Merge commits compare against their first parent.
 - **Latest turn** follows the newest completed turn. **Turn** keeps a particular turn selected. Turn reviews compare checkpoint snapshots; they are not a claim that every change was authored by the agent.
 
-Use **Show changed files** to search paths and navigate the changed-file tree. The tree stays beside the diff in a wide panel and opens over it in a narrow panel. Arrow keys browse files; Enter opens the selected file and closes the narrow file list. Previous/next controls also move between files. Selecting a collapsed file expands it.
+Use **Show changed files** to search paths and navigate the changed-file tree. The tree stays beside the diff in a wide panel and opens over it in a narrow panel. Drag its left edge to adjust its width; your preferred width is remembered. Arrow keys browse files; Enter opens the selected file and closes the narrow file list. Previous/next controls also move between files. Selecting a collapsed file expands it.
 
 Small reviews show a continuous diff. Large Git reviews show one file at a time while keeping the complete changed-file list available. A file that exceeds the preview limit is marked individually. Split/stacked views, line wrapping, whitespace filtering, syntax colors, and line comments remain available.
 
