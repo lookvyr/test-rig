@@ -84,6 +84,7 @@ shortcuts remain available; releasing Alt/Option switches the badges back to the
 Select terminal output and press `cmd+c` on macOS or `ctrl+shift+c` on Windows/Linux.
 You can also choose **Copy** from the selection menu or right-click the selected output.
 On desktop, **Edit** → **Copy** copies the focused terminal's selection.
+To copy a link without selecting text first, right-click it and choose **Copy Link**.
 `ctrl+c` still interrupts the running terminal command.
 
 ## `when` Conditions

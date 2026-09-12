@@ -1616,6 +1616,10 @@ export class GhosttyTerminalSurface {
     };
   }
 
+  getLinkAtClientPosition(clientX: number, clientY: number): string | null {
+    return this.linkAt(clientX, clientY)?.text ?? null;
+  }
+
   private linkAt(clientX: number, clientY: number): TerminalLinkWithRange | null {
     if (!this.snapshot) return null;
     const cell = terminalGridCellAt({

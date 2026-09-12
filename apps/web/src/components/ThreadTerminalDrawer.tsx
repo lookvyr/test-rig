@@ -32,6 +32,7 @@ import {
 } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
+import { copyTerminalLinkFromContextMenu } from "~/terminal/linkContextMenu";
 import { cn } from "~/lib/utils";
 import { type TerminalContextSelection } from "~/lib/terminalContext";
 import {
@@ -715,7 +716,26 @@ export function TerminalViewport({
       const handleContextMenu = (event: MouseEvent) => {
         // Mouse-reporting terminal apps already prevent this event. Otherwise,
         // use the terminal selection rather than the browser's canvas selection.
-        if (event.defaultPrevented || !terminal.hasSelection()) return;
+        if (event.defaultPrevented) return;
+        if (!terminal.hasSelection()) {
+          const link = terminal.getLinkAtClientPosition(event.clientX, event.clientY);
+          if (!link || !localApi) return;
+          event.preventDefault();
+          event.stopPropagation();
+          void copyTerminalLinkFromContextMenu(
+            link,
+            { x: event.clientX, y: event.clientY },
+            localApi.contextMenu,
+          ).catch((error: unknown) => {
+            const activeTerminal = terminalRef.current;
+            if (!activeTerminal) return;
+            writeSystemMessage(
+              activeTerminal,
+              error instanceof Error ? error.message : "Unable to copy terminal link",
+            );
+          });
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         void showSelectionAction();
