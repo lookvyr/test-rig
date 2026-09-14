@@ -6,6 +6,8 @@ import type { ComposerImageAttachment } from "~/composerDraftStore";
 import { formatElementContextLabel, normalizeElementContextSelection } from "~/lib/elementContext";
 import { cn } from "~/lib/utils";
 
+import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
+
 interface ComposerPreviewAnnotationCardsProps {
   annotations: ReadonlyArray<PreviewAnnotationPayload>;
   images: ReadonlyArray<ComposerImageAttachment>;
@@ -56,9 +58,10 @@ export function ComposerPreviewAnnotationCards({
                 className="size-14 shrink-0 cursor-zoom-in overflow-hidden border-r border-border/70 bg-muted"
                 onClick={() => onExpandImage(image.id)}
               >
-                <img
-                  src={image.previewUrl}
+                <ComposerImageThumbnail
+                  file={image.file}
                   alt="Annotated preview crop"
+                  fallback={<MousePointerClick className="m-auto size-3.5" />}
                   className="size-full object-cover transition duration-200 group-hover/preview-annotation:scale-[1.03]"
                 />
               </button>

@@ -17,17 +17,18 @@ export class DesktopSingleInstance extends Context.Service<
 export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const isPrimaryInstance = yield* electronApp.requestSingleInstanceLock;
+  if (!isPrimaryInstance) {
+    // Exit before application services or quit handlers are initialized.
+    // Interrupting the main Effect instead would report a failed launch (130).
+    yield* electronApp.exit(0);
+    return yield* Effect.never;
+  }
 
   return DesktopSingleInstance.of({
     configure: Effect.gen(function* () {
       const electronWindow = yield* ElectronWindow.ElectronWindow;
       const context = yield* Effect.context<ElectronWindow.ElectronWindow>();
       const runPromise = Effect.runPromiseWith(context);
-
-      if (!isPrimaryInstance) {
-        yield* electronApp.quit;
-        return yield* Effect.interrupt;
-      }
 
       yield* electronApp.on("second-instance", () => {
         void runPromise(

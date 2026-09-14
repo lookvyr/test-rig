@@ -27,6 +27,14 @@ vp i
 vp run dev:desktop
 ```
 
+Development keeps one desktop launcher per checkout. Rebuilding restarts its app;
+quitting or a crash leaves the app closed until the next rebuild. Starting a
+second launcher leaves the existing one running. Stop the development command
+in its terminal when finished to stop its watcher and app.
+If a launcher is forcibly killed, the next launch reports the stale ownership
+file's exact path. After confirming its recorded process has stopped, remove
+that file and retry.
+
 Build and run the production desktop app:
 
 ```bash

@@ -73,3 +73,16 @@ focus.
 [#8531](https://github.com/pingdotgg/t3code/pull/8531) adds previous/next turn
 controls to the existing minimap, preserving Test Rig's composer inset and
 virtualized scrolling.
+
+September 14 reliability batch:
+
+- [#11324](https://github.com/pingdotgg/t3code/pull/11324) caches bounded image
+  thumbnails for composer attachments, including annotated browser screenshots.
+  Expanded previews and provider attachments retain their original images.
+- [#10777](https://github.com/pingdotgg/t3code/pull/10777) releases consumed global
+  event-replay pages with stream pagination, preserving ordering, limits, and
+  repeatable reads without adding upstream's other replay services.
+- [#11291](https://github.com/pingdotgg/t3code/pull/11291) makes the startup error
+  screen's retry action invalidate router loaders after the backend recovers.
+- [#7599](https://github.com/pingdotgg/t3code/pull/7599) bounds concurrent desktop
+  backend shutdown to five seconds per instance so hung cleanup cannot block quit.

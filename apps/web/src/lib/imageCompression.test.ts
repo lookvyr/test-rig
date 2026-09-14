@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  createComposerImageThumbnail,
   compressImageForStash,
   compressImageToByteLimit,
   MAX_COMPRESSIBLE_SOURCE_BYTES,
@@ -66,6 +67,112 @@ afterEach(() => {
   vi.unstubAllGlobals();
   globalThis.createImageBitmap = originalCreateImageBitmap;
   globalThis.OffscreenCanvas = originalOffscreenCanvas;
+});
+
+describe("composer image thumbnails", () => {
+  it.each([
+    { width: 640, height: 320, cropX: 160, cropY: 0, side: 320, dimension: 256 },
+    { width: 32, height: 48, cropX: 0, cropY: 8, side: 32, dimension: 32 },
+  ])("centers a $width by $height image without enlarging it", async (size) => {
+    const close = vi.fn();
+    const bitmap = { width: size.width, height: size.height, close };
+    const drawImage = vi.fn();
+    const dimensions: number[][] = [];
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => bitmap),
+    );
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        constructor(width: number, height: number) {
+          dimensions.push([width, height]);
+        }
+        getContext() {
+          return { drawImage };
+        }
+        async convertToBlob() {
+          return new Blob(["thumbnail"], { type: "image/png" });
+        }
+      },
+    );
+    expect(await createComposerImageThumbnail(makeFile(5))).toMatch(/^data:image\/png;base64,/);
+    expect(dimensions).toEqual([[size.dimension, size.dimension]]);
+    expect(drawImage).toHaveBeenCalledWith(
+      bitmap,
+      size.cropX,
+      size.cropY,
+      size.side,
+      size.side,
+      0,
+      0,
+      size.dimension,
+      size.dimension,
+    );
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("falls back when the browser cannot decode thumbnails", async () => {
+    vi.stubGlobal("createImageBitmap", undefined);
+    expect(await createComposerImageThumbnail(makeFile(5))).toBeNull();
+  });
+
+  it("decodes a tall original once and caches a bounded center crop", async () => {
+    const close = vi.fn();
+    const bitmap = { width: 2304, height: 32766, close };
+    const decode = vi.fn(async () => bitmap);
+    const drawImage = vi.fn();
+    const dimensions: number[][] = [];
+    vi.stubGlobal("createImageBitmap", decode);
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        constructor(width: number, height: number) {
+          dimensions.push([width, height]);
+        }
+        getContext() {
+          return { drawImage };
+        }
+        async convertToBlob() {
+          return new Blob(["thumbnail"], { type: "image/png" });
+        }
+      },
+    );
+    const original = new File(["original bytes"], "tall.png", { type: "image/png" });
+    const [first, second] = await Promise.all([
+      createComposerImageThumbnail(original),
+      createComposerImageThumbnail(original),
+    ]);
+    expect(first).toBe("data:image/png;base64,dGh1bWJuYWls");
+    expect(second).toBe(first);
+    expect(await createComposerImageThumbnail(original)).toBe(first);
+    expect(decode).toHaveBeenCalledExactlyOnceWith(original);
+    expect(dimensions).toEqual([[256, 256]]);
+    expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 15231, 2304, 2304, 0, 0, 256, 256);
+    expect(close).toHaveBeenCalledOnce();
+    expect(await original.text()).toBe("original bytes");
+  });
+
+  it("releases the decoded image when thumbnail encoding fails", async () => {
+    const close = vi.fn();
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 500, height: 500, close })),
+    );
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class {
+        getContext() {
+          return { drawImage: vi.fn() };
+        }
+        async convertToBlob() {
+          throw new Error("encoder unavailable");
+        }
+      },
+    );
+    expect(await createComposerImageThumbnail(makeFile(5))).toBeNull();
+    expect(close).toHaveBeenCalledOnce();
+  });
 });
 
 describe("compressImageForStash", () => {
