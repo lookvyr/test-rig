@@ -4513,6 +4513,19 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (command === "rightPanel.previous" || command === "rightPanel.next") {
+        if (!rightPanelOpen || rightPanelState.surfaces.length < 2) return;
+        const surfaces = rightPanelState.surfaces;
+        const index = surfaces.findIndex((surface) => surface.id === activeRightPanelSurface?.id);
+        const direction = command === "rightPanel.next" ? 1 : -1;
+        const nextSurface = surfaces[(index + direction + surfaces.length) % surfaces.length];
+        if (!nextSurface) return;
+        event.preventDefault();
+        event.stopPropagation();
+        activateRightPanelSurface(nextSurface);
+        return;
+      }
+
       if (command === "rightPanel.close") {
         if (!activeRightPanelSurface) return;
         event.preventDefault();
@@ -4617,6 +4630,9 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeProject,
     activeRightPanelSurface,
+    activateRightPanelSurface,
+    rightPanelOpen,
+    rightPanelState.surfaces,
     activeThreadRef,
     activeThreadPinned,
     activeThreadSettled,

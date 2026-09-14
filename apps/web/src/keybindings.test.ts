@@ -892,6 +892,28 @@ describe("plus key parsing", () => {
 
 describe("thread and panel default shortcuts", () => {
   for (const platform of ["MacIntel", "Linux"]) {
+    it(`cycles side tabs from sidebar, browser, or terminal focus on ${platform}`, () => {
+      const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
+      for (const [key, command] of [
+        ["ArrowLeft", "rightPanel.previous"],
+        ["ArrowRight", "rightPanel.next"],
+      ] as const) {
+        const shortcut = event({ ...modifier, key, altKey: true });
+        for (const context of [{}, { previewFocus: true }, { terminalFocus: true }]) {
+          assert.strictEqual(
+            resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
+            command,
+          );
+        }
+        assert.notStrictEqual(
+          resolveShortcutCommand({ ...shortcut, altKey: false }, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+          }),
+          command,
+        );
+      }
+    });
+
     it(`opens browser tabs from chat, browser, or terminal focus on ${platform}`, () => {
       const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
       const shortcut = event({ ...modifier, key: "t" });

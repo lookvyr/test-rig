@@ -557,6 +557,27 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("keeps mixed tab order and selection stable when browser sessions update", () => {
+    const store = useRightPanelStore.getState();
+    store.openBrowser(refA, "tab-a");
+    store.open(refA, "files");
+    store.openBrowser(refA, "tab-b");
+    store.openTerminal(refA, "term-1");
+    store.activateSurface(refA, "browser:tab-a");
+
+    store.reconcileBrowserSurfaces(refA, ["tab-b", "tab-a", "tab-c"]);
+
+    const state = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+    expect(state.surfaces.map((surface) => surface.id)).toEqual([
+      "browser:tab-a",
+      "files",
+      "browser:tab-b",
+      "terminal:term-1",
+      "browser:tab-c",
+    ]);
+    expect(state.activeSurfaceId).toBe("browser:tab-a");
+  });
+
   it("reconciles browser surfaces without deleting other surface kinds", () => {
     useRightPanelStore.getState().openTerminal(refA, "term-1");
     useRightPanelStore.getState().openBrowser(refA, "tab-a");

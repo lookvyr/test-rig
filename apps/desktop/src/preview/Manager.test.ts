@@ -60,6 +60,30 @@ describe("isPreviewRefreshShortcut", () => {
 
 describe("isPreviewAppShortcut", () => {
   for (const platform of ["darwin", "linux", "win32"] as const) {
+    it(`forwards side-tab cycling with the ${platform} modifier`, () => {
+      for (const key of ["ArrowLeft", "ArrowRight"]) {
+        const input = {
+          type: "keyDown",
+          key,
+          meta: platform === "darwin",
+          control: platform !== "darwin",
+          shift: false,
+          alt: true,
+        } as Electron.Input;
+        expect(PreviewManager.isPreviewAppShortcut(input, platform)).toBe(true);
+        expect(PreviewManager.isPreviewAppShortcut({ ...input, alt: false }, platform)).toBe(false);
+        expect(PreviewManager.isPreviewAppShortcut({ ...input, shift: true }, platform)).toBe(
+          false,
+        );
+        expect(PreviewManager.isPreviewAppShortcut({ ...input, type: "keyUp" }, platform)).toBe(
+          false,
+        );
+        expect(
+          PreviewManager.isPreviewAppShortcut({ ...input, meta: false, control: false }, platform),
+        ).toBe(false);
+      }
+    });
+
     it(`forwards browser tab shortcuts with the ${platform} modifier`, () => {
       for (const key of ["t", "w"]) {
         const input = {

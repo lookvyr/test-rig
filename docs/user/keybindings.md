@@ -73,6 +73,8 @@ shortcut; assign one in **Settings** → **Keybindings**.
 
 These defaults yield to terminal focus: `mod+w` closes the focused terminal, and the thread shortcuts are inactive. Pin and settle apply to saved threads in environments that support those actions.
 
+`mod+alt+arrowleft` / `mod+alt+arrowright` (`rightPanel.previous` / `rightPanel.next`) cycle through the open right-panel tabs in their displayed order, wrapping at either end. On macOS, use **Command–Option–Left/Right Arrow**; on Windows/Linux, use **Ctrl–Alt–Left/Right Arrow**. These work while the sidebar, main chat, or panel is focused, including browser pages and terminals. A hidden panel or fewer than two tabs is left unchanged. Customize them in **Settings** → **Keybindings**.
+
 `mod+alt+p` (`pullRequest.open`) opens the Pull Requests workspace. In that view,
 `mod+alt+1` through `mod+alt+9` (`pullRequest.jump.1` through `pullRequest.jump.9`)
 select the first nine pull requests in the filtered, displayed order. Hold those

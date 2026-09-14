@@ -401,6 +401,7 @@ interface ExpectedAgentInput {
 const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
   key: string;
   shift: boolean;
+  alt?: boolean;
 }> = Object.freeze([
   // mod+shift+J → preview.toggle
   { key: "j", shift: true },
@@ -412,14 +413,18 @@ const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
   { key: "w", shift: false },
   // mod+T → new browser tab
   { key: "t", shift: false },
+  { key: "arrowleft", shift: false, alt: true },
+  { key: "arrowright", shift: false, alt: true },
 ]);
 
 export const isPreviewAppShortcut = (input: Electron.Input, platform: NodeJS.Platform): boolean =>
   input.type === "keyDown" &&
-  !input.alt &&
   (platform === "darwin" ? input.meta && !input.control : input.control && !input.meta) &&
   APP_FORWARDED_SHORTCUTS.some(
-    (shortcut) => shortcut.key === input.key.toLowerCase() && shortcut.shift === input.shift,
+    (shortcut) =>
+      shortcut.key === input.key.toLowerCase() &&
+      shortcut.shift === input.shift &&
+      (shortcut.alt ?? false) === input.alt,
   );
 
 export const isPreviewRefreshShortcut = (input: Electron.Input): boolean =>
@@ -1374,7 +1379,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       event.preventDefault();
       mainWindow.value.webContents.sendInputEvent({
         type: "keyDown",
-        keyCode: input.key,
+        keyCode:
+          input.key === "ArrowLeft" ? "Left" : input.key === "ArrowRight" ? "Right" : input.key,
         modifiers: [
           ...(input.meta ? (["meta"] as const) : []),
           ...(input.shift ? (["shift"] as const) : []),
