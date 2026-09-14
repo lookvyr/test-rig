@@ -1,7 +1,13 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { GitListPullRequestsResult } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { GitMergeIcon, GitPullRequestIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
+import {
+  ExternalLinkIcon,
+  GitMergeIcon,
+  GitPullRequestIcon,
+  RefreshCwIcon,
+  SearchIcon,
+} from "lucide-react";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { useResizableWidth } from "../../hooks/useResizableWidth";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../../state/entities";
@@ -23,6 +29,7 @@ import {
   usePullRequestWorkspaceStore,
 } from "../../pullRequestWorkspaceStore";
 import { cn } from "../../lib/utils";
+import { useOpenPrLink } from "../../lib/openPullRequestLink";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { isElectron } from "../../env";
 import { Button } from "../ui/button";
@@ -55,6 +62,7 @@ function ProjectPullRequests({
   jumpLabels: ReadonlyArray<string | null>;
 }) {
   const { selection, panelOpen, select, clearSelection } = usePullRequestQueueStore();
+  const openPrLink = useOpenPrLink();
   const workspaces = usePullRequestWorkspaceStore((state) => state.entriesByKey);
   const lastRefresh = useRef(refreshVersion);
   useEffect(() => {
@@ -110,59 +118,71 @@ function ProjectPullRequests({
           ];
         const noteCount = workspace?.notes.length ?? 0;
         return (
-          <button
-            key={pr.url}
-            type="button"
-            data-pr-jump-index={jumpIndex < 9 ? jumpIndex : undefined}
-            aria-pressed={
-              panelOpen &&
-              selection?.reference === pr.url &&
-              selection.environmentId === project.environmentId &&
-              selection.projectId === project.id
-            }
-            onClick={() =>
-              select({
-                environmentId: project.environmentId,
-                projectId: project.id,
-                projectName: project.title,
-                cwd: project.workspaceRoot,
-                reference: pr.url,
-              })
-            }
-            className="relative block w-full border-b px-5 py-4 text-left hover:bg-accent/40 aria-pressed:bg-accent/60 focus-visible:outline-2 focus-visible:outline-ring"
-          >
-            {jumpLabel && <JumpHintBadge label={jumpLabel} />}
-            <span className="flex items-center gap-2 text-xs text-muted-foreground">
-              {pr.state === "merged" ? (
-                <GitMergeIcon className="size-3.5 text-purple-500" />
-              ) : (
-                <GitPullRequestIcon
-                  className={cn(
-                    "size-3.5",
-                    pr.state === "open" ? "text-emerald-500" : "text-muted-foreground",
-                  )}
-                />
-              )}
-              #{pr.number} · {pr.author} · {new Date(pr.updatedAt).toLocaleDateString()}
-            </span>
-            <span className="mt-2 block text-sm font-medium leading-relaxed">{pr.title}</span>
-            <span className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
-              <span className="capitalize">
-                {pr.state === "open" && pr.isDraft ? "Draft" : pr.state}
+          <div key={pr.url} className="relative border-b">
+            <button
+              type="button"
+              data-pr-jump-index={jumpIndex < 9 ? jumpIndex : undefined}
+              aria-pressed={
+                panelOpen &&
+                selection?.reference === pr.url &&
+                selection.environmentId === project.environmentId &&
+                selection.projectId === project.id
+              }
+              onClick={() =>
+                select({
+                  environmentId: project.environmentId,
+                  projectId: project.id,
+                  projectName: project.title,
+                  cwd: project.workspaceRoot,
+                  reference: pr.url,
+                })
+              }
+              className="relative block w-full py-4 pr-12 pl-5 text-left hover:bg-accent/40 aria-pressed:bg-accent/60 focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              {jumpLabel && <JumpHintBadge label={jumpLabel} />}
+              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                {pr.state === "merged" ? (
+                  <GitMergeIcon className="size-3.5 text-purple-500" />
+                ) : (
+                  <GitPullRequestIcon
+                    className={cn(
+                      "size-3.5",
+                      pr.state === "open" ? "text-emerald-500" : "text-muted-foreground",
+                    )}
+                  />
+                )}
+                #{pr.number} · {pr.author} · {new Date(pr.updatedAt).toLocaleDateString()}
               </span>
-              <span className="text-emerald-600 dark:text-emerald-400">+{pr.additions}</span>
-              <span className="text-red-600 dark:text-red-400">−{pr.deletions}</span>
-              <span>
-                {pr.changedFiles} {pr.changedFiles === 1 ? "file" : "files"}
-              </span>
-              {workspace?.linkedTarget && <span>Linked conversation</span>}
-              {noteCount > 0 && (
-                <span>
-                  {noteCount} local {noteCount === 1 ? "note" : "notes"}
+              <span className="mt-2 block text-sm font-medium leading-relaxed">{pr.title}</span>
+              <span className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                <span className="capitalize">
+                  {pr.state === "open" && pr.isDraft ? "Draft" : pr.state}
                 </span>
-              )}
-            </span>
-          </button>
+                <span className="text-emerald-600 dark:text-emerald-400">+{pr.additions}</span>
+                <span className="text-red-600 dark:text-red-400">−{pr.deletions}</span>
+                <span>
+                  {pr.changedFiles} {pr.changedFiles === 1 ? "file" : "files"}
+                </span>
+                {workspace?.linkedTarget && <span>Linked conversation</span>}
+                {noteCount > 0 && (
+                  <span>
+                    {noteCount} local {noteCount === 1 ? "note" : "notes"}
+                  </span>
+                )}
+              </span>
+            </button>
+            <a
+              href={pr.url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open PR #${pr.number} in GitHub`}
+              title="Open in GitHub"
+              onClick={(event) => openPrLink(event, pr.url)}
+              className="absolute top-3 right-3 inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              <ExternalLinkIcon aria-hidden className="size-3.5" />
+            </a>
+          </div>
         );
       })}
       {!query.isPending && !query.error && items.length === 0 && (

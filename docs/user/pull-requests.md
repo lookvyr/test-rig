@@ -25,6 +25,9 @@ current information. Either refresh button in the workspace updates both the
 queue and the selected review, including check results and changed files. The
 workspace tells you when results are incomplete.
 
+Use the external-link button at the right of a pull request row to open it directly
+in GitHub in your browser. Selecting the rest of the row opens its review in Test Rig.
+
 After a pull request closes, refreshing removes it from the **Open** queue. Find
 it under **Closed** or **All states** to continue reviewing. Its local notes and
 linked conversation remain available.
