@@ -4041,6 +4041,14 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         `pr-existing-${NodePath.basename(repoDir)}`,
       );
       yield* runGit(repoDir, ["worktree", "add", worktreePath, "feature/pr-existing-worktree"]);
+      NodeFS.writeFileSync(
+        NodePath.join(worktreePath, "existing.txt"),
+        "Uncommitted review edit\n",
+      );
+      NodeFS.writeFileSync(NodePath.join(worktreePath, "staged.txt"), "Staged review edit\n");
+      yield* runGit(worktreePath, ["add", "staged.txt"]);
+      NodeFS.writeFileSync(NodePath.join(worktreePath, "notes.txt"), "Untracked review notes\n");
+      const statusBefore = (yield* runGit(worktreePath, ["status", "--porcelain"])).stdout;
 
       const setupCalls: ProjectSetupScriptRunner.ProjectSetupScriptRunnerInput[] = [];
       const { manager } = yield* makeManager({
@@ -4074,6 +4082,23 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         NodeFS.realpathSync.native(worktreePath),
       );
       expect(result.branch).toBe("feature/pr-existing-worktree");
+      const repeated = yield* preparePullRequestThread(manager, {
+        cwd: repoDir,
+        reference: "78",
+        mode: "worktree",
+        threadId: asThreadId("thread-pr-existing-worktree-again"),
+      });
+      expect(repeated.worktreePath).toBe(result.worktreePath);
+      expect((yield* runGit(worktreePath, ["status", "--porcelain"])).stdout).toBe(statusBefore);
+      expect(NodeFS.readFileSync(NodePath.join(worktreePath, "existing.txt"), "utf8")).toBe(
+        "Uncommitted review edit\n",
+      );
+      expect(NodeFS.readFileSync(NodePath.join(worktreePath, "staged.txt"), "utf8")).toBe(
+        "Staged review edit\n",
+      );
+      expect(NodeFS.readFileSync(NodePath.join(worktreePath, "notes.txt"), "utf8")).toBe(
+        "Untracked review notes\n",
+      );
       expect(setupCalls).toHaveLength(0);
     }),
   );
@@ -4252,6 +4277,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       expect(result.worktreePath && NodeFS.realpathSync.native(result.worktreePath)).toBe(
         NodeFS.realpathSync.native(worktreePath),
       );
+      expect(result.branch).toBe("feature/pr-reused-fork");
       expect(
         (yield* runGit(worktreePath, ["rev-parse", "--abbrev-ref", "@{upstream}"])).stdout.trim(),
       ).toBe("fork-seed/feature/pr-reused-fork");

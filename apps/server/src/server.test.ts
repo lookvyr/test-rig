@@ -3349,6 +3349,71 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  for (const worktreePath of [null, "/tmp/repo", "/tmp/pr-worktree"]) {
+    it.effect(
+      `refreshes the PR checkout without waiting for status (${worktreePath ?? "local"})`,
+      () =>
+        Effect.gen(function* () {
+          const refreshes = yield* Queue.unbounded<string>();
+          const finishRefresh = yield* Deferred.make<void>();
+          yield* Effect.addFinalizer(() => Deferred.succeed(finishRefresh, undefined));
+          yield* buildAppUnderTest({
+            layers: {
+              gitManager: {
+                preparePullRequestThread: () =>
+                  Effect.succeed({
+                    pullRequest: {
+                      number: 1,
+                      title: "Demo PR",
+                      url: "https://example.com/pr/1",
+                      baseBranch: "main",
+                      headBranch: "feature/demo",
+                      state: "open",
+                    },
+                    branch: "feature/demo",
+                    worktreePath,
+                  }),
+              },
+              vcsStatusBroadcaster: {
+                refreshStatus: (cwd) =>
+                  Queue.offer(refreshes, cwd).pipe(
+                    Effect.andThen(Deferred.await(finishRefresh)),
+                    Effect.as({
+                      isRepo: true,
+                      hasPrimaryRemote: true,
+                      isDefaultRef: false,
+                      refName: "feature/demo",
+                      hasWorkingTreeChanges: false,
+                      workingTree: { files: [], insertions: 0, deletions: 0 },
+                      hasUpstream: true,
+                      aheadCount: 0,
+                      behindCount: 0,
+                      pr: null,
+                    }),
+                  ),
+              },
+            },
+          });
+          const wsUrl = yield* getWsServerUrl("/ws");
+          const prepared = yield* Effect.scoped(
+            withWsRpcClient(wsUrl, (client) =>
+              client[WS_METHODS.gitPreparePullRequestThread]({
+                cwd: "/tmp/repo",
+                reference: "1",
+                mode: worktreePath === null ? "local" : "worktree",
+              }),
+            ),
+          );
+          assert.equal(prepared.worktreePath, worktreePath);
+          assert.equal(yield* Queue.take(refreshes), "/tmp/repo");
+          if (worktreePath !== null && worktreePath !== "/tmp/repo") {
+            assert.equal(yield* Queue.take(refreshes), worktreePath);
+          }
+          assert.equal(yield* Queue.size(refreshes), 0);
+        }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+  }
+
   it.effect("routes websocket rpc git methods", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest({

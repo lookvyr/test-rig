@@ -1,19 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
-import { createMemoryStorage } from "../lib/storage";
-import {
-  createPullRequestWorkspaceStore,
-  pullRequestWorkspaceKey,
-} from "../pullRequestWorkspaceStore";
-import {
-  appendPullRequestHandoffContext,
-  buildPullRequestFeedbackContext,
-  buildPullRequestHandoffContext,
-  preparePullRequestHandoff,
-  resolveLinkedPullRequestTarget,
-} from "./usePullRequestHandoff";
+import { preparePullRequestDraft } from "./usePullRequestHandoff";
 
 const environmentId = EnvironmentId.make("local");
 const projectId = ProjectId.make("project");
@@ -21,17 +10,8 @@ const input = {
   environmentId,
   projectId,
   cwd: "/repo",
-  pullRequest: {
-    url: "https://github.com/owner/repo/pull/42",
-    number: 42,
-    title: "Fix resource release",
-    headRefName: "fix",
-    baseRefName: "main",
-    headSha: "new-head",
-    body: "Release the handle.",
-  },
+  reference: "https://github.com/owner/repo/pull/42",
 };
-const scope = { environmentId, cwd: input.cwd, reference: input.pullRequest.url };
 
 beforeEach(() => {
   useComposerDraftStore.setState({
@@ -43,331 +23,118 @@ beforeEach(() => {
   });
 });
 
-describe("explicit PR draft handoff", () => {
-  it("appends to a linked conversation without preparing a worktree, preserves composer data, and deduplicates repeated handoffs", async () => {
-    const store = createPullRequestWorkspaceStore(createMemoryStorage());
-    const ref = scopeThreadRef(environmentId, ThreadId.make("existing"));
-    store.getState().link(scope, { ...ref, projectId });
-    store.getState().setInstructions(scope, "Check cancellation");
+describe("PR review draft", () => {
+  it("waits for preparation, then creates a URL-only draft with the prepared checkout", async () => {
+    let finish!: (result: { branch: string; worktreePath: string }) => void;
+    const prepare = vi.fn<Parameters<typeof preparePullRequestDraft>[1]>(
+      () =>
+        new Promise<{ branch: string; worktreePath: string }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const operation = preparePullRequestDraft(input, prepare);
+    expect(useComposerDraftStore.getState().draftThreadsByThreadKey).toEqual({});
+    expect(useComposerDraftStore.getState().draftsByThreadKey).toEqual({});
+    finish({ branch: "fix", worktreePath: "/worktrees/fix" });
+    const draftId = await operation;
     const composer = useComposerDraftStore.getState();
-    composer.setPrompt(ref, "My unsent question");
-    composer.setModelSelection(ref, {
-      model: "gpt-5.4",
-      options: [],
-      instanceId: ProviderInstanceId.make("codex"),
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(composer.getDraftSession(draftId)).toMatchObject({
+      environmentId,
+      projectId,
+      threadId: prepare.mock.calls[0]![0],
+      branch: "fix",
+      worktreePath: "/worktrees/fix",
+      envMode: "worktree",
+      startFromOrigin: false,
     });
-    const attachment = {
-      id: "attachment",
-      name: "screenshot.png",
-      mimeType: "image/png",
-      sizeBytes: 2,
-      dataUrl: "data:image/png;base64,AA==",
-    };
-    const draft = composer.getComposerDraft(ref)!;
-    useComposerDraftStore.setState((state) => ({
-      draftsByThreadKey: Object.fromEntries(
-        Object.entries(state.draftsByThreadKey).map(([key, value]) => [
-          key,
-          value === draft ? { ...value, persistedAttachments: [attachment] } : value,
-        ]),
-      ),
-    }));
-    const before = composer.getComposerDraft(ref)!;
-    const prepare = vi.fn();
-    const deps = () => ({
-      prepare,
-      readThread: () => ({
-        environmentId,
-        id: ref.threadId,
-        projectId,
-        archivedAt: null,
-        sideOfThreadId: null,
-      }),
-      getWorkspaces: store.getState,
-    });
-    await preparePullRequestHandoff(input, { kind: "existing", threadId: ref.threadId }, deps());
-    const firstPrompt = composer.getComposerDraft(ref)?.prompt;
-    await preparePullRequestHandoff(input, { kind: "existing", threadId: ref.threadId }, deps());
-    const after = composer.getComposerDraft(ref)!;
-    expect(prepare).not.toHaveBeenCalled();
-    expect(after.prompt).toBe(firstPrompt);
-    expect(after.prompt).toMatch(/^My unsent question\n\nPull request #42/);
-    expect(after.persistedAttachments).toEqual(before.persistedAttachments);
-    expect(after.modelSelectionByProvider).toEqual(before.modelSelectionByProvider);
-    expect(Object.keys(useComposerDraftStore.getState().draftThreadsByThreadKey)).toHaveLength(0);
+    expect(composer.getComposerDraft(draftId)?.prompt).toBe(input.reference);
   });
 
-  it("creates only a local draft after prepare, preserves unrelated project drafts, and reopens it without preparing again", async () => {
-    const store = createPullRequestWorkspaceStore(createMemoryStorage());
+  it("preserves unrelated project drafts when starting a review", async () => {
     const composer = useComposerDraftStore.getState();
     const unrelated = DraftId.make("unrelated");
     composer.setProjectDraftThreadId(scopeProjectRef(environmentId, projectId), unrelated);
     composer.setPrompt(unrelated, "Keep my unrelated work");
     const prepare = vi.fn().mockResolvedValue({ branch: "fix", worktreePath: "/worktrees/fix" });
-    const first = await preparePullRequestHandoff(
-      input,
-      { kind: "new" },
-      {
-        prepare,
-        readThread: () => null,
-        getWorkspaces: store.getState,
-      },
-    );
-    expect(first.draftId).toBeTruthy();
-    expect(composer.getDraftSession(first.draftId!)?.worktreePath).toBe("/worktrees/fix");
+    const review = await preparePullRequestDraft(input, prepare);
+    expect(review).not.toBe(unrelated);
     expect(composer.getComposerDraft(unrelated)?.prompt).toBe("Keep my unrelated work");
-    const again = resolveLinkedPullRequestTarget(input, {
-      readThread: () => null,
-      getWorkspaces: store.getState,
-    });
-    expect(again).toEqual(first);
-    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(composer.getDraftSession(unrelated)).not.toBeNull();
   });
 
-  it("preserves notes/instructions and creates no draft when preparation fails", async () => {
-    const store = createPullRequestWorkspaceStore(createMemoryStorage());
-    store.getState().setInstructions(scope, "Keep these instructions");
-    store.getState().addNote(scope, { body: "My note", headSha: "old-head" });
-    const before = store.getState().entriesByKey[pullRequestWorkspaceKey(scope)];
+  it("creates no draft or composer content when checkout preparation fails", async () => {
     await expect(
-      preparePullRequestHandoff(
-        input,
-        { kind: "new" },
-        {
-          prepare: async () => {
-            throw new Error("fetch failed");
-          },
-          readThread: () => null,
-          getWorkspaces: store.getState,
-        },
-      ),
+      preparePullRequestDraft(input, async () => {
+        throw new Error("fetch failed");
+      }),
     ).rejects.toThrow("fetch failed");
-    expect(store.getState().entriesByKey[pullRequestWorkspaceKey(scope)]).toEqual(before);
     expect(useComposerDraftStore.getState().draftThreadsByThreadKey).toEqual({});
+    expect(useComposerDraftStore.getState().draftsByThreadKey).toEqual({});
   });
 
-  it("marks selected old-head notes stale and omits unselected notes", () => {
-    const context = buildPullRequestHandoffContext(input.pullRequest, {
-      instructions: "Review",
-      notes: [
-        {
-          id: "one",
-          body: "Old location",
-          headSha: "old-head",
-          filePath: "src/main.ts",
-          line: 2,
-          side: "old",
-          selected: true,
-        },
-        { id: "two", body: "Excluded", headSha: "new-head", selected: false },
-      ],
-    });
-    expect(context).toContain("src/main.ts:2 (old) [STALE: written against old-head");
-    expect(context).not.toContain("Excluded");
-  });
-  it("shares preparation across remounts and includes notes edited while it was pending", async () => {
-    const store = createPullRequestWorkspaceStore(createMemoryStorage());
-    let resolvePreparation!: (value: { branch: string; worktreePath: string }) => void;
-    const preparation = new Promise<{ branch: string; worktreePath: string }>((resolve) => {
-      resolvePreparation = resolve;
-    });
-    const prepare = vi.fn(() => preparation);
-    const dependencies = { prepare, readThread: () => null, getWorkspaces: store.getState };
-    const first = preparePullRequestHandoff(input, { kind: "new" }, dependencies);
-    const second = preparePullRequestHandoff(input, { kind: "new" }, dependencies);
-    expect(second).toBe(first);
-    await expect(
-      preparePullRequestHandoff(
-        input,
-        { kind: "existing", threadId: ThreadId.make("other") },
-        dependencies,
-      ),
-    ).rejects.toThrow("already being prepared");
-    store.getState().setInstructions(scope, "Edited during preparation");
-    resolvePreparation({ branch: "fix", worktreePath: "/worktrees/fix" });
-    const target = await first;
-    expect(prepare).toHaveBeenCalledTimes(1);
-    expect(useComposerDraftStore.getState().getComposerDraft(target.draftId!)?.prompt).toContain(
-      "Edited during preparation",
-    );
-  });
-
-  it("keeps a linked draft while its promotion shell is still arriving", async () => {
-    const store = createPullRequestWorkspaceStore(createMemoryStorage());
+  it("keeps independent unsent drafts when the same PR worktree is reused", async () => {
     const prepare = vi.fn().mockResolvedValue({ branch: "fix", worktreePath: "/worktrees/fix" });
-    const dependencies = { prepare, readThread: () => null, getWorkspaces: store.getState };
-    const target = await preparePullRequestHandoff(input, { kind: "new" }, dependencies);
-    useComposerDraftStore
-      .getState()
-      .markDraftThreadPromoting(target.draftId!, scopeThreadRef(environmentId, target.threadId));
-    const reopened = resolveLinkedPullRequestTarget(input, dependencies);
-    expect(reopened).toEqual(target);
-    expect(prepare).toHaveBeenCalledTimes(1);
-  });
-
-  it("preserves an old unsent PR draft when the user explicitly chooses a new worktree", async () => {
-    const store = createPullRequestWorkspaceStore(createMemoryStorage());
-    const prepare = vi.fn().mockResolvedValue({ branch: "fix", worktreePath: "/worktrees/fix" });
-    const dependencies = { prepare, readThread: () => null, getWorkspaces: store.getState };
-    const first = await preparePullRequestHandoff(input, { kind: "new" }, dependencies);
-    useComposerDraftStore.getState().setPrompt(first.draftId!, "Keep my unsent PR draft");
-    const next = await preparePullRequestHandoff(input, { kind: "new" }, dependencies);
-    expect(next.draftId).not.toBe(first.draftId);
-    expect(useComposerDraftStore.getState().getComposerDraft(first.draftId!)?.prompt).toBe(
-      "Keep my unsent PR draft",
-    );
-  });
-  it("reopens the same PR draft with unsent edits after serializing and hydrating both stores", async () => {
-    const storage = createMemoryStorage();
-    const store = createPullRequestWorkspaceStore(storage);
-    const prepare = vi.fn().mockResolvedValue({ branch: "fix", worktreePath: "/worktrees/fix" });
-    const target = await preparePullRequestHandoff(
-      input,
-      { kind: "new" },
-      {
-        prepare,
-        readThread: () => null,
-        getWorkspaces: store.getState,
-      },
-    );
+    const first = await preparePullRequestDraft(input, prepare);
+    useComposerDraftStore.getState().setPrompt(first, "Keep my unsent PR review");
+    const next = await preparePullRequestDraft(input, prepare);
     const composer = useComposerDraftStore.getState();
-    const ordinaryDraft = DraftId.make("ordinary-project-draft");
-    composer.setProjectDraftThreadId(scopeProjectRef(environmentId, projectId), ordinaryDraft);
-    composer.setPrompt(ordinaryDraft, "Unrelated unsent text");
-    const originalPrompt =
-      composer.getComposerDraft(target.draftId!)!.prompt + "\n\nMy additional unsent question";
-    composer.setPrompt(target.draftId!, originalPrompt);
+    expect(next).not.toBe(first);
+    expect(composer.getDraftSession(next)?.threadId).not.toBe(
+      composer.getDraftSession(first)?.threadId,
+    );
+    expect(composer.getDraftSession(next)?.worktreePath).toBe(
+      composer.getDraftSession(first)?.worktreePath,
+    );
+    expect(composer.getComposerDraft(first)?.prompt).toBe("Keep my unsent PR review");
+    expect(composer.getComposerDraft(next)?.prompt).toBe(input.reference);
+  });
+
+  it("restores an unsent review and checkout through normal draft persistence", async () => {
+    const draftId = await preparePullRequestDraft(input, async () => ({
+      branch: "fix",
+      worktreePath: "/worktrees/fix",
+    }));
+    const composer = useComposerDraftStore.getState();
+    const prompt = `${input.reference}\n\nReview cancellation handling.`;
+    composer.setPrompt(draftId, prompt);
     const options = useComposerDraftStore.persist.getOptions();
     const serialized = JSON.stringify(options.partialize!(useComposerDraftStore.getState()));
     useComposerDraftStore.setState(
       options.merge!(JSON.parse(serialized), useComposerDraftStore.getInitialState()),
       true,
     );
-    const hydratedDraft = useComposerDraftStore.getState().getDraftSession(target.draftId!);
-    expect(hydratedDraft).toMatchObject({
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)).toMatchObject({
       environmentId,
       projectId,
-      threadId: target.threadId,
       branch: "fix",
       worktreePath: "/worktrees/fix",
     });
-    expect(useComposerDraftStore.getState().getComposerDraft(ordinaryDraft)?.prompt).toBe(
-      "Unrelated unsent text",
-    );
-    const restored = createPullRequestWorkspaceStore(storage);
-    const reopened = resolveLinkedPullRequestTarget(input, {
-      readThread: () => null,
-      getWorkspaces: restored.getState,
-    });
-    expect(reopened).toEqual(target);
-    expect(prepare).toHaveBeenCalledTimes(1);
-    expect(useComposerDraftStore.getState().getComposerDraft(target.draftId!)?.prompt).toBe(
-      originalPrompt,
-    );
-  });
-  it("opening a saved conversation leaves its composer, instructions and association untouched", () => {
-    const store = createPullRequestWorkspaceStore(createMemoryStorage());
-    const threadId = ThreadId.make("linked");
-    const ref = scopeThreadRef(environmentId, threadId);
-    store.getState().link(scope, { ...ref, projectId });
-    store.getState().setInstructions(scope, "New instructions that have not been handed off");
-    useComposerDraftStore.getState().setPrompt(ref, "My unsent question");
-    const before = store.getState().entriesByKey;
-    const target = resolveLinkedPullRequestTarget(input, {
-      readThread: () => ({
-        environmentId,
-        id: threadId,
-        projectId,
-        archivedAt: null,
-      }),
-      getWorkspaces: store.getState,
-    });
-    expect(target).toEqual({ ...ref, projectId });
-    expect(useComposerDraftStore.getState().getComposerDraft(ref)?.prompt).toBe(
-      "My unsent question",
-    );
-    expect(store.getState().entriesByKey).toBe(before);
+    expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(prompt);
   });
 
-  it.each(["missing", "archived", "side", "other-project", "other-environment"])(
-    "rejects an unavailable %s destination without replacing its link or creating a worktree",
-    async (kind) => {
-      const store = createPullRequestWorkspaceStore(createMemoryStorage());
-      const threadId = ThreadId.make("existing");
-      store.getState().link(scope, { environmentId, projectId, threadId });
-      store.getState().setInstructions(scope, "Keep my instructions");
-      const before = store.getState().entriesByKey;
-      const readThread = () =>
-        kind === "missing"
-          ? null
-          : {
-              environmentId:
-                kind === "other-environment" ? EnvironmentId.make("remote") : environmentId,
-              id: threadId,
-              projectId: kind === "other-project" ? ProjectId.make("different") : projectId,
-              archivedAt: kind === "archived" ? "2026-09-04T00:00:00Z" : null,
-              sideOfThreadId: kind === "side" ? ThreadId.make("parent") : null,
-            };
-      const prepare = vi.fn();
-      const dependencies = { prepare, readThread, getWorkspaces: store.getState };
-      await expect(
-        preparePullRequestHandoff(input, { kind: "existing", threadId }, dependencies),
-      ).rejects.toThrow("unavailable");
-      expect(() => resolveLinkedPullRequestTarget(input, dependencies)).toThrow("unavailable");
-      expect(prepare).not.toHaveBeenCalled();
-      expect(store.getState().entriesByKey).toBe(before);
-      expect(useComposerDraftStore.getState().draftThreadsByThreadKey).toEqual({});
-    },
-  );
-
-  it("preserves the old association until explicit replacement worktree preparation succeeds", async () => {
-    const store = createPullRequestWorkspaceStore(createMemoryStorage());
-    store.getState().link(scope, { environmentId, projectId, threadId: ThreadId.make("previous") });
-    const before = store.getState().entriesByKey;
-    let finish!: (value: { branch: string; worktreePath: string }) => void;
-    const preparation = new Promise<{ branch: string; worktreePath: string }>((resolve) => {
-      finish = resolve;
-    });
-    const operation = preparePullRequestHandoff(
+  it("keeps overlapping preparations separate when they finish out of order", async () => {
+    let finishFirst!: (result: { branch: string; worktreePath: string }) => void;
+    const firstPending = preparePullRequestDraft(
       input,
-      { kind: "new" },
-      { prepare: () => preparation, readThread: () => null, getWorkspaces: store.getState },
+      () =>
+        new Promise((resolve) => {
+          finishFirst = resolve;
+        }),
     );
-    expect(store.getState().entriesByKey).toBe(before);
-    finish({ branch: "fix", worktreePath: "/worktrees/fix" });
-    const target = await operation;
-    expect(store.getState().entriesByKey[pullRequestWorkspaceKey(scope)]?.linkedTarget).toEqual(
-      target,
-    );
-  });
-
-  it("keeps feedback compact, includes stale coordinates, and appends once without touching initial instructions", () => {
-    const notes = [
-      {
-        id: "selected",
-        body: "Check cancellation",
-        headSha: "old-head",
-        selected: true,
-        filePath: "src/main.ts",
-        line: 2,
-        side: "old" as const,
-      },
-      { id: "excluded", body: "Leave out", headSha: "new-head", selected: false },
-    ];
-    const context = buildPullRequestFeedbackContext(input.pullRequest, notes);
-    expect(context).toContain("Head commit: new-head");
-    expect(context).toContain("src/main.ts:2 (old) [STALE: written against old-head");
-    expect(context).not.toContain(input.pullRequest.body);
-    expect(context).not.toContain("Instructions:");
-    expect(context).not.toContain("Leave out");
-    const draftId = DraftId.make("current");
-    useComposerDraftStore.getState().setPrompt(draftId, "My own message");
-    expect(appendPullRequestHandoffContext(draftId, context)).toBe(true);
-    expect(appendPullRequestHandoffContext(draftId, context)).toBe(false);
-    expect(buildPullRequestFeedbackContext(input.pullRequest, [])).toBe("");
-    expect(appendPullRequestHandoffContext(draftId, "")).toBe(false);
-    expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(
-      `My own message\n\n${context}`,
-    );
+    const secondInput = { ...input, reference: "https://github.com/owner/repo/pull/43" };
+    const second = await preparePullRequestDraft(secondInput, async () => ({
+      branch: "second",
+      worktreePath: "/worktrees/second",
+    }));
+    useComposerDraftStore.getState().setPrompt(second, "Keep the second review draft");
+    finishFirst({ branch: "first", worktreePath: "/worktrees/first" });
+    const first = await firstPending;
+    const composer = useComposerDraftStore.getState();
+    expect(first).not.toBe(second);
+    expect(composer.getComposerDraft(first)?.prompt).toBe(input.reference);
+    expect(composer.getDraftSession(first)?.worktreePath).toBe("/worktrees/first");
+    expect(composer.getComposerDraft(second)?.prompt).toBe("Keep the second review draft");
+    expect(composer.getDraftSession(second)?.worktreePath).toBe("/worktrees/second");
   });
 });

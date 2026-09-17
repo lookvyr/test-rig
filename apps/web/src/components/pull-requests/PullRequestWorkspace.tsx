@@ -24,10 +24,6 @@ import {
 } from "../../keybindings";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { JumpHintBadge } from "../JumpHintBadge";
-import {
-  pullRequestWorkspaceKey,
-  usePullRequestWorkspaceStore,
-} from "../../pullRequestWorkspaceStore";
 import { cn } from "../../lib/utils";
 import { useOpenPrLink } from "../../lib/openPullRequestLink";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
@@ -38,6 +34,7 @@ import { SidebarInset } from "../ui/sidebar";
 import { RightPanelResizeHandle } from "../preview/RightPanelResizeHandle";
 import { isPullRequestSelectionAvailable } from "./selection";
 import { PullRequestInspector } from "./PullRequestInspector";
+import { StartPullRequestThreadButton } from "./StartPullRequestThreadButton";
 import { PullRequestSelect } from "./PullRequestSelect";
 import { buildPullRequestGroups } from "./queue";
 import {
@@ -63,7 +60,6 @@ function ProjectPullRequests({
 }) {
   const { selection, panelOpen, select, clearSelection } = usePullRequestQueueStore();
   const openPrLink = useOpenPrLink();
-  const workspaces = usePullRequestWorkspaceStore((state) => state.entriesByKey);
   const lastRefresh = useRef(refreshVersion);
   useEffect(() => {
     if (lastRefresh.current === refreshVersion) return;
@@ -89,9 +85,11 @@ function ProjectPullRequests({
 
   return (
     <section aria-label={`${project.title} pull requests`}>
-      <div className="flex items-center justify-between border-b bg-muted/20 px-5 py-2 text-xs text-muted-foreground">
-        <span className="truncate">{query.data?.repository ?? project.title}</span>
-        <span>
+      <div className="flex items-center justify-between gap-3 border-b bg-muted/20 px-5 py-2 text-xs text-muted-foreground">
+        <span className="min-w-0 truncate" title={query.data?.repository ?? project.title}>
+          {query.data?.repository ?? project.title}
+        </span>
+        <span className="shrink-0 whitespace-nowrap">
           {query.isPending
             ? "Refreshing…"
             : `${items.length} pull request${items.length === 1 ? "" : "s"}`}
@@ -108,15 +106,6 @@ function ProjectPullRequests({
       {items.map((pr, index) => {
         const jumpIndex = startIndex + index;
         const jumpLabel = jumpLabels[jumpIndex];
-        const workspace =
-          workspaces[
-            pullRequestWorkspaceKey({
-              environmentId: project.environmentId,
-              cwd: project.workspaceRoot,
-              reference: pr.url,
-            })
-          ];
-        const noteCount = workspace?.notes.length ?? 0;
         return (
           <div key={pr.url} className="relative border-b">
             <button
@@ -137,16 +126,16 @@ function ProjectPullRequests({
                   reference: pr.url,
                 })
               }
-              className="relative block w-full py-4 pr-12 pl-5 text-left hover:bg-accent/40 aria-pressed:bg-accent/60 focus-visible:outline-2 focus-visible:outline-ring"
+              className="relative block w-full px-5 pt-4 pb-3 text-left hover:bg-accent/40 aria-pressed:bg-accent/60 focus-visible:outline-2 focus-visible:outline-ring"
             >
               {jumpLabel && <JumpHintBadge label={jumpLabel} />}
-              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="flex items-center gap-2 pr-28 text-xs text-muted-foreground">
                 {pr.state === "merged" ? (
-                  <GitMergeIcon className="size-3.5 text-purple-500" />
+                  <GitMergeIcon className="size-3.5 shrink-0 text-purple-500" />
                 ) : (
                   <GitPullRequestIcon
                     className={cn(
-                      "size-3.5",
+                      "size-3.5 shrink-0",
                       pr.state === "open" ? "text-emerald-500" : "text-muted-foreground",
                     )}
                   />
@@ -163,14 +152,14 @@ function ProjectPullRequests({
                 <span>
                   {pr.changedFiles} {pr.changedFiles === 1 ? "file" : "files"}
                 </span>
-                {workspace?.linkedTarget && <span>Linked conversation</span>}
-                {noteCount > 0 && (
-                  <span>
-                    {noteCount} local {noteCount === 1 ? "note" : "notes"}
-                  </span>
-                )}
               </span>
             </button>
+            <StartPullRequestThreadButton
+              environmentId={project.environmentId}
+              projectId={project.id}
+              cwd={project.workspaceRoot}
+              reference={pr.url}
+            />
             <a
               href={pr.url}
               target="_blank"

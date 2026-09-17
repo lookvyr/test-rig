@@ -169,5 +169,5 @@ Provider documentation:
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/)
 
 Browse GitHub pull requests across your projects from **Pull requests** above
-Settings. See [Pull requests](./pull-requests.md) for local review notes and
-opening an unsent conversation draft.
+Settings. See [Pull requests](./pull-requests.md) for starting review threads and
+viewing PR details alongside a conversation.

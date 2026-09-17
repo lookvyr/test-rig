@@ -70,10 +70,6 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
-import {
-  findPullRequestWorkspaceForThread,
-  usePullRequestWorkspaceStore,
-} from "../pullRequestWorkspaceStore";
 import { PullRequestInspector } from "./pull-requests/PullRequestInspector";
 import {
   collapseExpandedComposerCursor,
@@ -1504,18 +1500,6 @@ function ChatViewContent(props: ChatViewProps) {
   const activeRightPanelSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
   );
-  const pullRequestSurface = rightPanelState.surfaces.find(
-    (surface) => surface.kind === "pull-request",
-  );
-  const linkedPullRequest = usePullRequestWorkspaceStore((state) =>
-    activeThreadRef
-      ? findPullRequestWorkspaceForThread(
-          state.entriesByKey,
-          activeThreadRef,
-          pullRequestSurface?.workspaceKey,
-        )
-      : null,
-  );
   const activeFileSurface =
     activeRightPanelSurface?.kind === "file" ? activeRightPanelSurface : null;
   const activePreviewState = useThreadPreviewState(activeThreadRef);
@@ -2397,6 +2381,7 @@ function ChatViewContent(props: ChatViewProps) {
           input: { cwd: gitStatusCwd },
         }),
   );
+  const refreshCheckoutStatus = useAtomCommand(vcsEnvironment.refreshStatus);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
   // Prefer an instance-id match so a custom Codex instance (e.g.
@@ -3869,6 +3854,19 @@ function ChatViewContent(props: ChatViewProps) {
       bitbucket: false,
     },
   });
+  const pullRequestSelection =
+    activeThreadPr &&
+    activeProject &&
+    gitStatusCwd &&
+    gitStatusQuery.data?.sourceControlProvider?.kind === "github"
+      ? {
+          environmentId,
+          projectId: activeProject.id,
+          projectName: activeProject.title,
+          cwd: gitStatusCwd,
+          reference: activeThreadPr.url,
+        }
+      : null;
   const supportsPinning = serverConfig?.environment.capabilities.threadPinning === true;
   const activeThreadPinned = supportsPinning && activeThreadShell?.pinnedAt != null;
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true;
@@ -5806,36 +5804,31 @@ function ChatViewContent(props: ChatViewProps) {
         <div className="p-4 text-sm text-muted-foreground">Opening side chat…</div>
       )
     ) : activeRightPanelSurface?.kind === "pull-request" ? (
-      linkedPullRequest?.linkedTarget &&
-      activeProject?.workspaceRoot === linkedPullRequest.scope.cwd ? (
+      pullRequestSelection ? (
         <PullRequestInspector
-          key={`${linkedPullRequest.scope.environmentId}:${linkedPullRequest.scope.reference}`}
-          selection={{
-            ...linkedPullRequest.scope,
-            projectId: linkedPullRequest.linkedTarget.projectId,
-            projectName: activeProject?.title ?? "Project",
-          }}
-          onAddToMessage={(context) => {
-            const composer = composerRef.current;
-            const prompt = composer?.getSendContext().prompt ?? "";
-            if (prompt.includes(context)) {
-              focusComposer();
-            } else if (!composer?.insertTextAtEnd(prompt.length ? `\n\n${context}` : context)) {
-              toastManager.add({
-                type: "error",
-                title: "Could not add review feedback",
-                description:
-                  "The conversation is not ready for input. Your selected notes are saved.",
-              });
-            }
-          }}
+          key={JSON.stringify(pullRequestSelection)}
+          selection={pullRequestSelection}
           onClose={() =>
             useRightPanelStore.getState().closeSurface(activeThreadRef, "pull-request")
           }
         />
       ) : (
-        <div className="p-4 text-sm text-muted-foreground">
-          The linked pull request is unavailable for this project folder.
+        <div className="space-y-3 p-4 text-sm text-muted-foreground">
+          <p>
+            {!gitStatusQuery.data && gitStatusQuery.isPending
+              ? "Detecting pull request…"
+              : "No GitHub pull request detected for this checkout."}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (gitStatusCwd)
+                void refreshCheckoutStatus({ environmentId, input: { cwd: gitStatusCwd } });
+            }}
+          >
+            Refresh Git status
+          </Button>
         </div>
       )
     ) : activeRightPanelSurface?.kind === "preview" ? (
@@ -5955,6 +5948,11 @@ function ChatViewContent(props: ChatViewProps) {
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
+            onShowPullRequest={
+              pullRequestSelection && activeThreadRef
+                ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
+                : undefined
+            }
             onNewThreadInProject={handleNewThreadInActiveProject}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
@@ -6323,7 +6321,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddAgents={addAgentsSurface}
           onAddPullRequest={
-            linkedPullRequest
+            pullRequestSelection
               ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
               : undefined
           }
@@ -6358,7 +6356,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddAgents={addAgentsSurface}
             onAddPullRequest={
-              linkedPullRequest
+              pullRequestSelection
                 ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
                 : undefined
             }

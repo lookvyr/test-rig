@@ -11,7 +11,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ChangeRequestStateLike } from "@t3tools/client-runtime/state/thread-settled";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, GitPullRequestIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -56,6 +56,7 @@ interface ChatHeaderProps {
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
   gitCwd: string | null;
+  onShowPullRequest?: (() => void) | undefined;
   onNewThreadInProject: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
@@ -108,6 +109,7 @@ export const ChatHeader = memo(function ChatHeader({
   availableEditors,
   rightPanelOpen,
   gitCwd,
+  onShowPullRequest,
   onNewThreadInProject,
   onRunProjectScript,
   onAddProjectScript,
@@ -319,6 +321,23 @@ export const ChatHeader = memo(function ChatHeader({
             availableEditors={availableEditors}
             openInCwd={openInCwd}
           />
+        )}
+        {onShowPullRequest && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Show PR details"
+                  onClick={onShowPullRequest}
+                  className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                >
+                  <GitPullRequestIcon className="size-4" />
+                </button>
+              }
+            />
+            <TooltipPopup>Show PR details</TooltipPopup>
+          </Tooltip>
         )}
         {activeProjectName && (
           <GitActionsControl

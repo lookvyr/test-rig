@@ -1777,9 +1777,16 @@ const makeWsRpcLayer = (
         [WS_METHODS.gitPreparePullRequestThread]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitPreparePullRequestThread,
-            gitWorkflow
-              .preparePullRequestThread(input)
-              .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            gitWorkflow.preparePullRequestThread(input).pipe(
+              Effect.tap(
+                Effect.fn(function* (result) {
+                  yield* refreshGitStatus(input.cwd);
+                  if (result.worktreePath !== null && result.worktreePath !== input.cwd) {
+                    yield* refreshGitStatus(result.worktreePath);
+                  }
+                }),
+              ),
+            ),
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>

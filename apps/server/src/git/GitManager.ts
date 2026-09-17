@@ -2015,7 +2015,7 @@ export const make = Effect.gen(function* () {
         yield* ensureExistingWorktreeUpstream(existingBranchBeforeFetch.worktreePath);
         return {
           pullRequest,
-          branch: localPullRequestBranch,
+          branch: existingBranchBeforeFetch.name,
           worktreePath: existingBranchBeforeFetch.worktreePath,
         };
       }
@@ -2024,7 +2024,7 @@ export const make = Effect.gen(function* () {
           operation: "preparePullRequestThread",
           cwd: input.cwd,
           detail:
-            "This PR branch is already checked out in the main repo. Use Local, or switch the main repo off that branch before creating a worktree thread.",
+            "This PR branch is already checked out in the main repo. Switch the main repo to another branch, then try Review again.",
         });
       }
 
@@ -2045,7 +2045,7 @@ export const make = Effect.gen(function* () {
         yield* ensureExistingWorktreeUpstream(existingBranchAfterFetch.worktreePath);
         return {
           pullRequest,
-          branch: localPullRequestBranch,
+          branch: existingBranchAfterFetch.name,
           worktreePath: existingBranchAfterFetch.worktreePath,
         };
       }
@@ -2054,7 +2054,7 @@ export const make = Effect.gen(function* () {
           operation: "preparePullRequestThread",
           cwd: input.cwd,
           detail:
-            "This PR branch is already checked out in the main repo. Use Local, or switch the main repo off that branch before creating a worktree thread.",
+            "This PR branch is already checked out in the main repo. Switch the main repo to another branch, then try Review again.",
         });
       }
 

@@ -2,7 +2,6 @@ import type { ReactElement, ReactNode } from "react";
 import {
   EnvironmentId,
   ProjectId,
-  ThreadId,
   type GitGetPullRequestDetailsResult,
   type GitListPullRequestsResult,
 } from "@t3tools/contracts";
@@ -15,6 +14,8 @@ const state = vi.hoisted(() => ({
   ref: null as { current: number } | null,
   data: null as GitGetPullRequestDetailsResult | null,
   listData: null as GitListPullRequestsResult | null,
+  detailsPending: false,
+  detailsError: null as string | null,
 }));
 vi.mock("react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react")>()),
@@ -41,23 +42,6 @@ vi.mock("./workspaceStore", async (importOriginal) => {
     ),
   };
 });
-vi.mock("../../pullRequestWorkspaceStore", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../pullRequestWorkspaceStore")>();
-  return {
-    ...actual,
-    usePullRequestWorkspaceStore: Object.assign(
-      (
-        selector?: (
-          value: ReturnType<typeof actual.usePullRequestWorkspaceStore.getState>,
-        ) => unknown,
-      ) =>
-        selector
-          ? selector(actual.usePullRequestWorkspaceStore.getState())
-          : actual.usePullRequestWorkspaceStore.getState(),
-      actual.usePullRequestWorkspaceStore,
-    ),
-  };
-});
 vi.mock("react/compiler-runtime", () => ({
   c: (size: number) => Array.from({ length: size }, () => Symbol.for("react.memo_cache_sentinel")),
 }));
@@ -71,8 +55,8 @@ vi.mock("../../state/query", () => ({
     })),
   useEnvironmentQuery: (target: { kind: string }) => ({
     data: target.kind === "list" ? state.listData : state.data,
-    error: null,
-    isPending: false,
+    error: state.detailsError,
+    isPending: state.detailsPending,
     refresh: state.refresh,
   }),
 }));
@@ -104,13 +88,11 @@ vi.mock("../../hooks/usePullRequestHandoff", async (importOriginal) => ({
 }));
 
 import { PullRequestInspector } from "./PullRequestInspector";
-import { PullRequestConversationActions } from "./PullRequestConversationActions";
+import { StartPullRequestThreadButton } from "./StartPullRequestThreadButton";
+import { PullRequestChecks, PullRequestFiles } from "./PullRequestSummary";
+import { PullRequestMarkdown } from "./PullRequestMarkdown";
 import { PullRequestWorkspace } from "./PullRequestWorkspace";
 import { DEFAULT_QUEUE_FILTERS, usePullRequestQueueStore } from "./workspaceStore";
-import {
-  pullRequestWorkspaceKey,
-  usePullRequestWorkspaceStore,
-} from "../../pullRequestWorkspaceStore";
 
 const selection = {
   environmentId: EnvironmentId.make("env"),
@@ -118,11 +100,6 @@ const selection = {
   projectName: "Repo",
   cwd: "/repo",
   reference: "https://github.com/owner/repo/pull/1",
-};
-const scope = {
-  environmentId: selection.environmentId,
-  cwd: selection.cwd,
-  reference: selection.reference,
 };
 function elements(node: ReactNode): ReactElement<Record<string, unknown>>[] {
   if (Array.isArray(node)) return node.flatMap(elements);
@@ -171,7 +148,8 @@ beforeEach(() => {
     panelOpen: true,
     panelExpanded: false,
   });
-  usePullRequestWorkspaceStore.setState({ entriesByKey: {} });
+  state.detailsPending = false;
+  state.detailsError = null;
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("pull request refresh lifecycle", () => {
@@ -195,16 +173,7 @@ describe("pull request refresh lifecycle", () => {
       2,
     );
   });
-  it("refreshes details once per revision while preserving content identity and unsaved note/tab state", () => {
-    const store = usePullRequestWorkspaceStore.getState();
-    store.setTab(scope, "code");
-    store.setNoteDraft(scope, {
-      body: "Keep editing",
-      headSha: "before",
-      filePath: "a.ts",
-      line: 2,
-      side: "new",
-    });
+  it("refreshes details once per revision and replaces the visible snapshot", () => {
     const first = elements(
       PullRequestInspector({ selection, onClose: () => {}, refreshVersion: 0 }),
     );
@@ -212,23 +181,7 @@ describe("pull request refresh lifecycle", () => {
     expect(state.refresh).not.toHaveBeenCalled();
     PullRequestInspector({ selection, onClose: () => {}, refreshVersion: 1 });
     expect(state.refresh).toHaveBeenCalledTimes(1);
-    state.data = {
-      ...details("after"),
-      timeline: [
-        {
-          id: "comment:2",
-          kind: "comment",
-          author: "reviewer",
-          body: "New comment",
-          createdAt: "2026-01-02",
-          url: selection.reference,
-          state: null,
-          path: null,
-          line: null,
-          side: null,
-        },
-      ],
-    };
+    state.data = { ...details("after"), body: "Updated description" };
     const updated = elements(
       PullRequestInspector({ selection, onClose: () => {}, refreshVersion: 1 }),
     ).find((element) => element.props.details !== undefined)!;
@@ -236,36 +189,36 @@ describe("pull request refresh lifecycle", () => {
     expect(updated.key).toBe(originalContents.key);
     expect(updated.props.details).toMatchObject({
       pullRequest: { headSha: "after" },
-      timeline: [{ body: "New comment" }],
+      body: "Updated description",
     });
-    expect(
-      usePullRequestWorkspaceStore.getState().entriesByKey[pullRequestWorkspaceKey(scope)],
-    ).toMatchObject({ tab: "code", noteDraft: { body: "Keep editing", headSha: "before" } });
   });
-  it("always renders Summary even when an older workspace selected Code or Timeline", () => {
-    for (const tab of ["code", "timeline"] as const) {
-      usePullRequestWorkspaceStore.getState().setTab(scope, tab);
-      const contents = elements(PullRequestInspector({ selection, onClose: () => {} })).find(
-        (element) => element.props.details !== undefined,
-      )!;
-      const renderContents = contents.type as (props: typeof contents.props) => ReactNode;
-      const controls = elements(renderContents(contents.props));
-      expect(
-        controls.find((element) => element.props.role === "tabpanel")?.props["aria-labelledby"],
-      ).toBe("pr-tab-summary");
-      expect(
-        controls.find((element) => element.props.id === "pr-tab-summary")?.props["aria-selected"],
-      ).toBe(true);
-      for (const label of ["Diff", "Activity"]) {
-        const trigger = controls.find((element) => element.props.children === label)!;
-        const button = trigger.props.render as ReactElement<Record<string, unknown>>;
-        expect(button.props["aria-disabled"]).toBe("true");
-        expect(button.props.onClick).toBeUndefined();
-      }
-      expect(controls.filter((element) => element.props.children === "Coming soon")).toHaveLength(
-        2,
-      );
-    }
+  it("keeps description, checks and the file tree without review tabs or note controls", () => {
+    const contents = elements(PullRequestInspector({ selection, onClose: () => {} })).find(
+      (element) => element.props.details !== undefined,
+    )!;
+    const renderContents = contents.type as (props: typeof contents.props) => ReactNode;
+    const controls = elements(renderContents(contents.props));
+    expect(controls.find((element) => element.type === PullRequestMarkdown)?.props.text).toBe(
+      "Description",
+    );
+    expect(controls.find((element) => element.type === PullRequestChecks)?.props.checks).toEqual(
+      [],
+    );
+    expect(controls.find((element) => element.type === PullRequestFiles)?.props.details).toBe(
+      state.data,
+    );
+    expect(
+      controls.some((element) =>
+        ["tab", "tablist", "tabpanel"].includes(String(element.props.role)),
+      ),
+    ).toBe(false);
+    expect(controls.some((element) => element.type === "textarea")).toBe(false);
+    expect(controls.some((element) => element.type === StartPullRequestThreadButton)).toBe(false);
+    expect(
+      controls.some(
+        (element) => element.type === "a" && element.props.href === selection.reference,
+      ),
+    ).toBe(true);
   });
   it("standalone conversation inspector refresh falls back to its detail query", () => {
     const button = elements(PullRequestInspector({ selection, onClose: () => {} })).find(
@@ -274,84 +227,44 @@ describe("pull request refresh lifecycle", () => {
     (button.props.onClick as () => void)();
     expect(state.refresh).toHaveBeenCalledOnce();
   });
-  it("linked inspection only adds selected feedback to its host composer without changing the PR link", () => {
-    const store = usePullRequestWorkspaceStore.getState();
-    store.addNote(scope, {
-      body: "Check the changed line",
-      headSha: "before",
-      filePath: "a.ts",
-      line: 2,
-      side: "new",
-    });
-    store.addNote(scope, { body: "Leave this out", headSha: "before", selected: false });
-    store.setInstructions(scope, "Initial review instructions");
-    store.link(scope, {
-      environmentId: selection.environmentId,
-      projectId: selection.projectId,
-      threadId: ThreadId.make("linked-thread"),
-    });
-    const before =
-      usePullRequestWorkspaceStore.getState().entriesByKey[pullRequestWorkspaceKey(scope)];
-    const addToMessage = vi.fn();
-    const inspector = elements(
-      PullRequestInspector({ selection, onClose: () => {}, onAddToMessage: addToMessage }),
-    );
-    const contents = inspector.find((element) => element.props.details !== undefined)!;
-    const renderContents = contents.type as (props: typeof contents.props) => ReactNode;
-    const controls = elements(renderContents(contents.props));
-    expect(controls.some((element) => element.type === PullRequestConversationActions)).toBe(false);
-    expect(controls.some((element) => element.props.id === "pr-destination")).toBe(false);
-    const add = controls.find((element) => element.props.children === "Add to message")!;
-    expect(add.props.disabled).toBe(false);
-    (add.props.onClick as () => void)();
-    expect(addToMessage).toHaveBeenCalledExactlyOnceWith(
-      expect.stringContaining("a.ts:2 (new): Check the changed line"),
-    );
-    const context = addToMessage.mock.calls[0]?.[0];
-    expect(context).not.toContain("Leave this out");
-    expect(context).not.toContain("Description");
-    expect(context).not.toContain("Initial review instructions");
-    expect(
-      usePullRequestWorkspaceStore.getState().entriesByKey[pullRequestWorkspaceKey(scope)],
-    ).toBe(before);
-  });
-  it("keeps preparation in the global inspector and disables empty linked feedback", () => {
-    for (const onAddToMessage of [undefined, vi.fn()]) {
-      const contents = elements(
-        PullRequestInspector({ selection, onClose: () => {}, onAddToMessage }),
-      ).find((element) => element.props.details !== undefined)!;
-      const renderContents = contents.type as (props: typeof contents.props) => ReactNode;
-      const controls = elements(renderContents(contents.props));
-      expect(controls.some((element) => element.type === PullRequestConversationActions)).toBe(
-        !onAddToMessage,
-      );
-      if (onAddToMessage)
-        expect(
-          controls.find((element) => element.props.children === "Add to message")?.props.disabled,
-        ).toBe(true);
-    }
-  });
-  it("clears a closed PR excluded by the Open queue without deleting local notes", () => {
-    usePullRequestWorkspaceStore
-      .getState()
-      .setNoteDraft(scope, { body: "Preserve unsaved note", headSha: "before" });
+  it.each(["loading", "failed"])(
+    "offers a review thread directly from the list while details are %s",
+    (status) => {
+      state.listData = {
+        repository: "repo",
+        pullRequests: [details("head").pullRequest],
+        truncated: false,
+      };
+      state.data = null;
+      state.detailsPending = status === "loading";
+      state.detailsError = status === "failed" ? "GitHub is unavailable" : null;
+      const queue = elements(PullRequestWorkspace()).find(
+        (element) => element.props.project !== undefined,
+      )!;
+      const renderQueue = queue.type as (props: typeof queue.props) => ReactNode;
+      const start = elements(renderQueue(queue.props)).find(
+        (element) => element.type === StartPullRequestThreadButton,
+      )!;
+      expect(start.props).toMatchObject({
+        environmentId: selection.environmentId,
+        projectId: selection.projectId,
+        cwd: selection.cwd,
+        reference: selection.reference,
+      });
+      expect(start.props.disabled).toBeUndefined();
+    },
+  );
+  it("clears a selected PR that is no longer in the queue", () => {
     usePullRequestQueueStore.getState().setPanelOpen(false);
     const root = elements(PullRequestWorkspace());
     const queue = root.find((element) => element.props.project !== undefined)!;
-    const renderQueue = queue.type as (props: {
-      project: { environmentId: string; id: string; title: string; workspaceRoot: string };
-      refreshVersion: number;
-    }) => ReactNode;
-    renderQueue(queue.props as Parameters<typeof renderQueue>[0]);
+    const renderQueue = queue.type as (props: typeof queue.props) => ReactNode;
+    renderQueue(queue.props);
     expect(usePullRequestQueueStore.getState()).toMatchObject({
       selection: null,
       panelOpen: false,
       panelExpanded: false,
     });
-    expect(
-      usePullRequestWorkspaceStore.getState().entriesByKey[pullRequestWorkspaceKey(scope)]
-        ?.noteDraft?.body,
-    ).toBe("Preserve unsaved note");
     expect(
       elements(PullRequestWorkspace()).some(
         (element) => element.props.children === "Reopen review",

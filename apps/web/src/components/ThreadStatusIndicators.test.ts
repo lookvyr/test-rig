@@ -1,4 +1,5 @@
 import type { VcsStatusResult } from "@t3tools/contracts";
+import { applyGitStatusStreamEvent } from "@t3tools/shared/git";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -32,6 +33,36 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
 }
 
 describe("resolveThreadPr", () => {
+  it("resolves a PR arriving after the local checkout snapshot", () => {
+    const complete = status();
+    const local = {
+      isRepo: complete.isRepo,
+      hasPrimaryRemote: complete.hasPrimaryRemote,
+      isDefaultRef: complete.isDefaultRef,
+      refName: complete.refName,
+      hasWorkingTreeChanges: complete.hasWorkingTreeChanges,
+      workingTree: complete.workingTree,
+    };
+    let current = applyGitStatusStreamEvent(null, { _tag: "snapshot", local, remote: null });
+    const resolve = () => resolveThreadPr({ threadBranch: "feature/current", gitStatus: current });
+    expect(resolve()).toBeNull();
+    current = applyGitStatusStreamEvent(current, {
+      _tag: "remoteUpdated",
+      remote: {
+        hasUpstream: complete.hasUpstream,
+        aheadCount: complete.aheadCount,
+        behindCount: complete.behindCount,
+        pr: complete.pr,
+      },
+    });
+    expect(resolve()).toEqual(complete.pr);
+    current = applyGitStatusStreamEvent(current, {
+      _tag: "localUpdated",
+      local: { ...local, refName: "another-branch" },
+    });
+    expect(resolve()).toBeNull();
+  });
+
   it("keeps local-checkout PR indicators scoped to the stored thread branch", () => {
     expect(
       resolveThreadPr({

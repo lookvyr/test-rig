@@ -20,19 +20,19 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
-  it("opens the requested PR in one descriptor while preserving other panels and threads", () => {
+  it("opens one PR summary surface while preserving other panels and threads", () => {
     const panel = useRightPanelStore.getState();
     panel.openBrowser(refA, "browser-tab");
     panel.openFile(refA, "src/main.ts", 9);
-    panel.openPullRequest(refA, "workspace-A");
+    panel.open(refA, "pull-request");
     panel.open(refA, "agents");
-    panel.openPullRequest(refB, "separate-thread");
+    panel.open(refB, "pull-request");
     const others = selectThreadRightPanelState(
       useRightPanelStore.getState().byThreadKey,
       refA,
     ).surfaces.filter((surface) => surface.kind !== "pull-request");
-    panel.openPullRequest(refA, "workspace-B");
-    panel.openPullRequest(refA, "workspace-A");
+    panel.open(refA, "pull-request");
+    panel.open(refA, "pull-request");
     const result = selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
     expect(result.surfaces.filter((surface) => surface.kind !== "pull-request")).toEqual(others);
     expect(result.surfaces.map((surface) => surface.kind)).toEqual([
@@ -44,21 +44,20 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
       id: "pull-request",
       kind: "pull-request",
-      workspaceKey: "workspace-A",
     });
-    expect(
-      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refB),
-    ).toMatchObject({ workspaceKey: "separate-thread" });
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refB)).toEqual({
+      id: "pull-request",
+      kind: "pull-request",
+    });
   });
 
-  it("persists the explicit PR and retains it when a hidden panel is reopened", async () => {
+  it("persists PR panel visibility without storing a separate PR association", async () => {
     const originalOptions = useRightPanelStore.persist.getOptions();
     const storage = createJSONStorage(() => createMemoryStorage())!;
     useRightPanelStore.persist.setOptions({ storage });
     try {
       const panel = useRightPanelStore.getState();
-      panel.openPullRequest(refA, "workspace-B");
-      panel.openPullRequest(refA, "workspace-A");
+      panel.open(refA, "pull-request");
       panel.close(refA);
       const saved = await storage.getItem(originalOptions.name!);
       useRightPanelStore.setState({ byThreadKey: {} });
@@ -70,15 +69,35 @@ describe("rightPanelStore", () => {
       panel.open(refA, "pull-request");
       expect(
         selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
-      ).toEqual({ id: "pull-request", kind: "pull-request", workspaceKey: "workspace-A" });
-      panel.closeSurface(refA, "pull-request");
-      panel.openPullRequest(refA, "workspace-A");
-      expect(
-        selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA),
-      ).toMatchObject({ workspaceKey: "workspace-A" });
+      ).toEqual({
+        id: "pull-request",
+        kind: "pull-request",
+      });
     } finally {
       useRightPanelStore.persist.setOptions(originalOptions);
     }
+  });
+
+  it("drops the legacy PR workspace association while preserving panel visibility", () => {
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "pull-request",
+            surfaces: [{ id: "pull-request", kind: "pull-request", workspaceKey: "old-pr-link" }],
+          },
+        },
+      }),
+    ).toEqual({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "pull-request",
+          surfaces: [{ id: "pull-request", kind: "pull-request" }],
+        },
+      },
+    });
   });
 
   it("reopens one side-chat tab alongside other surfaces without changing its draft", async () => {

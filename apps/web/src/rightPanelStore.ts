@@ -48,11 +48,11 @@ export type RightPanelSurface =
     }
   | { id: "agents"; kind: "agents" }
   | { id: "side-chat"; kind: "side-chat" }
-  | { id: "pull-request"; kind: "pull-request"; workspaceKey?: string };
+  | { id: "pull-request"; kind: "pull-request" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-// v9 removed the "plan" surface kind (plans render inline in the transcript).
-const RIGHT_PANEL_STORAGE_VERSION = 9;
+// v10 derives PR content from Git status instead of a saved workspace link.
+const RIGHT_PANEL_STORAGE_VERSION = 10;
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
@@ -63,7 +63,6 @@ export interface ThreadRightPanelState {
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
   open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
-  openPullRequest: (ref: ScopedThreadRef, workspaceKey: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
@@ -190,6 +189,7 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                     // Dropped surface kind: plans now render inline in the
                     // transcript (v9).
                     if ((surface as { kind?: string }).kind === "plan") return [];
+                    if (surface.kind === "pull-request") return [singletonSurface("pull-request")];
                     if (surface.kind === "file") {
                       const revealLine =
                         typeof surface.revealLine === "number" &&
@@ -275,16 +275,6 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               return upsertSurface(current, existing ?? browserSurface(null));
             }
             return upsertSurface(current, singletonSurface(kind));
-          }),
-        })),
-      openPullRequest: (ref, workspaceKey) =>
-        set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
-            const surface = { id: "pull-request", kind: "pull-request", workspaceKey } as const;
-            const surfaces = current.surfaces.map((entry) =>
-              entry.kind === "pull-request" ? surface : entry,
-            );
-            return upsertSurface({ ...current, surfaces }, surface);
           }),
         })),
       openBrowser: (ref, tabId) =>
