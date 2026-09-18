@@ -2120,3 +2120,78 @@ label:has(> select#reasoning-effort) select {
   opacity: 0.3;
   pointer-events: none;
 }
+
+/* Keep prompt formatting compact: the composer is an editor, not an article. */
+.composer-tiptap p {
+  margin: 0;
+}
+.composer-tiptap > * + * {
+  margin-top: 0.35em;
+}
+.composer-tiptap h1,
+.composer-tiptap h2,
+.composer-tiptap h3,
+.composer-tiptap h4,
+.composer-tiptap h5,
+.composer-tiptap h6 {
+  font-weight: 600;
+  line-height: 1.4;
+}
+.composer-tiptap h1 {
+  font-size: 1.3em;
+}
+.composer-tiptap h2 {
+  font-size: 1.15em;
+}
+.composer-tiptap h3,
+.composer-tiptap h4,
+.composer-tiptap h5,
+.composer-tiptap h6 {
+  font-size: 1em;
+}
+.composer-tiptap ul,
+.composer-tiptap ol {
+  padding-left: 1.5em;
+}
+.composer-tiptap ul {
+  list-style-type: disc;
+}
+.composer-tiptap ol {
+  list-style-type: decimal;
+}
+.composer-tiptap li > p {
+  margin: 0;
+}
+.composer-tiptap blockquote {
+  border-left: 2px solid var(--color-border);
+  padding-left: 0.75em;
+  color: var(--color-muted-foreground);
+}
+.composer-tiptap code {
+  border-radius: 0.25rem;
+  background: var(--color-muted);
+  padding: 0.08em 0.25em;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+.composer-tiptap pre {
+  border: 1px solid var(--color-border);
+  border-radius: 0.4rem;
+  background: var(--color-muted);
+  padding: 0.5em 0.75em;
+  tab-size: 2;
+}
+.composer-tiptap pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.9em;
+}
+.composer-tiptap a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.composer-tiptap .ProseMirror-selectednode {
+  outline: 2px solid var(--color-primary);
+  border-radius: 0.25rem;
+}

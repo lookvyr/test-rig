@@ -39,6 +39,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   replaceTextRange,
+  prepareComposerChipInsertion,
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
@@ -1590,7 +1591,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       rangeStart: number,
       rangeEnd: number,
       replacement: string,
-      options?: { expectedText?: string; focusEditorAfterReplace?: boolean },
+      options?: { expectedText?: string; focusEditorAfterReplace?: boolean; cursor?: number },
     ): boolean => {
       const currentText = promptRef.current;
       const safeStart = Math.max(0, Math.min(currentText.length, rangeStart));
@@ -1602,7 +1603,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return false;
       }
       const next = replaceTextRange(promptRef.current, rangeStart, rangeEnd, replacement);
-      const nextCursor = collapseExpandedComposerCursor(next.text, next.cursor);
+      const nextCursor = collapseExpandedComposerCursor(next.text, options?.cursor ?? next.cursor);
       const nextExpandedCursor = expandCollapsedComposerCursor(next.text, nextCursor);
       promptRef.current = next.text;
       const activePendingQuestion = activePendingProgress?.activeQuestion;
@@ -1899,6 +1900,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
     event: KeyboardEvent,
   ) => {
+    if (key === "Enter") {
+      if (event.isComposing || event.keyCode === 229) return true;
+      if (!shouldSubmitComposerOnEnter({ isMobileViewport, shiftKey: event.shiftKey })) {
+        return false;
+      }
+      submitComposer();
+      return true;
+    }
     if (key === "Tab" && event.shiftKey) {
       if (!planModeUiEnabled) return false;
       toggleInteractionMode();
@@ -1917,17 +1926,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         nudgeComposerMenuHighlight("ArrowUp");
         return true;
       }
-      if ((key === "Enter" || key === "Tab") && selectedItem) {
+      if (key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey && selectedItem) {
         onSelectComposerItem(selectedItem);
         return true;
       }
-    }
-    if (
-      key === "Enter" &&
-      shouldSubmitComposerOnEnter({ isMobileViewport, shiftKey: event.shiftKey })
-    ) {
-      submitComposer();
-      return true;
     }
     return false;
   };
@@ -2478,13 +2480,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return false;
     }
     const prompt = promptRef.current;
+    const position = options?.ensureLeadingBoundary
+      ? prepareComposerChipInsertion(prompt, prompt.length)
+      : { text: prompt, cursor: prompt.length };
     const needsLeadingSpace =
-      (options?.ensureLeadingBoundary ?? false) && prompt.length > 0 && !/\s$/.test(prompt);
-    return applyPromptReplacement(
-      prompt.length,
-      prompt.length,
+      (options?.ensureLeadingBoundary ?? false) &&
+      position.cursor > 0 &&
+      !/\s/.test(position.text[position.cursor - 1]!);
+    const next = replaceTextRange(
+      position.text,
+      position.cursor,
+      position.cursor,
       needsLeadingSpace ? ` ${text}` : text,
     );
+    return applyPromptReplacement(0, prompt.length, next.text, { cursor: next.cursor });
   };
 
   // File-tree drags land as mentions. Handled in the capture phase so the
@@ -2623,10 +2632,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           expandedCursor: expandCollapsedComposerCursor(promptRef.current, composerCursor),
           terminalContextIds: composerTerminalContexts.map((context) => context.id),
         };
-        const insertion = insertInlineTerminalContextPlaceholder(
-          snapshot.value,
-          snapshot.expandedCursor,
-        );
+        const position = prepareComposerChipInsertion(snapshot.value, snapshot.expandedCursor);
+        const insertion = insertInlineTerminalContextPlaceholder(position.text, position.cursor);
         const nextCollapsedCursor = collapseExpandedComposerCursor(
           insertion.prompt,
           insertion.cursor,

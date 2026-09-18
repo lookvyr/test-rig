@@ -7,18 +7,22 @@ import {
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
+  prepareComposerChipInsertion,
   replaceTextRange,
   shouldSubmitComposerOnEnter,
 } from "./composer-logic";
-import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
+import {
+  INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
+  insertInlineTerminalContextPlaceholder,
+} from "./lib/terminalContext";
 
 describe("shouldSubmitComposerOnEnter", () => {
   it("submits plain Enter on desktop", () => {
     expect(shouldSubmitComposerOnEnter({ isMobileViewport: false, shiftKey: false })).toBe(true);
   });
 
-  it("inserts a newline for plain Enter on mobile", () => {
-    expect(shouldSubmitComposerOnEnter({ isMobileViewport: true, shiftKey: false })).toBe(false);
+  it("submits plain Enter regardless of viewport width", () => {
+    expect(shouldSubmitComposerOnEnter({ isMobileViewport: true, shiftKey: false })).toBe(true);
   });
 
   it("inserts a newline for Shift+Enter", () => {
@@ -27,6 +31,22 @@ describe("shouldSubmitComposerOnEnter", () => {
 });
 
 describe("detectComposerTrigger", () => {
+  it.each([
+    "```sh\n$HOME",
+    "~~~sh\n@README.md",
+    "```\n/plan",
+    "Use ` $HOME ` here",
+    "Use `` @README.md `` here",
+  ])("keeps autocomplete out of Markdown code: %s", (text) => {
+    const cursor = text.indexOf(" here") >= 0 ? text.indexOf(" `", 6) : text.length;
+    expect(detectComposerTrigger(text, cursor)).toBeNull();
+  });
+
+  it("resumes autocomplete after a closed code fence", () => {
+    const text = "```sh\necho $HOME\n```\n$skill";
+    expect(detectComposerTrigger(text, text.length)?.kind).toBe("skill");
+  });
+
   it("detects @path trigger at cursor", () => {
     const text = "Please check @src/com";
     const trigger = detectComposerTrigger(text, text.length);
@@ -370,5 +390,61 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("prepareComposerChipInsertion", () => {
+  const insertContext = (text: string, cursor: number) => {
+    const position = prepareComposerChipInsertion(text, cursor);
+    return insertInlineTerminalContextPlaceholder(position.text, position.cursor);
+  };
+
+  it("moves a terminal attachment after a complete code block", () => {
+    const source = "Before\n```sh\necho $HOME\n```\nAfter";
+    const result = insertContext(source, source.indexOf("$HOME"));
+    expect(result.prompt).toBe(
+      `Before\n\`\`\`sh\necho $HOME\n\`\`\`\n${INLINE_TERMINAL_CONTEXT_PLACEHOLDER} \nAfter`,
+    );
+    expect(result.prompt.slice(result.cursor)).toBe("\nAfter");
+    expect(result.contextIndex).toBe(0);
+  });
+
+  it("puts attachments before an unfinished fence, preserving its exact source", () => {
+    const source = `First ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER} \n~~~sh\necho $HOME`;
+    const result = insertContext(source, source.length);
+    expect(result.prompt).toBe(
+      `First ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER} \n${INLINE_TERMINAL_CONTEXT_PLACEHOLDER} \n~~~sh\necho $HOME`,
+    );
+    expect(result.prompt.slice(result.cursor)).toBe("\n~~~sh\necho $HOME");
+    expect(result.contextIndex).toBe(1);
+  });
+
+  it("moves an attachment out of an inline code span without splitting the paragraph", () => {
+    const source = "Inspect `echo $HOME` please";
+    const result = insertContext(source, source.indexOf("$HOME"));
+    expect(result.prompt).toBe(
+      `Inspect \`echo $HOME\` ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER} please`,
+    );
+    expect(result.prompt.slice(result.cursor)).toBe("please");
+  });
+
+  it("keeps a dropped file link outside a code block at the end of a draft", () => {
+    const source = "```sh\necho $HOME\n```";
+    const position = prepareComposerChipInsertion(source, source.length);
+    const result = replaceTextRange(
+      position.text,
+      position.cursor,
+      position.cursor,
+      "[file.ts](src/file.ts) ",
+    );
+    expect(result.text).toBe(source + "\n[file.ts](src/file.ts) ");
+    expect(result.cursor).toBe(result.text.length);
+  });
+
+  it("leaves ordinary insertion positions unchanged", () => {
+    expect(prepareComposerChipInsertion("Before after", 7)).toEqual({
+      text: "Before after",
+      cursor: 7,
+    });
   });
 });

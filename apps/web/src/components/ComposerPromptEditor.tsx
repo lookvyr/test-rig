@@ -1,57 +1,26 @@
-import { LexicalComposer, type InitialConfigType } from "@lexical/react/LexicalComposer";
-import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
-import { ContentEditable } from "@lexical/react/LexicalContentEditable";
-import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
-import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
-import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
-import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
-import { type ServerProviderSkill } from "@t3tools/contracts";
-import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
+import { Extension, Node, type Editor } from "@tiptap/core";
+import Code from "@tiptap/extension-code";
+import { Plugin, TextSelection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import {
-  $applyNodeReplacement,
-  $createRangeSelectionFromDom,
-  $createRangeSelection,
-  $getSelection,
-  $setSelection,
-  $isElementNode,
-  $isLineBreakNode,
-  $isRangeSelection,
-  $isTextNode,
-  $createLineBreakNode,
-  $createParagraphNode,
-  $createTextNode,
-  KEY_ARROW_DOWN_COMMAND,
-  KEY_ARROW_LEFT_COMMAND,
-  KEY_ARROW_RIGHT_COMMAND,
-  KEY_ARROW_UP_COMMAND,
-  KEY_DOWN_COMMAND,
-  KEY_ENTER_COMMAND,
-  KEY_TAB_COMMAND,
-  COMMAND_PRIORITY_HIGH,
-  COMMAND_PRIORITY_LOW,
-  KEY_BACKSPACE_COMMAND,
-  BLUR_COMMAND,
-  FOCUS_COMMAND,
-  $getRoot,
-  HISTORY_MERGE_TAG,
-  DecoratorNode,
-  type ElementNode,
-  type LexicalNode,
-  type SerializedLexicalNode,
-  type EditorState,
-  type NodeKey,
-  type Spread,
-} from "lexical";
+  EditorContent,
+  NodeViewWrapper,
+  ReactNodeViewRenderer,
+  useEditor,
+  type NodeViewProps,
+} from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import type { ServerProviderSkill } from "@t3tools/contracts";
 import {
   createContext,
   use,
   useCallback,
   useEffect,
-  useEffectEvent,
   useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 
 import {
@@ -60,16 +29,21 @@ import {
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
 } from "~/composer-logic";
+import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";
 import {
-  selectionTouchesMentionBoundary,
-  splitPromptIntoComposerSegments,
-} from "~/composer-editor-mentions";
-import {
-  INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
-  type TerminalContextDraft,
-} from "~/lib/terminalContext";
+  buildDocJson,
+  collapsedToFlat,
+  flatToCollapsed,
+  flatToMarkdown,
+  flatToPm,
+  pmToFlat,
+  serializeEditorDoc,
+  type SkillMeta,
+} from "~/composer-rich-text-doc";
+import type { TerminalContextDraft } from "~/lib/terminalContext";
 import { cn, isMacPlatform } from "~/lib/utils";
 import { basenameOfPath } from "~/pierre-icons";
+import { formatProviderSkillDisplayName } from "~/providerSkillPresentation";
 import {
   COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
   COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME,
@@ -78,791 +52,13 @@ import {
 } from "./composerInlineChip";
 import { FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
-import { formatProviderSkillDisplayName } from "~/providerSkillPresentation";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
-import { registerComposerInlineTokenPaste } from "./composerInlineTokenPaste";
-
-const COMPOSER_EDITOR_HMR_KEY = `composer-editor-${Math.random().toString(36).slice(2)}`;
-const SURROUND_SYMBOLS: [string, string][] = [
-  ["(", ")"],
-  ["[", "]"],
-  ["{", "}"],
-  ["'", "'"],
-  ['"', '"'],
-  ["“", "”"],
-  ["`", "`"],
-  ["<", ">"],
-  ["«", "»"],
-  ["*", "*"],
-  ["_", "_"],
-];
-const SURROUND_SYMBOLS_MAP = new Map<string, string>(SURROUND_SYMBOLS);
-const BACKTICK_SURROUND_CLOSE_SYMBOL = SURROUND_SYMBOLS_MAP.get("`") ?? null;
-
-type SerializedComposerMentionNode = Spread<
-  {
-    path: string;
-    type: "composer-mention";
-    version: 1;
-  },
-  SerializedLexicalNode
->;
-
-type SerializedComposerSkillNode = Spread<
-  {
-    skillName: string;
-    skillLabel?: string;
-    skillDescription?: string;
-    type: "composer-skill";
-    version: 1;
-  },
-  SerializedLexicalNode
->;
-
-type SerializedComposerTerminalContextNode = Spread<
-  {
-    context: TerminalContextDraft;
-    type: "composer-terminal-context";
-    version: 1;
-  },
-  SerializedLexicalNode
->;
-
-const ComposerTerminalContextActionsContext = createContext<{
-  onRemoveTerminalContext: (contextId: string) => void;
-}>({
-  onRemoveTerminalContext: () => {},
-});
-
-function ComposerMentionDecorator(props: { path: string }) {
-  const theme = resolvedThemeFromDocument();
-  const chip = (
-    <span
-      className={FILE_TAG_CHIP_CLASS_NAME}
-      contentEditable={false}
-      spellCheck={false}
-      data-composer-mention-chip="true"
-    >
-      <FileTagChipContent path={props.path} label={basenameOfPath(props.path)} theme={theme} />
-    </span>
-  );
-
-  return (
-    <Tooltip>
-      <TooltipTrigger render={chip} />
-      <TooltipPopup side="top" className="max-w-120 whitespace-normal leading-tight wrap-anywhere">
-        {props.path}
-      </TooltipPopup>
-    </Tooltip>
-  );
-}
-
-class ComposerMentionNode extends DecoratorNode<React.ReactElement> {
-  __path: string;
-
-  static override getType(): string {
-    return "composer-mention";
-  }
-
-  static override clone(node: ComposerMentionNode): ComposerMentionNode {
-    return new ComposerMentionNode(node.__path, node.__key);
-  }
-
-  static override importJSON(serializedNode: SerializedComposerMentionNode): ComposerMentionNode {
-    return $createComposerMentionNode(serializedNode.path).updateFromJSON(serializedNode);
-  }
-
-  constructor(path: string, key?: NodeKey) {
-    super(key);
-    this.__path = path;
-  }
-
-  override exportJSON(): SerializedComposerMentionNode {
-    return {
-      ...super.exportJSON(),
-      path: this.__path,
-      type: "composer-mention",
-      version: 1,
-    };
-  }
-
-  override createDOM(): HTMLElement {
-    const dom = document.createElement("span");
-    dom.className = "composer-inline-chip relative inline-flex align-[-0.125em] leading-none";
-    return dom;
-  }
-
-  override updateDOM(): false {
-    return false;
-  }
-
-  override getTextContent(): string {
-    return serializeComposerFileLink(this.__path);
-  }
-
-  override isInline(): true {
-    return true;
-  }
-
-  override decorate(): React.ReactElement {
-    return <ComposerMentionDecorator path={this.__path} />;
-  }
-}
-
-function $createComposerMentionNode(path: string): ComposerMentionNode {
-  return $applyNodeReplacement(new ComposerMentionNode(path));
-}
-
-function resolveSkillDescription(
-  skill: Pick<ServerProviderSkill, "shortDescription" | "description">,
-): string | null {
-  const shortDescription = skill.shortDescription?.trim();
-  if (shortDescription) {
-    return shortDescription;
-  }
-  const description = skill.description?.trim();
-  return description || null;
-}
-
-type ComposerSkillMetadata = {
-  label: string;
-  description: string | null;
-};
-
-function skillMetadataByName(
-  skills: ReadonlyArray<ServerProviderSkill>,
-): ReadonlyMap<string, ComposerSkillMetadata> {
-  return new Map(
-    skills.map((skill) => [
-      skill.name,
-      {
-        label: formatProviderSkillDisplayName(skill),
-        description: resolveSkillDescription(skill),
-      },
-    ]),
-  );
-}
-
-function ComposerSkillDecorator(props: { skillLabel: string; skillDescription: string | null }) {
-  const chip = (
-    <span
-      className={COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME}
-      contentEditable={false}
-      spellCheck={false}
-      data-composer-skill-chip="true"
-    >
-      <span
-        aria-hidden="true"
-        className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME}
-        dangerouslySetInnerHTML={{ __html: SKILL_CHIP_ICON_SVG }}
-      />
-      <span className={COMPOSER_INLINE_SKILL_CHIP_LABEL_CLASS_NAME}>{props.skillLabel}</span>
-    </span>
-  );
-
-  if (!props.skillDescription) {
-    return chip;
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger render={chip} />
-      <TooltipPopup side="top" className="max-w-120 whitespace-normal leading-tight">
-        {props.skillDescription}
-      </TooltipPopup>
-    </Tooltip>
-  );
-}
-
-class ComposerSkillNode extends DecoratorNode<React.ReactElement> {
-  __skillName: string;
-  __skillLabel: string;
-  __skillDescription: string | null;
-
-  static override getType(): string {
-    return "composer-skill";
-  }
-
-  static override clone(node: ComposerSkillNode): ComposerSkillNode {
-    return new ComposerSkillNode(
-      node.__skillName,
-      node.__skillLabel,
-      node.__skillDescription,
-      node.__key,
-    );
-  }
-
-  static override importJSON(serializedNode: SerializedComposerSkillNode): ComposerSkillNode {
-    return $createComposerSkillNode(
-      serializedNode.skillName,
-      serializedNode.skillLabel ?? serializedNode.skillName,
-      serializedNode.skillDescription ?? null,
-    ).updateFromJSON(serializedNode);
-  }
-
-  constructor(
-    skillName: string,
-    skillLabel: string,
-    skillDescription: string | null,
-    key?: NodeKey,
-  ) {
-    super(key);
-    const normalizedSkillName = skillName.startsWith("$") ? skillName.slice(1) : skillName;
-    this.__skillName = normalizedSkillName;
-    this.__skillLabel = skillLabel;
-    this.__skillDescription = skillDescription;
-  }
-
-  override exportJSON(): SerializedComposerSkillNode {
-    return {
-      ...super.exportJSON(),
-      skillName: this.__skillName,
-      skillLabel: this.__skillLabel,
-      ...(this.__skillDescription ? { skillDescription: this.__skillDescription } : {}),
-      type: "composer-skill",
-      version: 1,
-    };
-  }
-
-  override createDOM(): HTMLElement {
-    const dom = document.createElement("span");
-    dom.className = "composer-inline-chip relative inline-flex align-[-0.125em] leading-none";
-    return dom;
-  }
-
-  override updateDOM(): false {
-    return false;
-  }
-
-  override getTextContent(): string {
-    return `$${this.__skillName}`;
-  }
-
-  override isInline(): true {
-    return true;
-  }
-
-  override decorate(): React.ReactElement {
-    return (
-      <ComposerSkillDecorator
-        skillLabel={this.__skillLabel}
-        skillDescription={this.__skillDescription}
-      />
-    );
-  }
-}
-
-function $createComposerSkillNode(
-  skillName: string,
-  skillLabel: string,
-  skillDescription: string | null,
-): ComposerSkillNode {
-  return $applyNodeReplacement(new ComposerSkillNode(skillName, skillLabel, skillDescription));
-}
-
-function ComposerTerminalContextDecorator(props: { context: TerminalContextDraft }) {
-  return <ComposerPendingTerminalContextChip context={props.context} />;
-}
-
-class ComposerTerminalContextNode extends DecoratorNode<React.ReactElement> {
-  __context: TerminalContextDraft;
-
-  static override getType(): string {
-    return "composer-terminal-context";
-  }
-
-  static override clone(node: ComposerTerminalContextNode): ComposerTerminalContextNode {
-    return new ComposerTerminalContextNode(node.__context, node.__key);
-  }
-
-  static override importJSON(
-    serializedNode: SerializedComposerTerminalContextNode,
-  ): ComposerTerminalContextNode {
-    return $createComposerTerminalContextNode(serializedNode.context);
-  }
-
-  constructor(context: TerminalContextDraft, key?: NodeKey) {
-    super(key);
-    this.__context = context;
-  }
-
-  override exportJSON(): SerializedComposerTerminalContextNode {
-    return {
-      ...super.exportJSON(),
-      context: this.__context,
-      type: "composer-terminal-context",
-      version: 1,
-    };
-  }
-
-  override createDOM(): HTMLElement {
-    const dom = document.createElement("span");
-    dom.className = "composer-inline-chip relative inline-flex align-[-0.125em] leading-none";
-    return dom;
-  }
-
-  override updateDOM(): false {
-    return false;
-  }
-
-  override getTextContent(): string {
-    return INLINE_TERMINAL_CONTEXT_PLACEHOLDER;
-  }
-
-  override isInline(): true {
-    return true;
-  }
-
-  override decorate(): React.ReactElement {
-    return <ComposerTerminalContextDecorator context={this.__context} />;
-  }
-}
-
-function $createComposerTerminalContextNode(
-  context: TerminalContextDraft,
-): ComposerTerminalContextNode {
-  return $applyNodeReplacement(new ComposerTerminalContextNode(context));
-}
-
-type ComposerInlineTokenNode =
-  | ComposerMentionNode
-  | ComposerSkillNode
-  | ComposerTerminalContextNode;
-
-function isComposerInlineTokenNode(candidate: unknown): candidate is ComposerInlineTokenNode {
-  return (
-    candidate instanceof ComposerMentionNode ||
-    candidate instanceof ComposerSkillNode ||
-    candidate instanceof ComposerTerminalContextNode
-  );
-}
-
-function resolvedThemeFromDocument(): "light" | "dark" {
-  return document.documentElement.classList.contains("dark") ? "dark" : "light";
-}
-
-function terminalContextSignature(contexts: ReadonlyArray<TerminalContextDraft>): string {
-  return contexts
-    .map((context) =>
-      [
-        context.id,
-        context.threadId,
-        context.terminalId,
-        context.terminalLabel,
-        context.lineStart,
-        context.lineEnd,
-        context.createdAt,
-        context.text,
-      ].join("\u001f"),
-    )
-    .join("\u001e");
-}
-
-function skillSignature(skills: ReadonlyArray<ServerProviderSkill>): string {
-  return skills
-    .map((skill) =>
-      [
-        skill.name,
-        skill.displayName ?? "",
-        skill.shortDescription ?? "",
-        skill.description ?? "",
-        skill.path,
-        skill.scope ?? "",
-        skill.enabled ? "1" : "0",
-      ].join("\u001f"),
-    )
-    .join("\u001e");
-}
-
-function clampExpandedCursor(value: string, cursor: number): number {
-  if (!Number.isFinite(cursor)) return value.length;
-  return Math.max(0, Math.min(value.length, Math.floor(cursor)));
-}
-
-function getComposerInlineTokenTextLength(_node: ComposerInlineTokenNode): 1 {
-  return 1;
-}
-
-function getComposerInlineTokenExpandedTextLength(node: ComposerInlineTokenNode): number {
-  return node.getTextContentSize();
-}
-
-function getAbsoluteOffsetForInlineTokenPoint(
-  node: ComposerInlineTokenNode,
-  absoluteOffset: number,
-  pointOffset: number,
-): number {
-  return absoluteOffset + (pointOffset > 0 ? getComposerInlineTokenTextLength(node) : 0);
-}
-
-function getExpandedAbsoluteOffsetForInlineTokenPoint(
-  node: ComposerInlineTokenNode,
-  absoluteOffset: number,
-  pointOffset: number,
-): number {
-  return absoluteOffset + (pointOffset > 0 ? getComposerInlineTokenExpandedTextLength(node) : 0);
-}
-
-function findSelectionPointForInlineToken(
-  node: ComposerInlineTokenNode,
-  remainingRef: { value: number },
-): { key: string; offset: number; type: "element" } | null {
-  const parent = node.getParent();
-  if (!parent || !$isElementNode(parent)) return null;
-  const index = node.getIndexWithinParent();
-  if (remainingRef.value === 0) {
-    return {
-      key: parent.getKey(),
-      offset: index,
-      type: "element",
-    };
-  }
-  if (remainingRef.value === getComposerInlineTokenTextLength(node)) {
-    return {
-      key: parent.getKey(),
-      offset: index + 1,
-      type: "element",
-    };
-  }
-  remainingRef.value -= getComposerInlineTokenTextLength(node);
-  return null;
-}
-
-function getComposerNodeTextLength(node: LexicalNode): number {
-  if (isComposerInlineTokenNode(node)) {
-    return getComposerInlineTokenTextLength(node);
-  }
-  if ($isTextNode(node)) {
-    return node.getTextContentSize();
-  }
-  if ($isLineBreakNode(node)) {
-    return 1;
-  }
-  if ($isElementNode(node)) {
-    return node.getChildren().reduce((total, child) => total + getComposerNodeTextLength(child), 0);
-  }
-  return 0;
-}
-
-function getComposerNodeExpandedTextLength(node: LexicalNode): number {
-  if (isComposerInlineTokenNode(node)) {
-    return getComposerInlineTokenExpandedTextLength(node);
-  }
-  if ($isTextNode(node)) {
-    return node.getTextContentSize();
-  }
-  if ($isLineBreakNode(node)) {
-    return 1;
-  }
-  if ($isElementNode(node)) {
-    return node
-      .getChildren()
-      .reduce((total, child) => total + getComposerNodeExpandedTextLength(child), 0);
-  }
-  return 0;
-}
-
-function getAbsoluteOffsetForPoint(node: LexicalNode, pointOffset: number): number {
-  let offset = 0;
-  let current: LexicalNode | null = node;
-
-  while (current) {
-    const nextParent = current.getParent() as LexicalNode | null;
-    if (!nextParent || !$isElementNode(nextParent)) {
-      break;
-    }
-    const siblings = nextParent.getChildren();
-    const index = current.getIndexWithinParent();
-    for (let i = 0; i < index; i += 1) {
-      const sibling = siblings[i];
-      if (!sibling) continue;
-      offset += getComposerNodeTextLength(sibling);
-    }
-    current = nextParent;
-  }
-
-  if ($isTextNode(node)) {
-    return offset + Math.min(pointOffset, node.getTextContentSize());
-  }
-  if (isComposerInlineTokenNode(node)) {
-    return getAbsoluteOffsetForInlineTokenPoint(node, offset, pointOffset);
-  }
-
-  if ($isLineBreakNode(node)) {
-    return offset + Math.min(pointOffset, 1);
-  }
-
-  if ($isElementNode(node)) {
-    const children = node.getChildren();
-    const clampedOffset = Math.max(0, Math.min(pointOffset, children.length));
-    for (let i = 0; i < clampedOffset; i += 1) {
-      const child = children[i];
-      if (!child) continue;
-      offset += getComposerNodeTextLength(child);
-    }
-    return offset;
-  }
-
-  return offset;
-}
-
-function getExpandedAbsoluteOffsetForPoint(node: LexicalNode, pointOffset: number): number {
-  let offset = 0;
-  let current: LexicalNode | null = node;
-
-  while (current) {
-    const nextParent = current.getParent() as LexicalNode | null;
-    if (!nextParent || !$isElementNode(nextParent)) {
-      break;
-    }
-    const siblings = nextParent.getChildren();
-    const index = current.getIndexWithinParent();
-    for (let i = 0; i < index; i += 1) {
-      const sibling = siblings[i];
-      if (!sibling) continue;
-      offset += getComposerNodeExpandedTextLength(sibling);
-    }
-    current = nextParent;
-  }
-
-  if ($isTextNode(node)) {
-    return offset + Math.min(pointOffset, node.getTextContentSize());
-  }
-  if (isComposerInlineTokenNode(node)) {
-    return getExpandedAbsoluteOffsetForInlineTokenPoint(node, offset, pointOffset);
-  }
-
-  if ($isLineBreakNode(node)) {
-    return offset + Math.min(pointOffset, 1);
-  }
-
-  if ($isElementNode(node)) {
-    const children = node.getChildren();
-    const clampedOffset = Math.max(0, Math.min(pointOffset, children.length));
-    for (let i = 0; i < clampedOffset; i += 1) {
-      const child = children[i];
-      if (!child) continue;
-      offset += getComposerNodeExpandedTextLength(child);
-    }
-    return offset;
-  }
-
-  return offset;
-}
-
-function findSelectionPointAtOffset(
-  node: LexicalNode,
-  remainingRef: { value: number },
-): { key: string; offset: number; type: "text" | "element" } | null {
-  if (isComposerInlineTokenNode(node)) {
-    return findSelectionPointForInlineToken(node, remainingRef);
-  }
-
-  if ($isTextNode(node)) {
-    const size = node.getTextContentSize();
-    if (remainingRef.value <= size) {
-      return {
-        key: node.getKey(),
-        offset: remainingRef.value,
-        type: "text",
-      };
-    }
-    remainingRef.value -= size;
-    return null;
-  }
-
-  if ($isLineBreakNode(node)) {
-    const parent = node.getParent();
-    if (!parent) return null;
-    const index = node.getIndexWithinParent();
-    if (remainingRef.value === 0) {
-      return {
-        key: parent.getKey(),
-        offset: index,
-        type: "element",
-      };
-    }
-    if (remainingRef.value === 1) {
-      return {
-        key: parent.getKey(),
-        offset: index + 1,
-        type: "element",
-      };
-    }
-    remainingRef.value -= 1;
-    return null;
-  }
-
-  if ($isElementNode(node)) {
-    const children = node.getChildren();
-    for (const child of children) {
-      const point = findSelectionPointAtOffset(child, remainingRef);
-      if (point) {
-        return point;
-      }
-    }
-    if (remainingRef.value === 0) {
-      return {
-        key: node.getKey(),
-        offset: children.length,
-        type: "element",
-      };
-    }
-  }
-
-  return null;
-}
-
-function $getComposerRootLength(): number {
-  const root = $getRoot();
-  const children = root.getChildren();
-  return children.reduce((sum, child) => sum + getComposerNodeTextLength(child), 0);
-}
-
-function $setSelectionAtComposerOffset(nextOffset: number): void {
-  const root = $getRoot();
-  const composerLength = $getComposerRootLength();
-  const boundedOffset = Math.max(0, Math.min(nextOffset, composerLength));
-  const remainingRef = { value: boundedOffset };
-  const point = findSelectionPointAtOffset(root, remainingRef) ?? {
-    key: root.getKey(),
-    offset: root.getChildren().length,
-    type: "element" as const,
-  };
-  const selection = $createRangeSelection();
-  selection.anchor.set(point.key, point.offset, point.type);
-  selection.focus.set(point.key, point.offset, point.type);
-  $setSelection(selection);
-}
-
-function $setSelectionRangeAtComposerOffsets(startOffset: number, endOffset: number): void {
-  const root = $getRoot();
-  const composerLength = $getComposerRootLength();
-  const boundedStart = Math.max(0, Math.min(startOffset, composerLength));
-  const boundedEnd = Math.max(0, Math.min(endOffset, composerLength));
-  const anchorRemainingRef = { value: boundedStart };
-  const focusRemainingRef = { value: boundedEnd };
-  const anchorPoint = findSelectionPointAtOffset(root, anchorRemainingRef) ?? {
-    key: root.getKey(),
-    offset: root.getChildren().length,
-    type: "element" as const,
-  };
-  const focusPoint = findSelectionPointAtOffset(root, focusRemainingRef) ?? {
-    key: root.getKey(),
-    offset: root.getChildren().length,
-    type: "element" as const,
-  };
-  const selection = $createRangeSelection();
-  selection.anchor.set(anchorPoint.key, anchorPoint.offset, anchorPoint.type);
-  selection.focus.set(focusPoint.key, focusPoint.offset, focusPoint.type);
-  $setSelection(selection);
-}
-
-function getSelectionRangeForExpandedComposerOffsets(selection: ReturnType<typeof $getSelection>): {
-  start: number;
-  end: number;
-} | null {
-  if (!$isRangeSelection(selection)) {
-    return null;
-  }
-  const anchorNode = selection.anchor.getNode();
-  const focusNode = selection.focus.getNode();
-  const anchorOffset = getExpandedAbsoluteOffsetForPoint(anchorNode, selection.anchor.offset);
-  const focusOffset = getExpandedAbsoluteOffsetForPoint(focusNode, selection.focus.offset);
-  return {
-    start: Math.min(anchorOffset, focusOffset),
-    end: Math.max(anchorOffset, focusOffset),
-  };
-}
-
-function $selectionTouchesInlineToken(selection: ReturnType<typeof $getSelection>): boolean {
-  if (!$isRangeSelection(selection)) {
-    return false;
-  }
-  return selection.getNodes().some((node) => isComposerInlineTokenNode(node));
-}
-
-function $readSelectionOffsetFromEditorState(fallback: number): number {
-  const selection = $getSelection();
-  if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
-    return fallback;
-  }
-  const anchorNode = selection.anchor.getNode();
-  const offset = getAbsoluteOffsetForPoint(anchorNode, selection.anchor.offset);
-  const composerLength = $getComposerRootLength();
-  return Math.max(0, Math.min(offset, composerLength));
-}
-
-function $readExpandedSelectionOffsetFromEditorState(fallback: number): number {
-  const selection = $getSelection();
-  if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
-    return fallback;
-  }
-  const anchorNode = selection.anchor.getNode();
-  const offset = getExpandedAbsoluteOffsetForPoint(anchorNode, selection.anchor.offset);
-  const expandedLength = $getRoot().getTextContent().length;
-  return Math.max(0, Math.min(offset, expandedLength));
-}
-
-function $appendTextWithLineBreaks(parent: ElementNode, text: string): void {
-  const lines = text.split("\n");
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    if (line.length > 0) {
-      parent.append($createTextNode(line));
-    }
-    if (index < lines.length - 1) {
-      parent.append($createLineBreakNode());
-    }
-  }
-}
-
-function $setComposerEditorPrompt(
-  prompt: string,
-  terminalContexts: ReadonlyArray<TerminalContextDraft>,
-  skillMetadata: ReadonlyMap<string, ComposerSkillMetadata>,
-): void {
-  const root = $getRoot();
-  root.clear();
-  const paragraph = $createParagraphNode();
-  root.append(paragraph);
-
-  const segments = splitPromptIntoComposerSegments(prompt, terminalContexts);
-  for (const segment of segments) {
-    if (segment.type === "mention") {
-      paragraph.append($createComposerMentionNode(segment.path));
-      continue;
-    }
-    if (segment.type === "skill") {
-      const metadata = skillMetadata.get(segment.name);
-      paragraph.append(
-        $createComposerSkillNode(
-          segment.name,
-          metadata?.label ?? formatProviderSkillDisplayName({ name: segment.name }),
-          metadata?.description ?? null,
-        ),
-      );
-      continue;
-    }
-    if (segment.type === "terminal-context") {
-      if (segment.context) {
-        paragraph.append($createComposerTerminalContextNode(segment.context));
-      }
-      continue;
-    }
-    $appendTextWithLineBreaks(paragraph, segment.text);
-  }
-}
-
-function collectTerminalContextIds(node: LexicalNode): string[] {
-  if (node instanceof ComposerTerminalContextNode) {
-    return [node.__context.id];
-  }
-  if ($isElementNode(node)) {
-    return node.getChildren().flatMap((child) => collectTerminalContextIds(child));
-  }
-  return [];
-}
+import { continueComposerBlock, serializeComposerSelection } from "./composerRichTextCommands";
+import { useTheme } from "~/hooks/useTheme";
+import {
+  composerCodeHighlightingKey,
+  createComposerCodeHighlighting,
+} from "./composerCodeHighlighting";
 
 export interface ComposerPromptEditorHandle {
   focus: () => void;
@@ -900,945 +96,538 @@ interface ComposerPromptEditorProps {
   editorRef: React.RefObject<ComposerPromptEditorHandle | null>;
 }
 
-function ComposerCommandKeyPlugin(props: {
-  onCommandKeyDown?: (
-    key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
-    event: KeyboardEvent,
-  ) => boolean;
-}) {
-  const [editor] = useLexicalComposerContext();
+const TerminalContextsContext = createContext<ReadonlyArray<TerminalContextDraft>>([]);
+const chipWrapperClass = "composer-inline-chip relative inline-flex align-[-0.125em] leading-none";
 
-  useEffect(() => {
-    const handleCommand = (
-      key: "ArrowDown" | "ArrowUp" | "Enter" | "Tab",
-      event: KeyboardEvent | null,
-    ): boolean => {
-      if (!props.onCommandKeyDown || !event) {
-        return false;
-      }
+function ComposerMentionView({ node }: NodeViewProps) {
+  const path = String(node.attrs.path);
+  const chip = (
+    <span
+      className={FILE_TAG_CHIP_CLASS_NAME}
+      contentEditable={false}
+      spellCheck={false}
+      data-composer-mention-chip="true"
+    >
+      <FileTagChipContent
+        path={path}
+        label={basenameOfPath(path)}
+        theme={document.documentElement.classList.contains("dark") ? "dark" : "light"}
+      />
+    </span>
+  );
+  return (
+    <NodeViewWrapper as="span" className={chipWrapperClass}>
+      <Tooltip>
+        <TooltipTrigger render={chip} />
+        <TooltipPopup
+          side="top"
+          className="max-w-120 whitespace-normal leading-tight wrap-anywhere"
+        >
+          {path}
+        </TooltipPopup>
+      </Tooltip>
+    </NodeViewWrapper>
+  );
+}
 
-      if (key === "Enter" && (event.isComposing || event.keyCode === 229)) {
-        event.stopPropagation();
-        return true;
-      }
+function ComposerSkillView({ node }: NodeViewProps) {
+  const chip = (
+    <span
+      className={COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME}
+      contentEditable={false}
+      spellCheck={false}
+      data-composer-skill-chip="true"
+    >
+      <span
+        aria-hidden="true"
+        className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME}
+        dangerouslySetInnerHTML={{ __html: SKILL_CHIP_ICON_SVG }}
+      />
+      <span className={COMPOSER_INLINE_SKILL_CHIP_LABEL_CLASS_NAME}>
+        {String(node.attrs.skillLabel || node.attrs.skillName)}
+      </span>
+    </span>
+  );
+  return (
+    <NodeViewWrapper as="span" className={chipWrapperClass}>
+      {node.attrs.skillDescription ? (
+        <Tooltip>
+          <TooltipTrigger render={chip} />
+          <TooltipPopup side="top" className="max-w-120 whitespace-normal leading-tight">
+            {String(node.attrs.skillDescription)}
+          </TooltipPopup>
+        </Tooltip>
+      ) : (
+        chip
+      )}
+    </NodeViewWrapper>
+  );
+}
 
-      const handled = props.onCommandKeyDown(key, event);
-      if (handled) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-      return handled;
+function ComposerTerminalView({ node }: NodeViewProps) {
+  const contexts = use(TerminalContextsContext);
+  const context = contexts.find((candidate) => candidate.id === node.attrs.contextId);
+  return (
+    <NodeViewWrapper as="span" className={chipWrapperClass} contentEditable={false}>
+      {context ? <ComposerPendingTerminalContextChip context={context} /> : "Terminal context"}
+    </NodeViewWrapper>
+  );
+}
+
+const ComposerMentionExtension = Node.create({
+  name: "composer-mention",
+  group: "inline",
+  inline: true,
+  atom: true,
+  addAttributes: () => ({ path: { default: "" }, source: { default: "" } }),
+  parseHTML: () => [{ tag: "span[data-composer-mention]" }],
+  renderHTML: ({ HTMLAttributes }) => ["span", { "data-composer-mention": "", ...HTMLAttributes }],
+  addNodeView: () => ReactNodeViewRenderer(ComposerMentionView),
+});
+const ComposerSkillExtension = Node.create({
+  name: "composer-skill",
+  group: "inline",
+  inline: true,
+  atom: true,
+  addAttributes: () => ({
+    skillName: { default: "" },
+    skillLabel: { default: "" },
+    skillDescription: { default: null },
+  }),
+  parseHTML: () => [{ tag: "span[data-composer-skill]" }],
+  renderHTML: ({ HTMLAttributes }) => ["span", { "data-composer-skill": "", ...HTMLAttributes }],
+  addNodeView: () => ReactNodeViewRenderer(ComposerSkillView),
+});
+const ComposerTerminalExtension = Node.create({
+  name: "composer-terminal-context",
+  group: "inline",
+  inline: true,
+  atom: true,
+  addAttributes: () => ({ contextId: { default: "" } }),
+  parseHTML: () => [{ tag: "span[data-composer-terminal-context]" }],
+  renderHTML: ({ HTMLAttributes }) => [
+    "span",
+    { "data-composer-terminal-context": "", ...HTMLAttributes },
+  ],
+  addNodeView: () => ReactNodeViewRenderer(ComposerTerminalView),
+});
+
+// Atom views need their own highlight when a text selection crosses a chip.
+const ComposerSelectionExtension = Extension.create({
+  name: "composer-selection",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          decorations(state) {
+            const { from, to, empty } = state.selection;
+            if (empty) return DecorationSet.empty;
+            const decorations: Decoration[] = [];
+            state.doc.nodesBetween(from, to, (node, pos) => {
+              if (node.type.name.startsWith("composer-"))
+                decorations.push(
+                  Decoration.node(pos, pos + node.nodeSize, {
+                    "data-composer-chip-selected": "true",
+                  }),
+                );
+            });
+            return DecorationSet.create(state.doc, decorations);
+          },
+        },
+      }),
+    ];
+  },
+});
+
+function readEditorSnapshot(editor: Editor) {
+  const map = serializeEditorDoc(editor.state.doc);
+  const flat = pmToFlat(map, editor.state.selection.from);
+  return {
+    value: map.value,
+    cursor: clampCollapsedComposerCursor(map.value, flatToCollapsed(map, flat)),
+    expandedCursor: Math.max(0, Math.min(map.value.length, flatToMarkdown(map, flat))),
+    terminalContextIds: map.contextIds,
+  };
+}
+
+export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
+  const { value, cursor, terminalContexts, disabled, placeholder, className, editorRef } = props;
+  const { resolvedTheme } = useTheme();
+  const themeRef = useRef(resolvedTheme);
+  themeRef.current = resolvedTheme;
+  const latest = useRef(props);
+  latest.current = props;
+  const applyingControlled = useRef(false);
+  const pendingControlled = useRef<{
+    value: string;
+    cursor: number;
+    terminalContexts: ReadonlyArray<TerminalContextDraft>;
+  } | null>(null);
+  const appliedInitialSelection = useRef(false);
+  const editorHolder = useRef<Editor | null>(null);
+  const snapshot = useRef({
+    value,
+    cursor,
+    expandedCursor: expandCollapsedComposerCursor(value, cursor),
+    terminalContextIds: terminalContexts.map((context) => context.id),
+  });
+  const [isEmpty, setIsEmpty] = useState(value.length === 0);
+  const skillLabelFor = useCallback((name: string): SkillMeta => {
+    const normalized = name.replace(/^\$/, "");
+    const skill = latest.current.skills.find((candidate) => candidate.name === normalized);
+    return {
+      label: formatProviderSkillDisplayName(skill ?? { name: normalized }),
+      description: skill?.shortDescription?.trim() || skill?.description?.trim() || null,
     };
+  }, []);
 
-    const unregisterArrowDown = editor.registerCommand(
-      KEY_ARROW_DOWN_COMMAND,
-      (event) => handleCommand("ArrowDown", event),
-      COMMAND_PRIORITY_HIGH,
+  const handleChange = useCallback((editor: Editor) => {
+    if (applyingControlled.current || pendingControlled.current) return;
+    const next = readEditorSnapshot(editor);
+    const previous = snapshot.current;
+    if (previous.value === next.value && next.value !== latest.current.value) return;
+    if (
+      previous.value === next.value &&
+      previous.cursor === next.cursor &&
+      previous.expandedCursor === next.expandedCursor &&
+      previous.terminalContextIds.join("\0") === next.terminalContextIds.join("\0")
+    )
+      return;
+    snapshot.current = next;
+    setIsEmpty(next.value.length === 0);
+    latest.current.onChange(
+      next.value,
+      next.cursor,
+      next.expandedCursor,
+      isCollapsedCursorAdjacentToInlineToken(next.value, next.cursor, "left") ||
+        isCollapsedCursorAdjacentToInlineToken(next.value, next.cursor, "right"),
+      next.terminalContextIds,
     );
-    const unregisterArrowUp = editor.registerCommand(
-      KEY_ARROW_UP_COMMAND,
-      (event) => handleCommand("ArrowUp", event),
-      COMMAND_PRIORITY_HIGH,
-    );
-    const unregisterEnter = editor.registerCommand(
-      KEY_ENTER_COMMAND,
-      (event) => handleCommand("Enter", event),
-      COMMAND_PRIORITY_HIGH,
-    );
-    const unregisterTab = editor.registerCommand(
-      KEY_TAB_COMMAND,
-      (event) => handleCommand("Tab", event),
-      COMMAND_PRIORITY_HIGH,
-    );
+  }, []);
 
-    return () => {
-      unregisterArrowDown();
-      unregisterArrowUp();
-      unregisterEnter();
-      unregisterTab();
-    };
-  }, [editor, props]);
+  const editorAttributes = useMemo(
+    () => ({
+      class: cn(
+        "composer-tiptap block max-h-50 min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
+        className,
+      ),
+      "data-testid": "composer-editor",
+      "aria-placeholder": placeholder,
+      role: "textbox",
+      "aria-multiline": "true",
+    }),
+    [className, placeholder],
+  );
 
-  return null;
-}
-
-function ComposerInlineTokenArrowPlugin() {
-  const [editor] = useLexicalComposerContext();
-
-  useEffect(() => {
-    const unregisterLeft = editor.registerCommand(
-      KEY_ARROW_LEFT_COMMAND,
-      (event) => {
-        let nextOffset: number | null = null;
-        editor.getEditorState().read(() => {
-          const selection = $getSelection();
-          if (!$isRangeSelection(selection) || !selection.isCollapsed()) return;
-          const currentOffset = $readSelectionOffsetFromEditorState(0);
-          if (currentOffset <= 0) return;
-          const promptValue = $getRoot().getTextContent();
-          if (!isCollapsedCursorAdjacentToInlineToken(promptValue, currentOffset, "left")) {
-            return;
+  const editor = useEditor(
+    {
+      extensions: [
+        StarterKit.configure({
+          horizontalRule: false,
+          underline: false,
+          trailingNode: false,
+          link: false,
+          code: false,
+        }),
+        Code.extend({ excludes: "" }),
+        ComposerMentionExtension,
+        ComposerSkillExtension,
+        ComposerTerminalExtension,
+        ComposerSelectionExtension,
+        createComposerCodeHighlighting(() => themeRef.current),
+      ],
+      content: buildDocJson(value, skillLabelFor, { terminalContexts }),
+      editable: !disabled,
+      editorProps: {
+        attributes: editorAttributes,
+        handleKeyDown: (view, event) => {
+          if (event.isComposing || event.keyCode === 229) {
+            if (event.key === "Enter") event.stopPropagation();
+            return event.key === "Enter";
           }
-          nextOffset = currentOffset - 1;
-        });
-        if (nextOffset === null) return false;
-        const selectionOffset = nextOffset;
-        event?.preventDefault();
-        event?.stopPropagation();
-        editor.update(() => {
-          $setSelectionAtComposerOffset(selectionOffset);
-        });
-        return true;
-      },
-      COMMAND_PRIORITY_HIGH,
-    );
-    const unregisterRight = editor.registerCommand(
-      KEY_ARROW_RIGHT_COMMAND,
-      (event) => {
-        let nextOffset: number | null = null;
-        editor.getEditorState().read(() => {
-          const selection = $getSelection();
-          if (!$isRangeSelection(selection) || !selection.isCollapsed()) return;
-          const currentOffset = $readSelectionOffsetFromEditorState(0);
-          const composerLength = $getComposerRootLength();
-          if (currentOffset >= composerLength) return;
-          const promptValue = $getRoot().getTextContent();
-          if (!isCollapsedCursorAdjacentToInlineToken(promptValue, currentOffset, "right")) {
-            return;
-          }
-          nextOffset = currentOffset + 1;
-        });
-        if (nextOffset === null) return false;
-        const selectionOffset = nextOffset;
-        event?.preventDefault();
-        event?.stopPropagation();
-        editor.update(() => {
-          $setSelectionAtComposerOffset(selectionOffset);
-        });
-        return true;
-      },
-      COMMAND_PRIORITY_HIGH,
-    );
-    return () => {
-      unregisterLeft();
-      unregisterRight();
-    };
-  }, [editor]);
-
-  return null;
-}
-
-function ComposerHomeEndKeyPlugin() {
-  const [editor] = useLexicalComposerContext();
-
-  useEffect(() => {
-    return editor.registerCommand(
-      KEY_DOWN_COMMAND,
-      (event) => {
-        if (!isMacPlatform(navigator.platform)) {
-          return false;
-        }
-        if (event.key !== "Home" && event.key !== "End") {
-          return false;
-        }
-        if (event.altKey || event.metaKey || event.ctrlKey || event.isComposing) {
-          return false;
-        }
-
-        const rootElement = editor.getRootElement();
-        const selection = window.getSelection();
-        const anchorNode = selection?.anchorNode;
-        if (!rootElement || !selection || !anchorNode || !rootElement.contains(anchorNode)) {
-          return false;
-        }
-        if (selection.rangeCount === 0 || typeof selection.modify !== "function") {
-          return false;
-        }
-
-        event.preventDefault();
-        event.stopPropagation();
-
-        selection.modify(
-          event.shiftKey ? "extend" : "move",
-          event.key === "Home" ? "backward" : "forward",
-          "lineboundary",
-        );
-        editor.update(() => {
-          $setSelection($createRangeSelectionFromDom(selection, editor));
-        });
-        return true;
-      },
-      COMMAND_PRIORITY_HIGH,
-    );
-  }, [editor]);
-
-  return null;
-}
-
-function ComposerInlineTokenSelectionNormalizePlugin() {
-  const [editor] = useLexicalComposerContext();
-
-  useEffect(() => {
-    return editor.registerUpdateListener(({ editorState }) => {
-      let afterOffset: number | null = null;
-      editorState.read(() => {
-        const selection = $getSelection();
-        if (!$isRangeSelection(selection) || !selection.isCollapsed()) return;
-        const anchorNode = selection.anchor.getNode();
-        if (!isComposerInlineTokenNode(anchorNode)) return;
-        if (selection.anchor.offset === 0) return;
-        const beforeOffset = getAbsoluteOffsetForPoint(anchorNode, 0);
-        afterOffset = beforeOffset + 1;
-      });
-      if (afterOffset !== null) {
-        queueMicrotask(() => {
-          editor.update(() => {
-            $setSelectionAtComposerOffset(afterOffset!);
-          });
-        });
-      }
-    });
-  }, [editor]);
-
-  return null;
-}
-
-function ComposerInlineTokenBackspacePlugin() {
-  const [editor] = useLexicalComposerContext();
-  const { onRemoveTerminalContext } = use(ComposerTerminalContextActionsContext);
-
-  useEffect(() => {
-    return editor.registerCommand(
-      KEY_BACKSPACE_COMMAND,
-      (event) => {
-        const selection = $getSelection();
-        if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
-          return false;
-        }
-
-        const anchorNode = selection.anchor.getNode();
-        const selectionOffset = $readSelectionOffsetFromEditorState(0);
-        const removeInlineTokenNode = (candidate: unknown): boolean => {
-          if (!isComposerInlineTokenNode(candidate)) {
-            return false;
-          }
-          const tokenStart = getAbsoluteOffsetForPoint(candidate, 0);
-          candidate.remove();
-          if (candidate instanceof ComposerTerminalContextNode) {
-            onRemoveTerminalContext(candidate.__context.id);
-            $setSelectionAtComposerOffset(selectionOffset);
-          } else {
-            $setSelectionAtComposerOffset(tokenStart);
-          }
-          event?.preventDefault();
-          return true;
-        };
-        if (removeInlineTokenNode(anchorNode)) {
-          return true;
-        }
-
-        if ($isTextNode(anchorNode)) {
-          if (selection.anchor.offset > 0) {
-            return false;
-          }
-          if (removeInlineTokenNode(anchorNode.getPreviousSibling())) {
+          const commandKey =
+            event.key === "ArrowDown" ||
+            event.key === "ArrowUp" ||
+            event.key === "Enter" ||
+            event.key === "Tab"
+              ? event.key
+              : null;
+          if (commandKey && latest.current.onCommandKeyDown?.(commandKey, event)) {
+            event.preventDefault();
+            event.stopPropagation();
             return true;
           }
-          const parent = anchorNode.getParent();
-          if ($isElementNode(parent)) {
-            const index = anchorNode.getIndexWithinParent();
-            if (index > 0 && removeInlineTokenNode(parent.getChildAtIndex(index - 1))) {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            // Enter belongs to the composer. Shift-Enter performs the editor's
+            // normal block continuation, including lists and literal code lines.
+            if (!event.shiftKey) return true;
+            const instance = editorHolder.current;
+            if (!instance) return true;
+            return continueComposerBlock(instance);
+          }
+          if (
+            (event.key === "ArrowLeft" ||
+              event.key === "ArrowRight" ||
+              event.key === "Backspace" ||
+              event.key === "Delete") &&
+            !event.shiftKey &&
+            !event.altKey &&
+            !event.metaKey &&
+            !event.ctrlKey &&
+            view.state.selection.empty
+          ) {
+            const { $from } = view.state.selection;
+            const backwards = event.key === "ArrowLeft" || event.key === "Backspace";
+            const adjacent = backwards ? $from.nodeBefore : $from.nodeAfter;
+            if (adjacent?.type.name.startsWith("composer-")) {
+              const other = $from.pos + (backwards ? -adjacent.nodeSize : adjacent.nodeSize);
+              const deleting = event.key === "Backspace" || event.key === "Delete";
+              event.preventDefault();
+              const tr = deleting
+                ? view.state.tr.delete(Math.min(other, $from.pos), Math.max(other, $from.pos))
+                : view.state.tr.setSelection(TextSelection.create(view.state.doc, other));
+              view.dispatch(tr.scrollIntoView());
+              return true;
+            }
+          }
+          if (
+            isMacPlatform(navigator.platform) &&
+            (event.key === "Home" || event.key === "End") &&
+            !event.altKey &&
+            !event.metaKey &&
+            !event.ctrlKey
+          ) {
+            const selection = window.getSelection();
+            if (
+              selection?.anchorNode &&
+              view.dom.contains(selection.anchorNode) &&
+              typeof selection.modify === "function"
+            ) {
+              event.preventDefault();
+              selection.modify(
+                event.shiftKey ? "extend" : "move",
+                event.key === "Home" ? "backward" : "forward",
+                "lineboundary",
+              );
+              if (selection.anchorNode && selection.focusNode)
+                view.dispatch(
+                  view.state.tr.setSelection(
+                    TextSelection.create(
+                      view.state.doc,
+                      view.posAtDOM(selection.anchorNode, selection.anchorOffset),
+                      view.posAtDOM(selection.focusNode, selection.focusOffset),
+                    ),
+                  ),
+                );
               return true;
             }
           }
           return false;
-        }
-
-        if ($isElementNode(anchorNode)) {
-          const childIndex = selection.anchor.offset - 1;
-          if (childIndex >= 0 && removeInlineTokenNode(anchorNode.getChildAtIndex(childIndex))) {
+        },
+        handleTextInput: (view, from, to, text) => {
+          const close = new Map([
+            ["(", ")"],
+            ["[", "]"],
+            ["{", "}"],
+            ["'", "'"],
+            ['"', '"'],
+            ["`", "`"],
+            ["<", ">"],
+            ["*", "*"],
+            ["_", "_"],
+          ]).get(text);
+          if (!close || from === to) return false;
+          let special = false;
+          view.state.doc.nodesBetween(from, to, (node) => {
+            if (
+              (node.isBlock && node.type.name === "codeBlock") ||
+              (node.isInline && (!node.isText || node.marks.length > 0))
+            )
+              special = true;
+          });
+          if (special) return false;
+          const tr = view.state.tr.insertText(close, to).insertText(text, from);
+          tr.setSelection(TextSelection.create(tr.doc, from + 1, to + 1));
+          view.dispatch(tr);
+          return true;
+        },
+        handlePaste: (view, event) => {
+          if (
+            event.defaultPrevented ||
+            !event.clipboardData ||
+            event.clipboardData.files.length > 0
+          )
+            return false;
+          let text = event.clipboardData.getData("text/plain");
+          if (!text) return false;
+          event.preventDefault();
+          const instance = editorHolder.current;
+          if (!instance) return true;
+          // Code paste stays literal, including $variables and Markdown markers.
+          if (instance.isActive("codeBlock") || instance.isActive("code")) {
+            view.dispatch(view.state.tr.insertText(text).scrollIntoView());
             return true;
           }
-        }
-
-        return false;
-      },
-      COMMAND_PRIORITY_HIGH,
-    );
-  }, [editor, onRemoveTerminalContext]);
-
-  return null;
-}
-
-/**
- * Chips render as non-editable decorators, so the browser never paints the
- * native text selection over them; without help, a selection spanning chips
- * is only visible in the slivers between them. Mirror the selection onto the
- * chips with a data attribute the stylesheet turns into a highlight overlay.
- */
-function ComposerChipSelectionPlugin() {
-  const [editor] = useLexicalComposerContext();
-
-  useEffect(() => {
-    let selectedKeys = new Set<string>();
-    // Lexical keeps the range selection on blur without emitting an update,
-    // so focus is tracked separately; while blurred the native highlight is
-    // gone and the mirrored one has to go with it.
-    let hasFocus = editor.getRootElement() === document.activeElement;
-
-    const applyKeys = (nextKeys: Set<string>) => {
-      for (const key of selectedKeys) {
-        if (!nextKeys.has(key)) {
-          editor.getElementByKey(key)?.removeAttribute("data-composer-chip-selected");
-        }
-      }
-      for (const key of nextKeys) {
-        editor.getElementByKey(key)?.setAttribute("data-composer-chip-selected", "true");
-      }
-      selectedKeys = nextKeys;
-    };
-
-    const readSelectedKeys = () => {
-      const nextKeys = new Set<string>();
-      editor.getEditorState().read(() => {
-        const selection = $getSelection();
-        if ($isRangeSelection(selection) && !selection.isCollapsed()) {
-          for (const node of selection.getNodes()) {
-            if (node instanceof DecoratorNode) {
-              nextKeys.add(node.getKey());
-            }
+          const tokens = collectComposerInlineTokens(`${text}\n`);
+          const lastToken = tokens.at(-1);
+          if (
+            (lastToken?.type === "mention" || lastToken?.type === "skill") &&
+            lastToken.end === text.length
+          )
+            text += " ";
+          if (
+            (tokens[0]?.type === "mention" || tokens[0]?.type === "skill") &&
+            tokens[0].start === 0
+          ) {
+            const current = readEditorSnapshot(instance);
+            if (
+              current.expandedCursor > 0 &&
+              !/\s/.test(current.value[current.expandedCursor - 1]!)
+            )
+              text = ` ${text}`;
           }
-        }
-      });
-      return nextKeys;
-    };
-
-    const unregisterUpdate = editor.registerUpdateListener(() => {
-      applyKeys(hasFocus ? readSelectedKeys() : new Set());
-    });
-    const unregisterFocus = editor.registerCommand(
-      FOCUS_COMMAND,
-      () => {
-        hasFocus = true;
-        applyKeys(readSelectedKeys());
-        return false;
+          const blocks = buildDocJson(text, skillLabelFor, { terminalContexts: [] }).content ?? [];
+          instance.commands.insertContent(
+            blocks.length === 1 && blocks[0]?.type === "paragraph"
+              ? (blocks[0].content ?? [])
+              : blocks,
+          );
+          instance.view.dispatch(instance.state.tr.scrollIntoView());
+          return true;
+        },
       },
-      COMMAND_PRIORITY_LOW,
-    );
-    const unregisterBlur = editor.registerCommand(
-      BLUR_COMMAND,
-      () => {
-        hasFocus = false;
-        applyKeys(new Set());
-        return false;
-      },
-      COMMAND_PRIORITY_LOW,
-    );
-    return () => {
-      unregisterUpdate();
-      unregisterFocus();
-      unregisterBlur();
-    };
-  }, [editor]);
-
-  return null;
-}
-
-function ComposerInlineTokenPastePlugin() {
-  const [editor] = useLexicalComposerContext();
-
-  useEffect(
-    () =>
-      registerComposerInlineTokenPaste(editor, {
-        createMentionNode: $createComposerMentionNode,
-        getExpandedAbsoluteOffsetForPoint,
-      }),
-    [editor],
+      onUpdate: ({ editor: updated }) => handleChange(updated),
+      onSelectionUpdate: ({ editor: updated }) => handleChange(updated),
+    },
+    [],
   );
-
-  return null;
-}
-
-function ComposerSurroundSelectionPlugin(props: {
-  terminalContexts: ReadonlyArray<TerminalContextDraft>;
-  skills: ReadonlyArray<ServerProviderSkill>;
-}) {
-  const [editor] = useLexicalComposerContext();
-  const terminalContextsRef = useRef(props.terminalContexts);
-  const skillMetadataRef = useRef(skillMetadataByName(props.skills));
-  const pendingSurroundSelectionRef = useRef<{
-    value: string;
-    expandedStart: number;
-    expandedEnd: number;
-  } | null>(null);
-  const pendingDeadKeySelectionRef = useRef<{
-    value: string;
-    expandedStart: number;
-    expandedEnd: number;
-  } | null>(null);
+  editorHolder.current = editor;
 
   useEffect(() => {
-    terminalContextsRef.current = props.terminalContexts;
-  }, [props.terminalContexts]);
-
-  useEffect(() => {
-    skillMetadataRef.current = skillMetadataByName(props.skills);
-  }, [props.skills]);
-
-  const applySurroundInsertion = useEffectEvent((inputData: string): boolean => {
-    const surroundCloseSymbol = SURROUND_SYMBOLS_MAP.get(inputData);
-    const pendingSurroundSelection = pendingSurroundSelectionRef.current;
-    if (!surroundCloseSymbol) {
-      pendingSurroundSelectionRef.current = null;
-      return false;
-    }
-
-    let handled = false;
-    editor.update(() => {
-      const selectionSnapshot =
-        pendingSurroundSelection ??
-        (() => {
-          const selection = $getSelection();
-          if (!$isRangeSelection(selection) || selection.isCollapsed()) {
-            return null;
-          }
-          if ($selectionTouchesInlineToken(selection)) {
-            return null;
-          }
-          const range = getSelectionRangeForExpandedComposerOffsets(selection);
-          if (!range || range.start === range.end) {
-            return null;
-          }
-          const value = $getRoot().getTextContent();
-          if (selectionTouchesMentionBoundary(value, range.start, range.end)) {
-            return null;
-          }
-          return {
-            value,
-            expandedStart: range.start,
-            expandedEnd: range.end,
-          };
-        })();
-
-      if (!selectionSnapshot || !surroundCloseSymbol) {
-        return;
-      }
-
-      const selectedText = selectionSnapshot.value.slice(
-        selectionSnapshot.expandedStart,
-        selectionSnapshot.expandedEnd,
-      );
-      const nextValue = `${selectionSnapshot.value.slice(0, selectionSnapshot.expandedStart)}${inputData}${selectedText}${surroundCloseSymbol}${selectionSnapshot.value.slice(selectionSnapshot.expandedEnd)}`;
-      $setComposerEditorPrompt(nextValue, terminalContextsRef.current, skillMetadataRef.current);
-      const selectionStart = collapseExpandedComposerCursor(
-        nextValue,
-        selectionSnapshot.expandedStart,
-      );
-      $setSelectionRangeAtComposerOffsets(
-        selectionStart + inputData.length,
-        selectionStart + inputData.length + selectedText.length,
-      );
-      handled = true;
-      pendingSurroundSelectionRef.current = null;
-    });
-
-    return handled;
-  });
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (pendingDeadKeySelectionRef.current) {
-        if (event.key === "Dead" || event.key === " " || event.code === "Space") {
-          return;
-        }
-        pendingDeadKeySelectionRef.current = null;
-      }
-
-      if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey) {
-        pendingSurroundSelectionRef.current = null;
-        pendingDeadKeySelectionRef.current = null;
-        return;
-      }
-
-      editor.getEditorState().read(() => {
-        const selection = $getSelection();
-        if (!$isRangeSelection(selection) || selection.isCollapsed()) {
-          pendingSurroundSelectionRef.current = null;
-          pendingDeadKeySelectionRef.current = null;
-          return;
-        }
-        if ($selectionTouchesInlineToken(selection)) {
-          pendingSurroundSelectionRef.current = null;
-          pendingDeadKeySelectionRef.current = null;
-          return;
-        }
-        const range = getSelectionRangeForExpandedComposerOffsets(selection);
-        if (!range || range.start === range.end) {
-          pendingSurroundSelectionRef.current = null;
-          pendingDeadKeySelectionRef.current = null;
-          return;
-        }
-        const value = $getRoot().getTextContent();
-        if (selectionTouchesMentionBoundary(value, range.start, range.end)) {
-          pendingSurroundSelectionRef.current = null;
-          pendingDeadKeySelectionRef.current = null;
-          return;
-        }
-        const snapshot = {
-          value,
-          expandedStart: range.start,
-          expandedEnd: range.end,
-        };
-        pendingSurroundSelectionRef.current = snapshot;
-        pendingDeadKeySelectionRef.current = null;
-      });
-    };
-
-    const onBeforeInput = (event: InputEvent) => {
-      if (
-        event.inputType === "insertCompositionText" &&
-        event.data === "`" &&
-        BACKTICK_SURROUND_CLOSE_SYMBOL !== null &&
-        pendingSurroundSelectionRef.current
-      ) {
-        pendingDeadKeySelectionRef.current = pendingSurroundSelectionRef.current;
-        return;
-      }
-
-      if (pendingDeadKeySelectionRef.current) {
-        return;
-      }
-
-      if (event.inputType === "insertCompositionText") {
-        return;
-      }
-
-      if (typeof event.data !== "string") {
-        pendingSurroundSelectionRef.current = null;
-        return;
-      }
-      const inputData = event.inputType === "insertText" ? event.data : null;
-      if (!inputData || inputData.length !== 1) {
-        pendingSurroundSelectionRef.current = null;
-        return;
-      }
-      if (!applySurroundInsertion(inputData)) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-    };
-
-    const tryApplyDeadKeyBacktickSurround = (options?: { finalAttempt?: boolean }) => {
-      queueMicrotask(() => {
-        editor.update(
-          () => {
-            const pendingDeadKeySelection = pendingDeadKeySelectionRef.current;
-            if (!pendingDeadKeySelection) {
-              return;
-            }
-
-            const currentValue = $getRoot().getTextContent();
-            const backtickCloseSymbol = BACKTICK_SURROUND_CLOSE_SYMBOL;
-            if (backtickCloseSymbol === null) {
-              pendingDeadKeySelectionRef.current = null;
-              return;
-            }
-
-            const expectedResolvedValue = `${pendingDeadKeySelection.value.slice(0, pendingDeadKeySelection.expandedStart)}\`${pendingDeadKeySelection.value.slice(pendingDeadKeySelection.expandedEnd)}`;
-            if (currentValue !== expectedResolvedValue) {
-              if (options?.finalAttempt) {
-                pendingSurroundSelectionRef.current = null;
-                pendingDeadKeySelectionRef.current = null;
-              }
-              return;
-            }
-
-            const selectedText = pendingDeadKeySelection.value.slice(
-              pendingDeadKeySelection.expandedStart,
-              pendingDeadKeySelection.expandedEnd,
-            );
-            const replacementStart = collapseExpandedComposerCursor(
-              currentValue,
-              pendingDeadKeySelection.expandedStart,
-            );
-            $setSelectionRangeAtComposerOffsets(replacementStart, replacementStart + 1);
-            const replacementSelection = $getSelection();
-            if (!$isRangeSelection(replacementSelection)) {
-              pendingSurroundSelectionRef.current = null;
-              pendingDeadKeySelectionRef.current = null;
-              return;
-            }
-            replacementSelection.insertText(`\`${selectedText}${backtickCloseSymbol}`);
-            $setSelectionRangeAtComposerOffsets(
-              replacementStart + 1,
-              replacementStart + 1 + selectedText.length,
-            );
-            pendingSurroundSelectionRef.current = null;
-            pendingDeadKeySelectionRef.current = null;
-          },
-          { tag: HISTORY_MERGE_TAG },
-        );
-      });
-    };
-
-    const onInput = (event: Event) => {
-      const inputEvent = event as InputEvent;
-      if (
-        inputEvent.inputType === "insertText" ||
-        inputEvent.inputType === "insertCompositionText"
-      ) {
-        tryApplyDeadKeyBacktickSurround();
-      }
-    };
-
-    const onCompositionEnd = () => {
-      tryApplyDeadKeyBacktickSurround({ finalAttempt: true });
-    };
-
-    let activeRootElement: HTMLElement | null = null;
-    const unregisterRootListener = editor.registerRootListener((rootElement, prevRootElement) => {
-      prevRootElement?.removeEventListener("keydown", onKeyDown);
-      prevRootElement?.removeEventListener("beforeinput", onBeforeInput, true);
-      prevRootElement?.removeEventListener("input", onInput);
-      prevRootElement?.removeEventListener("compositionend", onCompositionEnd);
-      rootElement?.addEventListener("keydown", onKeyDown);
-      rootElement?.addEventListener("beforeinput", onBeforeInput, true);
-      rootElement?.addEventListener("input", onInput);
-      rootElement?.addEventListener("compositionend", onCompositionEnd);
-      activeRootElement = rootElement;
-    });
-
-    return () => {
-      if (activeRootElement) {
-        activeRootElement.removeEventListener("keydown", onKeyDown);
-        activeRootElement.removeEventListener("beforeinput", onBeforeInput, true);
-        activeRootElement.removeEventListener("input", onInput);
-        activeRootElement.removeEventListener("compositionend", onCompositionEnd);
-      }
-      unregisterRootListener();
-    };
-  }, [editor]);
-
-  return null;
-}
-
-function ComposerPromptEditorInner({
-  value,
-  cursor,
-  terminalContexts,
-  skills,
-  disabled,
-  placeholder,
-  className,
-  onRemoveTerminalContext,
-  onChange,
-  onCommandKeyDown,
-  onPaste,
-  editorRef,
-}: ComposerPromptEditorProps) {
-  const [editor] = useLexicalComposerContext();
-  const onChangeRef = useRef(onChange);
-  const initialCursor = clampCollapsedComposerCursor(value, cursor);
-  const terminalContextsSignature = terminalContextSignature(terminalContexts);
-  const terminalContextsSignatureRef = useRef(terminalContextsSignature);
-  const skillsSignature = skillSignature(skills);
-  const skillsSignatureRef = useRef(skillsSignature);
-  const skillMetadataRef = useRef(skillMetadataByName(skills));
-  const snapshotRef = useRef({
-    value,
-    cursor: initialCursor,
-    expandedCursor: expandCollapsedComposerCursor(value, initialCursor),
-    terminalContextIds: terminalContexts.map((context) => context.id),
-  });
-  const isApplyingControlledUpdateRef = useRef(false);
-  const terminalContextActions = useMemo(
-    () => ({ onRemoveTerminalContext }),
-    [onRemoveTerminalContext],
-  );
-
-  useEffect(() => {
-    onChangeRef.current = onChange;
-  }, [onChange]);
-
-  useLayoutEffect(() => {
-    skillMetadataRef.current = skillMetadataByName(skills);
-  }, [skills]);
-
-  useEffect(() => {
-    editor.setEditable(!disabled);
+    editor?.setEditable(!disabled);
   }, [disabled, editor]);
-
+  useEffect(() => {
+    editor?.setOptions({ editorProps: { attributes: editorAttributes } });
+  }, [editor, editorAttributes]);
+  useEffect(() => {
+    if (editor) editor.view.dispatch(editor.state.tr.setMeta(composerCodeHighlightingKey, true));
+  }, [editor, resolvedTheme]);
+  const contextIds = terminalContexts.map((context) => context.id).join("\0");
+  const previousContextIds = useRef(contextIds);
   useLayoutEffect(() => {
-    const normalizedCursor = clampCollapsedComposerCursor(value, cursor);
-    const previousSnapshot = snapshotRef.current;
-    const contextsChanged = terminalContextsSignatureRef.current !== terminalContextsSignature;
-    const skillsChanged = skillsSignatureRef.current !== skillsSignature;
-    if (
-      previousSnapshot.value === value &&
-      previousSnapshot.cursor === normalizedCursor &&
-      !contextsChanged &&
-      !skillsChanged
-    ) {
+    if (!editor) return;
+    const initial = !appliedInitialSelection.current;
+    const normalized = clampCollapsedComposerCursor(value, cursor);
+    const previous = snapshot.current;
+    const contextsChanged = previousContextIds.current !== contextIds;
+    if (!initial && previous.value === value && previous.cursor === normalized && !contextsChanged)
       return;
-    }
+    if (!initial && previous.value === value && !contextsChanged && !editor.view.hasFocus()) return;
 
-    snapshotRef.current = {
-      value,
-      cursor: normalizedCursor,
-      expandedCursor: expandCollapsedComposerCursor(value, normalizedCursor),
-      terminalContextIds: terminalContexts.map((context) => context.id),
-    };
-    terminalContextsSignatureRef.current = terminalContextsSignature;
-    skillsSignatureRef.current = skillsSignature;
-
-    const rootElement = editor.getRootElement();
-    const isFocused = Boolean(rootElement && document.activeElement === rootElement);
-    if (previousSnapshot.value === value && !contextsChanged && !skillsChanged && !isFocused) {
-      return;
-    }
-
-    isApplyingControlledUpdateRef.current = true;
-    editor.update(() => {
-      const shouldRewriteEditorState =
-        previousSnapshot.value !== value || contextsChanged || skillsChanged;
-      if (shouldRewriteEditorState) {
-        $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current);
-      }
-      if (shouldRewriteEditorState || isFocused) {
-        $setSelectionAtComposerOffset(normalizedCursor);
-      }
-    });
+    const pending = { value, cursor: normalized, terminalContexts };
+    pendingControlled.current = pending;
+    let canceled = false;
+    // React node views mount synchronously. Apply external draft/chip updates
+    // after React's commit so Tiptap's flushSync never runs inside a lifecycle.
     queueMicrotask(() => {
-      isApplyingControlledUpdateRef.current = false;
+      if (canceled || editor.isDestroyed || pendingControlled.current !== pending) return;
+      applyingControlled.current = true;
+      try {
+        const focused = editor.view.hasFocus();
+        if (snapshot.current.value !== pending.value || contextsChanged)
+          editor.commands.setContent(
+            buildDocJson(pending.value, skillLabelFor, {
+              terminalContexts: pending.terminalContexts,
+            }),
+            { emitUpdate: false },
+          );
+        const map = serializeEditorDoc(editor.state.doc);
+        editor.commands.setTextSelection(flatToPm(map, collapsedToFlat(map, pending.cursor)));
+        snapshot.current = readEditorSnapshot(editor);
+        previousContextIds.current = contextIds;
+        appliedInitialSelection.current = true;
+        setIsEmpty(snapshot.current.value.length === 0);
+        if (focused) editor.view.dispatch(editor.state.tr.scrollIntoView());
+      } finally {
+        applyingControlled.current = false;
+        if (pendingControlled.current === pending) pendingControlled.current = null;
+      }
     });
-  }, [cursor, editor, skillsSignature, terminalContexts, terminalContextsSignature, value]);
+    return () => {
+      canceled = true;
+      if (pendingControlled.current === pending) pendingControlled.current = null;
+    };
+  }, [contextIds, cursor, editor, skillLabelFor, terminalContexts, value]);
 
   const focusAt = useCallback(
     (nextCursor: number) => {
-      const rootElement = editor.getRootElement();
-      if (!rootElement) return;
-      const boundedCursor = clampCollapsedComposerCursor(snapshotRef.current.value, nextCursor);
-      rootElement.focus({ preventScroll: true });
-      editor.update(() => {
-        $setSelectionAtComposerOffset(boundedCursor);
-      });
-      snapshotRef.current = {
-        value: snapshotRef.current.value,
-        cursor: boundedCursor,
-        expandedCursor: expandCollapsedComposerCursor(snapshotRef.current.value, boundedCursor),
-        terminalContextIds: snapshotRef.current.terminalContextIds,
-      };
-      onChangeRef.current(
-        snapshotRef.current.value,
-        boundedCursor,
-        snapshotRef.current.expandedCursor,
-        false,
-        snapshotRef.current.terminalContextIds,
+      if (!editor) return;
+      editor.view.dom.focus({ preventScroll: true });
+      const pending = pendingControlled.current;
+      if (pending) {
+        pending.cursor = clampCollapsedComposerCursor(pending.value, nextCursor);
+        return;
+      }
+      if (snapshot.current.value !== latest.current.value) return;
+      const map = serializeEditorDoc(editor.state.doc);
+      editor.commands.setTextSelection(
+        flatToPm(map, collapsedToFlat(map, clampCollapsedComposerCursor(map.value, nextCursor))),
       );
+      editor.view.dispatch(editor.state.tr.scrollIntoView());
     },
     [editor],
   );
-
-  const readSnapshot = useCallback((): {
-    value: string;
-    cursor: number;
-    expandedCursor: number;
-    terminalContextIds: string[];
-  } => {
-    let snapshot = snapshotRef.current;
-    editor.getEditorState().read(() => {
-      const nextValue = $getRoot().getTextContent();
-      const fallbackCursor = clampCollapsedComposerCursor(nextValue, snapshotRef.current.cursor);
-      const nextCursor = clampCollapsedComposerCursor(
-        nextValue,
-        $readSelectionOffsetFromEditorState(fallbackCursor),
-      );
-      const fallbackExpandedCursor = clampExpandedCursor(
-        nextValue,
-        snapshotRef.current.expandedCursor,
-      );
-      const nextExpandedCursor = clampExpandedCursor(
-        nextValue,
-        $readExpandedSelectionOffsetFromEditorState(fallbackExpandedCursor),
-      );
-      const terminalContextIds = collectTerminalContextIds($getRoot());
-      snapshot = {
-        value: nextValue,
-        cursor: nextCursor,
-        expandedCursor: nextExpandedCursor,
-        terminalContextIds,
-      };
-    });
-    snapshotRef.current = snapshot;
-    return snapshot;
-  }, [editor]);
-
   useImperativeHandle(
     editorRef,
     () => ({
-      focus: () => {
-        focusAt(snapshotRef.current.cursor);
-      },
+      focus: () => focusAt(pendingControlled.current?.cursor ?? snapshot.current.cursor),
       focusAt,
       focusAtEnd: () => {
-        focusAt(
-          collapseExpandedComposerCursor(
-            snapshotRef.current.value,
-            snapshotRef.current.value.length,
-          ),
-        );
+        const nextValue = pendingControlled.current?.value ?? snapshot.current.value;
+        focusAt(collapseExpandedComposerCursor(nextValue, nextValue.length));
       },
-      readSnapshot,
+      readSnapshot: () => {
+        const pending = pendingControlled.current;
+        if (pending)
+          return {
+            value: pending.value,
+            cursor: pending.cursor,
+            expandedCursor: expandCollapsedComposerCursor(pending.value, pending.cursor),
+            terminalContextIds: pending.terminalContexts.map((context) => context.id),
+          };
+        if (editor) snapshot.current = readEditorSnapshot(editor);
+        return snapshot.current;
+      },
     }),
-    [focusAt, readSnapshot],
+    [editor, focusAt],
   );
 
-  const handleEditorChange = useCallback((editorState: EditorState) => {
-    editorState.read(() => {
-      const nextValue = $getRoot().getTextContent();
-      const fallbackCursor = clampCollapsedComposerCursor(nextValue, snapshotRef.current.cursor);
-      const nextCursor = clampCollapsedComposerCursor(
-        nextValue,
-        $readSelectionOffsetFromEditorState(fallbackCursor),
-      );
-      const fallbackExpandedCursor = clampExpandedCursor(
-        nextValue,
-        snapshotRef.current.expandedCursor,
-      );
-      const nextExpandedCursor = clampExpandedCursor(
-        nextValue,
-        $readExpandedSelectionOffsetFromEditorState(fallbackExpandedCursor),
-      );
-      const terminalContextIds = collectTerminalContextIds($getRoot());
-      const previousSnapshot = snapshotRef.current;
-      if (
-        previousSnapshot.value === nextValue &&
-        previousSnapshot.cursor === nextCursor &&
-        previousSnapshot.expandedCursor === nextExpandedCursor &&
-        previousSnapshot.terminalContextIds.length === terminalContextIds.length &&
-        previousSnapshot.terminalContextIds.every((id, index) => id === terminalContextIds[index])
-      ) {
-        return;
-      }
-      if (isApplyingControlledUpdateRef.current) {
-        return;
-      }
-      snapshotRef.current = {
-        value: nextValue,
-        cursor: nextCursor,
-        expandedCursor: nextExpandedCursor,
-        terminalContextIds,
-      };
-      const cursorAdjacentToMention =
-        isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "left") ||
-        isCollapsedCursorAdjacentToInlineToken(nextValue, nextCursor, "right");
-      onChangeRef.current(
-        nextValue,
-        nextCursor,
-        nextExpandedCursor,
-        cursorAdjacentToMention,
-        terminalContextIds,
-      );
-    });
-  }, []);
+  const copySelection = (event: React.ClipboardEvent, cut: boolean) => {
+    if (!editor || (cut && !editor.isEditable)) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", serializeComposerSelection(editor));
+    if (cut) editor.chain().focus().deleteSelection().run();
+  };
 
   return (
-    <ComposerTerminalContextActionsContext value={terminalContextActions}>
+    <TerminalContextsContext value={terminalContexts}>
       <div className="composer-editor-surface relative">
-        <PlainTextPlugin
-          contentEditable={
-            <ContentEditable
-              className={cn(
-                // The size comes from .composer-editor-surface so Settings -> Appearance
-                // can drive it; keep everything else here.
-                "block max-h-50 min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
-                className,
-              )}
-              data-testid="composer-editor"
-              aria-placeholder={placeholder}
-              placeholder={<span />}
-              onPaste={onPaste}
-            />
-          }
-          placeholder={
-            terminalContexts.length > 0 ? null : (
-              <div className="pointer-events-none absolute inset-0 leading-relaxed text-placeholder">
-                {placeholder}
-              </div>
-            )
-          }
-          ErrorBoundary={LexicalErrorBoundary}
+        <EditorContent
+          editor={editor}
+          onPasteCapture={props.onPaste}
+          onCopyCapture={(event) => copySelection(event, false)}
+          onCutCapture={(event) => copySelection(event, true)}
         />
-        <OnChangePlugin onChange={handleEditorChange} />
-        <ComposerCommandKeyPlugin {...(onCommandKeyDown ? { onCommandKeyDown } : {})} />
-        <ComposerSurroundSelectionPlugin terminalContexts={terminalContexts} skills={skills} />
-        <ComposerHomeEndKeyPlugin />
-        <ComposerInlineTokenArrowPlugin />
-        <ComposerInlineTokenSelectionNormalizePlugin />
-        <ComposerInlineTokenBackspacePlugin />
-        <ComposerInlineTokenPastePlugin />
-        <ComposerChipSelectionPlugin />
-        <HistoryPlugin />
+        {isEmpty && terminalContexts.length === 0 ? (
+          <div className="pointer-events-none absolute inset-0 leading-relaxed text-placeholder">
+            {placeholder}
+          </div>
+        ) : null}
       </div>
-    </ComposerTerminalContextActionsContext>
-  );
-}
-
-export function ComposerPromptEditor({
-  value,
-  cursor,
-  terminalContexts,
-  skills,
-  disabled,
-  placeholder,
-  className,
-  onRemoveTerminalContext,
-  onChange,
-  onCommandKeyDown,
-  onPaste,
-  editorRef,
-}: ComposerPromptEditorProps) {
-  const initialValueRef = useRef(value);
-  const initialTerminalContextsRef = useRef(terminalContexts);
-  const initialSkillMetadataRef = useRef(skillMetadataByName(skills));
-  const initialConfig = useMemo<InitialConfigType>(
-    () => ({
-      namespace: "t3tools-composer-editor",
-      editable: true,
-      nodes: [ComposerMentionNode, ComposerSkillNode, ComposerTerminalContextNode],
-      editorState: () => {
-        $setComposerEditorPrompt(
-          initialValueRef.current,
-          initialTerminalContextsRef.current,
-          initialSkillMetadataRef.current,
-        );
-      },
-      onError: (error) => {
-        throw error;
-      },
-    }),
-    [],
-  );
-
-  return (
-    <LexicalComposer key={COMPOSER_EDITOR_HMR_KEY} initialConfig={initialConfig}>
-      <ComposerPromptEditorInner
-        value={value}
-        cursor={cursor}
-        terminalContexts={terminalContexts}
-        skills={skills}
-        disabled={disabled}
-        placeholder={placeholder}
-        onRemoveTerminalContext={onRemoveTerminalContext}
-        onChange={onChange}
-        onPaste={onPaste}
-        editorRef={editorRef}
-        {...(onCommandKeyDown ? { onCommandKeyDown } : {})}
-        {...(className ? { className } : {})}
-      />
-    </LexicalComposer>
+    </TerminalContextsContext>
   );
 }

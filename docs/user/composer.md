@@ -1,5 +1,21 @@
 # Composer drafts and stashed prompts
 
+## Markdown while editing
+
+The composer renders headings, bullet and numbered lists, blockquotes, bold,
+italic, strikethrough, and inline or fenced code as you type or paste Markdown.
+Fenced code uses syntax highlighting when its language is supported. Drafts and
+sent prompts remain Markdown, and copying formatted content copies Markdown.
+Links, tables, and task checkboxes remain literal Markdown in the composer.
+
+**Enter sends the prompt**, including from a list or code block. **Shift+Enter**
+continues the current list or inserts a line in code. Use Shift+Enter on an empty
+list item to leave the list; in code, use it after two trailing blank lines to
+continue below the block. **Tab** accepts a file, skill, or command suggestion.
+File and skill references inside code remain literal text.
+
+## Drafts and stashes
+
 Text and attachments entered while a new thread's worktree is being prepared
 remain in the composer when setup finishes.
 

@@ -1,3 +1,7 @@
+import {
+  collectComposerMarkdownCodeRanges,
+  isComposerMarkdownCode,
+} from "@t3tools/shared/composerInlineTokens";
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
@@ -15,7 +19,7 @@ export function shouldSubmitComposerOnEnter(input: {
   isMobileViewport: boolean;
   shiftKey: boolean;
 }): boolean {
-  return !input.isMobileViewport && !input.shiftKey;
+  return !input.shiftKey;
 }
 
 const isInlineTokenSegment = (
@@ -224,6 +228,7 @@ export const isCollapsedCursorAdjacentToMention = isCollapsedCursorAdjacentToInl
 
 export function detectComposerTrigger(text: string, cursorInput: number): ComposerTrigger | null {
   const cursor = clampCursor(text, cursorInput);
+  if (isComposerMarkdownCode(text, Math.max(0, cursor - 1))) return null;
   const lineStart = text.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
   const linePrefix = text.slice(lineStart, cursor);
 
@@ -282,4 +287,21 @@ export function replaceTextRange(
   const safeEnd = Math.max(safeStart, Math.min(text.length, rangeEnd));
   const nextText = `${text.slice(0, safeStart)}${replacement}${text.slice(safeEnd)}`;
   return { text: nextText, cursor: safeStart + replacement.length };
+}
+
+/** Keep imperative attachments outside literal code without rewriting the code itself. */
+export function prepareComposerChipInsertion(
+  text: string,
+  cursorInput: number,
+): { text: string; cursor: number } {
+  const cursor = clampCursor(text, cursorInput);
+  const code = collectComposerMarkdownCodeRanges(text).find(
+    (range) => range.start <= cursor && cursor <= range.end,
+  );
+  if (!code) return { text, cursor };
+  if (code.kind === "inline") return { text, cursor: code.end };
+  if (!code.closed) {
+    return { text: `${text.slice(0, code.start)}\n${text.slice(code.start)}`, cursor: code.start };
+  }
+  return { text: `${text.slice(0, code.end)}\n${text.slice(code.end)}`, cursor: code.end + 1 };
 }

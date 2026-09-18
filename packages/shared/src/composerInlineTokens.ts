@@ -1,3 +1,73 @@
+export interface MarkdownCodeRange {
+  start: number;
+  end: number;
+  kind: "inline" | "fenced";
+  closed: boolean;
+}
+
+// Keep shell variables and file-like text literal in prompt code. Unclosed
+// fences also count, because autocomplete runs while the prompt is being typed.
+export function collectComposerMarkdownCodeRanges(text: string): MarkdownCodeRange[] {
+  const ranges: MarkdownCodeRange[] = [];
+  let fence: { start: number; marker: string } | null = null;
+  for (const line of text.matchAll(/^.*(?:\n|$)/gm)) {
+    const source = line[0];
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)/.exec(source);
+    if (!marker) continue;
+    const run = marker[1]!;
+    if (fence) {
+      if (run[0] === fence.marker[0] && run.length >= fence.marker.length && !marker[2]!.trim()) {
+        ranges.push({
+          start: fence.start,
+          end: line.index + source.trimEnd().length,
+          kind: "fenced",
+          closed: true,
+        });
+        fence = null;
+      }
+    } else if (run[0] !== "`" || !marker[2]!.includes("`")) {
+      fence = { start: line.index, marker: run };
+    }
+  }
+  if (fence) ranges.push({ start: fence.start, end: text.length, kind: "fenced", closed: false });
+
+  const runs = [...text.matchAll(/`+/g)];
+  const nextMatchingRun = new Map<number, number>();
+  const nextByLength = new Map<number, number>();
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    const run = runs[index]!;
+    const next = nextByLength.get(run[0].length);
+    if (next !== undefined) nextMatchingRun.set(index, next);
+    nextByLength.set(run[0].length, index);
+  }
+  for (let index = 0; index < runs.length; index += 1) {
+    const run = runs[index]!;
+    if (ranges.some((range) => range.start <= run.index && run.index < range.end)) continue;
+    let backslashes = 0;
+    for (let before = run.index - 1; before >= 0 && text[before] === "\\"; before -= 1)
+      backslashes += 1;
+    if (backslashes % 2 !== 0) continue;
+    const closingIndex = nextMatchingRun.get(index);
+    if (closingIndex === undefined) continue;
+    const closing = runs[closingIndex]!;
+    if (ranges.some((range) => run.index < range.start && closing.index >= range.start)) continue;
+    ranges.push({
+      start: run.index,
+      end: closing.index + closing[0].length,
+      kind: "inline",
+      closed: true,
+    });
+    index = closingIndex;
+  }
+  return ranges;
+}
+
+export function isComposerMarkdownCode(text: string, offset: number): boolean {
+  return collectComposerMarkdownCodeRanges(text).some(
+    (range) => range.start <= offset && offset < range.end,
+  );
+}
+
 export type ComposerInlineToken =
   | {
       readonly type: "mention";
@@ -20,7 +90,7 @@ export interface CollectComposerInlineTokensOptions {
 
 const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s)/g;
 const MENTION_TOKEN_REGEX = /(^|\s)@(?:"((?:\\.|[^"\\])*)"|([^\s@"]+))(?=\s)/g;
-const FILE_LINK_TOKEN_REGEX = /(^|\s)\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)(?=\s)/g;
+const FILE_LINK_TOKEN_REGEX = /(^|\s)\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)(?=\s|$)/g;
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/;
 // Autocomplete emits canonical file links, so ambiguous bare @scope/package text stays a package.
@@ -117,5 +187,10 @@ export function collectComposerInlineTokens(
     }
   }
 
-  return [...matches].sort((left, right) => left.start - right.start);
+  const codeRanges = collectComposerMarkdownCodeRanges(text);
+  return matches
+    .filter(
+      (token) => !codeRanges.some((range) => token.start < range.end && token.end > range.start),
+    )
+    .sort((left, right) => left.start - right.start);
 }

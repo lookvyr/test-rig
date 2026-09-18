@@ -3,6 +3,29 @@ import { describe, expect, it } from "vite-plus/test";
 import { collectComposerInlineTokens } from "./composerInlineTokens.ts";
 
 describe("collectComposerInlineTokens", () => {
+  it.each([
+    "```sh\n$HOME @README.md [file.ts](src/file.ts) \n```",
+    "~~~sh\n$HOME @README.md [file.ts](src/file.ts) ",
+    "` $HOME @README.md [file.ts](src/file.ts) `",
+    "`` $HOME ` @README.md [file.ts](src/file.ts) ``",
+  ])("keeps code literal: %s", (text) => {
+    expect(collectComposerInlineTokens(text)).toEqual([]);
+  });
+
+  it("preserves tokens outside code fences and spans", () => {
+    const text = "```sh\n$HOME \n```\n$ui and ` $HOME ` @README.md ";
+    expect(collectComposerInlineTokens(text).map((token) => token.source)).toEqual([
+      "$ui",
+      "@README.md",
+    ]);
+  });
+
+  it("does not treat escaped backticks as code", () => {
+    expect(collectComposerInlineTokens("\\` $ui \\`").map((token) => token.source)).toEqual([
+      "$ui",
+    ]);
+  });
+
   it("collects file links, mentions, and skills with source ranges", () => {
     const text = "Use $ui and inspect [Chat.tsx](src/Chat.tsx) with @AGENTS.md please";
 
@@ -29,6 +52,21 @@ describe("collectComposerInlineTokens", () => {
         end: 60,
       },
     ]);
+  });
+
+  it("recognizes a complete canonical file link after stash trimming removes its trailing space", () => {
+    const source = "Inspect [README.md](README.md) ".trim();
+    expect(collectComposerInlineTokens(source)).toEqual([
+      {
+        type: "mention",
+        value: "README.md",
+        source: "[README.md](README.md)",
+        start: 8,
+        end: source.length,
+      },
+    ]);
+    expect(collectComposerInlineTokens("```md\n[README.md](README.md)")).toEqual([]);
+    expect(collectComposerInlineTokens("`[README.md](README.md)`")).toEqual([]);
   });
 
   it("does not convert incomplete trailing tokens", () => {

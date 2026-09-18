@@ -86,3 +86,16 @@ September 14 reliability batch:
   screen's retry action invalidate router loaders after the backend recovers.
 - [#7599](https://github.com/pingdotgg/t3code/pull/7599) bounds concurrent desktop
   backend shutdown to five seconds per instance so hung cleanup cannot block quit.
+
+September 17 composer prototype:
+
+- Adapted [#12160](https://github.com/pingdotgg/t3code/pull/12160) at
+  `d359e94cabca4722029359c77d60cb6d13da1e59`: Tiptap replaces Lexical while
+  keeping Markdown drafts, the composer handle, and Test Rig's file, skill,
+  and terminal chips. The local document adapter extends the upstream inline
+  parser and cursor mapping to headings, ordinary lists, quotes, and fenced code.
+  Enter always submits; Shift-Enter continues blocks. Syntax coloring reuses
+  the existing local highlighter. Upstream citations, generalized context records,
+  and the rich/plain setting are not included. Links, tables, and task checkboxes
+  remain literal. The code mark permits nested formatting, addressing the issue
+  identified in [#12290](https://github.com/pingdotgg/t3code/pull/12290).
