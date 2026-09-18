@@ -1,3 +1,53 @@
+diff --git a/dist/components/CodeView.d.ts b/dist/components/CodeView.d.ts
+index c499b8b933fce154f95f0cb698c61eaf146ce3e1..61a378d86049029884b844d12c29fbe890928665 100644
+--- a/dist/components/CodeView.d.ts
++++ b/dist/components/CodeView.d.ts
+@@ -400,7 +400,9 @@ declare class CodeView<LAnnotation = undefined> {
+    * anchoring corrections if necessary
+    */
+   private advanceScrollAnimation;
++  private isRendering;
+   private computeRenderRangeAndEmit;
++  private renderRangeAndEmit;
+   private flushManagers;
+   private syncContainerHeight;
+   private getStickyBounds;
+diff --git a/dist/components/CodeView.js b/dist/components/CodeView.js
+index dfabd4963697284d5ea70812bca010efa5cce9b3..a8f40c7e57c647eb36c0d1fb562dd6e898b6fa9c 100644
+--- a/dist/components/CodeView.js
++++ b/dist/components/CodeView.js
+@@ -1449,7 +1449,22 @@ var CodeView = class CodeView {
+ 		}
+ 		return animation.position;
+ 	}
++	isRendering = false;
+ 	computeRenderRangeAndEmit = (timestamp = performance.now()) => {
++		// React slot publication can request an immediate render inside this frame.
++		// Finish settling its scroll target before starting another frame.
++		if (this.isRendering) {
++			queueRender(this.computeRenderRangeAndEmit);
++			return;
++		}
++		this.isRendering = true;
++		try {
++			this.renderRangeAndEmit(timestamp);
++		} finally {
++			this.isRendering = false;
++		}
++	};
++	renderRangeAndEmit(timestamp) {
+ 		if (CodeView.__STOP || this.container == null) return;
+ 		if (!this.isReady()) return;
+ 		const viewportHeight = this.getHeight();
+@@ -1559,7 +1574,7 @@ var CodeView = class CodeView {
+ 		this.validateStickyContainerHeight();
+ 		this.fixContainerFocus();
+ 		if (fitPerfectly || this.scrollAnimation != null) this.render();
+-	};
++	}
+ 	flushManagers(updatedItems) {
+ 		for (const item of updatedItems) item.instance.flushManagers();
+ 	}
 diff --git a/dist/editor/editor.js b/dist/editor/editor.js
 index ff78e2a..f9df318 100644
 --- a/dist/editor/editor.js
