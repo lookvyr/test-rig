@@ -106,6 +106,14 @@ export function buildLoadingThreadFromShell(shell: ThreadShell): Thread {
   };
 }
 
+export function getThreadVisitTimestamp(
+  thread: Pick<Thread, "createdAt" | "latestTurn"> | null,
+): string | null {
+  // A first visit needs a baseline before any turn finishes. Creation time
+  // cannot acknowledge a later completion or snooze wake that wasn't read.
+  return thread?.latestTurn?.completedAt ?? thread?.createdAt ?? null;
+}
+
 export function shouldWriteThreadErrorToCurrentServerThread(input: {
   activeServerThread:
     | {

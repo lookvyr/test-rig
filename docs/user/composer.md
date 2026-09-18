@@ -33,6 +33,11 @@ Enter. Custom keybindings for the stash action also use this behavior.
 
 ## Moving between turns
 
+When you leave a running thread, its next completion shows an unread indicator
+in the sidebar, including its first reply. Opening the completed thread clears
+that indicator. Switching to a different provider's thread does not mark the
+background thread as read.
+
 In a conversation with multiple turns, move the pointer beside the conversation
 minimap to reveal **Previous turn** and **Next turn**. These move from your current
 reading position to the adjacent user message. A control is disabled when there

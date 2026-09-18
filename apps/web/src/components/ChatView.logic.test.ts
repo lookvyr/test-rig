@@ -9,6 +9,8 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Thread, ThreadShell } from "../types";
+import { markThreadVisited, useUiStateStore, type UiState } from "../uiStateStore";
+import { hasUnseenCompletion } from "./Sidebar.logic";
 import {
   MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -21,6 +23,7 @@ import {
   deriveComposerSendState,
   dismissBranchMismatchForSession,
   getStartedThreadModelChangeBlockReason,
+  getThreadVisitTimestamp,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
   reconcileMountedTerminalThreadIds,
@@ -86,6 +89,85 @@ const readySession = {
   lastError: null,
   updatedAt: "2026-03-29T00:00:10.000Z",
 };
+
+describe("thread completion visits", () => {
+  function visit(state: UiState, thread: Thread) {
+    const timestamp = getThreadVisitTimestamp(thread);
+    return timestamp === null ? state : markThreadVisited(state, thread.id, timestamp);
+  }
+
+  function isUnread(thread: Thread, state: UiState) {
+    return hasUnseenCompletion({
+      ...thread,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+      lastVisitedAt: state.threadLastVisitedAtById[thread.id],
+    });
+  }
+
+  it.each([false, true])(
+    "keeps a first background completion unread after visiting (turn already running: %s)",
+    (running) => {
+      const firstThread = makeThread({
+        latestTurn: running ? { ...completedTurn, state: "running", completedAt: null } : null,
+      });
+      let state = visit(useUiStateStore.getInitialState(), firstThread);
+      // Navigating to another thread must not acknowledge this thread's result.
+      state = visit(state, makeThread({ id: ThreadId.make("other-thread") }));
+      const finishedThread = makeThread({ latestTurn: completedTurn });
+      expect(isUnread(finishedThread, state)).toBe(true);
+
+      state = visit(state, finishedThread);
+      expect(isUnread(finishedThread, state)).toBe(false);
+
+      state = visit(
+        state,
+        makeThread({
+          latestTurn: {
+            ...completedTurn,
+            turnId: TurnId.make("turn-2"),
+            state: "running",
+            completedAt: null,
+          },
+        }),
+      );
+      expect(state.threadLastVisitedAtById[threadId]).toBe(completedTurn.completedAt);
+      expect(
+        isUnread(
+          makeThread({
+            latestTurn: {
+              ...completedTurn,
+              turnId: TurnId.make("turn-2"),
+              completedAt: "2026-03-29T00:01:00.000Z",
+            },
+          }),
+          state,
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("acknowledges only the displayed completion, even when metadata is newer", () => {
+    const thread = makeThread({
+      latestTurn: completedTurn,
+      updatedAt: "2026-03-29T00:02:00.000Z",
+    });
+    const state = visit(useUiStateStore.getInitialState(), thread);
+    expect(isUnread(thread, state)).toBe(false);
+    // A later snooze wake remains newer than the acknowledged completion.
+    expect(Date.parse(state.threadLastVisitedAtById[threadId]!)).toBeLessThan(
+      Date.parse("2026-03-29T00:01:00.000Z"),
+    );
+  });
+
+  it("leaves never-visited historical threads read", () => {
+    expect(
+      isUnread(makeThread({ latestTurn: completedTurn }), useUiStateStore.getInitialState()),
+    ).toBe(false);
+    expect(getThreadVisitTimestamp(null)).toBeNull();
+  });
+});
 
 describe("buildLoadingThreadFromShell", () => {
   it("preserves shell metadata and supplies empty detail collections", () => {
