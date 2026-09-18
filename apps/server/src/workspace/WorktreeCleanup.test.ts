@@ -13,7 +13,6 @@ import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import {
   DEFAULT_SERVER_SETTINGS,
   OrchestrationThreadShell,
@@ -57,7 +56,10 @@ const fixture = Effect.gen(function* () {
   git(repo, "config", "user.name", "Cleanup test");
   git(repo, "config", "user.email", "cleanup@example.invalid");
   NodeFS.writeFileSync(NodePath.join(repo, "tracked.txt"), "original\n");
-  NodeFS.writeFileSync(NodePath.join(repo, ".gitignore"), "node_modules/\n.env\n");
+  NodeFS.writeFileSync(
+    NodePath.join(repo, ".gitignore"),
+    "node_modules/\n.env\n.husky/_/\ndist/\n",
+  );
   git(repo, "add", ".");
   git(repo, "commit", "-m", "fixture");
   const worktreesDir = NodePath.join(root, "worktrees");
@@ -172,16 +174,9 @@ const fixture = Effect.gen(function* () {
             behindCount: 0,
             aheadOfDefaultCount: 0,
           })),
-        execute: (input) =>
-          Effect.sync(() => ({
-            stdout: git(input.cwd, ...input.args),
-            stderr: "",
-            exitCode: ChildProcessSpawner.ExitCode(0),
-            stdoutTruncated: false,
-            stderrTruncated: false,
-          })),
         removeWorktree: (input) =>
           Effect.sync(() => {
+            expect(input.force).toBe(false);
             git(input.cwd, "worktree", "remove", input.path);
           }),
       }),
@@ -257,27 +252,64 @@ const fixture = Effect.gen(function* () {
 });
 
 describe("settled worktree cleanup", () => {
-  it.effect("removes a clean checkout including dependencies, preserving the branch", () =>
-    Effect.gen(function* () {
-      const f = yield* fixture;
-      NodeFS.mkdirSync(NodePath.join(f.checkout, "node_modules"));
-      NodeFS.writeFileSync(NodePath.join(f.checkout, "node_modules", "cache"), "generated");
-      yield* f.sweep();
-      expect(NodeFS.existsSync(f.checkout)).toBe(false);
-      expect(git(f.repo, "rev-parse", "task").trim()).toBe(git(f.repo, "rev-parse", "main").trim());
-      expect(f.state.get(f.thread.id)).toBeNull();
-    }),
-  );
-  it.effect.each(["tracked.txt", "untracked.txt", ".env"])(
-    "keeps unfinished/local-only file %s and explains why",
+  it.effect.each(["node_modules/cache", ".env", ".husky/_/husky.sh", "dist/app.js"])(
+    "removes a clean checkout containing ignored %s, preserving the branch",
     (name) =>
       Effect.gen(function* () {
         const f = yield* fixture;
-        NodeFS.writeFileSync(NodePath.join(f.checkout, name), "keep me");
+        const file = NodePath.join(f.checkout, name);
+        NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
+        NodeFS.writeFileSync(file, "local fixture");
+        expect(git(f.checkout, "status", "--porcelain")).toBe("");
+        expect(git(f.checkout, "check-ignore", name).trim()).toBe(name);
         yield* f.sweep();
-        expect(NodeFS.existsSync(f.checkout)).toBe(true);
-        expect(f.state.get(f.thread.id)?.state).toBe("retained");
+        expect(NodeFS.existsSync(f.checkout)).toBe(false);
+        expect(git(f.repo, "rev-parse", "task").trim()).toBe(
+          git(f.repo, "rev-parse", "main").trim(),
+        );
+        expect(f.state.get(f.thread.id)).toBeNull();
       }),
+  );
+  it.effect.each(["unstaged", "staged", "untracked"])("keeps %s work and explains why", (kind) =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const name = kind === "untracked" ? "untracked.txt" : "tracked.txt";
+      NodeFS.writeFileSync(NodePath.join(f.checkout, name), "keep me");
+      if (kind === "staged") git(f.checkout, "add", name);
+      yield* f.sweep();
+      expect(NodeFS.readFileSync(NodePath.join(f.checkout, name), "utf8")).toBe("keep me");
+      expect(f.state.get(f.thread.id)).toEqual({
+        state: "retained",
+        reason: "Worktree kept because it has uncommitted changes.",
+      });
+    }),
+  );
+  it.effect.each(["unstaged", "staged", "untracked"])(
+    "keeps %s work created during session shutdown",
+    (kind) =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const name = kind === "untracked" ? "untracked.txt" : "tracked.txt";
+        f.onStop(() => {
+          NodeFS.writeFileSync(NodePath.join(f.checkout, name), "keep me");
+          if (kind === "staged") git(f.checkout, "add", name);
+        });
+        yield* f.sweep();
+        expect(NodeFS.readFileSync(NodePath.join(f.checkout, name), "utf8")).toBe("keep me");
+        expect(f.state.get(f.thread.id)).toEqual({
+          state: "retained",
+          reason: "Worktree kept because its local files changed during cleanup.",
+        });
+      }),
+  );
+  it.effect("removes a checkout when only ignored files appear during session shutdown", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.onStop(() => NodeFS.writeFileSync(NodePath.join(f.checkout, ".env"), "local fixture"));
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(false);
+      expect(f.state.get(f.thread.id)).toBeNull();
+    }),
   );
   it.effect("honors opt-out and clears existing notices", () =>
     Effect.gen(function* () {

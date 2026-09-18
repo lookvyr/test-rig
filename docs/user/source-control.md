@@ -94,7 +94,9 @@ When **Start from origin** is enabled for a new worktree, Test Rig fetches origi
 
 The branch and conversation stay available. Sending a new prompt recreates the checkout from its branch and launches the project's setup script, when configured.
 
-Cleanup keeps worktrees with uncommitted or untracked work and ignored local-only files, such as `.env`. Ignored `node_modules` directories are treated as disposable dependencies. Running agents, checkpoints, terminal jobs, pins, and other threads sharing the checkout prevent removal. Idle sessions and terminals close during cleanup.
+Cleanup requires a clean Git working directory: staged changes, unstaged changes, and non-ignored untracked files prevent removal. Ignored files and directories, including `.env`, `.husky/_/`, `node_modules`, and build outputs, are deleted with the worktree. They are not restored from the branch when the checkout is recreated; use the project's setup script to recreate any needed local configuration and generated files.
+
+Running agents, checkpoints, terminal jobs, pins, and other threads sharing the checkout prevent removal. Idle sessions and terminals close during cleanup.
 
 When cleanup is waiting or keeps a checkout, a small worktree icon in the sidebar shows the reason on hover. The same explanation appears above that thread's composer. Cleanup retries automatically. Turn the setting off to keep worktrees until you remove them yourself.
 

@@ -58,13 +58,6 @@ export function worktreeHasActiveThread(thread: Thread, now: number): boolean {
   );
 }
 
-export function hasMeaningfulIgnoredFiles(output: string, truncated: boolean): boolean {
-  return (
-    truncated ||
-    output.split("\0").some((entry) => entry !== "" && !/(^|\/)node_modules\/$/.test(entry))
-  );
-}
-
 export class WorktreeCleanup extends Context.Service<
   WorktreeCleanup,
   {
@@ -223,18 +216,6 @@ export const make = Effect.gen(function* () {
       yield* notice("retained", "Worktree kept because it has uncommitted changes.");
       return;
     }
-    const ignored = () =>
-      git.execute({
-        operation: "WorktreeCleanup.ignoredFiles",
-        cwd: checkout,
-        args: ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"],
-        maxOutputBytes: 64 * 1024,
-      });
-    const ignoredFiles = yield* ignored();
-    if (hasMeaningfulIgnoredFiles(ignoredFiles.stdout, ignoredFiles.stdoutTruncated)) {
-      yield* notice("retained", "Worktree kept because it contains local-only files.");
-      return;
-    }
     if (
       checkoutTerminals(checkout).some(
         (terminal) => terminal.hasRunningSubprocess || terminal.status === "starting",
@@ -268,12 +249,7 @@ export const make = Effect.gen(function* () {
     if (!(yield* settings.getSettings).autoRemoveSettledWorktrees || !eligible(yield* currentGroup))
       return;
     const finalStatus = yield* git.statusDetailsLocal(checkout);
-    const finalIgnored = yield* ignored();
-    if (
-      finalStatus.hasWorkingTreeChanges ||
-      finalStatus.branch !== local.branch ||
-      hasMeaningfulIgnoredFiles(finalIgnored.stdout, finalIgnored.stdoutTruncated)
-    ) {
+    if (finalStatus.hasWorkingTreeChanges || finalStatus.branch !== local.branch) {
       yield* notice("retained", "Worktree kept because its local files changed during cleanup.");
       return;
     }

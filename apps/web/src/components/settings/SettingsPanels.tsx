@@ -1675,7 +1675,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("automatic-worktree-cleanup")}
-          description="Remove unused worktrees when threads settle. Keeps unfinished local work, branches, and conversations."
+          description="Remove unused worktrees when threads settle and Git is clean, including ignored files such as .env. Keeps branches and conversations."
           resetAction={
             !settings.autoRemoveSettledWorktrees ? (
               <SettingResetButton
