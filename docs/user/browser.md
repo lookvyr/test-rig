@@ -5,9 +5,9 @@ bar. Existing tabs stay open. This also works with the terminal focused unless
 you have assigned that shortcut to another command in your terminal keybindings.
 
 Command-W closes the active tab in the right panel, including browsers, reviews,
-files, and side chats. Closing the last tab hides the panel. When a terminal is
-focused, Command-W closes that terminal instead. On Windows and Linux, use Ctrl
-in place of Command.
+files, and side chats. Closing the last tab hides the panel. If the panel is open
+with no tabs, Command-W hides it. When a terminal is focused, Command-W closes
+that terminal instead. On Windows and Linux, use Ctrl in place of Command.
 
 Enter a website address or search terms in the browser's address bar, then press
 Enter. Search terms open Google results in the current tab. Searches are sent

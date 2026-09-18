@@ -69,7 +69,7 @@ shortcut; assign one in **Settings** → **Keybindings**.
 
 - `mod+shift+p` (`thread.pin`) pins or unpins the active thread.
 - `mod+shift+s` (`thread.settle`) settles the active thread or restores it to active. Threads that are running or waiting for input cannot be settled.
-- `mod+w` (`rightPanel.close`) closes the active right-panel tab. When no panel is open, the normal window or browser close behavior applies.
+- `mod+w` (`rightPanel.close`) closes the active right-panel tab, or hides the panel if it is open with no tabs. When no panel is open, the normal window or browser close behavior applies.
 
 These defaults yield to terminal focus: `mod+w` closes the focused terminal, and the thread shortcuts are inactive. Pin and settle apply to saved threads in environments that support those actions.
 

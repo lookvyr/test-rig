@@ -4530,10 +4530,15 @@ function ChatViewContent(props: ChatViewProps) {
       }
 
       if (command === "rightPanel.close") {
-        if (!activeRightPanelSurface) return;
+        if (!rightPanelOpen) return;
         event.preventDefault();
         event.stopPropagation();
-        if (!event.repeat) closeRightPanelSurface(activeRightPanelSurface);
+        if (event.repeat) return;
+        if (activeRightPanelSurface) {
+          closeRightPanelSurface(activeRightPanelSurface);
+        } else {
+          closePreviewPanel();
+        }
         return;
       }
 
@@ -4639,6 +4644,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeThreadRef,
     activeThreadPinned,
     activeThreadSettled,
+    closePreviewPanel,
     closeRightPanelSurface,
     canInterruptRunningThread,
     onInterrupt,
