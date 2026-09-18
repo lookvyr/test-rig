@@ -127,6 +127,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "new-threads",
   },
   {
+    id: "automatic-worktree-cleanup",
+    title: "Automatic worktree cleanup",
+    to: "/settings/general",
+  },
+  {
     id: "worktree-branch-prefix",
     title: "Worktree branch prefix",
     to: "/settings/general",

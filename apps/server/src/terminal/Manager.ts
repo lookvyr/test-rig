@@ -1,3 +1,4 @@
+import { withWorktreeLease } from "../workspace/worktreeLifecycle.ts";
 /**
  * TerminalManager - Terminal session orchestration service interface.
  *
@@ -2304,7 +2305,10 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   });
 
   const open: TerminalManager["Service"]["open"] = (input) =>
-    withThreadLock(input.threadId, openLocked(input));
+    withWorktreeLease(
+      path.resolve(input.worktreePath ?? input.cwd),
+      withThreadLock(input.threadId, openLocked(input)),
+    );
 
   const openOrAttachForStream = (input: TerminalAttachInput) =>
     withThreadLock(
@@ -2407,7 +2411,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         return attachEvent ? listener(attachEvent) : Effect.void;
       });
 
-      const initialSnapshot = yield* openOrAttachForStream(input);
+      const initialSnapshot = yield* input.cwd
+        ? withWorktreeLease(
+            path.resolve(input.worktreePath ?? input.cwd),
+            openOrAttachForStream(input),
+          )
+        : openOrAttachForStream(input);
 
       yield* listener({
         type: "snapshot",
@@ -2525,28 +2534,40 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     );
   };
 
-  const write: TerminalManager["Service"]["write"] = Effect.fn("terminal.write")(function* (input) {
-    const terminalId = input.terminalId;
-    const session = yield* requireSession(input.threadId, terminalId);
-    const process = session.process;
-    if (!process || session.status !== "running") {
-      if (session.status === "exited") return;
-      return yield* new TerminalNotRunningError({
-        threadId: input.threadId,
-        terminalId,
-      });
-    }
-    yield* Effect.try({
-      try: () => process.write(input.data),
-      catch: (cause) =>
-        new TerminalWriteError({
+  const writeUnlocked: TerminalManager["Service"]["write"] = Effect.fn("terminal.write")(
+    function* (input) {
+      const terminalId = input.terminalId;
+      const session = yield* requireSession(input.threadId, terminalId);
+      const process = session.process;
+      if (!process || session.status !== "running") {
+        if (session.status === "exited") return;
+        return yield* new TerminalNotRunningError({
           threadId: input.threadId,
           terminalId,
-          terminalPid: process.pid,
-          cause,
-        }),
-    });
-  });
+        });
+      }
+      yield* Effect.try({
+        try: () => process.write(input.data),
+        catch: (cause) =>
+          new TerminalWriteError({
+            threadId: input.threadId,
+            terminalId,
+            terminalPid: process.pid,
+            cause,
+          }),
+      });
+    },
+  );
+
+  const write: TerminalManager["Service"]["write"] = Effect.fn("terminal.writeWithCheckout")(
+    function* (input) {
+      const session = yield* requireSession(input.threadId, input.terminalId);
+      return yield* withWorktreeLease(
+        path.resolve(session.worktreePath ?? session.cwd),
+        writeUnlocked(input),
+      );
+    },
+  );
 
   const resizeLocked = Effect.fn("terminal.resize")(function* (input: TerminalResizeInput) {
     const session = yield* getSession(input.threadId, input.terminalId);
@@ -2589,7 +2610,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       }),
     );
 
-  const restart: TerminalManager["Service"]["restart"] = (input) =>
+  const restartUnlocked: TerminalManager["Service"]["restart"] = (input) =>
     withThreadLock(
       input.threadId,
       Effect.gen(function* () {
@@ -2668,6 +2689,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
         return snapshot(session);
       }),
     );
+
+  const restart: TerminalManager["Service"]["restart"] = (input) =>
+    withWorktreeLease(path.resolve(input.worktreePath ?? input.cwd), restartUnlocked(input));
 
   const close: TerminalManager["Service"]["close"] = (input) =>
     withThreadLock(

@@ -1,3 +1,7 @@
+import { ProjectSetupScriptRunner } from "../../project/ProjectSetupScriptRunner.ts";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import { withWorktreeLease } from "../../workspace/worktreeLifecycle.ts";
 import {
   type ChatAttachment,
   CommandId,
@@ -298,6 +302,9 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
   const gitWorkflow = yield* GitWorkflowService;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const setupScriptRunner = yield* ProjectSetupScriptRunner;
+  const path = yield* Path.Path;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
@@ -480,7 +487,7 @@ const make = Effect.gen(function* () {
         .listSessions()
         .pipe(Effect.map((sessions) => sessions.find((session) => session.threadId === threadId)));
 
-    const activeSession = yield* resolveActiveSession(threadId);
+    let activeSession = yield* resolveActiveSession(threadId);
     const activeThreadSession =
       thread.session !== null && thread.session.status !== "stopped" && activeSession
         ? thread.session
@@ -540,24 +547,75 @@ const make = Effect.gen(function* () {
       });
     }
     const preferredProvider: ProviderDriverKind = desiredDriverKind;
-    if (
-      (options?.pendingTurnStart === true || options?.forkFromThreadId !== undefined) &&
-      thread.session?.status !== "running"
-    ) {
-      yield* setThreadSession({
-        threadId,
-        session: {
+    const prepare = Effect.gen(function* () {
+      activeSession = yield* resolveActiveSession(threadId);
+      if (
+        (options?.pendingTurnStart === true ||
+          options?.forkFromThreadId !== undefined ||
+          thread.worktreePath != null) &&
+        thread.session?.status !== "running"
+      ) {
+        yield* setThreadSession({
           threadId,
-          status: "starting",
-          providerName: activeSession?.provider ?? preferredProvider,
-          providerInstanceId: activeSession?.providerInstanceId ?? desiredInstanceId,
-          runtimeMode: desiredRuntimeMode,
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: createdAt,
-        },
-        createdAt,
-      });
+          session: {
+            threadId,
+            status: "starting",
+            providerName: activeSession?.provider ?? preferredProvider,
+            providerInstanceId: activeSession?.providerInstanceId ?? desiredInstanceId,
+            runtimeMode: desiredRuntimeMode,
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: createdAt,
+          },
+          createdAt,
+        });
+      }
+      if (
+        thread.worktreePath &&
+        thread.branch &&
+        !(yield* fileSystem.exists(thread.worktreePath))
+      ) {
+        const project = yield* resolveProject(thread.projectId);
+        if (!project)
+          return yield* Effect.die(new Error("Cannot restore worktree: project is missing."));
+        yield* gitWorkflow
+          .createWorktree({
+            cwd: project.workspaceRoot,
+            path: thread.worktreePath,
+            refName: thread.branch,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderAdapterRequestError({
+                  provider: providerErrorLabel(thread.session?.providerName ?? undefined),
+                  method: "thread.turn.start",
+                  detail: "Could not restore this thread's worktree from its branch.",
+                  cause,
+                }),
+            ),
+          );
+        return true;
+      }
+      return false;
+    });
+    const restored = yield* thread.worktreePath
+      ? withWorktreeLease(path.resolve(thread.worktreePath), prepare)
+      : prepare;
+    if (restored && thread.worktreePath) {
+      yield* setupScriptRunner
+        .runForThread({ threadId, projectId: thread.projectId, worktreePath: thread.worktreePath })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: preferredProvider,
+                method: "thread.turn.start",
+                detail: "The worktree was restored, but its setup script could not start.",
+                cause,
+              }),
+          ),
+        );
     }
     if (thread.session !== null) {
       yield* rejectStartedThreadModelChangeIfRequired({
@@ -1403,12 +1461,21 @@ const make = Effect.gen(function* () {
           event.payload.threadId,
           event.occurredAt,
           cachedModelSelection !== undefined ? { modelSelection: cachedModelSelection } : {},
+        ).pipe(
+          Effect.tapError(() =>
+            setThreadSession({
+              threadId: thread.id,
+              session: thread.session!,
+              createdAt: event.occurredAt,
+            }),
+          ),
         );
         return;
       }
-      case "thread.turn-start-requested":
+      case "thread.turn-start-requested": {
         yield* processTurnStartRequested(event);
         return;
+      }
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;

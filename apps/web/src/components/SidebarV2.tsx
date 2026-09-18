@@ -875,6 +875,21 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             </span>
             {title}
             <ThreadDraftIndicator threadRef={threadRef} isActive={props.isActive} />
+            {thread.worktreeCleanup ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+                      aria-label={thread.worktreeCleanup.reason}
+                    >
+                      <GitBranchIcon className="size-3" />
+                    </span>
+                  }
+                />
+                <TooltipPopup>{thread.worktreeCleanup.reason}</TooltipPopup>
+              </Tooltip>
+            ) : null}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
@@ -1148,6 +1163,21 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              {thread.worktreeCleanup ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+                        aria-label={thread.worktreeCleanup.reason}
+                      >
+                        <GitBranchIcon className="size-3" />
+                      </span>
+                    }
+                  />
+                  <TooltipPopup>{thread.worktreeCleanup.reason}</TooltipPopup>
+                </Tooltip>
+              ) : null}
               {terminalStatusIcon}
               {prBadge}
               {diff ? (

@@ -273,6 +273,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
         ? ["New worktrees start from origin"]
         : []),
+      ...(settings.autoRemoveSettledWorktrees !==
+      DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees
+        ? ["Automatic worktree cleanup"]
+        : []),
       ...(settings.newWorktreeBranchPrefix !== DEFAULT_UNIFIED_SETTINGS.newWorktreeBranchPrefix
         ? ["Worktree branch prefix"]
         : []),
@@ -294,6 +298,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
+      settings.autoRemoveSettledWorktrees,
       settings.newWorktreeBranchPrefix,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
@@ -392,6 +397,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+      autoRemoveSettledWorktrees: DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees,
       newWorktreeBranchPrefix: DEFAULT_UNIFIED_SETTINGS.newWorktreeBranchPrefix,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
@@ -1666,6 +1672,28 @@ export function GeneralSettingsPanel() {
             }
           />
         ) : null}
+
+        <SettingsRow
+          {...searchableSetting("automatic-worktree-cleanup")}
+          description="Remove unused worktrees when threads settle. Keeps unfinished local work, branches, and conversations."
+          resetAction={
+            !settings.autoRemoveSettledWorktrees ? (
+              <SettingResetButton
+                label="automatic worktree cleanup"
+                onClick={() => updateSettings({ autoRemoveSettledWorktrees: true })}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.autoRemoveSettledWorktrees}
+              onCheckedChange={(autoRemoveSettledWorktrees) =>
+                updateSettings({ autoRemoveSettledWorktrees })
+              }
+              aria-label="Automatically remove worktrees when threads settle"
+            />
+          }
+        />
 
         <SettingsRow
           {...searchableSetting("add-project-starts-in")}

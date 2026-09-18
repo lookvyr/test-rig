@@ -1,3 +1,5 @@
+import * as WorktreeCleanup from "./workspace/WorktreeCleanup.ts";
+import * as WorktreeCleanupState from "./workspace/WorktreeCleanupState.ts";
 import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -208,6 +210,8 @@ const PlatformServicesLive = Layer.unwrap(
 
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
+  Layer.provideMerge(WorktreeCleanup.layer),
+  Layer.provideMerge(WorktreeCleanupState.layer),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),

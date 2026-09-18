@@ -414,6 +414,14 @@ export const OrchestrationProjectShell = Schema.Struct({
 export type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;
 
 export const OrchestrationThreadShell = Schema.Struct({
+  worktreeCleanup: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        state: Schema.Literals(["pending", "retained"]),
+        reason: Schema.String,
+      }),
+    ),
+  ),
   id: ThreadId,
   projectId: ProjectId,
   sideOfThreadId: Schema.optional(Schema.NullOr(ThreadId)),

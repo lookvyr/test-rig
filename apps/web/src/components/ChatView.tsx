@@ -4223,7 +4223,8 @@ function ChatViewContent(props: ChatViewProps) {
       title: `This thread is ${isSnoozed ? "snoozed" : "settled"}`,
       description: isSnoozed
         ? "Sending a message wakes it and moves it back to Active in the sidebar."
-        : "Sending a message moves it back to Active in the sidebar.",
+        : (activeThreadShell?.worktreeCleanup?.reason ??
+          "Sending a message moves it back to Active in the sidebar."),
       actions: (
         <Button
           size="xs"
@@ -4247,6 +4248,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread?.id,
     activeThreadSettled,
     activeThreadSnoozed,
+    activeThreadShell?.worktreeCleanup?.reason,
     handleUnsnoozeActiveThread,
     handleUnsettleActiveThread,
     isUnsnoozing,
@@ -4259,6 +4261,12 @@ function ChatViewContent(props: ChatViewProps) {
     }
     void handleSwitchCheckoutToThread();
   }, [gitStatusQuery.data?.hasWorkingTreeChanges, handleSwitchCheckoutToThread]);
+  const worktreeCleanupBanner = useMemo<ComposerBannerStackItem[]>(() => {
+    const status = parkedThreadBannerItem ? null : activeThreadShell?.worktreeCleanup;
+    return status
+      ? [{ id: "worktree-cleanup", variant: "info", icon: <GitBranchIcon />, title: status.reason }]
+      : [];
+  }, [activeThreadShell?.worktreeCleanup, parkedThreadBannerItem]);
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const isUrgentSystemItem = (item: ComposerBannerStackItem) =>
       item.urgent === true || item.variant === "error" || item.variant === "warning";
@@ -4275,6 +4283,7 @@ function ChatViewContent(props: ChatViewProps) {
         ...calmSystemItems,
         ...wokeThreadItems,
         ...parkedThreadItems,
+        ...worktreeCleanupBanner,
       ];
     }
     return [
@@ -4322,6 +4331,7 @@ function ChatViewContent(props: ChatViewProps) {
         },
       },
       ...parkedThreadItems,
+      ...worktreeCleanupBanner,
     ];
   }, [
     activeBranchMismatchKey,
@@ -4333,6 +4343,7 @@ function ChatViewContent(props: ChatViewProps) {
     showBranchMismatchBanner,
     systemComposerBannerItems,
     wokeThreadBannerItem,
+    worktreeCleanupBanner,
   ]);
 
   useEffect(() => {

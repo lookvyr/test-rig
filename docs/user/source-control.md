@@ -88,6 +88,16 @@ affect synthetic branches for cross-repository pull requests.
 
 When **Start from origin** is enabled for a new worktree, Test Rig fetches origin and uses the selected branch there. If origin or that branch is absent, it uses the selected local branch. A fetch failure is reported instead of silently using stale local state.
 
+## Automatic worktree cleanup
+
+**Settings** → **General** → **Automatic worktree cleanup** is on by default. Test Rig removes unused managed worktrees when their threads settle, including after a pull request is merged or closed. Existing settled threads are eligible too.
+
+The branch and conversation stay available. Sending a new prompt recreates the checkout from its branch and launches the project's setup script, when configured.
+
+Cleanup keeps worktrees with uncommitted or untracked work and ignored local-only files, such as `.env`. Ignored `node_modules` directories are treated as disposable dependencies. Running agents, checkpoints, terminal jobs, pins, and other threads sharing the checkout prevent removal. Idle sessions and terminals close during cleanup.
+
+When cleanup is waiting or keeps a checkout, a small worktree icon in the sidebar shows the reason on hover. The same explanation appears above that thread's composer. Cleanup retries automatically. Turn the setting off to keep worktrees until you remove them yourself.
+
 ## Available provider actions
 
 With the matching integration enabled and authenticated, Test Rig can:

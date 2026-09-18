@@ -562,6 +562,7 @@ export const BackgroundActivitySettings = Schema.Struct({
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
 export const ServerSettings = Schema.Struct({
+  autoRemoveSettledWorktrees: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   backgroundActivity: BackgroundActivitySettings,
   // Legacy flat fields retained for old settings files and old clients. New
@@ -714,6 +715,7 @@ const OpenCodeSettingsPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  autoRemoveSettledWorktrees: Schema.optionalKey(Schema.Boolean),
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   backgroundActivity: Schema.optionalKey(

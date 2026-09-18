@@ -1,3 +1,4 @@
+import { WorktreeCleanup } from "../../workspace/WorktreeCleanup.ts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -14,6 +15,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const providerRuntimeIngestion = yield* ProviderRuntimeIngestionService;
   const providerCommandReactor = yield* ProviderCommandReactor;
   const checkpointReactor = yield* CheckpointReactor;
+  const worktreeCleanup = yield* WorktreeCleanup;
   const threadDeletionReactor = yield* ThreadDeletionReactor;
 
   const start: OrchestrationReactorShape["start"] = Effect.fn("start")(function* () {
@@ -21,6 +23,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* providerRuntimeIngestion.start();
     yield* providerCommandReactor.start();
     yield* checkpointReactor.start();
+    yield* worktreeCleanup.start();
   });
 
   return {

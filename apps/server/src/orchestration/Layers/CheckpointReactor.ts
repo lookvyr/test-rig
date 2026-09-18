@@ -1,3 +1,5 @@
+import { withWorktreeLease } from "../../workspace/worktreeLifecycle.ts";
+import * as Path from "effect/Path";
 import {
   CommandId,
   type CheckpointRef,
@@ -76,6 +78,7 @@ function checkpointStatusFromRuntime(status: string | undefined): "ready" | "mis
 }
 
 const make = Effect.gen(function* () {
+  const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const randomUUID = crypto.randomUUIDv4;
   const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
@@ -950,7 +953,19 @@ const make = Effect.gen(function* () {
     input.source === "domain" ? processDomainEvent(input.event) : processRuntimeEvent(input.event);
 
   const processInputSafely = (input: ReactorInput) =>
-    processInput(input).pipe(
+    Effect.gen(function* () {
+      const threadId =
+        input.source === "runtime"
+          ? input.event.threadId
+          : "threadId" in input.event.payload
+            ? input.event.payload.threadId
+            : null;
+      const thread = threadId ? yield* resolveThreadDetail(threadId) : undefined;
+      const action = processInput(input);
+      yield* thread?.worktreePath
+        ? withWorktreeLease(path.resolve(thread.worktreePath), action)
+        : action;
+    }).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);

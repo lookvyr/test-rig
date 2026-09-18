@@ -1,3 +1,4 @@
+import { ProjectSetupScriptRunner } from "../../project/ProjectSetupScriptRunner.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -165,6 +166,7 @@ describe("ProviderCommandReactor", () => {
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
     let nextSessionIndex = 1;
     const runtimeSessions: Array<ProviderSession> = [];
+    const listSessions = vi.fn(() => Effect.sync(() => [...runtimeSessions]));
     const modelSelection = input?.threadModelSelection ?? {
       instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5-codex",
@@ -317,7 +319,7 @@ describe("ProviderCommandReactor", () => {
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],
       respondToUserInput: respondToUserInput as ProviderServiceShape["respondToUserInput"],
       stopSession: stopSession as ProviderServiceShape["stopSession"],
-      listSessions: () => Effect.succeed(runtimeSessions),
+      listSessions,
       getCapabilities: (_provider) =>
         Effect.succeed({
           sessionModelSwitch: input?.sessionModelSwitch ?? "in-session",
@@ -392,7 +394,15 @@ describe("ProviderCommandReactor", () => {
         } satisfies OrchestrationEngineService["Service"];
       }),
     ).pipe(Layer.provide(orchestrationLayer));
+    const createWorktree = vi.fn(
+      (input: Parameters<GitWorkflowService.GitWorkflowService["Service"]["createWorktree"]>[0]) =>
+        Effect.succeed({
+          worktree: { path: input.path ?? "/tmp/restored", refName: input.refName },
+        }),
+    );
+    const runSetup = vi.fn(() => Effect.succeed({ status: "no-script" as const }));
     const layer = ProviderCommandReactorLive.pipe(
+      Layer.provide(Layer.mock(ProjectSetupScriptRunner, { runForThread: runSetup })),
       Layer.provideMerge(reactorOrchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
@@ -400,6 +410,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(
         Layer.mock(GitWorkflowService.GitWorkflowService)({
           renameBranch,
+          createWorktree,
         } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
       ),
       Layer.provideMerge(
@@ -501,6 +512,8 @@ describe("ProviderCommandReactor", () => {
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       snapshotQuery,
       startSession,
+      createWorktree,
+      runSetup,
       sendTurn,
       interruptTurn,
       respondToRequest,
@@ -511,6 +524,7 @@ describe("ProviderCommandReactor", () => {
       generateBranchName,
       generateThreadTitle,
       runtimeSessions,
+      listSessions,
       stateDir,
       drain,
       runEffect,
@@ -1677,6 +1691,79 @@ describe("ProviderCommandReactor", () => {
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Reconnect spinner resume bug");
+  });
+
+  it("refreshes a session that cleanup stopped before checkout preparation", async () => {
+    const harness = await createHarness();
+    const send = (id: string) =>
+      harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(id),
+          threadId: ThreadId.make("thread-1"),
+          message: { messageId: asMessageId(id), role: "user", text: "Continue", attachments: [] },
+          interactionMode: "default",
+          runtimeMode: "approval-required",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+      );
+    await send("first-start");
+    await harness.drain();
+    harness.listSessions.mockImplementationOnce(() =>
+      Effect.sync(() => {
+        const previous = [...harness.runtimeSessions];
+        harness.runtimeSessions.length = 0;
+        return previous;
+      }),
+    );
+    await send("after-cleanup");
+    await harness.drain();
+    expect(harness.startSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores a removed worktree on its existing branch and launches setup before provider startup", async () => {
+    const harness = await createHarness();
+    const checkout = NodePath.join(NodeOS.tmpdir(), "missing-cleanup-checkout", "task");
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("restore-meta"),
+        threadId: ThreadId.make("thread-1"),
+        branch: "feature/finished",
+        worktreePath: checkout,
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("restore-turn"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("restore-message"),
+          role: "user",
+          text: "Continue",
+          attachments: [],
+        },
+        interactionMode: "default",
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await harness.drain();
+    expect(harness.createWorktree).toHaveBeenCalledWith({
+      cwd: "/tmp/provider-project",
+      path: checkout,
+      refName: "feature/finished",
+    });
+    expect(harness.runSetup).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      projectId: "project-1",
+      worktreePath: checkout,
+    });
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({ cwd: checkout });
+    expect(harness.runSetup.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.startSession.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("generates a worktree branch name for the first turn", async () => {

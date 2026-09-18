@@ -1,3 +1,4 @@
+import * as WorktreeCleanupState from "../../workspace/WorktreeCleanupState.ts";
 import {
   ChatAttachment,
   CheckpointRef,
@@ -346,6 +347,7 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const threadPlanProgress = yield* ThreadPlanProgressService;
+  const worktreeCleanupState = yield* WorktreeCleanupState.WorktreeCleanupState;
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
   const repositoryIdentityResolutionConcurrency = 4;
@@ -1920,6 +1922,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                         row.threadId,
                       ),
                       planProgress: threadPlanProgress.getThreadPlanProgress(row.threadId),
+                      worktreeCleanup: worktreeCleanupState.get(row.threadId),
                     } satisfies OrchestrationThreadShell)
                   : Result.failVoid,
               ),
@@ -2065,6 +2068,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     row.threadId,
                   ),
                   planProgress: threadPlanProgress.getThreadPlanProgress(row.threadId),
+                  worktreeCleanup: worktreeCleanupState.get(row.threadId),
                 }),
               ),
               updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
@@ -2342,6 +2346,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           threadRow.value.threadId,
         ),
         planProgress: threadPlanProgress.getThreadPlanProgress(threadRow.value.threadId),
+        worktreeCleanup: worktreeCleanupState.get(threadRow.value.threadId),
       } satisfies OrchestrationThreadShell);
     });
 
@@ -2674,4 +2679,4 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 export const OrchestrationProjectionSnapshotQueryLive = Layer.effect(
   ProjectionSnapshotQuery,
   makeProjectionSnapshotQuery,
-);
+).pipe(Layer.provide(WorktreeCleanupState.layer));
