@@ -29,6 +29,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
+  searchThreadMessages: "orchestration.searchThreadMessages",
+  getThreadSearchContext: "orchestration.getThreadSearchContext",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -1542,6 +1544,33 @@ export type OrchestrationGetFullThreadDiffInput = typeof OrchestrationGetFullThr
 export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff;
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type;
 
+/** Matching message text for Find; never includes attachments or tool output. */
+export const OrchestrationThreadSearchMessage = Schema.Struct({
+  id: MessageId,
+  role: Schema.Literals(["user", "assistant"]),
+  text: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type OrchestrationThreadSearchMessage = typeof OrchestrationThreadSearchMessage.Type;
+export const OrchestrationThreadSearchCursor = Schema.Struct({
+  createdAt: IsoDateTime,
+  id: MessageId,
+});
+export const OrchestrationSearchThreadMessagesInput = Schema.Struct({
+  threadId: ThreadId,
+  query: TrimmedString.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  cursor: Schema.optionalKey(OrchestrationThreadSearchCursor),
+});
+export type OrchestrationSearchThreadMessagesInput =
+  typeof OrchestrationSearchThreadMessagesInput.Type;
+export const OrchestrationSearchThreadMessagesResult = Schema.Struct({
+  messages: Schema.Array(OrchestrationThreadSearchMessage),
+  truncated: Schema.Boolean,
+  nextCursor: Schema.NullOr(OrchestrationThreadSearchCursor),
+});
+export type OrchestrationSearchThreadMessagesResult =
+  typeof OrchestrationSearchThreadMessagesResult.Type;
+
 export const OrchestrationThreadSearchSource = Schema.Literals(["user", "assistant"]);
 export type OrchestrationThreadSearchSource = typeof OrchestrationThreadSearchSource.Type;
 
@@ -1631,6 +1660,14 @@ export const OrchestrationRpcSchemas = {
   getFullThreadDiff: {
     input: OrchestrationGetFullThreadDiffInput,
     output: OrchestrationGetFullThreadDiffResult,
+  },
+  getThreadSearchContext: {
+    input: Schema.Struct({ threadId: ThreadId, messageId: MessageId }),
+    output: Schema.Struct({ thread: Schema.NullOr(OrchestrationThread) }),
+  },
+  searchThreadMessages: {
+    input: OrchestrationSearchThreadMessagesInput,
+    output: OrchestrationSearchThreadMessagesResult,
   },
   searchThreads: {
     input: OrchestrationSearchThreadsInput,

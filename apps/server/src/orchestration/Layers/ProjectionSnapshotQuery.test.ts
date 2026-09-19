@@ -1786,6 +1786,67 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         )
       `;
 
+      const within = yield* snapshotQuery.searchThreadMessages({
+        threadId: ThreadId.make("thread-active"),
+        query: "needle",
+      });
+      assert.deepStrictEqual(
+        within.messages.map((message) => message.id),
+        [
+          MessageId.make("message-user"),
+          MessageId.make("message-final"),
+          MessageId.make("message-interim"),
+        ],
+      );
+      assert.equal(within.truncated, false);
+      assert.deepStrictEqual(
+        (yield* snapshotQuery.searchThreadMessages({
+          threadId: ThreadId.make("thread-active"),
+          query: "system",
+        })).messages,
+        [],
+      );
+      assert.equal(
+        (yield* snapshotQuery.searchThreadMessages({
+          threadId: ThreadId.make("thread-active"),
+          query: "100%",
+        })).messages.length,
+        1,
+      );
+      assert.deepStrictEqual(
+        (yield* snapshotQuery.searchThreadMessages({
+          threadId: ThreadId.make("thread-percent-decoy"),
+          query: "100%",
+        })).messages,
+        [],
+      );
+      assert.equal(
+        (yield* snapshotQuery.searchThreadMessages({
+          threadId: ThreadId.make("thread-hidden"),
+          query: "Hidden",
+        })).messages.length,
+        1,
+      );
+
+      // Rendered text can join formatting or decode entities; these remain candidates.
+      yield* sql`UPDATE projection_thread_messages
+        SET text = 'some**thing** &amp; &#65;'
+        WHERE message_id = 'message-hidden'`;
+      assert.equal(
+        (yield* snapshotQuery.searchThreadMessages({
+          threadId: ThreadId.make("thread-hidden"),
+          query: "something",
+        })).messages.length,
+        1,
+      );
+      assert.equal(
+        (yield* snapshotQuery.searchThreadMessages({
+          threadId: ThreadId.make("thread-hidden"),
+          query: "A",
+        })).messages.length,
+        1,
+      );
+
       const literalPercent = yield* snapshotQuery.searchThreads({ query: "100%" });
       assert.deepStrictEqual(
         literalPercent.matches.map((match) => [match.threadId, match.source]),
@@ -1824,6 +1885,13 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       `;
       assert.deepStrictEqual(
         (yield* snapshotQuery.searchThreads({ query: "user needle" })).matches,
+        [],
+      );
+      assert.deepStrictEqual(
+        (yield* snapshotQuery.searchThreadMessages({
+          threadId: ThreadId.make("thread-active"),
+          query: "needle",
+        })).messages,
         [],
       );
     }),
@@ -2056,6 +2124,130 @@ projectionSnapshotLayer("ProjectionSnapshotQuery windowed thread detail", (it) =
         assert.equal(snapshot.value.thread.activities.length, 6);
         assert.equal(snapshot.value.snapshotSequence, 42);
       }
+    }),
+  );
+
+  it.effect("loads search context around an old message without hydrating newer turns", () =>
+    Effect.gen(function* () {
+      yield* seedFanOutThread();
+      const query = yield* ProjectionSnapshotQuery;
+      for (const messageId of ["user-msg-1", "turn-1-reply"]) {
+        const result = yield* query.getThreadSearchContext({
+          threadId: threadW,
+          messageId: MessageId.make(messageId),
+        });
+        assert.notEqual(result.thread, null);
+        if (!result.thread) continue;
+        assert.deepEqual(messageIds({ thread: result.thread }), ["turn-1-reply", "user-msg-1"]);
+        assert.deepEqual(activityIds({ thread: result.thread }), ["turn-1-activity"]);
+      }
+      assert.deepEqual(
+        yield* query.getThreadSearchContext({
+          threadId: threadW,
+          messageId: MessageId.make("missing"),
+        }),
+        { thread: null },
+      );
+      assert.deepEqual(
+        yield* query.getThreadSearchContext({
+          threadId: ThreadId.make("other-thread"),
+          messageId: MessageId.make("user-msg-1"),
+        }),
+        { thread: null },
+      );
+    }),
+  );
+
+  it.effect("includes turnless search matches and preceding conversation context", () =>
+    Effect.gen(function* () {
+      yield* seedFanOutThread();
+      const query = yield* ProjectionSnapshotQuery;
+      const result = yield* query.getThreadSearchContext({
+        threadId: threadW,
+        messageId: MessageId.make("user-msg-straggler"),
+      });
+      assert.notEqual(result.thread, null);
+      if (!result.thread) return;
+      assert.ok(result.thread.messages.some((message) => message.id === "user-msg-straggler"));
+      assert.ok(result.thread.messages.some((message) => message.id === "user-msg-1"));
+      assert.ok(!result.thread.messages.some((message) => message.id === "user-msg-5"));
+    }),
+  );
+
+  it.effect("keeps search context bounded in a thousand-turn conversation", () =>
+    Effect.gen(function* () {
+      yield* seedFanOutThread();
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 1000)
+        INSERT INTO projection_turns (thread_id, turn_id, pending_message_id, state, requested_at, checkpoint_files_json)
+        SELECT 'thread-w', printf('long-turn-%04d', value), printf('long-user-%04d', value), 'completed',
+          strftime('%Y-%m-%dT%H:%M:%fZ', '2026-03-02', '+' || value || ' minutes'), '[]' FROM numbers`;
+      yield* sql`INSERT INTO projection_thread_messages (message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at)
+        SELECT pending_message_id, thread_id, NULL, 'user', 'long history prompt', 0, requested_at, requested_at
+        FROM projection_turns WHERE turn_id LIKE 'long-turn-%'`;
+      yield* sql`INSERT INTO projection_thread_messages (message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at)
+        SELECT turn_id || '-reply', thread_id, turn_id, 'assistant', 'long history answer', 0, requested_at, requested_at
+        FROM projection_turns WHERE turn_id LIKE 'long-turn-%'`;
+      const query = yield* ProjectionSnapshotQuery;
+      const old = yield* query.getThreadSearchContext({
+        threadId: threadW,
+        messageId: MessageId.make("turn-1-reply"),
+      });
+      assert.equal(old.thread?.messages.length, 2);
+      const recent = yield* query.getThreadSearchContext({
+        threadId: threadW,
+        messageId: MessageId.make("long-turn-1000-reply"),
+      });
+      assert.equal(recent.thread?.messages.length, 6);
+      assert.ok(recent.thread?.messages.some((message) => message.id === "long-user-0998"));
+      assert.ok(!recent.thread?.messages.some((message) => message.id === "long-user-0997"));
+    }),
+  );
+
+  it.effect("bounds context when the thread has no turn records", () =>
+    Effect.gen(function* () {
+      yield* seedFanOutThread();
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`DELETE FROM projection_turns`;
+      const query = yield* ProjectionSnapshotQuery;
+      const result = yield* query.getThreadSearchContext({
+        threadId: threadW,
+        messageId: MessageId.make("user-msg-1"),
+      });
+      assert.deepEqual(
+        result.thread?.messages.map((message) => message.id),
+        ["user-msg-1"],
+      );
+    }),
+  );
+
+  it.effect("paginates candidate search messages without skipping tied timestamps", () =>
+    Effect.gen(function* () {
+      yield* seedFanOutThread();
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 503)
+        INSERT INTO projection_thread_messages (message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at)
+        SELECT printf('candidate-%04d', value), 'thread-w', NULL, 'user', 'paginated needle', 0,
+          '2026-03-01T00:00:00.000Z', '2026-03-01T00:00:00.000Z' FROM numbers`;
+      const query = yield* ProjectionSnapshotQuery;
+      const first = yield* query.searchThreadMessages({
+        threadId: threadW,
+        query: "paginated needle",
+      });
+      assert.equal(first.messages.length, 500);
+      assert.ok(first.nextCursor);
+      if (!first.nextCursor) return;
+      const second = yield* query.searchThreadMessages({
+        threadId: threadW,
+        query: "paginated needle",
+        cursor: first.nextCursor,
+      });
+      assert.equal(second.messages.length, 3);
+      assert.equal(second.nextCursor, null);
+      assert.equal(
+        new Set([...first.messages, ...second.messages].map((message) => message.id)).size,
+        503,
+      );
     }),
   );
 

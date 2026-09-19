@@ -52,6 +52,19 @@ agent responses across connected environments. Message matches show one labeled 
 keeping the thread's project, branch, and machine context visible. Message search begins after two
 characters and uses SQLite's ASCII case-insensitive matching.
 
+Press **Cmd+F** on macOS or **Ctrl+F** elsewhere to find a word or phrase in the open
+thread. This shortcut is configurable as `thread.find`. The compact find bar only
+appears when invoked. **Enter** and **Shift+Enter** move forward and backward through
+matches; the arrows wrap at either end. **Escape** closes the bar and leaves the
+conversation at the selected passage.
+
+Find searches user and assistant messages, including commentary and code. It does
+not search separate tool logs, terminal output, attachment contents, or hidden
+prompt context. Matching ignores ASCII letter case and repeated whitespace.
+Older matches open a small section of surrounding history without loading every
+intervening turn; **Scroll to end** returns to the latest conversation. Terminal
+and integrated-browser focus retain their own keyboard handling.
+
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.
 

@@ -1,6 +1,8 @@
+import { ThreadFind } from "./ThreadFind";
 import {
   type EnvironmentId,
   type MessageId,
+  type OrchestrationThread,
   type ScopedThreadRef,
   type ServerProviderSkill,
   type TurnId,
@@ -132,6 +134,7 @@ import {
 // ---------------------------------------------------------------------------
 
 interface TimelineRowSharedState {
+  searchMessageId: MessageId | null;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;
   threadRef: ScopedThreadRef | null;
@@ -205,6 +208,10 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
 // ---------------------------------------------------------------------------
 
 interface MessagesTimelineProps {
+  showingSearchHistory?: boolean;
+  onSearchHistory?: (thread: OrchestrationThread | null) => void;
+  findRequest?: number;
+  onFindClose?: () => void;
   agentPanelModel?: AgentPanelModel;
   onOpenAgents?: () => void;
   isWorking: boolean;
@@ -251,6 +258,10 @@ interface MessagesTimelineProps {
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
+  showingSearchHistory = false,
+  onSearchHistory,
+  findRequest = 0,
+  onFindClose,
   isWorking,
   workingStepLabel = null,
   activeTurnInProgress,
@@ -284,6 +295,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   loadEarlier = null,
 }: MessagesTimelineProps) {
+  const [searchMessageId, setSearchMessageId] = useState<MessageId | null>(null);
+  const threadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
+  const handleFindClose = useCallback(() => onFindClose?.(), [onFindClose]);
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
@@ -422,6 +436,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  useEffect(() => {
+    if (
+      searchMessageId === null ||
+      rows.some((row) => row.kind === "message" && row.message.id === searchMessageId)
+    )
+      return;
+    const entry = timelineEntries.find(
+      (entry) => entry.kind === "message" && entry.message.id === searchMessageId,
+    );
+    if (entry?.kind !== "message" || !entry.message.turnId) return;
+    const turnId = entry.message.turnId;
+    setExpandedTurnIds((previous) =>
+      previous.has(turnId) ? previous : new Set([...previous, turnId]),
+    );
+  }, [searchMessageId, timelineEntries, rows]);
+
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
@@ -519,6 +549,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
+      searchMessageId,
       timestampFormat,
       routeThreadKey,
       threadRef: parseScopedThreadKey(routeThreadKey),
@@ -536,6 +567,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenAgents,
     }),
     [
+      searchMessageId,
       timestampFormat,
       routeThreadKey,
       markdownCwd,
@@ -574,7 +606,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [],
   );
 
-  if (rows.length === 0 && !isWorking) {
+  if (rows.length === 0 && !isWorking && findRequest === 0) {
     if (hideEmptyPlaceholder) {
       return null;
     }
@@ -589,6 +621,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
         <div ref={setTimelineViewportElement} className="relative h-full min-h-0">
+          {threadRef && onSearchHistory && (
+            <ThreadFind
+              markdownCwd={markdownCwd}
+              onSearchHistory={onSearchHistory}
+              request={findRequest}
+              threadRef={threadRef}
+              viewport={timelineViewportElement}
+              listRef={listRef}
+              rows={rows}
+              onSelectMessage={setSearchMessageId}
+              onManualNavigation={onManualNavigation}
+              onClose={handleFindClose}
+            />
+          )}
+
           <LegendList<MessagesTimelineRow>
             ref={listRef}
             data={rows}
@@ -611,7 +658,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               topFadeEnabled && "chat-timeline-scroll-fade",
             )}
             ListHeaderComponent={
-              loadEarlier !== null ? (
+              showingSearchHistory ? (
+                <div className="pt-14 pb-3 text-center text-xs text-muted-foreground">
+                  Earlier in this thread
+                </div>
+              ) : loadEarlier !== null ? (
                 <TimelineLoadEarlierHeader
                   loading={loadEarlier.loading}
                   onLoadEarlier={loadEarlier.onLoadEarlier}
@@ -1126,6 +1177,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           </div>
         ) : null}
         <CollapsibleUserMessageBody
+          searchExpanded={ctx.searchMessageId === row.message.id}
           text={elementContextState.promptText}
           terminalContexts={terminalContexts}
           skills={ctx.skills}
@@ -1694,6 +1746,7 @@ function shouldCollapseUserMessage(text: string): boolean {
 }
 
 const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
+  searchExpanded?: boolean;
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
@@ -1701,6 +1754,9 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   footer?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (props.searchExpanded) setExpanded(true);
+  }, [props.searchExpanded]);
   const hasVisibleBody = props.text.trim().length > 0 || props.terminalContexts.length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
   const isCollapsed = canCollapse && !expanded;

@@ -1125,6 +1125,34 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [ORCHESTRATION_WS_METHODS.getThreadSearchContext]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadSearchContext,
+            projectionSnapshotQuery.getThreadSearchContext(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to load thread search context",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.searchThreadMessages]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.searchThreadMessages,
+            projectionSnapshotQuery.searchThreadMessages(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to load thread search history",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.searchThreads]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.searchThreads,

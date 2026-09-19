@@ -2195,3 +2195,13 @@ label:has(> select#reasoning-effort) select {
   outline: 2px solid var(--color-primary);
   border-radius: 0.25rem;
 }
+
+::highlight(thread-find) {
+  background-color: light-dark(#fff0b4, #66531d);
+  color: inherit;
+}
+::highlight(thread-find-current) {
+  background-color: light-dark(#ffcd70, #bd7626);
+  color: light-dark(#29231b, #ffffff);
+  text-decoration: underline;
+}

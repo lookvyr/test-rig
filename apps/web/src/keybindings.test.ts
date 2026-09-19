@@ -947,6 +947,22 @@ describe("thread and panel default shortcuts", () => {
       );
     });
 
+    it(`finds in the thread without stealing terminal or preview search on ${platform}`, () => {
+      const shortcut = event({
+        key: "f",
+        ...(platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true }),
+      });
+      assert.strictEqual(
+        resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, { platform }),
+        "thread.find",
+      );
+      for (const context of [{ terminalFocus: true }, { previewFocus: true }]) {
+        assert.isNull(
+          resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
+        );
+      }
+    });
+
     it(`respects terminal focus on ${platform}`, () => {
       const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
       for (const [key, command] of [

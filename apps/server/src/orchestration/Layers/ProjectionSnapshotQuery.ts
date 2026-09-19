@@ -9,6 +9,7 @@ import {
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
   OrchestrationThreadSearchSource,
+  OrchestrationThreadSearchMessage,
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
@@ -768,6 +769,62 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  // Formatted messages may contain visible matches split by markup or encoded entities.
+  // Return conservative candidates; the client checks their rendered text and caches it.
+  const listThreadSearchMessages = SqlSchema.findAll({
+    Request: Schema.Struct({
+      threadId: ThreadId,
+      pattern: Schema.String,
+      afterCreatedAt: Schema.String,
+      afterId: Schema.String,
+    }),
+    Result: OrchestrationThreadSearchMessage,
+    execute: ({ threadId, pattern, afterCreatedAt, afterId }) => sql`
+      SELECT messages.message_id AS id, messages.role, messages.text,
+        messages.created_at AS "createdAt"
+      FROM projection_thread_messages AS messages
+      INNER JOIN projection_threads AS threads ON threads.thread_id = messages.thread_id
+      INNER JOIN projection_projects AS projects ON projects.project_id = threads.project_id
+      WHERE messages.thread_id = ${threadId}
+        AND threads.deleted_at IS NULL AND projects.deleted_at IS NULL
+        AND messages.role IN ('user', 'assistant')
+        AND (messages.created_at > ${afterCreatedAt}
+          OR (messages.created_at = ${afterCreatedAt} AND messages.message_id > ${afterId}))
+        AND (messages.text LIKE ${pattern} ESCAPE '!'
+          OR instr(messages.text, '*') > 0 OR instr(messages.text, '_') > 0
+          OR instr(messages.text, ${"`"}) > 0 OR instr(messages.text, '~') > 0
+          OR instr(messages.text, '[') > 0 OR instr(messages.text, '<') > 0
+          OR instr(messages.text, '&') > 0 OR instr(messages.text, ${"\\"}) > 0)
+      ORDER BY messages.created_at ASC, messages.message_id ASC
+      LIMIT 501
+    `,
+  });
+
+  const searchThreadMessages: ProjectionSnapshotQueryShape["searchThreadMessages"] = (input) =>
+    listThreadSearchMessages({
+      threadId: input.threadId,
+      pattern: `%${input.query.split(/\s+/).map(escapeLikePattern).join("%")}%`,
+      afterCreatedAt: input.cursor?.createdAt ?? "",
+      afterId: input.cursor?.id ?? "",
+    }).pipe(
+      Effect.map((messages) => {
+        const page = messages.slice(0, 500);
+        const last = page.at(-1);
+        return {
+          messages: page,
+          truncated: messages.length > 500,
+          nextCursor:
+            messages.length > 500 && last ? { createdAt: last.createdAt, id: last.id } : null,
+        };
+      }),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.searchThreadMessages:query",
+          "ProjectionSnapshotQuery.searchThreadMessages:decodeRows",
+        ),
+      ),
+    );
+
   const searchActiveThreadRows = SqlSchema.findAll({
     Request: ProjectionThreadSearchRequest,
     Result: ProjectionThreadSearchRow,
@@ -977,9 +1034,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   });
 
   const listThreadProposedPlanRowsByThread = SqlSchema.findAll({
-    Request: ThreadIdLookupInput,
+    Request: Schema.Struct({
+      threadId: ThreadId,
+      bounds: Schema.optionalKey(ThreadTurnRangeLookupInput),
+    }),
     Result: ProjectionThreadProposedPlanDbRowSchema,
-    execute: ({ threadId }) =>
+    execute: ({ threadId, bounds }) =>
       sql`
         SELECT
           plan_id AS "planId",
@@ -992,6 +1052,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           updated_at AS "updatedAt"
         FROM projection_thread_proposed_plans
         WHERE thread_id = ${threadId}
+          AND (${bounds === undefined ? 1 : 0} OR turn_id IN (
+            SELECT turn_id FROM projection_turns WHERE thread_id = ${threadId}
+              AND requested_at >= ${bounds?.minAnchorAt ?? ""}
+              AND requested_at < ${bounds?.beforeAnchorAt ?? "~"}
+          ) OR (turn_id IS NULL AND created_at >= ${bounds?.minAnchorAt ?? ""}
+            AND created_at < ${bounds?.beforeAnchorAt ?? "~"}))
         ORDER BY created_at ASC, plan_id ASC
       `,
   });
@@ -1067,9 +1133,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
   });
 
   const listCheckpointRowsByThread = SqlSchema.findAll({
-    Request: ThreadIdLookupInput,
+    Request: Schema.Struct({
+      threadId: ThreadId,
+      bounds: Schema.optionalKey(ThreadTurnRangeLookupInput),
+    }),
     Result: ProjectionCheckpointDbRowSchema,
-    execute: ({ threadId }) =>
+    execute: ({ threadId, bounds }) =>
       sql`
         SELECT
           thread_id AS "threadId",
@@ -1083,6 +1152,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_turns
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count IS NOT NULL
+          AND requested_at >= ${bounds?.minAnchorAt ?? ""}
+          AND requested_at < ${bounds?.beforeAnchorAt ?? "~"}
         ORDER BY checkpoint_turn_count ASC
       `,
   });
@@ -2360,7 +2431,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     readonly beforeTurnKey: string;
   }
 
-  const getThreadDetailByIdBounded = (threadId: ThreadId, bounds: ThreadDetailBounds | undefined) =>
+  const getThreadDetailByIdBounded = (
+    threadId: ThreadId,
+    bounds: ThreadDetailBounds | undefined,
+    boundMetadata = false,
+  ) =>
     Effect.gen(function* () {
       const [
         threadRow,
@@ -2390,7 +2465,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
         ),
-        listThreadProposedPlanRowsByThread({ threadId }).pipe(
+        listThreadProposedPlanRowsByThread({
+          threadId,
+          ...(boundMetadata && bounds ? { bounds: { threadId, ...bounds } } : {}),
+        }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
               "ProjectionSnapshotQuery.getThreadDetailById:listPlans:query",
@@ -2409,7 +2487,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
         ),
-        listCheckpointRowsByThread({ threadId }).pipe(
+        listCheckpointRowsByThread({
+          threadId,
+          ...(boundMetadata && bounds ? { bounds: { threadId, ...bounds } } : {}),
+        }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
               "ProjectionSnapshotQuery.getThreadDetailById:listCheckpoints:query",
@@ -2514,6 +2595,81 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const getThreadDetailById: ProjectionSnapshotQueryShape["getThreadDetailById"] = (threadId) =>
     getThreadDetailByIdBounded(threadId, undefined);
+
+  // Resolve a message to its own turn, including user messages whose turn_id
+  // stays NULL, then fall back to its position in the conversation.
+  const getSearchMessageAnchor = SqlSchema.findOneOption({
+    Request: Schema.Struct({ threadId: ThreadId, messageId: MessageId }),
+    Result: Schema.Struct({
+      anchorAt: Schema.String,
+      messageCreatedAt: Schema.String,
+      beforeAnchorAt: Schema.String,
+    }),
+    execute: ({ threadId, messageId }) => sql`
+      WITH target AS (
+        SELECT messages.created_at,
+          COALESCE(
+            (SELECT turns.requested_at FROM projection_turns AS turns
+              WHERE turns.thread_id = messages.thread_id
+                AND (turns.turn_id = messages.turn_id OR turns.pending_message_id = messages.message_id)
+              ORDER BY turns.requested_at DESC LIMIT 1),
+            (SELECT turns.requested_at FROM projection_turns AS turns
+              WHERE turns.thread_id = messages.thread_id AND turns.requested_at <= messages.created_at
+              ORDER BY turns.requested_at DESC LIMIT 1),
+            messages.created_at
+          ) AS anchor_at
+        FROM projection_thread_messages AS messages
+        INNER JOIN projection_threads AS threads ON threads.thread_id = messages.thread_id
+        INNER JOIN projection_projects AS projects ON projects.project_id = threads.project_id
+        WHERE messages.thread_id = ${threadId} AND messages.message_id = ${messageId}
+          AND threads.deleted_at IS NULL AND projects.deleted_at IS NULL
+      )
+      SELECT anchor_at AS "anchorAt", created_at AS "messageCreatedAt",
+        COALESCE((SELECT MIN(turns.requested_at) FROM projection_turns AS turns
+          WHERE turns.thread_id = ${threadId} AND turns.requested_at > target.anchor_at),
+          CASE WHEN NOT EXISTS (SELECT 1 FROM projection_turns WHERE thread_id = ${threadId})
+            THEN (SELECT MIN(created_at) FROM projection_thread_messages
+              WHERE thread_id = ${threadId} AND created_at > target.created_at) END,
+          '~') AS "beforeAnchorAt"
+      FROM target
+    `,
+  });
+
+  const getThreadSearchContext: ProjectionSnapshotQueryShape["getThreadSearchContext"] = (input) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const target = yield* getSearchMessageAnchor(input);
+          if (Option.isNone(target)) return { thread: null };
+          const { anchorAt, messageCreatedAt, beforeAnchorAt } = target.value;
+          const turns = yield* listTurnWindowRows({
+            threadId: input.threadId,
+            beforeAnchorAt,
+            beforeTurnKey: "",
+            userTurnLimit: 3,
+            maxRawTurns: 150,
+          });
+          const oldest = turns[0];
+          const thread = yield* getThreadDetailByIdBounded(
+            input.threadId,
+            {
+              minAnchorAt: [oldest?.anchorAt ?? anchorAt, messageCreatedAt].sort()[0]!,
+              minTurnKey: oldest?.turnKey ?? "",
+              beforeAnchorAt,
+              beforeTurnKey: "",
+            },
+            true,
+          );
+          return { thread: Option.getOrNull(thread) };
+        }),
+      )
+      .pipe(
+        Effect.mapError((error) =>
+          isPersistenceError(error)
+            ? error
+            : toPersistenceSqlError("ProjectionSnapshotQuery.getThreadSearchContext:query")(error),
+        ),
+      );
 
   // Bounds pathological fan-out: one user turn that spawned hundreds of
   // subagent turns still pages in bounded chunks, at the cost of splitting the
@@ -2663,6 +2819,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getShellSnapshot,
     getArchivedShellSnapshot,
     searchThreads,
+    searchThreadMessages,
+    getThreadSearchContext,
     getSnapshotSequence,
     getCounts,
     getActiveProjectByWorkspaceRoot,

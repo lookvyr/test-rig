@@ -8,12 +8,15 @@
  */
 import type {
   CheckpointRef,
+  MessageId,
+  OrchestrationSearchThreadMessagesInput,
   OrchestrationCheckpointSummary,
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
   OrchestrationSearchThreadsInput,
   OrchestrationSearchThreadsResult,
+  OrchestrationSearchThreadMessagesResult,
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
@@ -101,6 +104,15 @@ export interface ProjectionSnapshotQueryShape {
    * Search active thread navigation metadata, user messages, and canonical
    * assistant outputs without hydrating thread detail snapshots.
    */
+  readonly getThreadSearchContext: (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+  }) => Effect.Effect<{ readonly thread: OrchestrationThread | null }, ProjectionRepositoryError>;
+
+  readonly searchThreadMessages: (
+    input: OrchestrationSearchThreadMessagesInput,
+  ) => Effect.Effect<OrchestrationSearchThreadMessagesResult, ProjectionRepositoryError>;
+
   readonly searchThreads: (
     input: OrchestrationSearchThreadsInput,
   ) => Effect.Effect<OrchestrationSearchThreadsResult, ProjectionRepositoryError>;

@@ -108,6 +108,9 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            getThreadSearchContext: () => Effect.succeed({ thread: null }),
+            searchThreadMessages: () =>
+              Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),
@@ -202,6 +205,9 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            getThreadSearchContext: () => Effect.succeed({ thread: null }),
+            searchThreadMessages: () =>
+              Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),
@@ -286,6 +292,9 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            getThreadSearchContext: () => Effect.succeed({ thread: null }),
+            searchThreadMessages: () =>
+              Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),
@@ -355,6 +364,9 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            getThreadSearchContext: () => Effect.succeed({ thread: null }),
+            searchThreadMessages: () =>
+              Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),
@@ -409,6 +421,9 @@ describe("CheckpointDiffQuery.layer", () => {
             getThreadShellById: () => Effect.succeed(Option.none()),
             getThreadDetailById: () => Effect.succeed(Option.none()),
             getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            getThreadSearchContext: () => Effect.succeed({ thread: null }),
+            searchThreadMessages: () =>
+              Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
             searchThreads: () => Effect.succeed({ matches: [] }),
           }),
         ),

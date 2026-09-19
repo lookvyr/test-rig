@@ -5,6 +5,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
+  type OrchestrationThread,
   type ProjectScript,
   type ProjectId,
   type ProviderApprovalDecision,
@@ -1255,6 +1256,17 @@ function ChatViewContent(props: ChatViewProps) {
     LastInvokedScriptByProjectSchema,
   );
   const legendListRef = useRef<LegendListRef | null>(null);
+  const [threadSearchHistory, setThreadSearchHistory] = useState<OrchestrationThread | null>(null);
+  const searchHistory =
+    threadSearchHistory?.id === routeThreadRef.threadId ? threadSearchHistory : null;
+  const [threadFindRequest, setThreadFindRequest] = useState({ threadKey: "", request: 0 });
+  useEffect(() => {
+    setThreadSearchHistory(null);
+    setThreadFindRequest({ threadKey: "", request: 0 });
+  }, [routeThreadKey]);
+  const closeThreadFind = useCallback(() => {
+    composerRef.current?.focusAtEnd();
+  }, [composerRef]);
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState(0);
   const isAtEndRef = useRef(true);
@@ -2290,15 +2302,30 @@ function ChatViewContent(props: ChatViewProps) {
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
   }, [attachmentPreviewHandoffByMessageId, displayServerMessages, optimisticUserMessages]);
+  const searchHistoryMessages = useMessagesWithImages(environmentId, searchHistory?.messages);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(
-        timelineMessages,
-        activeThread?.proposedPlans ?? [],
-        workLogEntries,
-        turnPlans,
-      ),
-    [activeThread?.proposedPlans, timelineMessages, turnPlans, workLogEntries],
+      searchHistory
+        ? deriveTimelineEntries(
+            searchHistoryMessages,
+            searchHistory.proposedPlans,
+            deriveWorkLogEntries(searchHistory.activities),
+            deriveTurnPlans(searchHistory.activities),
+          )
+        : deriveTimelineEntries(
+            timelineMessages,
+            activeThread?.proposedPlans ?? [],
+            workLogEntries,
+            turnPlans,
+          ),
+    [
+      activeThread?.proposedPlans,
+      timelineMessages,
+      turnPlans,
+      workLogEntries,
+      searchHistory,
+      searchHistoryMessages,
+    ],
   );
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
@@ -3473,6 +3500,7 @@ function ChatViewContent(props: ChatViewProps) {
   // Live-follow stays active after send/thread-open until an actual list scroll
   // gesture opts out.
   const scrollToEnd = useCallback((animated = false) => {
+    setThreadSearchHistory(null);
     isAtEndRef.current = true;
     timelineScrollModeRef.current = "following-end";
     liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
@@ -4460,6 +4488,26 @@ function ChatViewContent(props: ChatViewProps) {
       });
       if (!command) return;
 
+      if (command === "thread.find") {
+        if (
+          sideChatFocused ||
+          shortcutContext.terminalFocus ||
+          shortcutContext.previewFocus ||
+          shortcutContext.modelPickerOpen
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) {
+          cancelTimelineLiveFollowForUserNavigation();
+          setThreadFindRequest((current) => ({
+            threadKey: routeThreadKey,
+            request: current.request + 1,
+          }));
+        }
+        return;
+      }
+
       if (command === "thread.settle") {
         event.preventDefault();
         event.stopPropagation();
@@ -4636,6 +4684,8 @@ function ChatViewContent(props: ChatViewProps) {
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [
+    routeThreadKey,
+    cancelTimelineLiveFollowForUserNavigation,
     activeProject,
     activeRightPanelSurface,
     activateRightPanelSurface,
@@ -4937,6 +4987,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     sendInFlightRef.current = true;
+    setThreadSearchHistory(null);
     if (isDraftHeroState && activeThreadKey) {
       let resolveDockStarted: (() => void) | undefined;
       const dockStarted = new Promise<void>((resolve) => {
@@ -5319,6 +5370,7 @@ function ChatViewContent(props: ChatViewProps) {
       });
 
       sendInFlightRef.current = true;
+      setThreadSearchHistory(null);
       beginLocalDispatch({ preparingWorktree: false });
       setThreadError(threadIdForSend, null);
 
@@ -5478,6 +5530,7 @@ function ChatViewContent(props: ChatViewProps) {
     const nextThreadModelSelection: ModelSelection = ctxSelectedModelSelection;
 
     sendInFlightRef.current = true;
+    setThreadSearchHistory(null);
     beginLocalDispatch({ preparingWorktree: false });
     const finish = () => {
       sendInFlightRef.current = false;
@@ -5991,10 +6044,16 @@ function ChatViewContent(props: ChatViewProps) {
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                findRequest={
+                  threadFindRequest.threadKey === routeThreadKey ? threadFindRequest.request : 0
+                }
+                onFindClose={closeThreadFind}
+                onSearchHistory={setThreadSearchHistory}
+                showingSearchHistory={searchHistory !== null}
                 agentPanelModel={agentPanelModel}
                 onOpenAgents={addAgentsSurface}
                 key={activeThread.id}
-                isWorking={isWorking}
+                isWorking={isWorking && searchHistory === null}
                 workingStepLabel={workingStepLabel}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnStartedAt={activeWorkStartedAt}
@@ -6019,19 +6078,19 @@ function ChatViewContent(props: ChatViewProps) {
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeWorkspaceRoot}
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
-                anchorMessageId={timelineAnchorMessageId}
+                anchorMessageId={searchHistory ? null : timelineAnchorMessageId}
                 onAnchorReady={onTimelineAnchorReady}
                 contentInsetEndAdjustment={composerOverlayHeight}
-                liveFollowEnabled={timelineLiveFollowEnabled}
+                liveFollowEnabled={timelineLiveFollowEnabled && searchHistory === null}
                 onIsAtEndChange={onIsAtEndChange}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
-                loadEarlier={loadEarlierTurns}
+                loadEarlier={searchHistory ? null : loadEarlierTurns}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
-              {showScrollToBottom && (
+              {(showScrollToBottom || searchHistory !== null) && (
                 <div
                   className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
                   style={{ bottom: composerOverlayHeight + 4 }}

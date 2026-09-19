@@ -241,7 +241,7 @@ function MarkdownCodeBlock({
       data-language={language}
       data-wrap={wrapped ? "true" : "false"}
     >
-      <div className="chat-markdown-codeblock-header select-none">
+      <div className="chat-markdown-codeblock-header select-none" data-thread-find-ignore>
         <span className="chat-markdown-codeblock-title">
           <MarkdownCodeBlockTitleContent
             fenceTitle={fenceTitle}
