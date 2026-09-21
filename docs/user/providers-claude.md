@@ -10,6 +10,12 @@ Common reasons:
 - run Claude through a router such as Claude Code Router
 - use external providers exposed through a Claude-compatible workflow
 
+## Responses
+
+Claude may send progress updates before its final answer. Test Rig keeps each
+message separate and shows the final answer even when Claude delivers it all at
+once instead of streaming it.
+
 ## I Only Use One Claude Account
 
 Use the default provider.

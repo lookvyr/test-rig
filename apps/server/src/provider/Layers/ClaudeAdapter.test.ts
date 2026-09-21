@@ -3001,6 +3001,198 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect.each([
+    { name: "snapshot-only answers", streamed: [false, false], boundaries: false },
+    {
+      name: "streamed commentary and a snapshot-only final",
+      streamed: [true, false],
+      boundaries: false,
+    },
+    {
+      name: "native message boundaries with a missing final stream",
+      streamed: [true, false],
+      boundaries: true,
+    },
+    { name: "normal streaming and snapshots", streamed: [true, true], boundaries: true },
+    {
+      name: "final stream closes without text deltas",
+      streamed: [true, "empty"],
+      boundaries: true,
+    },
+  ])("preserves consecutive Claude messages: $name", ({ streamed, boundaries }) => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "do the work",
+        attachments: [],
+      });
+      const events: ProviderRuntimeEvent[] = [];
+      const emit = (message: SDKMessage) =>
+        emitAndDrainSdkMessage(adapter, harness.query, message).pipe(
+          Effect.tap((emitted) => Effect.sync(() => events.push(...emitted))),
+        );
+      for (const [index, text] of ["Earlier commentary", "New final answer"].entries()) {
+        const nativeId = `native-message-${index}`;
+        const streamEvents = [
+          ...(boundaries ? [{ type: "message_start", message: { id: nativeId } }] : []),
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+          { type: "content_block_stop", index: 0 },
+        ];
+        if (streamed[index]) {
+          for (const [eventIndex, event] of streamEvents.entries()) {
+            if (streamed[index] === "empty" && event.type === "content_block_delta") continue;
+            yield* emit({
+              type: "stream_event",
+              session_id: "snapshot-session",
+              uuid: `stream-${index}-${eventIndex}`,
+              parent_tool_use_id: null,
+              event,
+            } as unknown as SDKMessage);
+          }
+        }
+        const snapshot = {
+          type: "assistant",
+          session_id: "snapshot-session",
+          uuid: `snapshot-${index}`,
+          parent_tool_use_id: null,
+          message: { id: nativeId, content: [{ type: "text", text }] },
+        } as unknown as SDKMessage;
+        yield* emit(snapshot);
+        // The SDK may deliver a snapshot again; it must not duplicate the answer.
+        yield* emit(snapshot);
+        if (boundaries && streamed[index]) {
+          yield* emit({
+            type: "stream_event",
+            session_id: "snapshot-session",
+            uuid: `stop-${index}`,
+            parent_tool_use_id: null,
+            event: { type: "message_stop" },
+          } as unknown as SDKMessage);
+        }
+      }
+      yield* emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        session_id: "snapshot-session",
+        uuid: "result-snapshots",
+      } as unknown as SDKMessage);
+      const deltas = events
+        .filter((event) => event.type === "content.delta")
+        .filter((event) => event.payload.streamKind === "assistant_text");
+      assert.deepEqual(
+        deltas.map((event) => event.payload.delta),
+        ["Earlier commentary", "New final answer"],
+      );
+      assert.equal(new Set(deltas.map((event) => event.itemId)).size, 2);
+      assert.equal(
+        deltas.every((event) => event.turnId === turn.turnId),
+        true,
+      );
+      assert.equal(
+        events.filter(
+          (event) =>
+            event.type === "item.completed" && event.payload.itemType === "assistant_message",
+        ).length,
+        2,
+      );
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("preserves distinct snapshot fragments sharing a native message id", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "repeat the same text twice",
+        attachments: [],
+      });
+      const events: ProviderRuntimeEvent[] = [];
+      for (const uuid of ["fragment-1", "fragment-2", "fragment-2"]) {
+        const emitted = yield* emitAndDrainSdkMessage(adapter, harness.query, {
+          type: "assistant",
+          session_id: "fragment-session",
+          uuid,
+          parent_tool_use_id: null,
+          message: { id: "same-native-message", content: [{ type: "text", text: "Same text" }] },
+        } as unknown as SDKMessage);
+        events.push(...emitted);
+      }
+      assert.deepEqual(
+        events.flatMap((event) => (event.type === "content.delta" ? [event.payload.delta] : [])),
+        ["Same text", "Same text"],
+      );
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("does not match a late snapshot to another native message's streamed blocks", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "do the work", attachments: [] });
+      const events: ProviderRuntimeEvent[] = [];
+      const emit = (message: SDKMessage) =>
+        emitAndDrainSdkMessage(adapter, harness.query, message).pipe(
+          Effect.tap((emitted) => Effect.sync(() => events.push(...emitted))),
+        );
+      // The first message's text stream is entirely absent. A later message has
+      // started streaming before that first message's snapshot is delivered.
+      for (const [index, event] of [
+        { type: "message_start", message: { id: "later-native-message" } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "Later text" },
+        },
+        { type: "content_block_stop", index: 0 },
+      ].entries()) {
+        yield* emit({
+          type: "stream_event",
+          session_id: "late-session",
+          uuid: `late-stream-${index}`,
+          parent_tool_use_id: null,
+          event,
+        } as unknown as SDKMessage);
+      }
+      for (const [id, text] of [
+        ["earlier-native-message", "Earlier text"],
+        ["later-native-message", "Later text"],
+      ]) {
+        yield* emit({
+          type: "assistant",
+          session_id: "late-session",
+          uuid: `snapshot-${id}`,
+          parent_tool_use_id: null,
+          message: { id, content: [{ type: "text", text }] },
+        } as unknown as SDKMessage);
+      }
+      assert.deepEqual(
+        events.flatMap((event) => (event.type === "content.delta" ? [event.payload.delta] : [])),
+        ["Later text", "Earlier text"],
+      );
+    }).pipe(Effect.provide(harness.layer));
+  });
+
   it.effect("segments Claude assistant text blocks around tool calls", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

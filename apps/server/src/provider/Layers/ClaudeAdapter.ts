@@ -153,6 +153,7 @@ interface ClaudeTurnState {
   readonly items: Array<unknown>;
   readonly assistantTextBlocks: Map<number, AssistantTextBlockState>;
   readonly assistantTextBlockOrder: Array<AssistantTextBlockState>;
+  streamMessageId?: string;
   readonly capturedProposedPlanKeys: Set<string>;
   nextSyntheticAssistantBlockIndex: number;
 }
@@ -160,6 +161,8 @@ interface ClaudeTurnState {
 interface AssistantTextBlockState {
   readonly itemId: string;
   readonly blockIndex: number;
+  nativeMessageId: string | undefined;
+  snapshotId: string | undefined;
   emittedTextDelta: boolean;
   fallbackText: string;
   streamClosed: boolean;
@@ -1812,7 +1815,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     const existing = turnState.assistantTextBlocks.get(blockIndex);
-    if (existing && !existing.completionEmitted) {
+    if (
+      existing &&
+      !existing.completionEmitted &&
+      existing.nativeMessageId === turnState.streamMessageId
+    ) {
       if (existing.fallbackText.length === 0 && options?.fallbackText) {
         existing.fallbackText = options.fallbackText;
       }
@@ -1825,6 +1832,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     const block: AssistantTextBlockState = {
       itemId: yield* randomUUIDv4,
       blockIndex,
+      nativeMessageId: turnState.streamMessageId,
+      snapshotId: undefined,
       emittedTextDelta: false,
       fallbackText: options?.fallbackText ?? "",
       streamClosed: options?.streamClosed ?? false,
@@ -1866,6 +1875,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     if (!options?.force && !block.streamClosed) {
+      return;
+    }
+
+    // A stream can close without delivering text; leave its completion for
+    // the assistant snapshot that supplies the missing content.
+    if (!block.emittedTextDelta && block.fallbackText.length === 0) {
       return;
     }
 
@@ -1933,7 +1948,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     "backfillAssistantTextBlocksFromSnapshot",
   )(function* (context: ClaudeSessionContext, message: SDKMessage) {
     const turnState = context.turnState;
-    if (!turnState) {
+    if (!turnState || message.type !== "assistant") {
       return;
     }
 
@@ -1942,10 +1957,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
-    const orderedBlocks = turnState.assistantTextBlockOrder.map((block) => ({
-      blockIndex: block.blockIndex,
-      block,
-    }));
+    if (turnState.assistantTextBlockOrder.some((block) => block.snapshotId === message.uuid)) {
+      return;
+    }
+
+    // SDK snapshots can be separate fragments of one native message. Claim
+    // each streamed block once, and never backfill a different message's text.
+    // Unkeyed blocks support streams where message_start was not delivered.
+    const orderedBlocks = turnState.assistantTextBlockOrder
+      .filter(
+        (block) =>
+          block.snapshotId === undefined &&
+          (block.nativeMessageId === undefined || block.nativeMessageId === message.message.id),
+      )
+      .map((block) => ({ blockIndex: block.blockIndex, block }));
 
     for (const [position, text] of snapshotTextBlocks.entries()) {
       const existingEntry = orderedBlocks[position];
@@ -1964,6 +1989,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         continue;
       }
 
+      entry.block.nativeMessageId = message.message.id;
+      entry.block.snapshotId = message.uuid;
       if (entry.block.fallbackText.length === 0) {
         entry.block.fallbackText = text;
       }
@@ -2442,6 +2469,17 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       if (dropStart || dropDelta) {
         return;
       }
+    }
+
+    if (event.type === "message_start" || event.type === "message_stop") {
+      if (streamParentToolUseId == null && context.turnState) {
+        if (event.type === "message_start") {
+          context.turnState.streamMessageId = event.message.id;
+        } else {
+          delete context.turnState.streamMessageId;
+        }
+      }
+      return;
     }
 
     if (event.type === "message_delta") {
