@@ -1708,9 +1708,6 @@ export default function DiffPanel({
                   files={reviewFiles}
                   selectedPath={activeFilePath}
                   onSelectFile={selectFile}
-                  onActivateFile={() => {
-                    if (!wideReview) setShowFiles(false);
-                  }}
                 />
               </aside>
             )}

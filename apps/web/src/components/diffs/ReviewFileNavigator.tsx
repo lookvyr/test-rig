@@ -44,13 +44,11 @@ export function ReviewFileNavigator({
   files,
   selectedPath,
   onSelectFile,
-  onActivateFile,
   compact = false,
 }: {
   files: readonly ReviewFile[];
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
-  onActivateFile?: (path: string) => void;
   compact?: boolean;
 }) {
   const [query, setQuery] = useState("");
@@ -217,7 +215,6 @@ export function ReviewFileNavigator({
                   if (!searching) toggleDirectory(node.path);
                 } else {
                   onSelectFile(node.path);
-                  onActivateFile?.(node.path);
                 }
               }}
               onKeyDown={(event) => handleKeyDown(event, index)}
