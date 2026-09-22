@@ -84,6 +84,7 @@ export interface PendingUserInput {
   requestId: ApprovalRequestId;
   createdAt: string;
   questions: ReadonlyArray<UserInputQuestion>;
+  delivery?: "async";
 }
 
 export interface ActivePlanState {
@@ -442,15 +443,14 @@ function parseUserInputQuestions(
           };
         })
         .filter((option): option is UserInputQuestion["options"][number] => option !== null);
-      if (options.length === 0) {
-        return null;
-      }
       return {
         id: question.id,
         header: question.header,
         question: question.question,
         options,
         multiSelect: question.multiSelect === true,
+        ...(typeof question.isSecret === "boolean" ? { isSecret: question.isSecret } : {}),
+        ...(typeof question.isOther === "boolean" ? { isOther: question.isOther } : {}),
       };
     })
     .filter((question): question is UserInputQuestion => question !== null);
@@ -483,6 +483,7 @@ export function derivePendingUserInputs(
         requestId,
         createdAt: activity.createdAt,
         questions,
+        ...(payload?.delivery === "async" ? { delivery: "async" as const } : {}),
       });
       continue;
     }

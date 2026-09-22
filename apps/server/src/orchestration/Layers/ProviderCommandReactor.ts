@@ -6,6 +6,8 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  MessageId,
+  UserInputQuestion,
   type ModelSelection,
   type OrchestrationEvent,
   ProviderDriverKind,
@@ -54,6 +56,14 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
+const hasQuestionRequestId = Schema.is(Schema.Struct({ requestId: Schema.String }));
+const isAsyncQuestionRequest = Schema.is(
+  Schema.Struct({
+    requestId: Schema.String,
+    delivery: Schema.Literal("async"),
+    questions: Schema.Array(UserInputQuestion),
+  }),
+);
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -1347,6 +1357,78 @@ const make = Effect.gen(function* () {
     ) {
       const thread = yield* resolveThread(event.payload.threadId);
       if (!thread) {
+        return;
+      }
+      if (
+        thread.activities.some(
+          (activity) =>
+            activity.kind === "user-input.resolved" &&
+            hasQuestionRequestId(activity.payload) &&
+            activity.payload.requestId === event.payload.requestId,
+        )
+      )
+        return;
+      const questionActivity = thread.activities.findLast(
+        (activity) =>
+          activity.kind === "user-input.requested" &&
+          hasQuestionRequestId(activity.payload) &&
+          activity.payload.requestId === event.payload.requestId,
+      );
+      if (isAsyncQuestionRequest(questionActivity?.payload)) {
+        const request = questionActivity.payload;
+        if (
+          request.questions.some((question) => {
+            const answer = event.payload.answers[question.id];
+            return typeof answer !== "string" || answer.trim().length === 0;
+          })
+        ) {
+          return yield* appendProviderFailureActivity({
+            threadId: thread.id,
+            kind: "provider.user-input.respond.failed",
+            summary: "Question answer not sent",
+            detail: "Answer each question before submitting.",
+            turnId: questionActivity.turnId,
+            createdAt: event.payload.createdAt,
+            requestId: event.payload.requestId,
+          });
+        }
+        const text = request.questions
+          .map((question) => {
+            const answer = event.payload.answers[question.id];
+            return `${question.question}\n${answer}`;
+          })
+          .join("\n\n");
+        // Async answers are ordinary user messages, including when the original
+        // turn has finished or the provider needs to be resumed.
+        yield* orchestrationEngine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`${event.commandId}:answer`),
+          threadId: thread.id,
+          message: {
+            messageId: MessageId.make(`${event.eventId}:answer`),
+            role: "user",
+            text,
+            attachments: [],
+          },
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          createdAt: event.payload.createdAt,
+        });
+        yield* orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make(`${event.commandId}:resolved`),
+          threadId: thread.id,
+          activity: {
+            id: EventId.make(`${event.eventId}:resolved`),
+            kind: "user-input.resolved",
+            tone: "info",
+            summary: "User input submitted",
+            payload: { requestId: request.requestId, answers: event.payload.answers },
+            turnId: questionActivity.turnId,
+            createdAt: event.payload.createdAt,
+          },
+          createdAt: event.payload.createdAt,
+        });
         return;
       }
       const hasSession = thread.session && thread.session.status !== "stopped";

@@ -78,6 +78,18 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   if (pendingAction) {
     return (
       <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="rounded-full"
+          {...pointerFocusProps}
+          onClick={onInterrupt}
+          disabled={isEnvironmentUnavailable || pendingAction.isResponding}
+          aria-label="Stop generation"
+        >
+          Stop
+        </Button>
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button

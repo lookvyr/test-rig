@@ -225,6 +225,7 @@ interface ApprovalCorrelation {
 
 interface PendingUserInput {
   readonly requestId: ApprovalRequestId;
+  readonly jsonRpcId: string | number;
   readonly turnId: TurnId | undefined;
   readonly itemId: ProviderItemId | undefined;
   readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
@@ -312,6 +313,7 @@ function buildThreadStartParams(input: {
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
     approvalsReviewer: config.approvalsReviewer,
+    config: { "features.default_mode_request_user_input": true },
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   } satisfies EffectCodexSchema.V2ThreadStartParams;
@@ -995,12 +997,27 @@ export const makeCodexSessionRuntime = (
       );
 
     const settlePendingUserInputs = (answers: ProviderUserInputAnswers) =>
-      Ref.get(pendingUserInputsRef).pipe(
+      Ref.getAndSet(pendingUserInputsRef, new Map()).pipe(
         Effect.flatMap((pendingUserInputs) =>
           Effect.forEach(
             Array.from(pendingUserInputs.values()),
             (pendingUserInput) =>
-              Deferred.succeed(pendingUserInput.answers, answers).pipe(Effect.ignore),
+              Effect.gen(function* () {
+                yield* Deferred.succeed(pendingUserInput.answers, answers);
+                yield* emitEvent({
+                  kind: "notification",
+                  threadId: options.threadId,
+                  method: "item/tool/requestUserInput/cancelled",
+                  requestId: pendingUserInput.requestId,
+                  ...(pendingUserInput.turnId ? { turnId: pendingUserInput.turnId } : {}),
+                  ...(pendingUserInput.itemId ? { itemId: pendingUserInput.itemId } : {}),
+                  payload: {},
+                }).pipe(
+                  Effect.catch((cause) =>
+                    Effect.logError("Failed to clear a pending Codex question.", { cause }),
+                  ),
+                );
+              }),
             { discard: true },
           ),
         ),
@@ -1365,6 +1382,27 @@ export const makeCodexSessionRuntime = (
         let itemId = route.itemId;
 
         if (notification.method === "serverRequest/resolved") {
+          const pendingQuestion = [...(yield* Ref.get(pendingUserInputsRef)).values()].find(
+            (pending) => pending.jsonRpcId === notification.params.requestId,
+          );
+          if (pendingQuestion) {
+            yield* Ref.update(pendingUserInputsRef, (current) => {
+              const next = new Map(current);
+              next.delete(pendingQuestion.requestId);
+              return next;
+            });
+            yield* Deferred.succeed(pendingQuestion.answers, {});
+            yield* emitEvent({
+              kind: "notification",
+              threadId: options.threadId,
+              method: "item/tool/requestUserInput/cancelled",
+              requestId: pendingQuestion.requestId,
+              ...(pendingQuestion.turnId ? { turnId: pendingQuestion.turnId } : {}),
+              ...(pendingQuestion.itemId ? { itemId: pendingQuestion.itemId } : {}),
+              payload: {},
+            });
+            return;
+          }
           const rawRequestId =
             typeof notification.params.requestId === "string"
               ? notification.params.requestId
@@ -1580,7 +1618,7 @@ export const makeCodexSessionRuntime = (
       }),
     );
 
-    yield* client.handleServerRequest("item/tool/requestUserInput", (payload) =>
+    yield* client.handleServerRequest("item/tool/requestUserInput", (payload, context) =>
       Effect.gen(function* () {
         const requestId = ApprovalRequestId.make(yield* randomUUIDv4("user-input-request"));
         const turnId = TurnId.make(payload.turnId);
@@ -1591,6 +1629,7 @@ export const makeCodexSessionRuntime = (
           const next = new Map(current);
           next.set(requestId, {
             requestId,
+            jsonRpcId: context.requestId,
             turnId,
             itemId,
             answers,
@@ -1608,7 +1647,28 @@ export const makeCodexSessionRuntime = (
           payload,
         });
 
-        const resolvedAnswers = yield* Deferred.await(answers).pipe(
+        const waitForAnswers = Deferred.await(answers);
+        const resolvedAnswers = yield* (
+          payload.autoResolutionMs == null
+            ? waitForAnswers
+            : Effect.raceFirst(
+                waitForAnswers,
+                Effect.sleep(payload.autoResolutionMs).pipe(
+                  Effect.andThen(
+                    emitEvent({
+                      kind: "notification",
+                      threadId: options.threadId,
+                      method: "item/tool/requestUserInput/timeout",
+                      requestId,
+                      turnId,
+                      itemId,
+                      payload: {},
+                    }),
+                  ),
+                  Effect.as({} satisfies ProviderUserInputAnswers),
+                ),
+              )
+        ).pipe(
           Effect.ensuring(
             Ref.update(pendingUserInputsRef, (current) => {
               const next = new Map(current);
@@ -1699,6 +1759,7 @@ export const makeCodexSessionRuntime = (
               status: nextStatus,
               activeTurnId: undefined,
             }).pipe(
+              Effect.andThen(settlePendingUserInputs({})),
               Effect.andThen(
                 emitSessionEvent(
                   "session/exited",

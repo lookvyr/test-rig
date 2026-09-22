@@ -143,9 +143,7 @@ Your active mode changes only when new developer instructions with a different \
 
 ## request_user_input availability
 
-The \`request_user_input\` tool is unavailable in Default mode. If you call it while in Default mode, it will return an error.
-
-In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
+Use the question tools exposed in this session for missing information or decisions that materially affect the work. Prefer \`request_user_input_async\`, when available, if you can continue independent work while waiting. Use \`request_user_input\` when you need an answer before proceeding. Do not assume an unanswered question or a preselected option is approval. If neither tool is available, ask a concise plain-text question.
 ${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
 </collaboration_mode>`;
 

@@ -10,6 +10,7 @@ import type {
   ScopedThreadRef,
   ServerProvider,
   ThreadId,
+  UserInputQuestion,
 } from "@t3tools/contracts";
 import {
   ProviderDriverKind,
@@ -528,7 +529,7 @@ export interface ChatComposerProps {
     isLastQuestion: boolean;
     canAdvance: boolean;
     customAnswer: string;
-    activeQuestion: { id: string; multiSelect?: boolean | undefined } | null;
+    activeQuestion: UserInputQuestion | null;
   } | null;
   activePendingResolvedAnswers: Record<string, unknown> | null;
   activePendingIsResponding: boolean;
@@ -1151,6 +1152,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const isComposerApprovalState = activePendingApproval !== null;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
+  const pendingQuestion = activePendingProgress?.activeQuestion;
+  const customAnswerAllowed =
+    !pendingQuestion ||
+    pendingQuestion.isOther !== false ||
+    pendingQuestion.options.length === 0 ||
+    pendingQuestion.isSecret === true;
   const hasComposerHeader =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
@@ -2831,7 +2838,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onClick={expandMobileComposer}
                     aria-label="Write custom answer"
                   >
-                    {activePendingProgress?.customAnswer || "Write custom answer"}
+                    {pendingQuestion?.isSecret && activePendingProgress?.customAnswer
+                      ? "••••••••"
+                      : activePendingProgress?.customAnswer || "Write custom answer"}
                   </button>
                   {activePendingProgress?.activeQuestion?.multiSelect ? (
                     <ComposerPrimaryActions
@@ -2876,7 +2885,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 aria-label="Expand composer"
               >
                 {activePendingProgress
-                  ? activePendingProgress.customAnswer ||
+                  ? (pendingQuestion?.isSecret && activePendingProgress.customAnswer
+                      ? "••••••••"
+                      : activePendingProgress.customAnswer) ||
                     "Type your own answer, or leave this blank to use the selected option"
                   : prompt.trim() ||
                     (noProviderAvailable ? "Enable a provider in Settings" : "Ask anything...")}
@@ -3079,44 +3090,78 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )}
 
             <div className="relative">
-              <ComposerPromptEditor
-                editorRef={composerEditorRef}
-                value={
-                  isComposerApprovalState
-                    ? ""
-                    : activePendingProgress
-                      ? activePendingProgress.customAnswer
-                      : prompt
-                }
-                cursor={composerCursor}
-                terminalContexts={
-                  !isComposerApprovalState && pendingUserInputs.length === 0
-                    ? composerTerminalContexts
-                    : []
-                }
-                skills={selectedProviderStatus?.skills ?? []}
-                {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
-                onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
-                onChange={onPromptChange}
-                onCommandKeyDown={onComposerCommandKey}
-                onPaste={onComposerPaste}
-                placeholder={
-                  isComposerApprovalState
-                    ? (activePendingApproval?.detail ?? "Resolve this approval request to continue")
-                    : activePendingProgress
-                      ? "Type your own answer, or leave this blank to use the selected option"
-                      : showPlanFollowUpPrompt && activeProposedPlan
-                        ? "Add feedback to refine the plan, or leave this blank to implement it"
-                        : projectSelectionRequired
-                          ? "Choose a project above to start a thread"
-                          : noProviderAvailable
-                            ? "Enable a provider in Settings to send a message"
-                            : phase === "disconnected"
-                              ? "Ask for follow-up changes or attach images"
-                              : "Ask anything, @tag files/folders, $use skills, or / for commands"
-                }
-                disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
-              />
+              {pendingQuestion?.isSecret ? (
+                <input
+                  type="password"
+                  autoComplete="off"
+                  aria-label={pendingQuestion.question}
+                  placeholder="Enter your answer"
+                  value={activePendingProgress?.customAnswer ?? ""}
+                  disabled={activePendingIsResponding}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      submitComposer();
+                    }
+                  }}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    onChangeActivePendingUserInputCustomAnswer(
+                      pendingQuestion.id,
+                      value,
+                      value.length,
+                      value.length,
+                      false,
+                    );
+                  }}
+                  className="w-full bg-transparent px-4 py-3 text-sm outline-none"
+                />
+              ) : (
+                <ComposerPromptEditor
+                  editorRef={composerEditorRef}
+                  value={
+                    isComposerApprovalState
+                      ? ""
+                      : activePendingProgress
+                        ? activePendingProgress.customAnswer
+                        : prompt
+                  }
+                  cursor={composerCursor}
+                  terminalContexts={
+                    !isComposerApprovalState && pendingUserInputs.length === 0
+                      ? composerTerminalContexts
+                      : []
+                  }
+                  skills={selectedProviderStatus?.skills ?? []}
+                  {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
+                  onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
+                  onChange={onPromptChange}
+                  onCommandKeyDown={onComposerCommandKey}
+                  onPaste={onComposerPaste}
+                  placeholder={
+                    isComposerApprovalState
+                      ? (activePendingApproval?.detail ??
+                        "Resolve this approval request to continue")
+                      : activePendingProgress
+                        ? "Type your own answer, or leave this blank to use the selected option"
+                        : showPlanFollowUpPrompt && activeProposedPlan
+                          ? "Add feedback to refine the plan, or leave this blank to implement it"
+                          : projectSelectionRequired
+                            ? "Choose a project above to start a thread"
+                            : noProviderAvailable
+                              ? "Enable a provider in Settings to send a message"
+                              : phase === "disconnected"
+                                ? "Ask for follow-up changes or attach images"
+                                : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                  }
+                  disabled={
+                    isConnecting ||
+                    isComposerApprovalState ||
+                    projectSelectionRequired ||
+                    !customAnswerAllowed
+                  }
+                />
+              )}
               {showMobilePendingAnswerActions ? (
                 <div
                   data-chat-composer-mobile-pending-actions="true"

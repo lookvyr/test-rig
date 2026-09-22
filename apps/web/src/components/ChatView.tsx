@@ -92,6 +92,7 @@ import {
 import { type LegendListRef } from "@legendapp/list/react";
 import { getAnchoredTurnMetrics, type TimelineScrollMode } from "./chat/timelineScrollAnchoring";
 import { usePendingUserInput, clearPendingUserInputDrafts } from "./chat/usePendingUserInput";
+import { AsyncUserInputPanel } from "./chat/AsyncUserInputPanel";
 import { useUiStateStore } from "../uiStateStore";
 import {
   buildPlanImplementationThreadTitle,
@@ -2027,10 +2028,12 @@ function ChatViewContent(props: ChatViewProps) {
     () => derivePendingApprovals(threadActivities),
     [threadActivities],
   );
-  const pendingUserInputs = useMemo(
+  const allPendingUserInputs = useMemo(
     () => derivePendingUserInputs(threadActivities),
     [threadActivities],
   );
+  const pendingUserInputs = allPendingUserInputs.filter((request) => request.delivery !== "async");
+  const asyncUserInputs = allPendingUserInputs.filter((request) => request.delivery === "async");
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const {
     activePendingDraftAnswers,
@@ -5316,7 +5319,7 @@ function ChatViewContent(props: ChatViewProps) {
           error instanceof Error ? error.message : "Failed to submit user input.",
         );
       }
-      if (result._tag === "Success") clearPendingUserInputDrafts(routeThreadRef);
+      if (result._tag === "Success") clearPendingUserInputDrafts(routeThreadRef, requestId);
       setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
       return result;
     },
@@ -6145,6 +6148,15 @@ function ChatViewContent(props: ChatViewProps) {
                     </div>
                   ) : (
                     <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+                  )}
+                  {asyncUserInputs.length > 0 && (
+                    <AsyncUserInputPanel
+                      key={activeThreadKey}
+                      threadRef={routeThreadRef}
+                      requests={asyncUserInputs}
+                      respondingRequestIds={respondingUserInputRequestIds}
+                      onRespond={onRespondToUserInput}
+                    />
                   )}
                   {threadSyncPhase && !activeEnvironmentUnavailable ? (
                     <ThreadSyncStatusPill phase={threadSyncPhase} />

@@ -1141,6 +1141,121 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }),
   );
 
+  it.effect("maps async question messages without losing their text or choices", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const collected = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+      yield* runtime.emit({
+        id: asEventId("async-message"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("question-1"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        payload: {
+          completedAtMs: 1,
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "agentMessage",
+            id: "question-1",
+            text: "Which database?",
+            questions: [
+              { title: "Which database?", options: ["SQLite", "Postgres"] },
+              { title: "What should it be named?" },
+            ],
+          },
+        },
+      });
+      const events = Array.from(yield* Fiber.join(collected));
+      NodeAssert.equal(events[0]?.type, "item.completed");
+      NodeAssert.equal(events[1]?.type, "user-input.requested");
+      NodeAssert.notEqual(events[0]?.eventId, events[1]?.eventId);
+      const requested = events[1];
+      if (requested?.type === "user-input.requested") {
+        NodeAssert.equal(requested.requestId, "async:question-1");
+        NodeAssert.equal(requested.payload.delivery, "async");
+        NodeAssert.equal(requested.payload.questions[0]?.options[1]?.label, "Postgres");
+        NodeAssert.deepEqual(requested.payload.questions[1]?.options, []);
+      }
+    }),
+  );
+
+  it.effect("keeps free-text and secret blocking questions and resolves cancellation", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const collected = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+      const base = {
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        requestId: ApprovalRequestId.make("free-text"),
+      };
+      // The acknowledgement after an answered question has no pending approval
+      // correlation and must not produce a misleading "Approval resolved" row.
+      yield* runtime.emit({
+        id: asEventId("question-ack"),
+        kind: "notification",
+        provider: base.provider,
+        threadId: base.threadId,
+        createdAt: base.createdAt,
+        method: "serverRequest/resolved",
+        payload: { threadId: "thread-1", requestId: 7701 },
+      });
+      yield* runtime.emit({
+        ...base,
+        id: asEventId("question"),
+        kind: "request",
+        method: "item/tool/requestUserInput",
+        payload: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "item-1",
+          autoResolutionMs: 1000,
+          questions: [
+            {
+              id: "name",
+              header: "Name",
+              question: "What is the name?",
+              options: null,
+              isSecret: true,
+              isOther: false,
+            },
+          ],
+        },
+      });
+      yield* runtime.emit({
+        ...base,
+        id: asEventId("cancelled"),
+        kind: "notification",
+        method: "item/tool/requestUserInput/cancelled",
+        payload: {},
+      });
+      const events = Array.from(yield* Fiber.join(collected));
+      const requested = events[0];
+      NodeAssert.equal(requested?.type, "user-input.requested");
+      if (requested?.type === "user-input.requested") {
+        NodeAssert.deepEqual(requested.payload.questions[0], {
+          id: "name",
+          header: "Name",
+          question: "What is the name?",
+          options: [],
+          isSecret: true,
+          isOther: false,
+          multiSelect: false,
+        });
+        NodeAssert.equal(requested.payload.autoResolutionMs, 1000);
+      }
+      NodeAssert.deepEqual(events[1]?.payload, { answers: {}, reason: "cancelled" });
+    }),
+  );
+
   it.effect("unwraps Codex token usage payloads for context window events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

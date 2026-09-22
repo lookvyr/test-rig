@@ -452,6 +452,8 @@ export const UserInputQuestion = Schema.Struct({
   header: TrimmedNonEmptyStringSchema,
   question: TrimmedNonEmptyStringSchema,
   options: Schema.Array(UserInputQuestionOption),
+  isSecret: Schema.optional(Schema.Boolean),
+  isOther: Schema.optional(Schema.Boolean),
   multiSelect: Schema.optional(Schema.Boolean).pipe(
     Schema.withConstructorDefault(Effect.succeed(false)),
   ),
@@ -460,11 +462,14 @@ export type UserInputQuestion = typeof UserInputQuestion.Type;
 
 const UserInputRequestedPayload = Schema.Struct({
   questions: Schema.Array(UserInputQuestion),
+  delivery: Schema.optional(Schema.Literal("async")),
+  autoResolutionMs: Schema.optional(Schema.Number),
 });
 export type UserInputRequestedPayload = typeof UserInputRequestedPayload.Type;
 
 const UserInputResolvedPayload = Schema.Struct({
   answers: UnknownRecordSchema,
+  reason: Schema.optional(Schema.Literals(["cancelled", "timeout"])),
 });
 export type UserInputResolvedPayload = typeof UserInputResolvedPayload.Type;
 

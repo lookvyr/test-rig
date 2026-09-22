@@ -25,6 +25,7 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
+  EventId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
@@ -135,6 +136,17 @@ type CodexToolUserInputQuestion =
 
 const ApprovalDecisionPayload = Schema.Struct({
   decision: ProviderApprovalDecision,
+});
+
+const CodexAsyncQuestionMessage = Schema.Struct({
+  type: Schema.Literal("agentMessage"),
+  id: Schema.String,
+  questions: Schema.Array(
+    Schema.Struct({
+      title: Schema.String,
+      options: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+    }),
+  ),
 });
 
 function readPayload<A>(
@@ -360,7 +372,7 @@ function toUserInputQuestions(questions: ReadonlyArray<CodexToolUserInputQuestio
       const id = trimText(question.id);
       const header = trimText(question.header);
       const prompt = trimText(question.question);
-      if (!id || !header || !prompt || options.length === 0) {
+      if (!id || !header || !prompt) {
         return undefined;
       }
       return {
@@ -369,6 +381,8 @@ function toUserInputQuestions(questions: ReadonlyArray<CodexToolUserInputQuestio
         question: prompt,
         options,
         multiSelect: false,
+        ...(question.isSecret !== undefined ? { isSecret: question.isSecret } : {}),
+        ...(question.isOther !== undefined ? { isOther: question.isOther } : {}),
       };
     })
     .filter((question) => question !== undefined);
@@ -799,6 +813,9 @@ function mapToRuntimeEvents(
           type: "user-input.requested",
           payload: {
             questions,
+            ...(payload?.autoResolutionMs != null
+              ? { autoResolutionMs: payload.autoResolutionMs }
+              : {}),
           },
         },
       ];
@@ -1131,6 +1148,29 @@ function mapToRuntimeEvents(
       ];
     }
     const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
+    const asyncMessage = readPayload(CodexAsyncQuestionMessage, item);
+    if (asyncMessage && asyncMessage.questions.length > 0) {
+      return [
+        ...(completed ? [completed] : []),
+        {
+          ...runtimeEventBase(event, canonicalThreadId),
+          eventId: EventId.make(`${event.id}:questions`),
+          requestId: RuntimeRequestId.make(`async:${asyncMessage.id}`),
+          type: "user-input.requested",
+          payload: {
+            delivery: "async",
+            questions: asyncMessage.questions.map((question, index) => ({
+              id: String(index),
+              header: "Question",
+              question: question.title,
+              options: (question.options ?? []).map((label) => ({ label, description: label })),
+              isOther: true,
+              multiSelect: false,
+            })),
+          },
+        },
+      ];
+    }
     return completed ? [completed] : [];
   }
 
@@ -1290,7 +1330,9 @@ function mapToRuntimeEvents(
       EffectCodexSchema.V2ServerRequestResolvedNotification,
       event.payload,
     );
-    if (!payload) {
+    // Completed questions also emit this acknowledgement; only correlated
+    // approval requests belong in the approval activity stream.
+    if (!payload || !event.requestId || !event.requestKind) {
       return [];
     }
     const requestType = toRequestTypeFromKind(event.requestKind);
@@ -1301,6 +1343,22 @@ function mapToRuntimeEvents(
         payload: {
           requestType,
           ...(event.payload !== undefined ? { resolution: event.payload } : {}),
+        },
+      },
+    ];
+  }
+
+  if (
+    event.method === "item/tool/requestUserInput/cancelled" ||
+    event.method === "item/tool/requestUserInput/timeout"
+  ) {
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "user-input.resolved",
+        payload: {
+          answers: {},
+          reason: event.method.endsWith("/timeout") ? "timeout" : "cancelled",
         },
       },
     ];

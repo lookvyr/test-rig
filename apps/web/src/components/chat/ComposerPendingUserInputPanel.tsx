@@ -15,6 +15,8 @@ interface PendingUserInputPanelProps {
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
+  autoAdvance?: boolean;
+  globalShortcuts?: boolean;
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -24,6 +26,8 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   questionIndex,
   onToggleOption,
   onAdvance,
+  autoAdvance = true,
+  globalShortcuts = true,
 }: PendingUserInputPanelProps) {
   if (pendingUserInputs.length === 0) return null;
   const activePrompt = pendingUserInputs[0];
@@ -38,6 +42,8 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       questionIndex={questionIndex}
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
+      autoAdvance={autoAdvance}
+      globalShortcuts={globalShortcuts}
     />
   );
 });
@@ -49,6 +55,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex,
   onToggleOption,
   onAdvance,
+  autoAdvance,
+  globalShortcuts,
 }: {
   prompt: PendingUserInput;
   isResponding: boolean;
@@ -56,6 +64,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
+  autoAdvance: boolean;
+  globalShortcuts: boolean;
 }) {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
@@ -101,7 +111,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }, []);
 
   const handleOptionSelection = useEffectEvent((questionId: string, optionLabel: string) => {
-    if (activeQuestion?.multiSelect) {
+    if (activeQuestion?.multiSelect || !autoAdvance) {
       onToggleOption(questionId, optionLabel);
       return;
     }
@@ -120,7 +130,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // outside editable fields. Multi-select prompts toggle options in place; single-
   // select prompts keep the existing auto-advance behavior.
   useEffect(() => {
-    if (!activeQuestion || isResponding) return;
+    if (!activeQuestion || isResponding || !globalShortcuts) return;
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
@@ -144,7 +154,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isResponding]);
+  }, [activeQuestion, isResponding, globalShortcuts]);
 
   if (!activeQuestion) {
     return null;
@@ -176,7 +186,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           const isSelected =
             isOptimisticallySelected ||
             (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
-          const shortcutKey = index < 9 ? index + 1 : null;
+          const shortcutKey = globalShortcuts && index < 9 ? index + 1 : null;
           const className = cn(
             "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
             isSelected

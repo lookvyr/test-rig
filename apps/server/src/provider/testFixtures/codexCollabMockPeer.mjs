@@ -55,7 +55,7 @@ rl.on("line", (line) => {
       params: { threadId: rootThreadId, turn },
     });
     for (const notification of script.notifications) {
-      write({ jsonrpc: "2.0", method: notification.method, params: notification.params });
+      write({ jsonrpc: "2.0", ...notification });
     }
     if (script.holdTurnOpen !== true) {
       write({

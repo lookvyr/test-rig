@@ -1,6 +1,6 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { useMemo, type RefObject } from "react";
+import { useEffect, useMemo, type RefObject } from "react";
 import { create } from "zustand";
 import {
   buildPendingUserInputAnswers,
@@ -18,18 +18,22 @@ const EMPTY_DRAFT: QuestionDraft = { answers: {}, index: 0 };
 // The provider owns the pending request; this stores only unfinished local answers.
 const useQuestionDrafts = create<{ drafts: Record<string, QuestionDraft> }>(() => ({ drafts: {} }));
 
-export function clearPendingUserInputDrafts(threadRef: ScopedThreadRef) {
+export function clearPendingUserInputDrafts(threadRef: ScopedThreadRef, requestId?: string) {
   const prefix = `${scopedThreadKey(threadRef)}:`;
   useQuestionDrafts.setState(({ drafts }) => ({
-    drafts: Object.fromEntries(Object.entries(drafts).filter(([key]) => !key.startsWith(prefix))),
+    drafts: Object.fromEntries(
+      Object.entries(drafts).filter(([key]) =>
+        requestId ? key !== `${prefix}${requestId}` : !key.startsWith(prefix),
+      ),
+    ),
   }));
 }
 
 export function usePendingUserInput(input: {
   threadRef: ScopedThreadRef;
   request: PendingUserInput | null;
-  composerRef: RefObject<ChatComposerHandle | null>;
-  promptRef: RefObject<string>;
+  composerRef?: RefObject<ChatComposerHandle | null>;
+  promptRef?: RefObject<string>;
   onRespond: (
     requestId: PendingUserInput["requestId"],
     answers: Record<string, unknown>,
@@ -37,11 +41,40 @@ export function usePendingUserInput(input: {
 }) {
   const { request, composerRef, promptRef, onRespond } = input;
   const key = `${scopedThreadKey(input.threadRef)}:${request?.requestId ?? ""}`;
-  const draft = useQuestionDrafts((state) => state.drafts[key] ?? EMPTY_DRAFT);
+  const hasSecretQuestion = request?.questions.some((question) => question.isSecret) ?? false;
+  useEffect(
+    () => () => {
+      if (hasSecretQuestion) {
+        useQuestionDrafts.setState(({ drafts }) => ({
+          drafts: Object.fromEntries(
+            Object.entries(drafts).filter(([draftKey]) => draftKey !== key),
+          ),
+        }));
+      }
+    },
+    [key, hasSecretQuestion],
+  );
+  const initialDraft = useMemo<QuestionDraft>(
+    () =>
+      request?.delivery === "async"
+        ? {
+            index: 0,
+            answers: Object.fromEntries(
+              request.questions.flatMap((question) =>
+                question.options[0]
+                  ? [[question.id, { selectedOptionLabels: [question.options[0].label] }]]
+                  : [],
+              ),
+            ),
+          }
+        : EMPTY_DRAFT,
+    [request],
+  );
+  const draft = useQuestionDrafts((state) => state.drafts[key] ?? initialDraft);
   const update = (fn: (draft: QuestionDraft) => QuestionDraft) => {
     if (!request) return;
     useQuestionDrafts.setState(({ drafts }) => ({
-      drafts: { ...drafts, [key]: fn(drafts[key] ?? EMPTY_DRAFT) },
+      drafts: { ...drafts, [key]: fn(drafts[key] ?? initialDraft) },
     }));
   };
   const activePendingProgress = useMemo(
@@ -75,18 +108,18 @@ export function usePendingUserInput(input: {
           ),
         },
       }));
-      promptRef.current = "";
-      composerRef.current?.resetCursorState({ cursor: 0 });
+      if (promptRef) promptRef.current = "";
+      composerRef?.current?.resetCursorState({ cursor: 0 });
     },
     onChangeActivePendingUserInputCustomAnswer(
       questionId: string,
       value: string,
-      nextCursor: number,
-      expandedCursor: number,
-      _cursorAdjacentToMention: boolean,
+      nextCursor = value.length,
+      expandedCursor = nextCursor,
+      _cursorAdjacentToMention = false,
     ) {
       if (!request) return;
-      promptRef.current = value;
+      if (promptRef) promptRef.current = value;
       update((current) => ({
         ...current,
         answers: {
@@ -94,13 +127,13 @@ export function usePendingUserInput(input: {
           [questionId]: setPendingUserInputCustomAnswer(current.answers[questionId], value),
         },
       }));
-      const snapshot = composerRef.current?.readSnapshot();
+      const snapshot = composerRef?.current?.readSnapshot();
       if (
         snapshot?.value !== value ||
         snapshot.cursor !== nextCursor ||
         snapshot.expandedCursor !== expandedCursor
       ) {
-        composerRef.current?.focusAt(nextCursor);
+        composerRef?.current?.focusAt(nextCursor);
       }
     },
     onAdvanceActivePendingUserInput() {

@@ -1929,3 +1929,40 @@ describe("rerun workflows", () => {
     expect(spawnRows.map((row) => row.turnId)).toEqual(["turn-1", "turn-2"]);
   });
 });
+
+describe("question delivery", () => {
+  it("retains free-text metadata and async requests until explicitly resolved", () => {
+    const requested = makeActivity({
+      kind: "user-input.requested",
+      payload: {
+        requestId: "async:1",
+        delivery: "async",
+        questions: [
+          {
+            id: "name",
+            header: "Name",
+            question: "What name?",
+            options: [],
+            isSecret: true,
+            isOther: false,
+          },
+        ],
+      },
+    });
+    const pending = derivePendingUserInputs([requested]);
+    expect(pending).toHaveLength(1);
+    expect(pending[0]).toMatchObject({
+      delivery: "async",
+      questions: [{ options: [], isSecret: true, isOther: false }],
+    });
+    expect(
+      derivePendingUserInputs([
+        requested,
+        makeActivity({
+          kind: "user-input.resolved",
+          payload: { requestId: "async:1", reason: "cancelled", answers: {} },
+        }),
+      ]),
+    ).toEqual([]);
+  });
+});

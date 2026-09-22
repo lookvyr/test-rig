@@ -59,6 +59,7 @@ import { useLocalDispatchState } from "./useLocalDispatchState";
 import { usePersistThreadSettings } from "./usePersistThreadSettings";
 import { useMessagesWithImages } from "./useMessagesWithImages";
 import { usePendingUserInput, clearPendingUserInputDrafts } from "./usePendingUserInput";
+import { AsyncUserInputPanel } from "./AsyncUserInputPanel";
 import { formatOutgoingPrompt, serializeComposerPrompt } from "./composerMessage";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -99,7 +100,7 @@ export function SideChatPanel(props: {
   const [error, setError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
-  const [inputResponding, setInputResponding] = useState(false);
+  const [respondingInputIds, setRespondingInputIds] = useState<ApprovalRequestId[]>([]);
   const [liveFollow, setLiveFollow] = useState(true);
   const runtimeModeDraft = useComposerDraftStore(
     (store) => store.getComposerDraft(threadRef)?.runtimeMode,
@@ -125,27 +126,33 @@ export function SideChatPanel(props: {
     () => derivePendingApprovals(thread?.activities ?? []),
     [thread?.activities],
   );
-  const pendingUserInputs = useMemo(
+  const allPendingUserInputs = useMemo(
     () => derivePendingUserInputs(thread?.activities ?? []),
     [thread?.activities],
   );
+  const pendingUserInputs = allPendingUserInputs.filter((request) => request.delivery !== "async");
+  const asyncUserInputs = allPendingUserInputs.filter((request) => request.delivery === "async");
+  const onRespondToUserInput = async (
+    requestId: ApprovalRequestId,
+    answers: Record<string, unknown>,
+  ) => {
+    if (respondingInputIds.includes(requestId)) return;
+    setRespondingInputIds((ids) => [...ids, requestId]);
+    const result = await respondInput({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, requestId, answers },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
+      setError(String(squashAtomCommandFailure(result)));
+    if (result._tag === "Success") clearPendingUserInputDrafts(threadRef, requestId);
+    setRespondingInputIds((ids) => ids.filter((id) => id !== requestId));
+  };
   const pending = usePendingUserInput({
     threadRef,
     request: pendingUserInputs[0] ?? null,
     composerRef,
     promptRef,
-    onRespond: async (requestId, answers) => {
-      if (inputResponding) return;
-      setInputResponding(true);
-      const result = await respondInput({
-        environmentId: threadRef.environmentId,
-        input: { threadId: threadRef.threadId, requestId, answers },
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
-        setError(String(squashAtomCommandFailure(result)));
-      if (result._tag === "Success") clearPendingUserInputDrafts(threadRef);
-      setInputResponding(false);
-    },
+    onRespond: onRespondToUserInput,
   });
   const dispatch = useLocalDispatchState({
     activeThread: thread ?? undefined,
@@ -488,6 +495,15 @@ export function SideChatPanel(props: {
             />
           )}
           <div className="shrink-0 px-2 pb-2 pt-1">
+            {asyncUserInputs.length > 0 && (
+              <AsyncUserInputPanel
+                key={scopedThreadKey(threadRef)}
+                threadRef={threadRef}
+                requests={asyncUserInputs}
+                respondingRequestIds={respondingInputIds}
+                onRespond={onRespondToUserInput}
+              />
+            )}
             <div className="chat-composer-glass-shell">
               <div className="chat-composer-glass-host relative z-10 rounded-[22px]">
                 <ChatComposer
@@ -519,7 +535,10 @@ export function SideChatPanel(props: {
                   pendingApprovals={pendingApprovals}
                   pendingUserInputs={pendingUserInputs}
                   {...pending}
-                  activePendingIsResponding={inputResponding}
+                  activePendingIsResponding={
+                    pendingUserInputs[0] !== undefined &&
+                    respondingInputIds.includes(pendingUserInputs[0].requestId)
+                  }
                   respondingRequestIds={respondingRequestIds}
                   showPlanFollowUpPrompt={false}
                   activeProposedPlan={null}

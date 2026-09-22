@@ -152,6 +152,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
   function* (
     options: CodexAppServerPatchedProtocolOptions,
   ): Effect.fn.Return<CodexAppServerPatchedProtocol, never, Scope.Scope> {
+    const scope = yield* Scope.Scope;
     const outgoing = yield* Queue.unbounded<string, Cause.Done<void>>();
     const incomingNotifications = yield* Queue.unbounded<CodexAppServerIncomingNotification>();
     const incomingRequests = yield* Queue.unbounded<CodexAppServerIncomingRequest>();
@@ -285,6 +286,8 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
                     ),
                   onSuccess: (result) => respond(request.id, result),
                 }),
+                // A question may wait indefinitely; keep reading its cancellation and other traffic.
+                Effect.forkIn(scope, { startImmediately: true }),
               )
             : Effect.void,
         ),

@@ -3187,6 +3187,68 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  effectIt.effect(
+    "delivers an async answer as a durable user message without a live question callback",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        const now = "2026-01-01T00:00:00.000Z";
+        const threadId = ThreadId.make("thread-1");
+        yield* harness.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("ask-async"),
+          threadId,
+          createdAt: now,
+          activity: {
+            id: EventId.make("async-question"),
+            tone: "info",
+            kind: "user-input.requested",
+            summary: "Question",
+            turnId: null,
+            createdAt: now,
+            payload: {
+              requestId: "async:question-1",
+              delivery: "async",
+              questions: [
+                { id: "0", header: "Question", question: "Which database?", options: [] },
+              ],
+            },
+          },
+        });
+        const command = {
+          type: "thread.user-input.respond" as const,
+          commandId: CommandId.make("answer-async"),
+          threadId,
+          requestId: asApprovalRequestId("async:question-1"),
+          answers: { "0": "SQLite" },
+          createdAt: now,
+        };
+        yield* harness.engine.dispatch(command);
+        yield* Effect.promise(() => harness.drain());
+        const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+          (entry) => entry.id === threadId,
+        );
+        expect(
+          thread?.messages
+            .filter((message) => message.role === "user")
+            .map((message) => message.text),
+        ).toEqual(["Which database?\nSQLite"]);
+        expect(thread?.activities.some((activity) => activity.kind === "user-input.resolved")).toBe(
+          true,
+        );
+        expect(harness.respondToUserInput).not.toHaveBeenCalled();
+        yield* harness.engine.dispatch({
+          ...command,
+          commandId: CommandId.make("answer-duplicate"),
+        });
+        yield* Effect.promise(() => harness.drain());
+        const after = (yield* Effect.promise(() => harness.readModel())).threads.find(
+          (entry) => entry.id === threadId,
+        );
+        expect(after?.messages.filter((message) => message.role === "user")).toHaveLength(1);
+      }),
+  );
+
   it("surfaces stale provider approval request failures without faking approval resolution", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

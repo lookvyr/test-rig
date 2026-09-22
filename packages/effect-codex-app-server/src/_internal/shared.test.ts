@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { V2ItemCompletedNotification } from "../schema.ts";
 
 import * as CodexError from "../errors.ts";
 import * as Shared from "./shared.ts";
@@ -147,5 +148,27 @@ it.effect("retains the full notification payload decode cause chain", () =>
     assert.equal(error.operation, "decode-notification-payload");
     assert.instanceOf(error.cause, CodexError.CodexAppServerRequestError);
     assert.isTrue(Schema.isSchemaError(error.cause.cause));
+  }),
+);
+
+it.effect("preserves asynchronous question metadata through notification decoding", () =>
+  Effect.gen(function* () {
+    const item = {
+      type: "agentMessage",
+      id: "question-message",
+      text: "Pick a color",
+      questions: [{ title: "Pick a color", options: ["Blue", "Green"] }],
+    } as const;
+    const decoded = yield* Shared.decodeNotificationPayload(
+      "item/completed",
+      V2ItemCompletedNotification,
+      {
+        completedAtMs: 1,
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item,
+      },
+    );
+    assert.deepEqual(decoded.item, item);
   }),
 );

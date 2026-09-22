@@ -511,6 +511,10 @@ export function runtimeEventToActivities(
           payload: {
             ...(event.requestId ? { requestId: event.requestId } : {}),
             questions: event.payload.questions,
+            ...(event.payload.delivery ? { delivery: event.payload.delivery } : {}),
+            ...(event.payload.autoResolutionMs !== undefined
+              ? { autoResolutionMs: event.payload.autoResolutionMs }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -525,10 +529,16 @@ export function runtimeEventToActivities(
           createdAt: event.createdAt,
           tone: "info",
           kind: "user-input.resolved",
-          summary: "User input submitted",
+          summary:
+            event.payload.reason === "timeout"
+              ? "Question expired"
+              : event.payload.reason === "cancelled"
+                ? "Question cancelled"
+                : "User input submitted",
           payload: {
             ...(event.requestId ? { requestId: event.requestId } : {}),
             answers: event.payload.answers,
+            ...(event.payload.reason ? { reason: event.payload.reason } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -1684,7 +1694,8 @@ const make = Effect.gen(function* () {
       }
 
       const pauseForUserTurnId =
-        event.type === "request.opened" || event.type === "user-input.requested"
+        event.type === "request.opened" ||
+        (event.type === "user-input.requested" && event.payload.delivery !== "async")
           ? toTurnId(event.turnId)
           : undefined;
       if (pauseForUserTurnId) {

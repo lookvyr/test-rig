@@ -10,6 +10,20 @@ Common reasons:
 - switch to another account when one account hits limits
 - keep one shared Codex history instead of maintaining two separate Codex setups
 
+## Questions from Codex
+
+Codex can ask questions in both Default and Plan mode. Blocking questions appear in the composer:
+choose an option or enter an answer, then continue through any remaining questions. Questions can
+also ask for text without offering choices. Secret answers use a masked field. If Codex cancels a
+question or gives it an expiry time, the prompt clears when it is no longer answerable.
+Choose **Stop** beside the question's submit button to cancel the question and stop the current turn.
+
+Asynchronous questions appear above the composer while Codex continues working. You can collapse
+these questions, keep writing your main message, and answer when ready. Suggested answers may be
+preselected, but nothing is sent until you choose **Send answer**. Use the Other field to write a
+custom answer. Replies are added to the conversation as user messages, including after Codex
+finishes the original turn. Async questions require a Codex version and model that expose the tool.
+
 ## I Only Use One Codex Account
 
 Use the default provider.

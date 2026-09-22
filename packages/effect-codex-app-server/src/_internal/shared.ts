@@ -64,7 +64,16 @@ export const decodeNotificationPayload = <A, I>(
   schema: Schema.Codec<A, I> | undefined,
   raw: unknown,
 ): Effect.Effect<A, CodexError.CodexAppServerProtocolParseError> =>
-  decodeOptionalPayload(method, schema, raw).pipe(
+  (schema
+    ? // Notifications evolve additively. Keep newer fields available for adapters
+      // to validate without requiring an unrelated full protocol regeneration.
+      Schema.decodeUnknownEffect(schema, { onExcessProperty: "preserve" })(raw).pipe(
+        Effect.mapError((error) =>
+          CodexError.CodexAppServerRequestError.invalidPayload(method, "decode-payload", error),
+        ),
+      )
+    : decodeOptionalPayload<A, I>(method, schema, raw)
+  ).pipe(
     Effect.mapError((error) =>
       CodexError.CodexAppServerProtocolParseError.fromRequestError(
         "decode-notification-payload",
