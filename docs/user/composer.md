@@ -16,6 +16,9 @@ File and skill references inside code remain literal text.
 
 ## Drafts and stashes
 
+The new-thread heading gives longer project names more room and adapts to the
+space left by open sidebars. Hover over a shortened name to see the full name.
+
 Text and attachments entered while a new thread's worktree is being prepared
 remain in the composer when setup finishes.
 
