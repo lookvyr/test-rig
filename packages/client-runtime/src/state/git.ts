@@ -21,6 +21,11 @@ export function createGitEnvironmentAtoms<R, E>(
       label: "environment-data:git:resolve-pull-request",
       tag: WS_METHODS.gitResolvePullRequest,
     }),
+    linkedPullRequest: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:linked-pull-request",
+      tag: WS_METHODS.gitResolvePullRequest,
+      refreshIntervalMs: 60_000,
+    }),
     preparePullRequestThread: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:git:prepare-pull-request-thread",
       tag: WS_METHODS.gitPreparePullRequestThread,

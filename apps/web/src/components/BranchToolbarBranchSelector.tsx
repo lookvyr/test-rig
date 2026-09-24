@@ -1,3 +1,5 @@
+import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
+import { useUnlinkPullRequest } from "../hooks/useUnlinkPullRequest";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
@@ -51,11 +53,7 @@ import {
   resolveEffectiveEnvMode,
   shouldIncludeBranchPickerItem,
 } from "./BranchToolbar.logic";
-import {
-  ChangeRequestStatusIcon,
-  prStatusIndicator,
-  resolveThreadPr,
-} from "./ThreadStatusIndicators";
+import { ChangeRequestStatusIcon, prStatusIndicator } from "./ThreadStatusIndicators";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
 import {
@@ -666,7 +664,12 @@ export function BranchToolbarBranchSelector({
   });
 
   // PR pill shown next to the branch selector when the active branch has one.
-  const branchPr = resolveThreadPr({
+  const unlinkPr = useUnlinkPullRequest(draftThread ? null : threadRef);
+  const branchPr = useThreadPullRequest({
+    environmentId,
+    projectCwd: activeProjectCwd,
+    association: serverThread?.pullRequestAssociation,
+    providerSettings: sourceControlProviderSettings,
     threadBranch: resolveBranchToolbarPrBranch({
       activeThreadBranch,
       resolvedActiveBranch,
@@ -674,11 +677,7 @@ export function BranchToolbarBranchSelector({
     gitStatus: branchStatusQuery.data ?? null,
   });
   const branchProvider = branchStatusQuery.data?.sourceControlProvider;
-  const branchPrStatus =
-    branchProvider &&
-    isSourceControlProviderEnabled(sourceControlProviderSettings, branchProvider.kind)
-      ? prStatusIndicator(branchPr, branchProvider)
-      : null;
+  const branchPrStatus = prStatusIndicator(branchPr, branchProvider);
   // Action-oriented tooltip (the pill opens the PR), distinct from the sidebar's
   // state-description tooltip.
   const branchPrTooltip = branchPr
@@ -794,6 +793,7 @@ export function BranchToolbarBranchSelector({
                   type="button"
                   aria-label={branchPrTooltip}
                   onClick={(event) => openPrLink(event, branchPrStatus.url)}
+                  onContextMenu={unlinkPr}
                   className={cn(
                     "inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[11px] font-medium tabular-nums transition-colors hover:bg-muted/60",
                     branchPrStatus.colorClass,

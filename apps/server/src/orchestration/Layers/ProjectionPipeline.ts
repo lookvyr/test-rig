@@ -775,6 +775,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.worktreePath !== undefined
               ? { worktreePath: event.payload.worktreePath }
               : {}),
+            ...(event.payload.pullRequestAssociation !== undefined
+              ? { pullRequestAssociation: event.payload.pullRequestAssociation }
+              : {}),
             updatedAt: event.payload.updatedAt,
           });
           return;

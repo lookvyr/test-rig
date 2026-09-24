@@ -155,3 +155,30 @@ describe("settledPrHoverColorClass", () => {
     expect(settledPrHoverColorClass(state)).toContain(`group-hover/v2-row:${colorClass}`);
   });
 });
+
+it("keeps explicit unlinking authoritative over checkout detection", () => {
+  expect(
+    resolveThreadPr({
+      association: { mode: "unlinked" },
+      threadBranch: "feature/current",
+      gitStatus: status(),
+    }),
+  ).toBeNull();
+});
+it("resolves an explicit link independently of the checkout and never falls back", () => {
+  const association = {
+    mode: "linked",
+    provider: "github",
+    reference: "https://github.com/pingdotgg/t3code/pull/42",
+  } as const;
+  const input = { association, threadBranch: "another-branch", gitStatus: status() };
+  expect(resolveThreadPr(input)).toBeNull();
+  expect(resolveThreadPr({ ...input, linkedPr: status().pr })).toEqual(status().pr);
+  expect(
+    resolveEnabledThreadPr({
+      ...input,
+      linkedPr: status().pr,
+      providerSettings: { github: false, gitlab: false, "azure-devops": false, bitbucket: false },
+    }),
+  ).toBeNull();
+});

@@ -1,3 +1,6 @@
+import { useUnlinkPullRequest } from "../hooks/useUnlinkPullRequest";
+import { openLinkThreadPullRequest } from "./LinkThreadPullRequestDialog";
+import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -134,7 +137,6 @@ import {
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
   prStatusIndicator,
-  resolveEnabledThreadPr,
   settledPrHoverColorClass,
   terminalStatusFromRunningIds,
   type TerminalStatusIndicator,
@@ -479,7 +481,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     thread.environmentId,
     (settings) => settings.sourceControlProviders,
   );
-  const pr = resolveEnabledThreadPr({
+  const pr = useThreadPullRequest({
+    environmentId: thread.environmentId,
+    projectCwd: props.projectCwd,
+    association: thread.pullRequestAssociation,
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
     providerSettings,
@@ -734,6 +739,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   useEffect(() => {
     if (!showSnoozeButton) setSnoozeMenuOpen(false);
   }, [showSnoozeButton]);
+  const unlinkPr = useUnlinkPullRequest(threadRef);
   const handlePrClick = useCallback(
     (event: ReactMouseEvent<HTMLElement>) => {
       if (pr?.url) openPrLink(event, pr.url);
@@ -809,6 +815,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
       <button
         type="button"
         onClick={handlePrClick}
+        onContextMenu={unlinkPr}
         className={cn(
           // Sidebar chrome follows the interface font; tabular digits keep the
           // number from reflowing as PR states stream in.
@@ -2623,6 +2630,9 @@ export default function SidebarV2() {
           return;
         }
         switch (clicked.value) {
+          case "link-pr":
+            openLinkThreadPullRequest(scopeThreadRef(thread.environmentId, thread.id));
+            return;
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.

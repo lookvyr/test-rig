@@ -258,14 +258,17 @@ export function effectiveSettled(
   // "active" is the explicit keep-active pin: it suppresses auto-settle
   // until real activity clears it server-side.
   if (shell.settledOverride === "active") return false;
-  if (options.changeRequestState === "merged" || options.changeRequestState === "closed") {
+  const changeRequestState =
+    shell.pullRequestAssociation?.mode === "unlinked" ? null : options.changeRequestState;
+  if (shell.pullRequestAssociation?.mode === "linked" && changeRequestState == null) return false;
+  if (changeRequestState === "merged" || changeRequestState === "closed") {
     return true;
   }
   // An open PR is unfinished business regardless of how long the thread has
   // been quiet: review can take days, and hiding the thread would bury the
   // work waiting on it. Only merge/close (above) or an explicit user settle
   // resolves it.
-  if (options.changeRequestState === "open") return false;
+  if (changeRequestState === "open") return false;
   if (options.autoSettleAfterDays === null) return false;
 
   const lastActivityAt = threadLastActivityAt(shell);

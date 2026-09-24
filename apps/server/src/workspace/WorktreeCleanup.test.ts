@@ -347,6 +347,26 @@ describe("settled worktree cleanup", () => {
       expect(NodeFS.existsSync(f.checkout)).toBe(false);
     }),
   );
+  it.effect("does not settle or remove a checkout for an unlinked or different PR", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.merge();
+      for (const pullRequestAssociation of [
+        { mode: "unlinked" } as const,
+        {
+          mode: "linked",
+          provider: "github",
+          reference: "https://github.com/other/repo/pull/99",
+        } as const,
+      ]) {
+        f.setThreads([
+          { ...f.thread, settledOverride: null, settledAt: null, pullRequestAssociation },
+        ]);
+        yield* f.sweep();
+        expect(NodeFS.existsSync(f.checkout)).toBe(true);
+      }
+    }),
+  );
   it.effect("respects a pin on a merged PR", () =>
     Effect.gen(function* () {
       const f = yield* fixture;

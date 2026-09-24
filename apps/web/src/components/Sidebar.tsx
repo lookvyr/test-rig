@@ -1,3 +1,6 @@
+import { useUnlinkPullRequest } from "../hooks/useUnlinkPullRequest";
+import { openLinkThreadPullRequest } from "./LinkThreadPullRequestDialog";
+import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
@@ -16,7 +19,6 @@ import {
   ChangeRequestStatusIcon,
   prStatusIndicator,
   PrStatusTooltipContent,
-  resolveEnabledThreadPr,
   terminalStatusFromRunningIds,
   ThreadStatusLabel,
   ThreadWorktreeIndicator,
@@ -447,7 +449,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     thread.environmentId,
     (settings) => settings.sourceControlProviders,
   );
-  const pr = resolveEnabledThreadPr({
+  const pr = useThreadPullRequest({
+    environmentId: thread.environmentId,
+    projectCwd: threadProjectCwd ?? props.projectCwd,
+    association: thread.pullRequestAssociation,
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
     providerSettings,
@@ -560,6 +565,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
     },
     [clearSelection, handleMultiSelectContextMenu, handleThreadContextMenu, isSelected, threadRef],
   );
+  const unlinkPr = useUnlinkPullRequest(threadRef);
   const handlePrClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       if (!prStatus) return;
@@ -686,6 +692,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
                     aria-label={prStatus.tooltip}
                     className={`inline-flex items-center justify-center ${prStatus.colorClass} cursor-pointer rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring`}
                     onClick={handlePrClick}
+                    onContextMenu={unlinkPr}
                   >
                     <ChangeRequestStatusIcon className="size-3" />
                   </button>
@@ -2116,6 +2123,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             : []),
           { id: "rename", label: "Rename thread" },
           { id: "mark-unread", label: "Mark unread" },
+          { id: "link-pr", label: "Link PR" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
           { id: "delete", label: "Delete", destructive: true, icon: "trash" },
@@ -2147,6 +2155,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return;
       }
 
+      if (clicked === "link-pr") {
+        openLinkThreadPullRequest(threadRef);
+        return;
+      }
       if (clicked === "rename") {
         startThreadRename(threadKey, thread.title);
         return;

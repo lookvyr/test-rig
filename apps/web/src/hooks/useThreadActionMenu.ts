@@ -1,3 +1,4 @@
+import { openLinkThreadPullRequest } from "../components/LinkThreadPullRequestDialog";
 import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   type AtomCommandResult,
@@ -176,6 +177,9 @@ export function useThreadActionMenu(input: {
           }
         };
         switch (action) {
+          case "link-pr":
+            openLinkThreadPullRequest(threadRef);
+            return;
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.

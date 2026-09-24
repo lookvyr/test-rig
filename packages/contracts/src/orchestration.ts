@@ -4,6 +4,7 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Struct from "effect/Struct";
 import { ProviderOptionSelections } from "./model.ts";
+import { SourceControlProviderKind } from "./sourceControl.ts";
 import { RepositoryIdentity } from "./environment.ts";
 import {
   ApprovalRequestId,
@@ -22,6 +23,17 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+
+/** Absent means automatic checkout detection. Unlinking disables detection until explicitly linked. */
+export const ThreadPullRequestAssociation = Schema.Union([
+  Schema.Struct({ mode: Schema.Literal("unlinked") }),
+  Schema.Struct({
+    mode: Schema.Literal("linked"),
+    provider: SourceControlProviderKind,
+    reference: TrimmedNonEmptyString,
+  }),
+]);
+export type ThreadPullRequestAssociation = typeof ThreadPullRequestAssociation.Type;
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -364,6 +376,7 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -435,6 +448,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -747,6 +761,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
 }).check(
   Schema.makeFilter(
     (input) =>
@@ -1174,6 +1189,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
   updatedAt: IsoDateTime,
 });
 

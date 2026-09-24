@@ -1,3 +1,4 @@
+import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
@@ -246,7 +247,6 @@ import {
   shouldShowProviderStatusBanner,
 } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
-import { resolveEnabledThreadPr } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
@@ -3869,7 +3869,10 @@ function ChatViewContent(props: ChatViewProps) {
   // so the banner and the sidebar row never disagree.
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null);
   const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays);
-  const activeThreadPr = resolveEnabledThreadPr({
+  const activeThreadPr = useThreadPullRequest({
+    environmentId: environmentId,
+    projectCwd: activeProject?.workspaceRoot ?? null,
+    association: activeThread?.pullRequestAssociation,
     threadBranch: activeThread?.branch ?? null,
     gitStatus: gitStatusQuery.data ?? null,
     providerSettings: activeServerConfig?.settings.sourceControlProviders ?? {
@@ -3882,13 +3885,14 @@ function ChatViewContent(props: ChatViewProps) {
   const pullRequestSelection =
     activeThreadPr &&
     activeProject &&
-    gitStatusCwd &&
-    gitStatusQuery.data?.sourceControlProvider?.kind === "github"
+    (activeThread?.pullRequestAssociation?.mode === "linked"
+      ? activeThread.pullRequestAssociation.provider
+      : gitStatusQuery.data?.sourceControlProvider?.kind) === "github"
       ? {
           environmentId,
           projectId: activeProject.id,
           projectName: activeProject.title,
-          cwd: gitStatusCwd,
+          cwd: activeProject.workspaceRoot,
           reference: activeThreadPr.url,
         }
       : null;

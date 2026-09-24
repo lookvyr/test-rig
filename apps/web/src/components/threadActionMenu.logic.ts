@@ -18,6 +18,7 @@ export type ThreadActionMenuId =
   | "rename"
   | "regenerate-title"
   | "mark-unread"
+  | "link-pr"
   | "copy-path"
   | "copy-branch"
   | "delete";
@@ -98,6 +99,7 @@ export function buildThreadActionMenuItems(
         ]
       : []),
     { id: "mark-unread", label: "Mark unread" },
+    { id: "link-pr", label: "Link PR" },
     { id: "copy-path", label: "Copy path", icon: "copy" },
     ...(state.branch ? [{ id: "copy-branch" as const, label: "Copy branch", icon: "copy" }] : []),
     { id: "delete", label: "Delete", destructive: true, icon: "trash" },

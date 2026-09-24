@@ -1,3 +1,6 @@
+import * as Schema from "effect/Schema";
+import { ThreadPullRequestAssociation } from "@t3tools/contracts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   CheckpointRef,
   CommandId,
@@ -36,6 +39,10 @@ import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ServerConfig } from "../../config.ts";
+
+const decodePullRequestAssociation = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(ThreadPullRequestAssociation),
+);
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
   OrchestrationProjectionPipelineLive.pipe(
@@ -2672,7 +2679,7 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
 
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
-    Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+    Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
     Layer.provide(OrchestrationProjectionPipelineLive),
@@ -2726,6 +2733,89 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       `;
       assert.deepEqual(projectorRows, [{ lastAppliedSequence: 1 }]);
     }),
+  );
+
+  it.effect(
+    "persists PR association changes across metadata edits and every thread read surface",
+    () =>
+      Effect.gen(function* () {
+        const engine = yield* OrchestrationEngineService;
+        const query = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
+        const projectId = ProjectId.make("pr-association-project");
+        const threadId = ThreadId.make("pr-association-thread");
+        const createdAt = "2026-01-01T00:00:00.000Z";
+        yield* engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("association-project"),
+          projectId,
+          title: "PR associations",
+          workspaceRoot: "/tmp/pr-association",
+          defaultModelSelection: null,
+          createdAt,
+        });
+        yield* engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("association-thread"),
+          threadId,
+          projectId,
+          title: "Linked thread",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "feature",
+          worktreePath: null,
+          createdAt,
+        });
+        assert.equal(
+          (yield* query.getShellSnapshot()).threads.find((thread) => thread.id === threadId)
+            ?.pullRequestAssociation,
+          null,
+        );
+        for (const association of [
+          { mode: "unlinked" } as const,
+          {
+            mode: "linked",
+            provider: "github",
+            reference: "https://github.com/lookvyr/test-rig/pull/42",
+          } as const,
+        ]) {
+          yield* engine.dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.make(`association-${association.mode}`),
+            threadId,
+            pullRequestAssociation: association,
+          });
+          yield* engine.dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.make(`rename-${association.mode}`),
+            threadId,
+            title: "Renamed thread",
+            branch: "another-branch",
+          });
+          const rows = yield* sql<{
+            association: string;
+          }>`SELECT pull_request_association_json AS association FROM projection_threads WHERE thread_id = ${threadId}`;
+          assert.deepEqual(yield* decodePullRequestAssociation(rows[0]!.association), association);
+          assert.deepEqual(
+            (yield* query.getShellSnapshot()).threads.find((thread) => thread.id === threadId)
+              ?.pullRequestAssociation,
+            association,
+          );
+          assert.deepEqual(
+            (yield* query.getSnapshot()).threads.find((thread) => thread.id === threadId)
+              ?.pullRequestAssociation,
+            association,
+          );
+          const shell = yield* query.getThreadShellById(threadId);
+          const detail = yield* query.getThreadDetailById(threadId);
+          assert.isTrue(shell._tag === "Some" && detail._tag === "Some");
+          if (shell._tag === "Some" && detail._tag === "Some") {
+            assert.deepEqual(shell.value.pullRequestAssociation, association);
+            assert.deepEqual(detail.value.pullRequestAssociation, association);
+          }
+        }
+      }),
   );
 
   it.effect("projects persist updated scripts from project.meta.update", () =>

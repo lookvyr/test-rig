@@ -132,6 +132,7 @@ export const make = Effect.gen(function* () {
     thread.settledOverride === "settled" || thread.archivedAt !== null;
   const automaticCandidate = (thread: Thread, now: number) =>
     thread.settledOverride !== "active" &&
+    thread.pullRequestAssociation?.mode !== "unlinked" &&
     thread.pinnedAt == null &&
     (thread.snoozedUntil == null || Date.parse(thread.snoozedUntil) <= now) &&
     !worktreeHasActiveThread(thread, now);
@@ -170,7 +171,13 @@ export const make = Effect.gen(function* () {
         return;
       }
       const remote = yield* manager.remoteStatus({ cwd: checkout }, { refreshUpstream: false });
-      if (remote?.pr?.state !== "merged" && remote?.pr?.state !== "closed") {
+      const matchesCheckoutPr = (thread: Thread) =>
+        thread.pullRequestAssociation?.mode !== "linked" ||
+        thread.pullRequestAssociation.reference === remote?.pr?.url;
+      if (
+        (remote?.pr?.state !== "merged" && remote?.pr?.state !== "closed") ||
+        initial.some((thread) => !settled(thread) && !matchesCheckoutPr(thread))
+      ) {
         yield* notice("pending", "Worktree cleanup is waiting for other work using this checkout.");
         return;
       }
@@ -180,7 +187,10 @@ export const make = Effect.gen(function* () {
       );
       if (
         refreshed.length !== initial.length ||
-        refreshed.some((thread) => !settled(thread) && !automaticCandidate(thread, now))
+        refreshed.some(
+          (thread) =>
+            !settled(thread) && (!automaticCandidate(thread, now) || !matchesCheckoutPr(thread)),
+        )
       )
         return;
       for (const thread of refreshed) {

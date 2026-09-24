@@ -437,3 +437,26 @@ describe("canSettle", () => {
     expect(effectiveSettled(blocked, { now: NOW, autoSettleAfterDays: 3 })).toBe(false);
   });
 });
+
+it("ignores a stale merged PR after unlinking but settles an explicitly linked merged PR", () => {
+  const shell = makeShell({ activityAt: FRESH });
+  const options = { now: NOW, autoSettleAfterDays: 3, changeRequestState: "merged" as const };
+  expect(
+    effectiveSettled({ ...shell, pullRequestAssociation: { mode: "unlinked" } }, options),
+  ).toBe(false);
+  const linked = {
+    ...shell,
+    pullRequestAssociation: {
+      mode: "linked" as const,
+      provider: "github" as const,
+      reference: "https://github.com/lookvyr/test-rig/pull/1",
+    },
+  };
+  expect(effectiveSettled(linked, options)).toBe(true);
+  expect(
+    effectiveSettled(
+      { ...linked, latestTurn: makeShell({ activityAt: STALE }).latestTurn },
+      { ...options, changeRequestState: null },
+    ),
+  ).toBe(false);
+});

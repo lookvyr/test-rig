@@ -64,8 +64,19 @@ When a thread's checkout has a detected GitHub PR, **Show PR details** in the
 thread header opens its description, checks, and file tree. You can also add
 **Pull request** from the right panel's add menu. This works for ordinary
 coding threads as well as threads started from the PR page. Detection may take
-a moment after checkout. The panel follows the checkout's detected PR, just like
-the thread's PR badge; pasting another PR link into a message does not change it.
+a moment after checkout. By default, the panel and PR badge follow the PR detected for the thread's branch.
+Pasting another PR link into a message does not change the association.
+
+Right-click the PR badge in the sidebar or below the composer and choose
+**Unlink PR from thread** to stop automatic detection for that thread. This choice
+survives app restarts and branch changes. To link again, open the thread's menu
+and choose **Link PR**, then enter a PR number or URL from the project's repository.
+An explicit link stays attached even when the checkout changes. The same dialog
+can remove an explicit link if its badge is unavailable.
+
+Linked PRs continue to settle inactive threads when they merge or close, subject
+to the usual pin, active-work, and manual settlement settings. Unlinking stops
+PR-based settlement; ordinary inactivity settlement still applies.
 If no PR is detected, an already-open panel offers **Refresh Git status**.
 
 This workspace does not publish reviews or merge pull requests. Use the pull
