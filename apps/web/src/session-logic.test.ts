@@ -14,6 +14,7 @@ import {
   deriveTurnPlans,
   derivePendingApprovals,
   derivePendingUserInputs,
+  isBlockingUserInput,
   deriveTimelineEntries,
   deriveWorkLogEntries,
   findLatestProposedPlan,
@@ -1931,6 +1932,30 @@ describe("rerun workflows", () => {
 });
 
 describe("question delivery", () => {
+  it.each([
+    { metadata: {}, blocking: true },
+    { metadata: { isBlocking: true }, blocking: true },
+    { metadata: { isBlocking: false }, blocking: false },
+    { metadata: { delivery: "async" }, blocking: false },
+  ])(
+    "classifies persisted questions with $metadata as blocking=$blocking",
+    ({ metadata, blocking }) => {
+      const [request] = derivePendingUserInputs([
+        makeActivity({
+          kind: "user-input.requested",
+          payload: {
+            requestId: "question-1",
+            questions: [{ id: "name", header: "Name", question: "What name?", options: [] }],
+            ...metadata,
+          },
+        }),
+      ]);
+      expect(request).toBeDefined();
+      expect(isBlockingUserInput(request!)).toBe(blocking);
+      expect(request).toMatchObject(metadata);
+    },
+  );
+
   it("retains free-text metadata and async requests until explicitly resolved", () => {
     const requested = makeActivity({
       kind: "user-input.requested",

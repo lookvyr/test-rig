@@ -32,6 +32,7 @@ import {
 import {
   derivePendingApprovals,
   derivePendingUserInputs,
+  isBlockingUserInput,
   derivePhase,
   deriveTimelineEntries,
   deriveTurnPlans,
@@ -130,8 +131,10 @@ export function SideChatPanel(props: {
     () => derivePendingUserInputs(thread?.activities ?? []),
     [thread?.activities],
   );
-  const pendingUserInputs = allPendingUserInputs.filter((request) => request.delivery !== "async");
-  const asyncUserInputs = allPendingUserInputs.filter((request) => request.delivery === "async");
+  const pendingUserInputs = allPendingUserInputs.filter(isBlockingUserInput);
+  const nonBlockingUserInputs = allPendingUserInputs.filter(
+    (request) => !isBlockingUserInput(request),
+  );
   const onRespondToUserInput = async (
     requestId: ApprovalRequestId,
     answers: Record<string, unknown>,
@@ -495,11 +498,11 @@ export function SideChatPanel(props: {
             />
           )}
           <div className="shrink-0 px-2 pb-2 pt-1">
-            {asyncUserInputs.length > 0 && (
+            {nonBlockingUserInputs.length > 0 && (
               <AsyncUserInputPanel
                 key={scopedThreadKey(threadRef)}
                 threadRef={threadRef}
-                requests={asyncUserInputs}
+                requests={nonBlockingUserInputs}
                 respondingRequestIds={respondingInputIds}
                 onRespond={onRespondToUserInput}
               />

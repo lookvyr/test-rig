@@ -3142,50 +3142,80 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
-  it("reacts to thread.user-input.respond by forwarding structured user input answers", async () => {
-    const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
+  it.each([true, false])(
+    "forwards callback question answers without creating a user message (isBlocking=%s)",
+    async (isBlocking) => {
+      const harness = await createHarness();
+      const now = "2026-01-01T00:00:00.000Z";
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-set-for-user-input"),
-        threadId: ThreadId.make("thread-1"),
-        session: {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-session-set-for-user-input"),
           threadId: ThreadId.make("thread-1"),
-          status: "running",
-          providerName: "codex",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: now,
-        },
-        createdAt: now,
-      }),
-    );
+          session: {
+            threadId: ThreadId.make("thread-1"),
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
+      );
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.user-input.respond",
-        commandId: CommandId.make("cmd-user-input-respond"),
-        threadId: ThreadId.make("thread-1"),
-        requestId: asApprovalRequestId("user-input-request-1"),
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("ask-callback"),
+          threadId: ThreadId.make("thread-1"),
+          createdAt: now,
+          activity: {
+            id: EventId.make("callback-question"),
+            tone: "info",
+            kind: "user-input.requested",
+            summary: "Question",
+            turnId: null,
+            createdAt: now,
+            payload: {
+              requestId: "user-input-request-1",
+              isBlocking,
+              questions: [
+                { id: "sandbox_mode", header: "Mode", question: "Which mode?", options: [] },
+              ],
+            },
+          },
+        }),
+      );
+
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.user-input.respond",
+          commandId: CommandId.make("cmd-user-input-respond"),
+          threadId: ThreadId.make("thread-1"),
+          requestId: asApprovalRequestId("user-input-request-1"),
+          answers: {
+            sandbox_mode: "workspace-write",
+          },
+          createdAt: now,
+        }),
+      );
+
+      await harness.drain();
+      const thread = (await harness.readModel()).threads.find((entry) => entry.id === "thread-1");
+      expect(thread?.messages.filter((message) => message.role === "user")).toEqual([]);
+      expect(harness.respondToUserInput).toHaveBeenCalledTimes(1);
+      expect(harness.respondToUserInput.mock.calls[0]?.[0]).toEqual({
+        threadId: "thread-1",
+        requestId: "user-input-request-1",
         answers: {
           sandbox_mode: "workspace-write",
         },
-        createdAt: now,
-      }),
-    );
-
-    await waitFor(() => harness.respondToUserInput.mock.calls.length === 1);
-    expect(harness.respondToUserInput.mock.calls[0]?.[0]).toEqual({
-      threadId: "thread-1",
-      requestId: "user-input-request-1",
-      answers: {
-        sandbox_mode: "workspace-write",
-      },
-    });
-  });
+      });
+    },
+  );
 
   effectIt.effect(
     "delivers an async answer as a durable user message without a live question callback",

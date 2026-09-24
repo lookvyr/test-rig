@@ -1088,6 +1088,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
           method: "item/tool/requestUserInput",
           requestId: ApprovalRequestId.make("req-user-input-1"),
           payload: {
+            isBlocking: false,
             itemId: "item-user-input-1",
             threadId: "thread-1",
             turnId: "turn-1",
@@ -1127,6 +1128,8 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         NodeAssert.equal(events[0]?.type, "user-input.requested");
         if (events[0]?.type === "user-input.requested") {
           NodeAssert.equal(events[0].requestId, "req-user-input-1");
+          NodeAssert.equal(events[0].payload.isBlocking, false);
+          NodeAssert.equal(events[0].payload.delivery, undefined);
           NodeAssert.equal(events[0].payload.questions[0]?.id, "sandbox_mode");
           NodeAssert.equal(events[0].payload.questions[0]?.multiSelect, false);
         }
@@ -1217,6 +1220,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
           threadId: "thread-1",
           turnId: "turn-1",
           itemId: "item-1",
+          isBlocking: true,
           autoResolutionMs: 1000,
           questions: [
             {

@@ -91,8 +91,7 @@ export type CodexTurnStartParamsWithCollaborationMode =
 export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type;
 type CodexServiceTier = NonNullable<EffectCodexSchema.V2ThreadStartParams["serviceTier"]>;
 type CodexThreadItem =
-  | EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]["items"][number]
-  | EffectCodexSchema.V2ThreadRollbackResponse["thread"]["turns"][number]["items"][number];
+  EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]["items"][number];
 
 export interface CodexSessionRuntimeOptions {
   readonly threadId: ThreadId;
@@ -499,7 +498,7 @@ export const openCodexThread = (input: {
         }),
       );
     }
-    return input.client.request("thread/start", startParams);
+    return input.client.request("thread/start", { ...startParams, historyMode: "paginated" });
   }
 
   return input.client
@@ -517,7 +516,11 @@ export const openCodexThread = (input: {
             resumeThreadId,
             recoverable: true,
             cause: error,
-          }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+          }).pipe(
+            Effect.andThen(
+              input.client.request("thread/start", { ...startParams, historyMode: "paginated" }),
+            ),
+          ),
       ),
     );
 };
@@ -856,7 +859,7 @@ function updateSession(
 }
 
 function parseThreadSnapshot(
-  response: EffectCodexSchema.V2ThreadReadResponse | EffectCodexSchema.V2ThreadRollbackResponse,
+  response: EffectCodexSchema.V2ThreadReadResponse,
 ): CodexThreadSnapshot {
   return {
     threadId: response.thread.id,
@@ -866,6 +869,73 @@ function parseThreadSnapshot(
     })),
   };
 }
+
+type CodexHistoryClient = Pick<CodexClient.CodexAppServerClient["Service"], "request">;
+
+const readPaginatedCodexThread = Effect.fn("readPaginatedCodexThread")(function* (
+  client: CodexHistoryClient,
+  threadId: string,
+): Effect.fn.Return<CodexThreadSnapshot, CodexErrors.CodexAppServerError> {
+  const turns: Array<CodexThreadTurnSnapshot> = [];
+  const requestedCursors = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    if (cursor !== null) {
+      if (requestedCursors.has(cursor)) {
+        return yield* CodexErrors.CodexAppServerRequestError.internalError(
+          "Codex thread history repeated a pagination cursor.",
+        );
+      }
+      requestedCursors.add(cursor);
+    }
+    const page: EffectCodexSchema.V2ThreadTurnsListResponse = yield* client.request(
+      "thread/turns/list",
+      {
+        threadId,
+        cursor,
+        limit: 100,
+        sortDirection: "asc",
+        itemsView: "full",
+      },
+    );
+    turns.push(...page.data.map((turn) => ({ id: TurnId.make(turn.id), items: turn.items })));
+    cursor = page.nextCursor ?? null;
+  } while (cursor !== null);
+  return { threadId, turns };
+});
+
+export const readCodexThread = Effect.fn("readCodexThread")(function* (
+  client: CodexHistoryClient,
+  threadId: string,
+): Effect.fn.Return<CodexThreadSnapshot, CodexErrors.CodexAppServerError> {
+  const { thread } = yield* client.request("thread/read", { threadId, includeTurns: false });
+  if (thread.historyMode === "paginated") {
+    return yield* readPaginatedCodexThread(client, threadId);
+  }
+  return parseThreadSnapshot(
+    yield* client.request("thread/read", { threadId, includeTurns: true }),
+  );
+});
+
+export const rollbackCodexThread = Effect.fn("rollbackCodexThread")(function* (
+  client: CodexHistoryClient,
+  threadId: string,
+  numTurns: number,
+): Effect.fn.Return<CodexThreadSnapshot, CodexErrors.CodexAppServerError> {
+  const { thread } = yield* client.request("thread/read", { threadId, includeTurns: false });
+  if (thread.historyMode !== "paginated") {
+    return yield* CodexErrors.CodexAppServerRequestError.invalidRequest(
+      "Codex 0.156 and later cannot revert legacy conversations. Start a new conversation to use Edit from here.",
+    );
+  }
+  const snapshot = yield* readPaginatedCodexThread(client, threadId);
+  const retainedCount = Math.max(0, snapshot.turns.length - numTurns);
+  const firstRemoved = snapshot.turns[retainedCount];
+  if (firstRemoved) {
+    yield* client.request("thread/revert", { threadId, beforeTurnId: firstRemoved.id });
+  }
+  return { threadId, turns: snapshot.turns.slice(0, retainedCount) };
+});
 
 export const makeCodexSessionRuntime = (
   options: CodexSessionRuntimeOptions,
@@ -1930,24 +2000,17 @@ export const makeCodexSessionRuntime = (
         }),
       readThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;
-        const response = yield* client.request("thread/read", {
-          threadId: providerThreadId,
-          includeTurns: true,
-        });
-        return parseThreadSnapshot(response);
+        return yield* readCodexThread(client, providerThreadId);
       }),
       rollbackThread: (numTurns) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;
-          const response = yield* client.request("thread/rollback", {
-            threadId: providerThreadId,
-            numTurns,
-          });
+          const snapshot = yield* rollbackCodexThread(client, providerThreadId, numTurns);
           yield* updateSession(sessionRef, {
             status: "ready",
             activeTurnId: undefined,
           });
-          return parseThreadSnapshot(response);
+          return snapshot;
         }),
       respondToRequest: (requestId, decision) =>
         Effect.gen(function* () {

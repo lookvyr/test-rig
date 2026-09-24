@@ -85,6 +85,11 @@ export interface PendingUserInput {
   createdAt: string;
   questions: ReadonlyArray<UserInputQuestion>;
   delivery?: "async";
+  isBlocking?: boolean;
+}
+
+export function isBlockingUserInput(request: PendingUserInput): boolean {
+  return request.delivery !== "async" && request.isBlocking !== false;
 }
 
 export interface ActivePlanState {
@@ -484,6 +489,7 @@ export function derivePendingUserInputs(
         createdAt: activity.createdAt,
         questions,
         ...(payload?.delivery === "async" ? { delivery: "async" as const } : {}),
+        ...(typeof payload?.isBlocking === "boolean" ? { isBlocking: payload.isBlocking } : {}),
       });
       continue;
     }

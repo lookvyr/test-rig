@@ -93,6 +93,7 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
 ): Effect.fn.Return<CodexAppServerClient["Service"], never, Scope.Scope> {
   const requestHandlers = new Map<string, ServerRequestHandler>();
   const notificationHandlers = new Map<string, Array<ServerNotificationHandler>>();
+  let serverUserAgent: string | undefined;
   let unknownRequestHandler:
     | ((method: string, params: unknown) => Effect.Effect<unknown, CodexError.CodexAppServerError>)
     | undefined;
@@ -139,6 +140,17 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       >
     | undefined => CodexRpc.CLIENT_NOTIFICATION_PARAMS[method] as never;
 
+  const logDecodeFailure = (
+    error: CodexError.CodexAppServerProtocolParseError | CodexError.CodexAppServerRequestError,
+  ) =>
+    Effect.logWarning("Codex app-server payload could not be decoded.", {
+      method: error.method,
+      operation: error.operation,
+      serverUserAgent,
+      issueCount: error.issueCount,
+      issueKinds: error.issueKinds,
+    });
+
   const dispatchNotification = (
     notification: CodexProtocol.CodexAppServerIncomingNotification,
   ): Effect.Effect<void, never> => {
@@ -152,6 +164,7 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
 
     if (schema) {
       return decodeNotificationPayload(notification.method, schema, notification.params).pipe(
+        Effect.tapError(logDecodeFailure),
         Effect.flatMap((decoded) =>
           Effect.forEach(handlers, (handler) => handler(decoded), { discard: true }),
         ),
@@ -176,6 +189,7 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
       const handler = requestHandlers.get(method);
 
       return decodeOptionalPayload(method, payloadSchema, request.params).pipe(
+        Effect.tapError(logDecodeFailure),
         Effect.flatMap((decoded) =>
           runHandler(
             handler ? (payload) => handler(payload, { requestId: request.id }) : undefined,
@@ -214,8 +228,18 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
         ): Effect.Effect<
           CodexRpc.ClientRequestResponsesByMethod[M],
           CodexError.CodexAppServerError
-        > => decodeOptionalPayload(method, getClientRequestResponseSchema(method), raw),
+        > =>
+          decodeOptionalPayload(method, getClientRequestResponseSchema(method), raw).pipe(
+            Effect.tapError(logDecodeFailure),
+          ),
       ),
+      Effect.tap((response) => {
+        if (method === "initialize") {
+          serverUserAgent = (response as CodexRpc.ClientRequestResponsesByMethod["initialize"])
+            .userAgent;
+        }
+        return Effect.void;
+      }),
     );
 
   const notify = <M extends CodexRpc.ClientNotificationMethod>(

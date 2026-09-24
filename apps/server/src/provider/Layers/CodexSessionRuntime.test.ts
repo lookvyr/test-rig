@@ -19,6 +19,8 @@ import {
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,
+  readCodexThread,
+  rollbackCodexThread,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 type ThreadOpenMethod = "thread/start" | "thread/resume" | "thread/fork";
@@ -62,6 +64,156 @@ function makeThreadOpenResponse(
     },
   } as unknown as CodexRpc.ClientRequestResponsesByMethod["thread/start"];
 }
+
+describe("Codex thread history", () => {
+  function historyClient(
+    responses: ReadonlyArray<unknown | CodexErrors.CodexAppServerRequestError>,
+  ) {
+    const calls: Array<{ method: string; payload: unknown }> = [];
+    const client: Parameters<typeof readCodexThread>[0] = {
+      request: <M extends CodexRpc.ClientRequestMethod>(
+        method: M,
+        payload: CodexRpc.ClientRequestParamsByMethod[M],
+      ) => {
+        const response = responses[calls.length];
+        calls.push({ method, payload });
+        NodeAssert.ok(calls.length <= responses.length, `Unexpected request: ${method}`);
+        return isCodexAppServerRequestError(response)
+          ? Effect.fail(response)
+          : Effect.succeed(response as CodexRpc.ClientRequestResponsesByMethod[M]);
+      },
+    };
+    return { client, calls };
+  }
+  const metadata = { thread: { historyMode: "paginated" } };
+  const first = { id: "turn-1", items: [{ type: "userMessage", id: "message-1", content: [] }] };
+  const second = { id: "turn-2", items: [{ type: "agentMessage", id: "message-2", text: "Done" }] };
+
+  it.effect("reads complete paginated turns in chronological order", () =>
+    Effect.gen(function* () {
+      const { client, calls } = historyClient([
+        metadata,
+        { data: [first], nextCursor: "page-2" },
+        { data: [second], nextCursor: null },
+      ]);
+      NodeAssert.deepEqual(yield* readCodexThread(client, "thread-1"), {
+        threadId: "thread-1",
+        turns: [first, second],
+      });
+      NodeAssert.deepEqual(calls, [
+        { method: "thread/read", payload: { threadId: "thread-1", includeTurns: false } },
+        ...[null, "page-2"].map((cursor) => ({
+          method: "thread/turns/list",
+          payload: {
+            threadId: "thread-1",
+            cursor,
+            limit: 100,
+            sortDirection: "asc",
+            itemsView: "full",
+          },
+        })),
+      ]);
+    }),
+  );
+
+  it.effect("stops when the final history page omits its cursor", () =>
+    Effect.gen(function* () {
+      const { client, calls } = historyClient([
+        metadata,
+        { data: [first], nextCursor: "page-2" },
+        { data: [second] },
+      ]);
+      NodeAssert.deepEqual(yield* readCodexThread(client, "thread-1"), {
+        threadId: "thread-1",
+        turns: [first, second],
+      });
+      NodeAssert.equal(calls.length, 3);
+    }),
+  );
+
+  for (const historyMode of ["legacy", undefined]) {
+    it.effect(`reads legacy history when mode is ${historyMode}`, () =>
+      Effect.gen(function* () {
+        const { client, calls } = historyClient([
+          { thread: { historyMode } },
+          { thread: { id: "thread-1", turns: [first] } },
+        ]);
+        NodeAssert.deepEqual(yield* readCodexThread(client, "thread-1"), {
+          threadId: "thread-1",
+          turns: [first],
+        });
+        NodeAssert.deepEqual(calls[1], {
+          method: "thread/read",
+          payload: { threadId: "thread-1", includeTurns: true },
+        });
+      }),
+    );
+  }
+
+  it.effect("fails if pagination repeats a cursor", () =>
+    Effect.gen(function* () {
+      const { client, calls } = historyClient([
+        metadata,
+        { data: [], nextCursor: "same" },
+        { data: [], nextCursor: "same" },
+      ]);
+      const error = yield* readCodexThread(client, "thread-1").pipe(Effect.flip);
+      NodeAssert.match(error.message, /repeated a pagination cursor/);
+      NodeAssert.equal(calls.length, 3);
+    }),
+  );
+
+  for (const numTurns of [0, 1, 2, 3]) {
+    it.effect(`reverts ${numTurns} turns at the first removed turn boundary`, () =>
+      Effect.gen(function* () {
+        const { client, calls } = historyClient([
+          metadata,
+          { data: [first, second], nextCursor: null },
+          {},
+        ]);
+        const retainedCount = Math.max(0, 2 - numTurns);
+        NodeAssert.deepEqual(yield* rollbackCodexThread(client, "thread-1", numTurns), {
+          threadId: "thread-1",
+          turns: [first, second].slice(0, retainedCount),
+        });
+        NodeAssert.deepEqual(
+          calls.slice(2),
+          numTurns === 0
+            ? []
+            : [
+                {
+                  method: "thread/revert",
+                  payload: {
+                    threadId: "thread-1",
+                    beforeTurnId: retainedCount === 1 ? "turn-2" : "turn-1",
+                  },
+                },
+              ],
+        );
+      }),
+    );
+  }
+
+  it.effect("rejects legacy rollback without mutating the thread", () =>
+    Effect.gen(function* () {
+      const { client, calls } = historyClient([{ thread: { historyMode: "legacy" } }]);
+      const error = yield* rollbackCodexThread(client, "thread-1", 1).pipe(Effect.flip);
+      NodeAssert.match(error.message, /cannot revert legacy conversations/);
+      NodeAssert.equal(calls.length, 1);
+    }),
+  );
+
+  it.effect("preserves the original snapshot and propagates a failed revert", () =>
+    Effect.gen(function* () {
+      const original = { data: [first, second], nextCursor: null };
+      const rejection = CodexErrors.CodexAppServerRequestError.invalidRequest("Revert failed");
+      const { client } = historyClient([metadata, original, rejection]);
+      const error = yield* rollbackCodexThread(client, "thread-1", 1).pipe(Effect.flip);
+      NodeAssert.strictEqual(error, rejection);
+      NodeAssert.deepEqual(original.data, [first, second]);
+    }),
+  );
+});
 
 describe("buildTurnStartParams", () => {
   it("keeps invalid turn values only in the schema cause", () => {
@@ -394,6 +546,38 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  for (const operation of ["start", "resume", "fork"] as const) {
+    it.effect(`preserves history mode for ${operation}`, () =>
+      Effect.gen(function* () {
+        const client = {
+          request: <M extends ThreadOpenMethod>(
+            method: M,
+            payload: CodexRpc.ClientRequestParamsByMethod[M],
+          ) => {
+            NodeAssert.equal(method, `thread/${operation}`);
+            NodeAssert.equal(
+              "historyMode" in payload ? payload.historyMode : undefined,
+              operation === "start" ? "paginated" : undefined,
+            );
+            return Effect.succeed(
+              makeThreadOpenResponse("thread-1") as CodexRpc.ClientRequestResponsesByMethod[M],
+            );
+          },
+        };
+        yield* openCodexThread({
+          client,
+          threadId: ThreadId.make("thread-1"),
+          runtimeMode: "full-access",
+          cwd: "/tmp/project",
+          requestedModel: undefined,
+          serviceTier: undefined,
+          resumeThreadId: operation === "resume" ? "thread-1" : undefined,
+          ...(operation === "fork" ? { forkThreadId: "parent-thread" } : {}),
+        });
+      }),
+    );
+  }
+
   for (const mode of ["fork", "strict-resume", "missing-strict-cursor"] as const) {
     it.effect(`never starts a fresh thread after ${mode} fails`, () =>
       Effect.gen(function* () {
@@ -464,6 +648,8 @@ describe("openCodexThread", () => {
       });
 
       NodeAssert.equal(opened.thread.id, "fresh-thread");
+      NodeAssert.ok(calls[1]);
+      NodeAssert.equal((calls[1].payload as { historyMode: string }).historyMode, "paginated");
       NodeAssert.deepStrictEqual(
         calls.map((call) => call.method),
         ["thread/resume", "thread/start"],

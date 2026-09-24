@@ -25,6 +25,7 @@ import type {
 import { PREFERRED_DEFAULT_CODEX_MODELS, ServerSettingsError } from "@t3tools/contracts";
 
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
 import {
@@ -37,6 +38,7 @@ import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
+const MINIMUM_CODEX_VERSION = "0.156.0";
 
 const CODEX_PRESENTATION = {
   displayName: "Codex",
@@ -92,12 +94,17 @@ function codexAccountAuthLabel(account: CodexSchema.V2GetAccountResponse["accoun
     case "team":
       return "ChatGPT Team Subscription";
     case "self_serve_business_usage_based":
+    case "self_serve_business_prolite":
     case "business":
       return "ChatGPT Business Subscription";
     case "enterprise_cbp_usage_based":
+    case "enterprise_cbp_automation":
+    case "ent26":
     case "enterprise":
       return "ChatGPT Enterprise Subscription";
     case "edu":
+    case "edu_plus":
+    case "edu_pro":
       return "ChatGPT Edu Subscription";
     case "unknown":
       return "ChatGPT Subscription";
@@ -594,6 +601,16 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
 
   const snapshot = probeResult.success.value;
   const accountStatus = accountProbeStatus(snapshot.account);
+  let status = accountStatus.status;
+  let message = accountStatus.message;
+  if (status === "ready") {
+    if (!snapshot.version || !parseSemver(snapshot.version)) {
+      message = `Unable to determine Codex CLI version. Test Rig requires v${MINIMUM_CODEX_VERSION} or newer.`;
+    } else if (compareSemverVersions(snapshot.version, MINIMUM_CODEX_VERSION) < 0) {
+      status = "error";
+      message = `Codex CLI v${snapshot.version} is too old. Test Rig requires v${MINIMUM_CODEX_VERSION} or newer for thread history and revert. Upgrade Codex and refresh provider status.`;
+    }
+  }
 
   return buildServerProvider({
     presentation: CODEX_PRESENTATION,
@@ -604,9 +621,9 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     probe: {
       installed: true,
       version: snapshot.version ?? null,
-      status: accountStatus.status,
+      status,
       auth: accountStatus.auth,
-      ...(accountStatus.message ? { message: accountStatus.message } : {}),
+      ...(message ? { message } : {}),
     },
   });
 });

@@ -80,6 +80,7 @@ import {
 import {
   derivePendingApprovals,
   derivePendingUserInputs,
+  isBlockingUserInput,
   derivePhase,
   deriveTimelineEntries,
   deriveActiveWorkStartedAt,
@@ -2038,8 +2039,10 @@ function ChatViewContent(props: ChatViewProps) {
     () => derivePendingUserInputs(threadActivities),
     [threadActivities],
   );
-  const pendingUserInputs = allPendingUserInputs.filter((request) => request.delivery !== "async");
-  const asyncUserInputs = allPendingUserInputs.filter((request) => request.delivery === "async");
+  const pendingUserInputs = allPendingUserInputs.filter(isBlockingUserInput);
+  const nonBlockingUserInputs = allPendingUserInputs.filter(
+    (request) => !isBlockingUserInput(request),
+  );
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const {
     activePendingDraftAnswers,
@@ -6159,11 +6162,11 @@ function ChatViewContent(props: ChatViewProps) {
                   ) : (
                     <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                   )}
-                  {asyncUserInputs.length > 0 && (
+                  {nonBlockingUserInputs.length > 0 && (
                     <AsyncUserInputPanel
                       key={activeThreadKey}
                       threadRef={routeThreadRef}
-                      requests={asyncUserInputs}
+                      requests={nonBlockingUserInputs}
                       respondingRequestIds={respondingUserInputRequestIds}
                       onRespond={onRespondToUserInput}
                     />

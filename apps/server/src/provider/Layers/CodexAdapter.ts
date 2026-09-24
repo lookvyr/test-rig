@@ -804,7 +804,7 @@ function mapToRuntimeEvents(
         readPayload(EffectCodexSchema.ServerRequest__ToolRequestUserInputParams, event.payload) ??
         readPayload(EffectCodexSchema.ToolRequestUserInputParams, event.payload);
       const questions = payload ? toUserInputQuestions(payload.questions) : undefined;
-      if (!questions) {
+      if (!payload || !questions) {
         return [];
       }
       return [
@@ -813,7 +813,8 @@ function mapToRuntimeEvents(
           type: "user-input.requested",
           payload: {
             questions,
-            ...(payload?.autoResolutionMs != null
+            isBlocking: payload.isBlocking,
+            ...(payload.autoResolutionMs != null
               ? { autoResolutionMs: payload.autoResolutionMs }
               : {}),
           },
@@ -1971,7 +1972,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
-          : mapCodexRuntimeError(threadId, "thread/rollback", cause),
+          : mapCodexRuntimeError(threadId, "thread/revert", cause),
       ),
       Effect.map((snapshot) => ({
         threadId,

@@ -512,6 +512,9 @@ export function runtimeEventToActivities(
             ...(event.requestId ? { requestId: event.requestId } : {}),
             questions: event.payload.questions,
             ...(event.payload.delivery ? { delivery: event.payload.delivery } : {}),
+            ...(event.payload.isBlocking !== undefined
+              ? { isBlocking: event.payload.isBlocking }
+              : {}),
             ...(event.payload.autoResolutionMs !== undefined
               ? { autoResolutionMs: event.payload.autoResolutionMs }
               : {}),
@@ -1695,7 +1698,9 @@ const make = Effect.gen(function* () {
 
       const pauseForUserTurnId =
         event.type === "request.opened" ||
-        (event.type === "user-input.requested" && event.payload.delivery !== "async")
+        (event.type === "user-input.requested" &&
+          event.payload.delivery !== "async" &&
+          event.payload.isBlocking !== false)
           ? toTurnId(event.turnId)
           : undefined;
       if (pauseForUserTurnId) {

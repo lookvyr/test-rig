@@ -17,7 +17,8 @@ import {
 } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-const UPSTREAM_REF = "678157acaa819d5510adfe359abb5d0392cfe461";
+// Codex rust-v0.156.0. Pin the source so regeneration never follows a moving branch.
+const UPSTREAM_REF = "fe74a774532af67b5a4a3dec03ce9469e17f89af";
 const USER_AGENT = "effect-codex-app-server-generator";
 const GITHUB_API_BASE =
   "https://api.github.com/repos/openai/codex/contents/codex-rs/app-server-protocol";
@@ -292,13 +293,14 @@ function toPascalCaseMethod(method: string) {
 }
 
 function parseRequestEntries(fileContents: string): ReadonlyArray<MethodEntry> {
-  const entryPattern = /\{\s*"method":\s*"([^"]+)",\s*id:\s*RequestId,\s*params:\s*([^,}]+)/g;
+  // Optional params render as `params?: Foo | undefined`; their JSON schema is `NullableFoo`.
+  const entryPattern = /\{\s*"method":\s*"([^"]+)",\s*id:\s*RequestId,\s*params(\??):\s*([^,}|]+)/g;
   const entries: Array<MethodEntry> = [];
   let match: RegExpExecArray | null;
   while ((match = entryPattern.exec(fileContents)) !== null) {
     entries.push({
       method: match[1]!,
-      paramsType: match[2]!.trim(),
+      paramsType: `${match[2] ? "Nullable" : ""}${match[3]!.trim()}`,
     });
   }
   return entries;
@@ -591,6 +593,22 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     if (!(name in aggregateSchemas)) {
       aggregateSchemas[name] = stripNullDefaults(normalizeNullableTypes(schema));
     }
+  }
+
+  // The stable JSON filters this experimental field, but new threads need paginated
+  // history for thread/revert. Match ThreadStartParams.history_mode in the pinned
+  // codex-rs/app-server-protocol/src/protocol/v2/thread.rs; remove when JSON includes it.
+  for (const name of ["V2ThreadStartParams", "ClientRequest__ThreadStartParams"]) {
+    const schema = aggregateSchemas[name] as Record<string, Schema.Json>;
+    aggregateSchemas[name] = {
+      ...schema,
+      properties: {
+        ...(schema.properties as Record<string, Schema.Json>),
+        historyMode: {
+          anyOf: [{ type: "string", enum: ["legacy", "paginated"] }, { type: "null" }],
+        },
+      },
+    };
   }
 
   const generator = makeJsonSchemaGenerator();

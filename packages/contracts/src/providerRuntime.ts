@@ -462,7 +462,9 @@ export type UserInputQuestion = typeof UserInputQuestion.Type;
 
 const UserInputRequestedPayload = Schema.Struct({
   questions: Schema.Array(UserInputQuestion),
+  // Async message questions are answered with a new user message; callbacks keep their response route.
   delivery: Schema.optional(Schema.Literal("async")),
+  isBlocking: Schema.optional(Schema.Boolean),
   autoResolutionMs: Schema.optional(Schema.Number),
 });
 export type UserInputRequestedPayload = typeof UserInputRequestedPayload.Type;

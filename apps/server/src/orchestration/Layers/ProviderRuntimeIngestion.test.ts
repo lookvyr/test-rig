@@ -2006,6 +2006,48 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  it("keeps streaming assistant text open while a nonblocking callback question is pending", async () => {
+    const harness = await createHarness({ serverSettings: { enableAssistantStreaming: true } });
+    const base = {
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-nonblocking-question"),
+    };
+    harness.emit({ ...base, type: "turn.started", eventId: asEventId("nonblocking-turn") });
+    harness.emit({
+      ...base,
+      type: "content.delta",
+      eventId: asEventId("nonblocking-text"),
+      itemId: asItemId("nonblocking-message"),
+      payload: { streamKind: "assistant_text", delta: "Continuing work" },
+    });
+    harness.emit({
+      ...base,
+      type: "user-input.requested",
+      eventId: asEventId("nonblocking-question"),
+      requestId: ApprovalRequestId.make("nonblocking-request"),
+      payload: {
+        isBlocking: false,
+        questions: [{ id: "choice", header: "Choice", question: "Pick one", options: [] }],
+      },
+    });
+    await harness.drain();
+    const thread = (await harness.readModel()).threads.find((entry) => entry.id === base.threadId);
+    expect(
+      thread?.messages.find((message) => message.id === "assistant:nonblocking-message"),
+    ).toMatchObject({
+      text: "Continuing work",
+      streaming: true,
+    });
+    expect(
+      thread?.activities.find((activity) => activity.id === "nonblocking-question")?.payload,
+    ).toMatchObject({
+      requestId: "nonblocking-request",
+      isBlocking: false,
+    });
+  });
+
   it("does not create assistant segments for whitespace-only buffered text at approval boundaries", async () => {
     const harness = await createHarness();
     const startedAt = "2026-03-28T06:28:00.000Z";
