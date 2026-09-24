@@ -10,6 +10,13 @@ Common reasons:
 - switch to another account when one account hits limits
 - keep one shared Codex history instead of maintaining two separate Codex setups
 
+## Model selection
+
+The model picker gets available models from your installed Codex provider. GPT-6 Astra, Sol,
+and Luna appear in the main list; GPT-5 models, including the 5.6 family and GPT-5.5, appear
+under **Legacy models**. New model names stay visible when Codex adds them. GPT-6 Sol is the
+preferred default when available; saved thread and project selections still take precedence.
+
 ## Questions from Codex
 
 Codex can ask questions in both Default and Plan mode. Blocking questions appear in the composer:

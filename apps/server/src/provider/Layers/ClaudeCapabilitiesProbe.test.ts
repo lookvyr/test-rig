@@ -1,4 +1,5 @@
-import { ClaudeSettings } from "@t3tools/contracts";
+import { ClaudeSettings, ProviderInstanceId } from "@t3tools/contracts";
+import { createModelSelection } from "@t3tools/shared/model";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -10,12 +11,17 @@ import {
   buildClaudeCapabilitiesProbeQueryOptions,
   CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES,
   isLegacyClaudeModel,
+  getClaudeModelCapabilities,
+  normalizeClaudeCliEffort,
+  resolveClaudeApiModelId,
+  resolveClaudeEffort,
   probeClaudeCapabilities,
 } from "./ClaudeProvider.ts";
 
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 it("keeps only the Claude 5 family out of legacy models", () => {
+  assert.strictEqual(isLegacyClaudeModel("claude-opus-5-5"), false);
   assert.deepStrictEqual(
     ["claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-opus-4-8"].map((model) => [
       model,
@@ -27,6 +33,20 @@ it("keeps only the Claude 5 family out of legacy models", () => {
       ["claude-sonnet-5", false],
       ["claude-opus-4-8", true],
     ],
+  );
+});
+
+it("resolves Opus 5.5 defaults and preserves its extra-high effort", () => {
+  const capabilities = getClaudeModelCapabilities("claude-opus-5-5");
+  assert.strictEqual(resolveClaudeEffort(capabilities, undefined), "medium");
+  assert.strictEqual(resolveClaudeEffort(capabilities, "xhigh"), "xhigh");
+  assert.strictEqual(normalizeClaudeCliEffort("xhigh", "claude-opus-5-5"), "xhigh");
+  assert.strictEqual(normalizeClaudeCliEffort("ultracode", "claude-opus-5-5"), "xhigh");
+  assert.strictEqual(
+    resolveClaudeApiModelId(
+      createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-opus-5-5"),
+    ),
+    "claude-opus-5-5[1m]",
   );
 });
 

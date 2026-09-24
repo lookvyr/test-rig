@@ -6,19 +6,25 @@ import {
   mapCodexModelCapabilities,
 } from "./CodexProvider.ts";
 
-it("keeps only the GPT-5.6 Codex family out of legacy models", () => {
-  assert.deepStrictEqual(
-    ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.4"].map((model) => [
-      model,
-      isLegacyCodexModel(model),
-    ]),
-    [
-      ["gpt-5.6-luna", false],
-      ["gpt-5.6-terra", false],
-      ["gpt-5.6-sol", false],
-      ["gpt-5.4", true],
-    ],
-  );
+it("keeps discovered current and unfamiliar models visible", () => {
+  for (const model of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-7-sol", "custom-model"]) {
+    assert.strictEqual(isLegacyCodexModel(model), false, model);
+  }
+});
+
+it("groups older GPT families under legacy models", () => {
+  for (const model of [
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
+    "gpt-5.6-sol",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.3-codex",
+    "gpt-5-codex",
+    "gpt-4.1",
+  ]) {
+    assert.strictEqual(isLegacyCodexModel(model), true, model);
+  }
 });
 
 it("maps current Codex model capability fields", () => {
@@ -162,4 +168,21 @@ it("ignores custom models that shadow a preferred slug", () => {
   ]);
 
   assert.deepStrictEqual(models.find((model) => model.isDefault)?.slug, "gpt-5.4");
+});
+
+it("prefers GPT-6 Sol over older defaults when available", () => {
+  const models = applyPreferredCodexDefaultModel([
+    {
+      slug: "gpt-5.6-sol",
+      name: "GPT-5.6-Sol",
+      isCustom: false,
+      isDefault: true,
+      capabilities: null,
+    },
+    { slug: "gpt-6-sol", name: "GPT-6-Sol", isCustom: false, capabilities: null },
+  ]);
+  assert.deepStrictEqual(
+    models.filter((model) => model.isDefault).map((model) => model.slug),
+    ["gpt-6-sol"],
+  );
 });

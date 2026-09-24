@@ -3,6 +3,10 @@
 This guide is for people who want to use more than one Claude setup in Test Rig. For Codex, see
 [Codex](./providers-codex.md). For first-time setup, see [Install Test Rig](./install.md).
 
+The model picker includes **Claude Opus 5.5** with Medium reasoning by default, Fast Mode,
+and an explicit 1M context option. It requires Claude Code v2.1.280 or later. After upgrading
+Claude Code, use **Refresh provider status** in Settings to update the available choices.
+
 Common reasons:
 
 - use separate work and personal Claude accounts
