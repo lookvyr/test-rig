@@ -2,6 +2,7 @@ import {
   EnvironmentId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   TurnId,
@@ -28,6 +29,7 @@ import {
   isBranchMismatchDismissedForSession,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
+  resolveComposerRuntimeMode,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   startNewThreadForProject,
@@ -89,6 +91,65 @@ const readySession = {
   lastError: null,
   updatedAt: "2026-03-29T00:00:10.000Z",
 };
+
+describe("composer permission mode defaults", () => {
+  it.each(["codex", "claudeAgent"] as const)(
+    "starts a new %s draft in Auto even when it inherits Full access",
+    (provider) => {
+      expect(
+        resolveComposerRuntimeMode({
+          isLocalDraftThread: true,
+          provider: ProviderDriverKind.make(provider),
+          composerRuntimeMode: null,
+          threadRuntimeMode: "full-access",
+        }),
+      ).toBe("auto");
+    },
+  );
+
+  it.each(["approval-required", "auto-accept-edits", "auto", "full-access"] as const)(
+    "preserves an explicit %s selection while changing providers in a draft",
+    (mode) => {
+      for (const provider of ["codex", "claudeAgent", "opencode"] as const) {
+        expect(
+          resolveComposerRuntimeMode({
+            isLocalDraftThread: true,
+            provider: ProviderDriverKind.make(provider),
+            composerRuntimeMode: mode,
+            threadRuntimeMode: "full-access",
+          }),
+        ).toBe(mode);
+      }
+    },
+  );
+
+  it.each(["codex", "claudeAgent", "opencode"] as const)(
+    "keeps the saved mode of an existing %s thread",
+    (provider) => {
+      expect(
+        resolveComposerRuntimeMode({
+          isLocalDraftThread: false,
+          provider: ProviderDriverKind.make(provider),
+          composerRuntimeMode: null,
+          threadRuntimeMode: "full-access",
+        }),
+      ).toBe("full-access");
+    },
+  );
+
+  it("keeps OpenCode's inherited mode or Full access fallback", () => {
+    for (const mode of ["approval-required", undefined] as const) {
+      expect(
+        resolveComposerRuntimeMode({
+          isLocalDraftThread: true,
+          provider: ProviderDriverKind.make("opencode"),
+          composerRuntimeMode: null,
+          threadRuntimeMode: mode,
+        }),
+      ).toBe(mode ?? "full-access");
+    }
+  });
+});
 
 describe("thread completion visits", () => {
   function visit(state: UiState, thread: Thread) {

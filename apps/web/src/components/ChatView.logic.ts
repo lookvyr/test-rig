@@ -1,9 +1,11 @@
 import {
+  DEFAULT_RUNTIME_MODE,
   type EnvironmentId,
   isProviderDriverKind,
   ProjectId,
   type ModelSelection,
   type ProviderDriverKind,
+  type RuntimeMode,
   type ServerProvider,
   type ScopedProjectRef,
   type ScopedThreadRef,
@@ -27,6 +29,24 @@ export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
+
+export function resolveComposerRuntimeMode(input: {
+  isLocalDraftThread: boolean;
+  provider: ProviderDriverKind;
+  composerRuntimeMode: RuntimeMode | null;
+  threadRuntimeMode: RuntimeMode | undefined;
+}): RuntimeMode {
+  if (input.composerRuntimeMode !== null) return input.composerRuntimeMode;
+  // Resolve after provider selection so project defaults, custom instances,
+  // and provider changes in an unsent draft all use the same starting mode.
+  if (
+    input.isLocalDraftThread &&
+    (input.provider === "codex" || input.provider === "claudeAgent")
+  ) {
+    return "auto";
+  }
+  return input.threadRuntimeMode ?? DEFAULT_RUNTIME_MODE;
+}
 
 export function startNewThreadForProject(
   projectRef: ScopedProjectRef | null,

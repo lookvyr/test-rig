@@ -62,12 +62,15 @@ export function useNewThreadHandler() {
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
         setModelSelection,
+        setRuntimeMode,
       } = useComposerDraftStore.getState();
       const currentRouteTarget = getCurrentRouteTarget();
       // A new thread carries the user's *working mode* from the thread being
       // viewed: model (including options like reasoning effort and context
-      // window), permission mode, and interaction mode. Branch, worktree, and
-      // env mode never carry implicitly — those come from the configured
+      // window), permission mode, and interaction mode. The composer applies
+      // provider defaults over the carried permission mode for new Claude and
+      // Codex drafts, unless the user explicitly selects a mode in that draft.
+      // Branch, worktree, and env mode never carry implicitly — they use the configured
       // defaults unless the caller passes them explicitly.
       const carrySourceShell =
         currentRouteTarget?.kind === "server"
@@ -166,6 +169,12 @@ export function useNewThreadHandler() {
                   }),
                 };
           if (workspaceContext) {
+            if (!isDraftAlreadyOpen) {
+              // A new-thread action reuses the draft's text, but starts its
+              // permission selection over so an old override cannot mask
+              // the provider default or the newly carried mode.
+              setRuntimeMode(reusableStoredDraftThread.draftId, null);
+            }
             setDraftThreadContext(reusableStoredDraftThread.draftId, {
               ...workspaceContext,
               ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
