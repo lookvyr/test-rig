@@ -72,8 +72,7 @@ export function BetaSettingsPanel() {
           control={
             <Switch
               checked={sidebarV2Enabled}
-              // Touching the switch pins the choice, so a nightly build that
-              // defaults v2 on does not flip it back after the user opts out.
+              // Pin explicit choices so opting out overrides the V2 default.
               onCheckedChange={(checked) =>
                 updateSettings({
                   sidebarV2Enabled: Boolean(checked),

@@ -68,9 +68,10 @@ describe("ClientSettings environment identification", () => {
 });
 
 describe("ClientSettings sidebar v2", () => {
-  it("defaults the beta off with a three-day auto-settle threshold", () => {
+  it("keeps the raw legacy value unconfigured with a three-day auto-settle threshold", () => {
     const settings = decodeClientSettings({});
     expect(settings.sidebarV2Enabled).toBe(false);
+    expect(settings.sidebarV2ConfiguredByUser).toBe(false);
     expect(settings.sidebarAutoSettleAfterDays).toBe(3);
   });
 
