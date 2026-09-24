@@ -289,6 +289,7 @@ describe("CheckpointReactor", () => {
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderDriverKind;
     readonly gitStatusRefreshCalls?: Array<string>;
+    readonly gitStatusBranchChecks?: Array<boolean>;
     readonly pullRequestRefreshCalls?: Array<string>;
   }) {
     const cwd = createGitRepository();
@@ -321,9 +322,10 @@ describe("CheckpointReactor", () => {
     });
     const vcsStatusBroadcasterLayer = Layer.succeed(VcsStatusBroadcaster, {
       getStatus: () => Effect.die("getStatus should not be called in this test"),
-      refreshLocalStatus: (cwd: string) =>
+      refreshLocalStatus: (cwd, refreshOptions) =>
         Effect.sync(() => {
           options?.gitStatusRefreshCalls?.push(cwd);
+          options?.gitStatusBranchChecks?.push(refreshOptions?.onlyIfBranchChanged === true);
         }).pipe(
           Effect.as({
             isRepo: true,
@@ -559,6 +561,123 @@ describe("CheckpointReactor", () => {
     await harness.drain();
 
     expect(gitStatusRefreshCalls).toEqual([harness.cwd]);
+  });
+
+  it.each(["codex", "claude", "opencode"])(
+    "refreshes local git status after a %s command without waiting for turn completion",
+    async (providerName) => {
+      const gitStatusRefreshCalls: string[] = [];
+      const pullRequestRefreshCalls: string[] = [];
+      const harness = await createHarness({
+        seedFilesystemCheckpoints: false,
+        providerName: ProviderDriverKind.make(providerName),
+        providerSessionCwd: "/session-checkout",
+        threadBranch: "dev",
+        localStatusRefName: "feature/new-branch",
+        gitStatusRefreshCalls,
+        pullRequestRefreshCalls,
+      });
+
+      harness.provider.emit({
+        type: "item.completed",
+        eventId: EventId.make("evt-branch-command-completed"),
+        provider: ProviderDriverKind.make(providerName),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: ThreadId.make("thread-1"),
+        turnId: asTurnId("turn-still-running"),
+        payload: { itemType: "command_execution", status: "completed" },
+      });
+      await harness.drain();
+
+      expect(gitStatusRefreshCalls).toEqual(["/session-checkout"]);
+      expect(pullRequestRefreshCalls).toEqual([]);
+      expect(
+        gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 1)),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["file_change", "mcp_tool_call", "dynamic_tool_call", "collab_agent_tool_call"])(
+    "refreshes local git status after %s tools that can change the checkout",
+    async (itemType) => {
+      const gitStatusRefreshCalls: string[] = [];
+      const harness = await createHarness({
+        seedFilesystemCheckpoints: false,
+        gitStatusRefreshCalls,
+      });
+      harness.provider.emit({
+        type: "item.completed",
+        eventId: EventId.make("evt-tool-completed"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: ThreadId.make("thread-1"),
+        payload: { itemType, status: "completed" },
+      });
+      await harness.drain();
+      expect(gitStatusRefreshCalls).toEqual([harness.cwd]);
+    },
+  );
+
+  it("does not refresh git status for messages, read-only items, or unfinished tools", async () => {
+    const gitStatusRefreshCalls: string[] = [];
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      gitStatusRefreshCalls,
+    });
+    for (const [type, itemType] of [
+      ["item.completed", "assistant_message"],
+      ["item.completed", "reasoning"],
+      ["item.completed", "web_search"],
+      ["item.completed", "image_view"],
+      ["item.started", "command_execution"],
+      ["item.updated", "command_execution"],
+    ] as const) {
+      harness.provider.emit({
+        type,
+        eventId: EventId.make(`evt-${type}-${itemType}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: ThreadId.make("thread-1"),
+        payload: { itemType },
+      });
+    }
+    await harness.drain();
+    expect(gitStatusRefreshCalls).toEqual([]);
+  });
+
+  it("reuses the session cwd within a turn and clears it when the turn ends", async () => {
+    const gitStatusBranchChecks: boolean[] = [];
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      gitStatusBranchChecks,
+    });
+    const emit = (type: string) =>
+      harness.provider.emit({
+        type,
+        eventId: EventId.make(`evt-${type}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: ThreadId.make("thread-1"),
+        turnId: asTurnId("turn-session-cache"),
+        payload:
+          type === "item.completed" ? { itemType: "command_execution" } : { state: "completed" },
+      });
+    emit("turn.started");
+    await harness.drain();
+    harness.provider.listSessions.mockClear();
+    emit("item.completed");
+    emit("item.completed");
+    await harness.drain();
+    expect(harness.provider.listSessions).toHaveBeenCalledTimes(1);
+    expect(gitStatusBranchChecks).toEqual([true, true]);
+
+    emit("turn.completed");
+    await harness.drain();
+    expect(gitStatusBranchChecks).toEqual([true, true, false]);
+    harness.provider.listSessions.mockClear();
+    emit("item.completed");
+    await harness.drain();
+    expect(harness.provider.listSessions).toHaveBeenCalledTimes(1);
   });
 
   it("re-asks for the pull request at turn end when the thread branch is checked out", async () => {

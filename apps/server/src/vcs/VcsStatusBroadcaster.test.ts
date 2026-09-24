@@ -83,6 +83,7 @@ function makeTestLayer(state: {
     Layer.provide(makeBackgroundPolicyLayer(() => state.backgroundWorkEnabled !== false)),
     Layer.provide(
       Layer.mock(GitWorkflowService.GitWorkflowService)({
+        currentBranch: () => Effect.sync(() => state.currentLocalStatus.refName),
         localStatus: () =>
           Effect.sync(() => {
             state.localStatusCalls += 1;
@@ -460,6 +461,97 @@ describe("VcsStatusBroadcaster", () => {
       assert.equal(state.remoteInvalidationCalls, 0);
     }).pipe(Effect.provide(makeTestLayer(state)));
   });
+
+  it.effect("pushes a changed checkout branch to subscribers without refreshing remotes", () => {
+    const state = {
+      currentLocalStatus: baseLocalStatus,
+      currentRemoteStatus: baseRemoteStatus,
+      localStatusCalls: 0,
+      remoteStatusCalls: 0,
+      localInvalidationCalls: 0,
+      remoteInvalidationCalls: 0,
+    };
+
+    return Effect.gen(function* () {
+      const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+      yield* broadcaster.getStatus({ cwd: "/repo" });
+      const snapshotDeferred = yield* Deferred.make<void>();
+      const localUpdatedDeferred = yield* Deferred.make<VcsStatusStreamEvent>();
+      yield* Stream.runForEach(
+        broadcaster.streamStatus(
+          { cwd: "/repo" },
+          { automaticRemoteRefreshInterval: Effect.succeed(Duration.zero) },
+        ),
+        (event) => {
+          if (event._tag === "snapshot") {
+            return Deferred.succeed(snapshotDeferred, undefined);
+          }
+          if (event._tag === "localUpdated") {
+            return Deferred.succeed(localUpdatedDeferred, event);
+          }
+          return Effect.void;
+        },
+      ).pipe(Effect.forkScoped);
+      yield* Deferred.await(snapshotDeferred);
+
+      state.currentLocalStatus = { ...baseLocalStatus, refName: "feature/agent-created" };
+      yield* broadcaster.refreshLocalStatus("/repo", { onlyIfBranchChanged: true });
+
+      assert.deepStrictEqual(yield* Deferred.await(localUpdatedDeferred), {
+        _tag: "localUpdated",
+        local: state.currentLocalStatus,
+      });
+      assert.equal(state.remoteStatusCalls, 1);
+      assert.equal(state.remoteInvalidationCalls, 0);
+    }).pipe(Effect.provide(makeTestLayer(state)));
+  });
+
+  it.effect(
+    "skips full local status for unchanged branches but still refreshes at turn end",
+    () => {
+      const state = {
+        currentLocalStatus: baseLocalStatus,
+        currentRemoteStatus: baseRemoteStatus,
+        localStatusCalls: 0,
+        remoteStatusCalls: 0,
+        localInvalidationCalls: 0,
+        remoteInvalidationCalls: 0,
+      };
+      return Effect.gen(function* () {
+        const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+        yield* broadcaster.getStatus({ cwd: "/repo" });
+        state.currentLocalStatus = { ...baseLocalStatus, hasWorkingTreeChanges: true };
+        const unchanged = yield* broadcaster.refreshLocalStatus("/repo", {
+          onlyIfBranchChanged: true,
+        });
+        assert.deepStrictEqual(unchanged, baseLocalStatus);
+        assert.equal(state.localStatusCalls, 1);
+        assert.equal(state.localInvalidationCalls, 0);
+
+        const refreshed = yield* broadcaster.refreshLocalStatus("/repo");
+        assert.equal(refreshed.hasWorkingTreeChanges, true);
+        assert.equal(state.localStatusCalls, 2);
+        assert.equal(state.localInvalidationCalls, 1);
+
+        state.currentLocalStatus = { ...baseLocalStatus, refName: null };
+        const detached = yield* broadcaster.refreshLocalStatus("/repo", {
+          onlyIfBranchChanged: true,
+        });
+        assert.isNull(detached.refName);
+        assert.equal(state.localStatusCalls, 3);
+        yield* broadcaster.refreshLocalStatus("/repo", { onlyIfBranchChanged: true });
+        assert.equal(state.localStatusCalls, 3);
+
+        state.currentLocalStatus = baseLocalStatus;
+        const reattached = yield* broadcaster.refreshLocalStatus("/repo", {
+          onlyIfBranchChanged: true,
+        });
+        assert.equal(reattached.refName, baseLocalStatus.refName);
+        assert.equal(state.localStatusCalls, 4);
+        assert.equal(state.remoteStatusCalls, 1);
+      }).pipe(Effect.provide(makeTestLayer(state)));
+    },
+  );
 
   it.effect("normalizes symlinked CWDs before cache lookup and workflow calls", () => {
     const seenCwds: string[] = [];

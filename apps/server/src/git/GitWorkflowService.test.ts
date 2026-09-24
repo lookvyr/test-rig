@@ -1,6 +1,8 @@
 import { assert, describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as FileSystem from "effect/FileSystem";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 
 import { VcsRepositoryDetectionError } from "@t3tools/contracts";
 
@@ -8,6 +10,9 @@ import * as GitManager from "./GitManager.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
+import * as VcsProcess from "../vcs/VcsProcess.ts";
+import { ServerConfig } from "../config.ts";
 
 function makeLayer(input: {
   readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
@@ -24,6 +29,50 @@ function makeLayer(input: {
 }
 
 describe("GitWorkflowService", () => {
+  it.effect(
+    "reads real checkout branches, including unborn HEAD, tag collisions, and detached HEAD",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "branch-probe-test-" });
+        const git = yield* GitVcsDriver.GitVcsDriver;
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        const run = (args: string[]) => git.execute({ operation: "branch-probe-test", cwd, args });
+        yield* run(["init", "-b", "dev"]);
+        assert.equal(yield* workflow.currentBranch(cwd), "dev");
+        yield* run([
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.invalid",
+          "commit",
+          "--allow-empty",
+          "-m",
+          "fixture",
+        ]);
+        yield* run(["switch", "-c", "feature/new"]);
+        yield* run(["tag", "feature/new"]);
+        assert.equal(yield* workflow.currentBranch(cwd), "feature/new");
+        yield* run(["checkout", "--detach", "HEAD"]);
+        assert.isNull(yield* workflow.currentBranch(cwd));
+        yield* run(["switch", "dev"]);
+        assert.equal(yield* workflow.currentBranch(cwd), "dev");
+      }).pipe(
+        Effect.provide(
+          GitWorkflowService.layer.pipe(
+            Layer.provide(Layer.mock(GitManager.GitManager)({})),
+            Layer.provide(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer))),
+            Layer.provideMerge(GitVcsDriver.layer),
+            Layer.provide(VcsProcess.layer),
+            Layer.provide(
+              ServerConfig.layerTest(process.cwd(), { prefix: "branch-probe-config-" }),
+            ),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
   it.effect("returns an empty local status when no VCS repository is detected", () =>
     Effect.gen(function* () {
       const workflow = yield* GitWorkflowService.GitWorkflowService;

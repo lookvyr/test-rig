@@ -162,6 +162,7 @@ export class VcsStatusBroadcaster extends Context.Service<
     ) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
     readonly refreshLocalStatus: (
       cwd: string,
+      options?: { readonly onlyIfBranchChanged?: boolean },
     ) => Effect.Effect<VcsStatusLocalResult, GitManagerServiceError>;
     readonly refreshStatus: (cwd: string) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
     /**
@@ -376,8 +377,15 @@ export const make = Effect.gen(function* () {
 
   const refreshLocalStatus: VcsStatusBroadcaster["Service"]["refreshLocalStatus"] = Effect.fn(
     "VcsStatusBroadcaster.refreshLocalStatus",
-  )(function* (rawCwd) {
+  )(function* (rawCwd, options) {
     const cwd = yield* withFileSystem(normalizeCwd(rawCwd));
+    if (options?.onlyIfBranchChanged) {
+      const cached = yield* getCachedStatus(cwd);
+      if (cached?.local?.value.isRepo) {
+        const branch = yield* workflow.currentBranch(cwd);
+        if (branch === cached.local.value.refName) return cached.local.value;
+      }
+    }
     return yield* refreshLocalStatusCore(cwd);
   });
 

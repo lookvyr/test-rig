@@ -41,6 +41,7 @@ export class GitWorkflowService extends Context.Service<
     readonly localStatus: (
       input: VcsStatusInput,
     ) => Effect.Effect<VcsStatusLocalResult, GitManagerServiceError>;
+    readonly currentBranch: (cwd: string) => Effect.Effect<string | null, GitCommandError>;
     readonly remoteStatus: (
       input: VcsStatusInput,
       options?: GitManager.GitRemoteStatusOptions,
@@ -259,6 +260,23 @@ export const make = Effect.gen(function* () {
       ensureGit(operation, input.cwd).pipe(Effect.andThen(run(input)));
 
   return GitWorkflowService.of({
+    currentBranch: Effect.fn("GitWorkflowService.currentBranch")(function* (cwd) {
+      const operation = "GitWorkflowService.currentBranch";
+      yield* ensureGitCommand(operation, cwd);
+      const args = ["symbolic-ref", "--quiet", "HEAD"];
+      const result = yield* git.execute({ operation, cwd, args, allowNonZeroExit: true });
+      if (result.exitCode === 0) return result.stdout.trim().replace(/^refs\/heads\//, "") || null;
+      if (result.exitCode === 1) return null; // Detached HEAD.
+      return yield* new GitCommandError({
+        operation,
+        command: `git ${args.join(" ")}`,
+        cwd,
+        detail: "Git branch lookup failed.",
+        exitCode: result.exitCode,
+        stdoutLength: result.stdout.length,
+        stderrLength: result.stderr.length,
+      });
+    }),
     status: (input) =>
       detectGitRepositoryForStatus("GitWorkflowService.status", input.cwd).pipe(
         Effect.flatMap((isGitRepository) =>

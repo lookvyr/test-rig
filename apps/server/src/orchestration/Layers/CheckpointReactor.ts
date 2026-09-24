@@ -64,6 +64,19 @@ function sameId(left: string | null | undefined, right: string | null | undefine
   return left === right;
 }
 
+function shouldRefreshGitStatusAfterTool(event: ProviderRuntimeEvent): boolean {
+  return (
+    event.type === "item.completed" &&
+    [
+      "command_execution",
+      "file_change",
+      "mcp_tool_call",
+      "dynamic_tool_call",
+      "collab_agent_tool_call",
+    ].includes(event.payload.itemType)
+  );
+}
+
 function checkpointStatusFromRuntime(status: string | undefined): "ready" | "missing" | "error" {
   switch (status) {
     case "failed":
@@ -91,6 +104,15 @@ const make = Effect.gen(function* () {
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
+  // Tool events share a session cwd for the lifetime of a turn. Avoid listing
+  // all provider sessions again for every command in that turn.
+  const toolRefreshSessions = new Map<
+    ThreadId,
+    {
+      turnId: string | undefined;
+      runtime?: Option.Option<{ readonly threadId: ThreadId; readonly cwd: string }>;
+    }
+  >();
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -532,38 +554,52 @@ const make = Effect.gen(function* () {
     },
   );
 
-  const refreshLocalGitStatusFromTurnCompletion = Effect.fn(
-    "refreshLocalGitStatusFromTurnCompletion",
-  )(function* (event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>) {
-    const sessionRuntime = yield* resolveSessionRuntimeForThread(event.threadId);
-    if (Option.isNone(sessionRuntime)) {
-      return;
-    }
+  const refreshLocalGitStatusFromRuntimeEvent = Effect.fn("refreshLocalGitStatusFromRuntimeEvent")(
+    function* (
+      event: Extract<ProviderRuntimeEvent, { type: "turn.completed" | "item.completed" }>,
+    ) {
+      const turnSession =
+        event.type === "item.completed" ? toolRefreshSessions.get(event.threadId) : undefined;
+      const cachedTurn = turnSession?.turnId === event.turnId ? turnSession : undefined;
+      const sessionRuntime =
+        cachedTurn?.runtime ?? (yield* resolveSessionRuntimeForThread(event.threadId));
+      if (cachedTurn) cachedTurn.runtime = sessionRuntime;
+      if (Option.isNone(sessionRuntime)) {
+        return;
+      }
 
-    const local = yield* vcsStatusBroadcaster.refreshLocalStatus(sessionRuntime.value.cwd).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("failed to refresh local git status after turn completion", {
+      const local = yield* vcsStatusBroadcaster
+        .refreshLocalStatus(sessionRuntime.value.cwd, {
+          onlyIfBranchChanged: event.type === "item.completed",
+        })
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("failed to refresh local git status after provider activity", {
+              threadId: event.threadId,
+              turnId: event.turnId ?? null,
+              eventType: event.type,
+              cwd: sessionRuntime.value.cwd,
+              detail: error.message,
+            }).pipe(Effect.as(null)),
+          ),
+        );
+      // Tool completion pushes checkout changes while the agent is still working.
+      // Branch adoption and PR lookups stay at turn completion.
+      if (local !== null && event.type === "turn.completed") {
+        yield* followWorktreeBranchDrift({
           threadId: event.threadId,
-          turnId: event.turnId ?? null,
           cwd: sessionRuntime.value.cwd,
-          detail: error.message,
-        }).pipe(Effect.as(null)),
-      ),
-    );
-    if (local !== null) {
-      yield* followWorktreeBranchDrift({
-        threadId: event.threadId,
-        cwd: sessionRuntime.value.cwd,
-        local,
-      });
-      yield* refreshPullRequestAfterTurn({
-        threadId: event.threadId,
-        turnId: toTurnId(event.turnId),
-        cwd: sessionRuntime.value.cwd,
-        local,
-      });
-    }
-  });
+          local,
+        });
+        yield* refreshPullRequestAfterTurn({
+          threadId: event.threadId,
+          turnId: toTurnId(event.turnId),
+          cwd: sessionRuntime.value.cwd,
+          local,
+        });
+      }
+    },
+  );
 
   // Retry a missing PR after the agent finishes its push and PR creation.
   // Re-read the projected branch after drift adoption. A rejected metadata
@@ -920,13 +956,20 @@ const make = Effect.gen(function* () {
     event: ProviderRuntimeEvent,
   ) {
     if (event.type === "turn.started") {
+      toolRefreshSessions.set(event.threadId, { turnId: event.turnId });
       yield* ensurePreTurnBaselineFromTurnStart(event);
       return;
     }
 
+    if (event.type === "item.completed" && shouldRefreshGitStatusAfterTool(event)) {
+      yield* refreshLocalGitStatusFromRuntimeEvent(event);
+      return;
+    }
+
     if (event.type === "turn.completed") {
+      toolRefreshSessions.delete(event.threadId);
       const turnId = toTurnId(event.turnId);
-      yield* refreshLocalGitStatusFromTurnCompletion(event);
+      yield* refreshLocalGitStatusFromRuntimeEvent(event);
       yield* captureCheckpointFromTurnCompletion(event).pipe(
         Effect.catch((error) =>
           Effect.flatMap(nowIso, (createdAt) =>
@@ -997,7 +1040,11 @@ const make = Effect.gen(function* () {
 
     yield* forkParked(
       Stream.runForEach(providerService.streamEvents, (event) => {
-        if (event.type !== "turn.started" && event.type !== "turn.completed") {
+        if (
+          event.type !== "turn.started" &&
+          event.type !== "turn.completed" &&
+          !shouldRefreshGitStatusAfterTool(event)
+        ) {
           return Effect.void;
         }
         return worker.enqueue({ source: "runtime", event });
