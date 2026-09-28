@@ -4613,6 +4613,18 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (command === "terminal.previousGroup" || command === "terminal.nextGroup") {
+        if (terminalFocusOwner === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (terminalFocusOwner !== "drawer" || !activeThreadRef) return;
+        useTerminalUiStateStore
+          .getState()
+          .cycleTerminalGroup(activeThreadRef, command === "terminal.nextGroup" ? 1 : -1);
+        setTerminalFocusRequestId((value) => value + 1);
+        return;
+      }
+
       if (command === "terminal.split") {
         event.preventDefault();
         event.stopPropagation();

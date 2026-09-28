@@ -406,6 +406,18 @@ function setThreadActiveTerminal(
   };
 }
 
+function cycleThreadTerminalGroup(
+  state: ThreadTerminalUiState,
+  direction: -1 | 1,
+): ThreadTerminalUiState {
+  const normalized = normalizeThreadTerminalUiState(state);
+  const groups = normalized.terminalGroups;
+  if (groups.length < 2) return normalized;
+  const index = groups.findIndex((group) => group.id === normalized.activeTerminalGroupId);
+  const terminalId = groups[(index + direction + groups.length) % groups.length]?.terminalIds[0];
+  return terminalId ? setThreadActiveTerminal(normalized, terminalId) : normalized;
+}
+
 function closeThreadTerminal(
   state: ThreadTerminalUiState,
   terminalId: string,
@@ -575,6 +587,7 @@ interface TerminalUiStateStoreState {
     options?: { open?: boolean; active?: boolean },
   ) => void;
   setActiveTerminal: (threadRef: ScopedThreadRef, terminalId: string) => void;
+  cycleTerminalGroup: (threadRef: ScopedThreadRef, direction: -1 | 1) => void;
   closeTerminal: (threadRef: ScopedThreadRef, terminalId: string) => void;
   reconcileTerminalIds: (threadRef: ScopedThreadRef, nextIds: string[]) => void;
   clearTerminalUiState: (threadRef: ScopedThreadRef) => void;
@@ -682,6 +695,8 @@ export const useTerminalUiStateStore = create<TerminalUiStateStoreState>()(
           ),
         setActiveTerminal: (threadRef, terminalId) =>
           updateTerminal(threadRef, (state) => setThreadActiveTerminal(state, terminalId)),
+        cycleTerminalGroup: (threadRef, direction) =>
+          updateTerminal(threadRef, (state) => cycleThreadTerminalGroup(state, direction)),
         closeTerminal: (threadRef, terminalId) =>
           updateTerminal(threadRef, (state) => closeThreadTerminal(state, terminalId), {
             terminalId,

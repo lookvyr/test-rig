@@ -892,6 +892,50 @@ describe("plus key parsing", () => {
 
 describe("thread and panel default shortcuts", () => {
   for (const platform of ["MacIntel", "Linux"]) {
+    it(`cycles terminal groups only with terminal focus on ${platform}`, () => {
+      const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
+      for (const [key, command] of [
+        ["ArrowUp", "terminal.previousGroup"],
+        ["ArrowDown", "terminal.nextGroup"],
+      ] as const) {
+        const shortcut = event({ ...modifier, key, altKey: true });
+        assert.strictEqual(
+          resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+            context: { terminalFocus: true },
+          }),
+          command,
+        );
+        for (const context of [{}, { terminalFocus: false }, { previewFocus: true }]) {
+          assert.isNull(
+            resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context }),
+          );
+        }
+        const bindings: ResolvedKeybindingsConfig = [
+          ...DEFAULT_RESOLVED_KEYBINDINGS,
+          {
+            command: "sidebar.toggle",
+            shortcut: modShortcut(key.toLowerCase(), { altKey: true }),
+            whenAst: whenNot(whenIdentifier("terminalFocus")),
+          },
+        ];
+        assert.strictEqual(
+          resolveShortcutCommand(shortcut, bindings, {
+            platform,
+            context: { terminalFocus: true },
+          }),
+          command,
+        );
+        assert.strictEqual(
+          resolveShortcutCommand(shortcut, bindings, {
+            platform,
+            context: { terminalFocus: false },
+          }),
+          "sidebar.toggle",
+        );
+      }
+    });
+
     it(`cycles side tabs from sidebar, browser, or terminal focus on ${platform}`, () => {
       const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
       for (const [key, command] of [

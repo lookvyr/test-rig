@@ -82,6 +82,15 @@ shortcut; assign one in **Settings** → **Keybindings**.
 
 ## Thread and panel shortcuts
 
+With the bottom terminal focused, **Cmd+Option+Up/Down** on macOS or
+**Ctrl+Alt+Up/Down** on Windows/Linux selects the previous/next terminal group.
+Groups follow their displayed order and wrap at either end. A single group stays
+unchanged; switching groups focuses the first terminal in the destination group.
+These commands are `terminal.previousGroup` and `terminal.nextGroup`, configurable
+in **Settings** → **Keybindings**. Their defaults use `when: "terminalFocus"`, so
+the same keys can be assigned another action with `when: "!terminalFocus"`.
+Right-panel terminals retain the separate Left/Right tab shortcuts below.
+
 - `mod+shift+p` (`thread.pin`) pins or unpins the active thread.
 - `mod+shift+s` (`thread.settle`) settles the active thread or restores it to active. Threads that are running or waiting for input cannot be settled.
 - `mod+w` (`rightPanel.close`) closes the active right-panel tab, or hides the panel if it is open with no tabs. When no panel is open, the normal window or browser close behavior applies.

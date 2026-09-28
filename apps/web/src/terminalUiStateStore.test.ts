@@ -138,6 +138,63 @@ describe("terminalUiStateStore actions", () => {
     ]);
   });
 
+  it("cycles groups in displayed order, wrapping both ways and skipping split panes", () => {
+    const store = useTerminalUiStateStore.getState();
+    store.newTerminal(THREAD_REF, "first");
+    store.splitTerminal(THREAD_REF, "split");
+    store.newTerminal(THREAD_REF, "second");
+    store.newTerminal(THREAD_REF, "third");
+    const active = () =>
+      selectThreadTerminalUiState(
+        useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+        THREAD_REF,
+      ).activeTerminalId;
+
+    store.cycleTerminalGroup(THREAD_REF, 1);
+    expect(active()).toBe("first");
+    store.cycleTerminalGroup(THREAD_REF, -1);
+    expect(active()).toBe("third");
+    store.cycleTerminalGroup(THREAD_REF, -1);
+    expect(active()).toBe("second");
+    store.cycleTerminalGroup(THREAD_REF, -1);
+    expect(active()).toBe("first");
+    store.setActiveTerminal(THREAD_REF, "split");
+    store.cycleTerminalGroup(THREAD_REF, 1);
+    expect(active()).toBe("second");
+
+    store.closeTerminal(THREAD_REF, "third");
+    store.cycleTerminalGroup(THREAD_REF, 1);
+    expect(active()).toBe("first");
+    store.cycleTerminalGroup(THREAD_REF, 1);
+    expect(active()).toBe("second");
+    store.cycleTerminalGroup(THREAD_REF, -1);
+    expect(active()).toBe("first");
+  });
+
+  it("leaves empty and single groups unchanged, including the selected split pane", () => {
+    const store = useTerminalUiStateStore.getState();
+    for (const direction of [-1, 1] as const) {
+      store.cycleTerminalGroup(THREAD_REF, direction);
+      expect(
+        selectThreadTerminalUiState(
+          useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+          THREAD_REF,
+        ).terminalIds,
+      ).toEqual([]);
+    }
+    store.newTerminal(THREAD_REF, "first");
+    store.splitTerminal(THREAD_REF, "split");
+    for (const direction of [-1, 1] as const) {
+      store.cycleTerminalGroup(THREAD_REF, direction);
+      expect(
+        selectThreadTerminalUiState(
+          useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+          THREAD_REF,
+        ).activeTerminalId,
+      ).toBe("split");
+    }
+  });
+
   it("ensures unknown server terminals are registered, opened, and activated", () => {
     const store = useTerminalUiStateStore.getState();
     store.ensureTerminal(THREAD_REF, "setup-setup", { open: true, active: true });
