@@ -14,6 +14,12 @@ list item to leave the list; in code, use it after two trailing blank lines to
 continue below the block. **Tab** accepts a file, skill, or command suggestion.
 File and skill references inside code remain literal text.
 
+## Effort and speed
+
+The effort menu closes after you select any option, including effort level or
+speed. Reopen it to change another option. This also applies to model options in
+Settings.
+
 ## Drafts and stashes
 
 The new-thread heading gives longer project names more room and adapts to the
