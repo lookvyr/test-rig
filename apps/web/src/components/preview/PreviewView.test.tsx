@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   toggleAnnotation: null as (() => void) | null,
   pictureInPicture: false,
   showEmptyState: false,
+  controller: "none" as "none" | "human" | "agent",
 }));
 
 vi.mock("~/state/session", () => ({
@@ -65,7 +66,7 @@ vi.mock("~/previewStateStore", () => ({
         zoomFactor: 1,
         pictureInPicture: mocks.pictureInPicture,
         colorScheme: "system",
-        controller: "none",
+        controller: mocks.controller,
       },
     },
     recentlySeenUrls: [],
@@ -239,7 +240,20 @@ describe("PreviewView navigation", () => {
     mocks.toggleAnnotation = null;
     mocks.pictureInPicture = false;
     mocks.showEmptyState = false;
+    mocks.controller = "none";
   });
+
+  it.each(["none", "human", "agent"] as const)(
+    "does not show control badges (%s)",
+    (controller) => {
+      mocks.controller = controller;
+      const html = renderToStaticMarkup(
+        <PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />,
+      );
+      expect(html).not.toContain("Human control");
+      expect(html).not.toContain("Agent controlling browser");
+    },
+  );
 
   it("submits search terms to the active browser tab", async () => {
     renderToStaticMarkup(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);

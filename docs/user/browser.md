@@ -28,6 +28,10 @@ frames.
 
 ## Agent inspection and screenshots
 
+The agent cursor shows where the agent is interacting with the page, without
+control badges. Clicking or typing in the browser does not interrupt agent
+actions. Use the chat’s Stop control when you want to stop the agent.
+
 Ask the agent to inspect a page in Test Rig's integrated browser. Its snapshot
 includes page text, interactive elements, recent diagnostics, and an image.
 Large snapshots report which details were omitted so the agent can inspect a

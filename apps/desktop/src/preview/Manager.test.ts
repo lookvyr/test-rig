@@ -1,3 +1,4 @@
+import * as NodeEvents from "node:events";
 import { it as effectIt } from "@effect/vitest";
 import type { DesktopPreviewRecordingFrame } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -1953,10 +1954,10 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("still interrupts agent control for a different human pointer event", () =>
+  effectIt.effect("does not interrupt agent input when manual pointer and key events arrive", () =>
     withManager((manager) =>
       Effect.gen(function* () {
-        let humanInput: ((_event: unknown, signal: unknown) => void) | undefined;
+        const ipc = new NodeEvents.EventEmitter();
         const sendCommand = vi.fn(async (method: string) => {
           if (method === "Runtime.evaluate") {
             return {
@@ -1966,7 +1967,8 @@ describe("PreviewManager", () => {
             };
           }
           if (method === "Input.dispatchMouseEvent") {
-            humanInput?.({}, { kind: "pointer", x: 400, y: 300, button: 0 });
+            ipc.emit("preview:human-input", {}, { kind: "pointer", x: 400, y: 300, button: 0 });
+            ipc.emit("preview:human-input", {}, { kind: "key", key: "a", code: "KeyA" });
           }
           return undefined;
         });
@@ -1982,12 +1984,7 @@ describe("PreviewManager", () => {
           setZoomFactor: vi.fn(),
           on: vi.fn(),
           off: vi.fn(),
-          ipc: {
-            on: vi.fn((channel: string, listener: typeof humanInput) => {
-              if (channel === "preview:human-input") humanInput = listener;
-            }),
-            off: vi.fn(),
-          },
+          ipc,
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setWindowOpenHandler: vi.fn(),
@@ -2008,20 +2005,15 @@ describe("PreviewManager", () => {
           .pipe(Effect.forkChild({ startImmediately: true }));
         yield* TestClock.adjust(200);
         const exit = yield* Fiber.await(click);
-        expect(Exit.isFailure(exit)).toBe(true);
-        if (Exit.isSuccess(exit)) return;
-        const error = Option.getOrThrow(Cause.findErrorOption(exit.cause));
-        expect(error).toMatchObject({
-          _tag: "PreviewAutomationControlInterruptedError",
-          operation: "click",
-          tabId: "tab_1",
-          webContentsId: 42,
+        expect(Exit.isSuccess(exit)).toBe(true);
+        expect(ipc.listenerCount("preview:human-input")).toBe(0);
+        expect(sendCommand).toHaveBeenCalledWith("Input.dispatchMouseEvent", {
+          type: "mouseReleased",
+          x: 120,
+          y: 80,
+          button: "left",
+          clickCount: 1,
         });
-        expect(error).toBeInstanceOf(Error);
-        if (error instanceof Error) {
-          expect(error.name).toBe("PreviewAutomationControlInterruptedError");
-        }
-        expect("cause" in error).toBe(false);
       }),
     ),
   );
