@@ -100,7 +100,10 @@ import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
-import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
+import {
+  OrchestrationCommandInvariantError,
+  OrchestrationListenerCallbackError,
+} from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
@@ -1225,6 +1228,235 @@ const NodeHttpServerTestWithWsDeflate = HttpServer.layerTestClient.pipe(
 );
 
 it.layer(NodeServices.layer)("server router seam", (it) => {
+  it.effect("creates the Scratch project once and restores its folder on reuse", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const created: Array<{ readonly projectId: ProjectId; readonly workspaceRoot: string }> = [];
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                if (command.type === "project.create") {
+                  created.push({
+                    projectId: command.projectId,
+                    workspaceRoot: command.workspaceRoot,
+                  });
+                }
+                return { sequence: created.length };
+              }),
+          },
+          projectionSnapshotQuery: {
+            getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
+              Effect.succeed(
+                Option.fromNullishOr(
+                  created.find((project) => project.workspaceRoot === workspaceRoot),
+                ).pipe(
+                  Option.map((project) => ({
+                    ...makeDefaultOrchestrationReadModel().projects[0]!,
+                    id: project.projectId,
+                    workspaceRoot,
+                  })),
+                ),
+              ),
+          },
+        },
+      });
+
+      yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          Effect.gen(function* () {
+            const config = yield* client[WS_METHODS.serverGetConfig]({});
+            const scratchRoot = config.scratchWorkspaceRoot ?? "";
+            const first = yield* client[WS_METHODS.projectsEnsureScratch]({});
+            // A user may delete the folder; reuse must bring it back.
+            yield* fileSystem.remove(scratchRoot, { recursive: true });
+            const second = yield* client[WS_METHODS.projectsEnsureScratch]({});
+
+            assert.isTrue(scratchRoot.endsWith("scratch"));
+            assert.equal(created.length, 1);
+            assert.equal(created[0]?.workspaceRoot, scratchRoot);
+            assert.equal(first.projectId, created[0]?.projectId);
+            assert.equal(second.projectId, first.projectId);
+            assert.isTrue(yield* fileSystem.exists(scratchRoot));
+          }),
+        ),
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("resolves a lost Scratch create race to the winning project", () =>
+    Effect.gen(function* () {
+      const winnerId = ProjectId.make("project-scratch-winner");
+      let lookups = 0;
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.fail(
+                new OrchestrationCommandInvariantError({
+                  commandType: command.type,
+                  detail: "Active project already exists for workspace root.",
+                }),
+              ),
+          },
+          projectionSnapshotQuery: {
+            // Empty before the create, then the other client's project.
+            getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
+              Effect.sync(() =>
+                lookups++ === 0
+                  ? Option.none()
+                  : Option.some({
+                      ...makeDefaultOrchestrationReadModel().projects[0]!,
+                      id: winnerId,
+                      workspaceRoot,
+                    }),
+              ),
+          },
+        },
+      });
+
+      const result = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client[WS_METHODS.projectsEnsureScratch]({}),
+        ),
+      );
+      assert.equal(result.projectId, winnerId);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("gives each new Scratch thread its own folder", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const scratchProjectId = ProjectId.make("project-scratch");
+      let scratchRoot = "";
+      const created: Array<string | null> = [];
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                if (command.type === "thread.create") created.push(command.worktreePath);
+                return { sequence: created.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: (projectId) =>
+              Effect.succeed(
+                projectId === scratchProjectId
+                  ? Option.some({
+                      id: scratchProjectId,
+                      title: "Scratch",
+                      workspaceRoot: scratchRoot,
+                      defaultModelSelection: null,
+                      scripts: [],
+                      createdAt: "2026-09-25T00:00:00.000Z",
+                      updatedAt: "2026-09-25T00:00:00.000Z",
+                    })
+                  : Option.none(),
+              ),
+          },
+        },
+      });
+
+      yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          Effect.gen(function* () {
+            scratchRoot =
+              (yield* client[WS_METHODS.serverGetConfig]({})).scratchWorkspaceRoot ?? "";
+            const createdAt = "2026-09-25T10:00:00.000Z";
+            // The second id shares the first's short prefix, the third tries to
+            // climb out of the scratch root, and the fourth pastes a long token.
+            const text = "Convert these PNGs to WebP, please!";
+            const starts = [
+              { id: "a1b2c3d4-scratch-thread", text },
+              { id: "a1b2c3d4-other", text },
+              { id: "../../escape", text },
+              { id: "f00dcafe-long", text: "x".repeat(300) },
+              { id: "a1b2c3d4-scratch-thread", text: "Retry with different text" },
+              { id: "a1b2c3d4scratchthread", text },
+            ];
+            for (const [index, { id, text: messageText }] of starts.entries()) {
+              yield* client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+                type: "thread.turn.start",
+                commandId: CommandId.make(`cmd-scratch-turn-start-${index}`),
+                threadId: ThreadId.make(id),
+                message: {
+                  messageId: MessageId.make(`msg-scratch-${index}`),
+                  role: "user",
+                  text: messageText,
+                  attachments: [],
+                },
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                bootstrap: {
+                  createThread: {
+                    projectId: scratchProjectId,
+                    title: "New thread",
+                    modelSelection: defaultModelSelection,
+                    runtimeMode: "full-access",
+                    interactionMode: "default",
+                    branch: null,
+                    worktreePath: null,
+                    createdAt,
+                  },
+                },
+                createdAt,
+              });
+            }
+            // Direct creation (used outside the composer's bootstrap flow)
+            // must resolve to the same folder for the same thread id.
+            yield* client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+              type: "thread.create",
+              commandId: CommandId.make("cmd-scratch-direct-create"),
+              threadId: ThreadId.make(starts[0]!.id),
+              projectId: scratchProjectId,
+              title: "Direct Scratch thread",
+              modelSelection: defaultModelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              createdAt,
+            });
+          }),
+        ),
+      );
+
+      assert.equal(created[0], created[4]);
+      assert.equal(created[0], created[6]);
+      assert.notEqual(created[0], created[5]);
+      assert.equal(new Set(created).size, 5);
+      for (const folder of created) assert.match(path.basename(folder ?? ""), /^[a-f0-9]{24}$/);
+      for (const folder of created) {
+        assert.equal(path.dirname(folder ?? ""), scratchRoot);
+        assert.isTrue(yield* fileSystem.exists(folder ?? ""));
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("withholds Scratch when the data dir sits inside a work tree", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: { vcsDriver: { isInsideWorkTree: () => Effect.succeed(true) } },
+      });
+      yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          Effect.gen(function* () {
+            const config = yield* client[WS_METHODS.serverGetConfig]({});
+            const ensure = yield* Effect.flip(client[WS_METHODS.projectsEnsureScratch]({}));
+
+            assert.isUndefined(config.scratchWorkspaceRoot);
+            assert.include(String(ensure.message), "not available");
+          }),
+        ),
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("parks HTTP ingress until command readiness", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

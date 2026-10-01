@@ -93,6 +93,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "composer.stash",
   "chat.new",
   "chat.newLocal",
+  "chat.newWithoutProject",
   "editor.openFavorite",
   "pullRequest.open",
   ...PULL_REQUEST_JUMP_KEYBINDING_COMMANDS,

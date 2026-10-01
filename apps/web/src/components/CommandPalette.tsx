@@ -1,5 +1,8 @@
 "use client";
 
+import { useScratchProject } from "../hooks/useScratchProject";
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
@@ -34,6 +37,7 @@ import {
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
+  MessageSquareDashedIcon,
   GitPullRequestIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -582,6 +586,7 @@ function OpenCommandPaletteDialog(props: {
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
+  const { scratchEnvironmentId, scratchWorkspaceRootFor, startScratchThread } = useScratchProject();
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
   });
@@ -844,6 +849,11 @@ function OpenCommandPaletteDialog(props: {
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
+  // Where "without a project" threads start: the current environment when it
+  // offers them, or the sole available environment when none is current.
+  const scratchTargetEnvironmentId = scratchEnvironmentId(
+    currentProjectEnvironmentId ?? primaryEnvironmentId,
+  );
   const currentProjectCwd = currentProjectId
     ? (projectCwdById.get(currentProjectId) ?? null)
     : null;
@@ -979,9 +989,12 @@ function OpenCommandPaletteDialog(props: {
 
   const projectThreadItems = useMemo(
     () =>
-      enumerateCommandPaletteItems(
-        buildProjectActionItems({
-          projects: pickerProjects,
+      enumerateCommandPaletteItems([
+        ...buildProjectActionItems({
+          // The no-project home shows once, as the "No project" item below.
+          projects: pickerProjects.filter(
+            (project) => !isScratchProject(project, scratchWorkspaceRootFor(project.environmentId)),
+          ),
           valuePrefix: "new-thread-in",
           searchTerms: (project) => {
             const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
@@ -1006,8 +1019,29 @@ function OpenCommandPaletteDialog(props: {
             );
           },
         }),
-      ),
-    [contextualProjectRef, handleNewThread, pickerProjects, projectGroupByTargetKey],
+        ...(scratchTargetEnvironmentId === null
+          ? []
+          : [
+              {
+                kind: "action" as const,
+                value: "new-thread-in:no-project",
+                searchTerms: ["no project", "without project", "none"],
+                title: "No project",
+                icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
+                shortcutCommand: "chat.newWithoutProject" as const,
+                run: () => startScratchThread(scratchTargetEnvironmentId),
+              },
+            ]),
+      ]),
+    [
+      contextualProjectRef,
+      handleNewThread,
+      pickerProjects,
+      projectGroupByTargetKey,
+      scratchTargetEnvironmentId,
+      scratchWorkspaceRootFor,
+      startScratchThread,
+    ],
   );
 
   const allThreadItems = useMemo(
@@ -1402,7 +1436,19 @@ function OpenCommandPaletteDialog(props: {
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
-  if (projects.length > 0) {
+  if (scratchTargetEnvironmentId !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:new-thread-without-project",
+      searchTerms: ["new thread", "no project", "without project", "chat"],
+      title: "New thread without a project",
+      icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.newWithoutProject",
+      run: () => startScratchThread(scratchTargetEnvironmentId),
+    });
+  }
+
+  if (projectThreadItems.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);

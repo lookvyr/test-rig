@@ -418,6 +418,8 @@ export const ServerSignalProcessResult = Schema.Struct({
 export type ServerSignalProcessResult = typeof ServerSignalProcessResult.Type;
 
 export const ServerConfig = Schema.Struct({
+  /** Scratch root, advertised only when no-project threads are available. */
+  scratchWorkspaceRoot: Schema.optionalKey(TrimmedNonEmptyString),
   environment: ExecutionEnvironmentDescriptor,
   auth: ServerAuthDescriptor,
   cwd: TrimmedNonEmptyString,

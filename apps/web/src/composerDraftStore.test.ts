@@ -1112,6 +1112,102 @@ describe("composerDraftStore project draft thread mapping", () => {
     });
   });
 
+  it("retargets a draft without losing destination text or leaving a stale project mapping", () => {
+    const store = useComposerDraftStore.getState();
+    const destination = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("scratch"));
+    const destinationDraft = DraftId.make("scratch-draft");
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.setPrompt(draftId, "take this prompt with me");
+    store.setProjectDraftThreadId(destination, destinationDraft);
+    store.setPrompt(destinationDraft, "keep this existing prompt");
+    store.setLogicalProjectDraftThreadId(scopedProjectKey(destination), destination, draftId, {
+      envMode: "local",
+      branch: null,
+      worktreePath: null,
+      startFromOrigin: false,
+    });
+    const next = useComposerDraftStore.getState();
+    expect(next.getDraftSessionByLogicalProjectKey(scopedProjectKey(projectRef))).toBeNull();
+    expect(next.getDraftSessionByLogicalProjectKey(scopedProjectKey(destination))?.draftId).toBe(
+      draftId,
+    );
+    expect(next.getComposerDraft(draftId)?.prompt).toBe("take this prompt with me");
+    expect(next.getComposerDraft(destinationDraft)?.prompt).toBe("keep this existing prompt");
+    expect(next.getDraftSession(destinationDraft)?.projectId).toBe(destination.projectId);
+    expect(next.listDraftThreadKeys()).toContain(
+      scopedThreadKey(scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make(destinationDraft))),
+    );
+    markPromotedDraftThread(threadId);
+    const recovered = useComposerDraftStore
+      .getState()
+      .getDraftSessionByLogicalProjectKey(scopedProjectKey(destination));
+    expect(recovered?.draftId).toBe(destinationDraft);
+    expect(useComposerDraftStore.getState().getComposerDraft(recovered!.draftId)?.prompt).toBe(
+      "keep this existing prompt",
+    );
+  });
+
+  it.each([TEST_ENVIRONMENT_ID, OTHER_TEST_ENVIRONMENT_ID])(
+    "preserves both drafts and attachments when switching to scratch on %s and back",
+    (environmentId) => {
+      const store = useComposerDraftStore.getState();
+      const scratch = scopeProjectRef(environmentId, ProjectId.make("scratch"));
+      const parkedId = DraftId.make("parked-scratch-draft");
+      const movingImage = makeImage({ id: "moving-image", previewUrl: "blob:moving" });
+      const parkedImage = makeImage({ id: "parked-image", previewUrl: "blob:parked" });
+      store.setProjectDraftThreadId(projectRef, draftId, {
+        threadId,
+        branch: "feature/original",
+        worktreePath: "/tmp/original-worktree",
+        envMode: "worktree",
+      });
+      store.setPrompt(draftId, "moving prompt");
+      store.addImage(draftId, movingImage);
+      store.setProjectDraftThreadId(scratch, parkedId);
+      store.setPrompt(parkedId, "parked prompt");
+      store.addImage(parkedId, parkedImage);
+
+      store.setLogicalProjectDraftThreadId(scopedProjectKey(scratch), scratch, draftId, {
+        envMode: "local",
+        branch: null,
+        worktreePath: null,
+        startFromOrigin: false,
+      });
+      expect(store.getDraftSession(draftId)).toMatchObject({
+        environmentId,
+        projectId: scratch.projectId,
+        envMode: "local",
+        branch: null,
+        worktreePath: null,
+      });
+      expect(store.getDraftSessionByLogicalProjectKey(scopedProjectKey(projectRef))).toBeNull();
+
+      store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, draftId, {
+        envMode: "worktree",
+        branch: null,
+        worktreePath: null,
+        startFromOrigin: true,
+      });
+      expect(store.getDraftSessionByLogicalProjectKey(scopedProjectKey(projectRef))).toMatchObject({
+        draftId,
+        environmentId: TEST_ENVIRONMENT_ID,
+        envMode: "worktree",
+        startFromOrigin: true,
+      });
+      expect(store.getDraftSessionByLogicalProjectKey(scopedProjectKey(scratch))?.draftId).toBe(
+        parkedId,
+      );
+      expect(store.getComposerDraft(draftId)).toMatchObject({
+        prompt: "moving prompt",
+        images: [movingImage],
+      });
+      expect(store.getComposerDraft(parkedId)).toMatchObject({
+        prompt: "parked prompt",
+        images: [parkedImage],
+      });
+    },
+  );
+
   it("clears branch and worktree but keeps env mode when remapping a draft to another environment", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, {

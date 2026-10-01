@@ -1,3 +1,7 @@
+import * as NodeCrypto from "node:crypto";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -31,7 +35,7 @@ import {
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
-  type ProjectId,
+  ProjectId,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -963,7 +967,108 @@ const makeWsRpcLayer = (
           );
         });
 
-      const dispatchNormalizedCommand = (
+      const path = yield* Path.Path;
+      const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
+      // Scratch threads run in a plain folder under the data dir. Inside a
+      // checkout (a dev worktree's .test-rig, a dotfiles home) that folder would
+      // inherit the repo's git status and checkpoints, so it is only offered
+      // when the data dir is outside any work tree. Detection failures and
+      // defects fail closed and hide the folder, never the config.
+      // Probed once per connection: a negative VCS detection is not cached.
+      // An interrupt stays an interrupt, so a config load cancelled mid-probe
+      // invalidates the cache and the next load probes again.
+      const [cachedScratchWorkspaceRoot, invalidateScratchWorkspaceRoot] =
+        yield* Effect.cachedInvalidateWithTTL(
+          vcsRegistry.get("git").pipe(
+            Effect.flatMap((driver) => driver.isInsideWorkTree(config.baseDir)),
+            Effect.map((isRepository) =>
+              isRepository ? undefined : path.resolve(config.baseDir, "scratch"),
+            ),
+            Effect.catchCause((cause) =>
+              Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.void,
+            ),
+          ),
+          Duration.infinity,
+        );
+      const resolveScratchWorkspaceRoot = cachedScratchWorkspaceRoot.pipe(
+        Effect.onInterrupt(() => invalidateScratchWorkspaceRoot),
+      );
+
+      const fileSystem = yield* FileSystem.FileSystem;
+      // Reuse the thread workspace field so providers, terminals and files agree.
+      // Hash the complete id: retries reuse the same folder, and arbitrary ids
+      // cannot escape the root or collide after punctuation is stripped.
+      // Keep 96 bits in lowercase hex for short prompts on case-insensitive filesystems too.
+      const scratchThreadFolder = (input: {
+        readonly threadId: ThreadId;
+        readonly projectId: ProjectId;
+        readonly worktreePath: string | null;
+      }): Effect.Effect<string | null, OrchestrationDispatchCommandError> =>
+        Effect.gen(function* () {
+          if (input.worktreePath !== null) return null;
+          const scratchRoot = yield* resolveScratchWorkspaceRoot;
+          if (scratchRoot === undefined) return null;
+          const project = yield* projectionSnapshotQuery.getProjectShellById(input.projectId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationDispatchCommandError({
+                  message: "Failed to look up the thread's project.",
+                  cause,
+                }),
+            ),
+          );
+          if (
+            Option.isNone(project) ||
+            normalizeProjectPathForComparison(project.value.workspaceRoot) !==
+              normalizeProjectPathForComparison(scratchRoot)
+          ) {
+            return null;
+          }
+          const folder = path.join(
+            scratchRoot,
+            NodeCrypto.createHash("sha256").update(input.threadId).digest("hex").slice(0, 24),
+          );
+          yield* fileSystem.makeDirectory(folder, { recursive: true }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationDispatchCommandError({
+                  message: "Failed to create the thread's folder.",
+                  cause,
+                }),
+            ),
+          );
+          return folder;
+        });
+      const withScratchThreadFolder = (
+        command: OrchestrationCommand,
+      ): Effect.Effect<OrchestrationCommand, OrchestrationDispatchCommandError> => {
+        if (command.type === "thread.create") {
+          return scratchThreadFolder(command).pipe(
+            Effect.map((worktreePath) =>
+              worktreePath === null ? command : { ...command, worktreePath },
+            ),
+          );
+        }
+        if (command.type !== "thread.turn.start") return Effect.succeed(command);
+        const bootstrap = command.bootstrap;
+        const createThread = bootstrap?.createThread;
+        if (bootstrap === undefined || createThread === undefined) return Effect.succeed(command);
+        return scratchThreadFolder({
+          ...createThread,
+          threadId: command.threadId,
+        }).pipe(
+          Effect.map((worktreePath) =>
+            worktreePath === null
+              ? command
+              : {
+                  ...command,
+                  bootstrap: { ...bootstrap, createThread: { ...createThread, worktreePath } },
+                },
+          ),
+        );
+      };
+
+      const dispatchPreparedCommand = (
         normalizedCommand: OrchestrationCommand,
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
         const dispatchEffect =
@@ -986,6 +1091,73 @@ const makeWsRpcLayer = (
           );
       };
 
+      const dispatchNormalizedCommand = (
+        command: OrchestrationCommand,
+      ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> =>
+        withScratchThreadFolder(command).pipe(Effect.flatMap(dispatchPreparedCommand));
+
+      // One Scratch project per environment, created the first time a client
+      // asks. Two clients racing the create both reach dispatch; the loser's
+      // duplicate-root rejection resolves to the project the winner made.
+      // The folder is (re)made on every call so a deleted Scratch still runs.
+      const ensureScratchProject = Effect.gen(function* () {
+        const workspaceRoot = yield* resolveScratchWorkspaceRoot;
+        if (workspaceRoot === undefined) {
+          return yield* new OrchestrationDispatchCommandError({
+            message: "Threads without a project are not available on this environment.",
+          });
+        }
+        yield* fileSystem.makeDirectory(workspaceRoot, { recursive: true }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationDispatchCommandError({
+                message: "Failed to create the folder for threads without a project.",
+                cause,
+              }),
+          ),
+        );
+        const findScratchProjectId = projectionSnapshotQuery
+          .getActiveProjectByWorkspaceRoot(workspaceRoot)
+          .pipe(
+            Effect.map(Option.map((project) => project.id)),
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationDispatchCommandError({
+                  message: "Failed to look up the home for threads without a project.",
+                  cause,
+                }),
+            ),
+          );
+        const existingProjectId = yield* findScratchProjectId;
+        if (Option.isSome(existingProjectId)) {
+          return { projectId: existingProjectId.value };
+        }
+        const projectId = ProjectId.make(yield* randomUUID);
+        return yield* Effect.gen(function* () {
+          const command = yield* normalizeDispatchCommand({
+            type: "project.create",
+            commandId: yield* serverCommandId("scratch-project-create"),
+            projectId,
+            title: "No project",
+            workspaceRoot,
+            createdAt: yield* nowIso,
+          });
+          yield* dispatchNormalizedCommand(command);
+          return { projectId };
+        }).pipe(
+          Effect.catch((error) =>
+            findScratchProjectId.pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () => Effect.fail(error),
+                  onSome: (racedProjectId) => Effect.succeed({ projectId: racedProjectId }),
+                }),
+              ),
+            ),
+          ),
+        );
+      });
+
       const loadServerConfig = Effect.gen(function* () {
         const keybindingsConfig = yield* keybindings.loadConfigState;
         const providers = yield* providerRegistry.getProviders;
@@ -994,11 +1166,13 @@ const makeWsRpcLayer = (
         );
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();
+        const scratchWorkspaceRoot = yield* resolveScratchWorkspaceRoot;
 
         return {
           environment,
           auth,
           cwd: config.cwd,
+          ...(scratchWorkspaceRoot === undefined ? {} : { scratchWorkspaceRoot }),
           keybindingsConfigPath: config.keybindingsConfigPath,
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
@@ -1648,6 +1822,10 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.projectsEnsureScratch]: () =>
+          observeRpcEffect(WS_METHODS.projectsEnsureScratch, ensureScratchProject, {
+            "rpc.aggregate": "orchestration",
+          }),
         [WS_METHODS.projectsWriteFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsWriteFile,

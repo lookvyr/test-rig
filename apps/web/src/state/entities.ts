@@ -218,6 +218,27 @@ export function readProject(ref: ScopedProjectRef): EnvironmentProject | null {
   return appAtomRegistry.get(environmentProjects.projectAtom(ref));
 }
 
+/** Wait for the project stream after a create RPC; the response can arrive first. */
+export function waitForProject(ref: ScopedProjectRef): Promise<EnvironmentProject> {
+  const atom = environmentProjects.projectAtom(ref);
+  const current = appAtomRegistry.get(atom);
+  if (current) return Promise.resolve(current);
+  return new Promise((resolve, reject) => {
+    const timeout = globalThis.setTimeout(() => {
+      unsubscribe();
+      reject(new Error("The project did not arrive. Please try again."));
+    }, 10_000);
+    const finish = (project: EnvironmentProject | null) => {
+      if (!project) return;
+      globalThis.clearTimeout(timeout);
+      unsubscribe();
+      resolve(project);
+    };
+    const unsubscribe = appAtomRegistry.subscribe(atom, finish);
+    finish(appAtomRegistry.get(atom));
+  });
+}
+
 export function readThreadShell(ref: ScopedThreadRef): EnvironmentThreadShell | null {
   return appAtomRegistry.get(environmentThreadShells.threadShellAtom(ref));
 }

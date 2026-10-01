@@ -1,3 +1,6 @@
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentServerConfigsAtom } from "../state/server";
 import { useAtomValue } from "@effect/atom-react";
 import {
   scopedProjectKey,
@@ -20,7 +23,7 @@ import {
   getProjectOrderKey,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { readThreadShell, useProjects, useThread } from "../state/entities";
+import { readProject, readThreadShell, useProjects, useThread } from "../state/entities";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import { primaryServerSettingsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
@@ -28,7 +31,6 @@ import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore"
 import { useClientSettings } from "./useSettings";
 
 export function useNewThreadHandler() {
-  const projects = useProjects();
   // New-thread defaults are a user preference, and the settings UI only ever
   // edits the primary environment's settings.json. Reading the target
   // environment's own settings here would silently reset remote projects to
@@ -45,7 +47,7 @@ export function useNewThreadHandler() {
   return useCallback(
     (
       projectRef: ScopedProjectRef,
-      options?: {
+      inputOptions?: {
         branch?: string | null;
         worktreePath?: string | null;
         envMode?: DraftThreadEnvMode;
@@ -103,11 +105,22 @@ export function useNewThreadHandler() {
         carrySourceShell?.interactionMode ??
         carrySourceDraft?.interactionMode ??
         null;
-      const project = projects.find(
-        (candidate) =>
-          candidate.id === projectRef.projectId &&
-          candidate.environmentId === projectRef.environmentId,
-      );
+      const project = readProject(projectRef);
+      const options =
+        project &&
+        isScratchProject(
+          project,
+          appAtomRegistry.get(environmentServerConfigsAtom).get(projectRef.environmentId)
+            ?.scratchWorkspaceRoot,
+        )
+          ? {
+              ...inputOptions,
+              envMode: "local" as const,
+              branch: null,
+              worktreePath: null,
+              startFromOrigin: false,
+            }
+          : inputOptions;
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
@@ -287,7 +300,7 @@ export function useNewThreadHandler() {
         });
       })();
     },
-    [getCurrentRouteTarget, primaryServerSettings, projectGroupingSettings, projects, router],
+    [getCurrentRouteTarget, primaryServerSettings, projectGroupingSettings, router],
   );
 }
 

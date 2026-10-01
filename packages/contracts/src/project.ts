@@ -2,9 +2,13 @@ import * as Schema from "effect/Schema";
 import {
   NonNegativeInt,
   PositiveInt,
+  ProjectId,
   TrimmedNonEmptyString,
   TrimmedString,
 } from "./baseSchemas.ts";
+
+export const ProjectEnsureScratchResult = Schema.Struct({ projectId: ProjectId });
+export type ProjectEnsureScratchResult = typeof ProjectEnsureScratchResult.Type;
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_SEARCH_CONTENTS_MAX_LIMIT = 500;

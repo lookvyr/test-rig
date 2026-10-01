@@ -1,3 +1,5 @@
+import { useScratchProject } from "../hooks/useScratchProject";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute } from "@tanstack/react-router";
 import { PlusIcon, RotateCcwIcon } from "lucide-react";
@@ -93,6 +95,9 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
 }
 
 function NoProjectsHero() {
+  const { scratchEnvironmentId, startScratchThread } = useScratchProject();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const scratchTarget = scratchEnvironmentId(primaryEnvironmentId);
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
 
   return (
@@ -105,13 +110,24 @@ function NoProjectsHero() {
                 What should we work on?
               </EmptyTitle>
               <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                Add a project to start your first thread.
+                {scratchTarget
+                  ? "Add a project, or start without one."
+                  : "Add a project to start your first thread."}
               </EmptyDescription>
-              <div className="mt-6 flex justify-center">
+              <div className="mt-6 flex justify-center gap-2">
                 <Button size="sm" onClick={openAddProject}>
                   <PlusIcon className="size-4" />
                   Add project
                 </Button>
+                {scratchTarget && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void startScratchThread(scratchTarget)}
+                  >
+                    Start without a project
+                  </Button>
+                )}
               </div>
             </EmptyHeader>
           </div>

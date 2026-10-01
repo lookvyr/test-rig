@@ -99,3 +99,16 @@ September 17 composer prototype:
   and the rich/plain setting are not included. Links, tables, and task checkboxes
   remain literal. The code mark permits nested formatting, addressing the issue
   identified in [#12290](https://github.com/pingdotgg/t3code/pull/12290).
+
+## Threads without a project
+
+Adapted [#13612](https://github.com/pingdotgg/t3code/pull/13612): one lazily created
+project rooted at the environment's scratch directory, with a separate folder
+per thread carried in `worktreePath`. Contracts and authorization advertise
+`projects.ensureScratch` only alongside `scratchWorkspaceRoot`. No database
+migration or provider changes are needed.
+
+Test Rig uses the first 24 hex characters of a hash of the complete thread ID for
+short, stable folder names across retries, omits upstream's custom icon and mobile changes, and preserves existing
+drafts when changing the unsent draft's project. Development verification needs
+an explicit `--home-dir` outside a Git checkout.

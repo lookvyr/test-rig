@@ -2210,16 +2210,25 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           if (normalizedLogicalProjectKey.length === 0) {
             return null;
           }
-          const draftId =
-            get().logicalProjectDraftThreadKeyByLogicalProjectKey[normalizedLogicalProjectKey];
-          if (!draftId) {
-            return null;
+          const state = get();
+          const preferredId =
+            state.logicalProjectDraftThreadKeyByLogicalProjectKey[normalizedLogicalProjectKey];
+          const preferred = preferredId ? state.draftThreadsByThreadKey[preferredId] : undefined;
+          if (
+            preferred &&
+            preferred.logicalProjectKey === normalizedLogicalProjectKey &&
+            !isDraftThreadPromoting(preferred)
+          ) {
+            return toProjectDraftSession(DraftId.make(preferredId!), preferred);
           }
-          const draftThread = get().draftThreadsByThreadKey[draftId];
-          if (!draftThread || isDraftThreadPromoting(draftThread)) {
-            return null;
-          }
-          return toProjectDraftSession(DraftId.make(draftId), draftThread);
+          // Retargeting may leave an older draft parked in this project. Reopen
+          // it once the preferred draft is sent or moved instead of losing it.
+          const fallback = Object.entries(state.draftThreadsByThreadKey).find(
+            ([, draft]) =>
+              draft.logicalProjectKey === normalizedLogicalProjectKey &&
+              !isDraftThreadPromoting(draft),
+          );
+          return fallback ? toProjectDraftSession(DraftId.make(fallback[0]), fallback[1]) : null;
         },
         getDraftThreadByProjectRef: (projectRef) => {
           return get().getDraftSessionByProjectRef(projectRef);
@@ -2283,12 +2292,19 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               existingThread,
               options,
             );
+            const isRetargeting =
+              existingThread !== undefined &&
+              existingThread.logicalProjectKey !== normalizedLogicalProjectKey;
             const hasSameLogicalMapping = previousThreadKeyForLogicalProject === draftId;
             if (hasSameLogicalMapping && draftThreadsEqual(existingThread, nextDraftThread)) {
               return state;
             }
             const nextLogicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string> = {
-              ...state.logicalProjectDraftThreadKeyByLogicalProjectKey,
+              ...Object.fromEntries(
+                Object.entries(state.logicalProjectDraftThreadKeyByLogicalProjectKey).filter(
+                  ([, value]) => !isRetargeting || value !== draftId,
+                ),
+              ),
               [normalizedLogicalProjectKey]: draftId,
             };
             const nextDraftThreadsByThreadKey: Record<string, DraftThreadState> = {
@@ -2301,6 +2317,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 ? undefined
                 : nextDraftThreadsByThreadKey[previousThreadKeyForLogicalProject];
             if (
+              !isRetargeting &&
               previousThreadKeyForLogicalProject &&
               previousThreadKeyForLogicalProject !== draftId &&
               !isComposerThreadKeyInUse(

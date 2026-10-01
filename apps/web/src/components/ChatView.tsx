@@ -1,3 +1,4 @@
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
 import {
   type ApprovalRequestId,
@@ -2461,7 +2462,9 @@ function ChatViewContent(props: ChatViewProps) {
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   // Default true while loading to avoid toolbar flicker.
-  const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const isScratch =
+    activeProject != null && isScratchProject(activeProject, serverConfig?.scratchWorkspaceRoot);
+  const isGitRepo = !isScratch && (gitStatusQuery.data?.isRepo ?? true);
   const showComposerContextStrip = shouldShowComposerContextStrip({
     hasActiveProject: activeProject !== null,
     isGitRepo,
@@ -6039,7 +6042,7 @@ function ChatViewContent(props: ChatViewProps) {
             keybindings={keybindings}
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
-            gitCwd={gitCwd}
+            gitCwd={isScratch ? null : gitCwd}
             onShowPullRequest={
               pullRequestSelection && activeThreadRef
                 ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
@@ -6165,6 +6168,7 @@ function ChatViewContent(props: ChatViewProps) {
                         }
                       >
                         <DraftHeroHeadline
+                          draftId={draftId}
                           activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
                         />

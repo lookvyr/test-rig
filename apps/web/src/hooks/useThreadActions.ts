@@ -1,3 +1,6 @@
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentServerConfigsAtom } from "../state/server";
 import {
   parseScopedThreadKey,
   scopeProjectRef,
@@ -283,7 +286,14 @@ export function useThreadActions() {
       const displayWorktreePath = orphanedWorktreePath
         ? formatWorktreePathForDisplay(orphanedWorktreePath)
         : null;
-      const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== null;
+      const canDeleteWorktree =
+        orphanedWorktreePath !== null &&
+        threadProject !== null &&
+        !isScratchProject(
+          threadProject,
+          appAtomRegistry.get(environmentServerConfigsAtom).get(threadRef.environmentId)
+            ?.scratchWorkspaceRoot,
+        );
       const localApi = readLocalApi();
       let shouldDeleteWorktree = false;
       if (canDeleteWorktree && localApi) {
