@@ -1615,6 +1615,25 @@ it.layer(
   );
 
   it.effect(
+    "reattaching with a changed cwd preserves the running shell and its actual workspace",
+    () =>
+      Effect.gen(function* () {
+        const { manager, ptyAdapter } = yield* createManager(5);
+        const opened = yield* manager.open(openInput());
+        const events = yield* Ref.make<ReadonlyArray<TerminalAttachStreamEvent>>([]);
+        const unsubscribe = yield* manager.attachStream(
+          { ...openInput(), cwd: "/other-workspace" },
+          (event) => Ref.update(events, (values) => [...values, event]),
+        );
+        yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+        expect(ptyAdapter.processes).toHaveLength(1);
+        expect(ptyAdapter.processes[0]?.killed).toBe(false);
+        const snapshot = (yield* Ref.get(events)).find((event) => event.type === "snapshot");
+        expect(snapshot?.type === "snapshot" && snapshot.snapshot.cwd).toBe(opened.cwd);
+      }),
+  );
+
+  it.effect(
     "streams attach snapshots followed by live events without duplicate start snapshots",
     () =>
       Effect.gen(function* () {

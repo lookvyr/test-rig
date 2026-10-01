@@ -22,11 +22,15 @@ palette. The shortcut is **Cmd+Alt+N** on macOS or **Ctrl+Alt+N** elsewhere. You
 also start without a project from the empty welcome screen.
 
 Each conversation gets its own folder under `~/.test-rig/scratch`. The agent,
-terminal, and file browser use that folder. These threads have no Git branch,
+terminal, and file browser use that folder. The folder is ready before you open
+a terminal or browse files, including before the first message. These threads have no Git branch,
 worktree, checkpoints, or turn diffs. Deleting a conversation keeps its files.
 
 Before sending, you can switch between **No project** and a project using the
-heading's picker without losing the prompt. Existing conversations cannot be
+heading's picker without losing the prompt. Close the draft's terminals first;
+changing projects never moves or restarts a running shell. If an older draft has
+terminals in its previous workspace, Test Rig keeps them running and asks you to
+close them before preparing the new folder. Existing conversations cannot be
 moved into a project.
 
 This option is unavailable if the app's data directory is inside a Git repository.

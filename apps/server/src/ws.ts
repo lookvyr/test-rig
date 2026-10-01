@@ -1,7 +1,6 @@
-import * as NodeCrypto from "node:crypto";
+import { makePrepareScratchWorkspace } from "./orchestration/ScratchWorkspace.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -995,10 +994,9 @@ const makeWsRpcLayer = (
       );
 
       const fileSystem = yield* FileSystem.FileSystem;
-      // Reuse the thread workspace field so providers, terminals and files agree.
-      // Hash the complete id: retries reuse the same folder, and arbitrary ids
-      // cannot escape the root or collide after punctuation is stripped.
-      // Keep 96 bits in lowercase hex for short prompts on case-insensitive filesystems too.
+      const prepareScratchWorkspace = yield* makePrepareScratchWorkspace;
+      // Resolve early for drafts and bootstrap setup; engine dispatch also prepares
+      // direct creates from HTTP and internal callers using the same policy.
       const scratchThreadFolder = (input: {
         readonly threadId: ThreadId;
         readonly projectId: ProjectId;
@@ -1017,18 +1015,11 @@ const makeWsRpcLayer = (
                 }),
             ),
           );
-          if (
-            Option.isNone(project) ||
-            normalizeProjectPathForComparison(project.value.workspaceRoot) !==
-              normalizeProjectPathForComparison(scratchRoot)
-          ) {
-            return null;
-          }
-          const folder = path.join(
-            scratchRoot,
-            NodeCrypto.createHash("sha256").update(input.threadId).digest("hex").slice(0, 24),
-          );
-          yield* fileSystem.makeDirectory(folder, { recursive: true }).pipe(
+          if (Option.isNone(project)) return null;
+          return yield* prepareScratchWorkspace({
+            ...input,
+            workspaceRoot: project.value.workspaceRoot,
+          }).pipe(
             Effect.mapError(
               (cause) =>
                 new OrchestrationDispatchCommandError({
@@ -1037,7 +1028,6 @@ const makeWsRpcLayer = (
                 }),
             ),
           );
-          return folder;
         });
       const withScratchThreadFolder = (
         command: OrchestrationCommand,
@@ -1822,10 +1812,21 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "workspace" },
           ),
-        [WS_METHODS.projectsEnsureScratch]: () =>
-          observeRpcEffect(WS_METHODS.projectsEnsureScratch, ensureScratchProject, {
-            "rpc.aggregate": "orchestration",
-          }),
+        [WS_METHODS.projectsEnsureScratch]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsEnsureScratch,
+            Effect.gen(function* () {
+              const project = yield* ensureScratchProject;
+              if (input.threadId === undefined) return project;
+              const worktreePath = yield* scratchThreadFolder({
+                projectId: project.projectId,
+                threadId: input.threadId,
+                worktreePath: null,
+              });
+              return { ...project, ...(worktreePath === null ? {} : { worktreePath }) };
+            }),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [WS_METHODS.projectsWriteFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsWriteFile,

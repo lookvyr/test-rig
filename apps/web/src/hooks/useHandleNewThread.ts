@@ -106,21 +106,22 @@ export function useNewThreadHandler() {
         carrySourceDraft?.interactionMode ??
         null;
       const project = readProject(projectRef);
-      const options =
+      const scratch =
         project &&
         isScratchProject(
           project,
           appAtomRegistry.get(environmentServerConfigsAtom).get(projectRef.environmentId)
             ?.scratchWorkspaceRoot,
-        )
-          ? {
-              ...inputOptions,
-              envMode: "local" as const,
-              branch: null,
-              worktreePath: null,
-              startFromOrigin: false,
-            }
-          : inputOptions;
+        );
+      const options = scratch
+        ? {
+            ...inputOptions,
+            envMode: "local" as const,
+            branch: null,
+            worktreePath: null as string | null,
+            startFromOrigin: false,
+          }
+        : inputOptions;
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
@@ -136,6 +137,9 @@ export function useNewThreadHandler() {
         storedDraftThreadRef && readThreadShell(storedDraftThreadRef) !== null
           ? null
           : storedDraftThread;
+      if (scratch && options && reusableStoredDraftThread) {
+        options.worktreePath = reusableStoredDraftThread.worktreePath;
+      }
       if (storedDraftThreadRef && reusableStoredDraftThread === null) {
         markPromotedDraftThreadByRef(storedDraftThreadRef);
       }

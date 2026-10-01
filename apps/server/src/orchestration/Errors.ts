@@ -40,6 +40,11 @@ export class OrchestrationCommandInvariantError extends Schema.TaggedErrorClass<
   }
 }
 
+export class OrchestrationWorkspacePreparationError extends Schema.TaggedErrorClass<OrchestrationWorkspacePreparationError>()(
+  "OrchestrationWorkspacePreparationError",
+  { message: Schema.String, cause: Schema.Defect() },
+) {}
+
 export class OrchestrationCommandPreviouslyRejectedError extends Schema.TaggedErrorClass<OrchestrationCommandPreviouslyRejectedError>()(
   "OrchestrationCommandPreviouslyRejectedError",
   {
@@ -80,6 +85,7 @@ export class OrchestrationListenerCallbackError extends Schema.TaggedErrorClass<
 }
 
 export type OrchestrationDispatchError =
+  | OrchestrationWorkspacePreparationError
   | ProjectionRepositoryError
   | OrchestrationCommandInvariantError
   | OrchestrationCommandPreviouslyRejectedError

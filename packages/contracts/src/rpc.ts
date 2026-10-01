@@ -1,3 +1,4 @@
+import { ThreadId } from "./baseSchemas.ts";
 import {
   GitListPullRequestsInput,
   GitListPullRequestsResult,
@@ -451,7 +452,7 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
 });
 
 const WsProjectsEnsureScratchRpc = Rpc.make(WS_METHODS.projectsEnsureScratch, {
-  payload: Schema.Struct({}),
+  payload: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
   success: ProjectEnsureScratchResult,
   error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
 });

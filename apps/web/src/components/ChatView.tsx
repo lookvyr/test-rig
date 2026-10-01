@@ -1,3 +1,4 @@
+import { useScratchDraftWorkspace } from "../hooks/useScratchDraftWorkspace";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
 import {
@@ -1602,7 +1603,22 @@ function ChatViewContent(props: ChatViewProps) {
   const activeProjectRef = activeThread
     ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
     : null;
-  const activeProject = useProject(activeProjectRef);
+  const resolvedProject = useProject(activeProjectRef);
+  const draftTerminalMetadata = useEnvironmentQuery(
+    isLocalDraftThread && activeThread
+      ? terminalEnvironment.metadata({ environmentId: activeThread.environmentId, input: null })
+      : null,
+  );
+  const scratchWorkspace = useScratchDraftWorkspace(
+    draftId,
+    isLocalDraftThread ? draftThread : null,
+    resolvedProject,
+    activeServerConfig?.scratchWorkspaceRoot,
+    activeServerConfig != null,
+    draftTerminalMetadata.data != null,
+    allocatableActiveTerminalIds.length > 0,
+  );
+  const activeProject = scratchWorkspace.pending ? null : resolvedProject;
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
@@ -5998,6 +6014,53 @@ function ChatViewContent(props: ChatViewProps) {
     ) : null
   ) : null;
 
+  if (scratchWorkspace.pending) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+        {scratchWorkspace.blockedByTerminals ? (
+          <>
+            <p>
+              Existing terminals are still in the previous workspace. Close them before preparing
+              this draft.
+            </p>
+            <p>Running commands will continue until you close their terminal.</p>
+            {allocatableActiveTerminalIds.map((terminalId) => (
+              <button
+                key={terminalId}
+                type="button"
+                onClick={() => {
+                  closeTerminal(terminalId);
+                  if (activeThreadRef) {
+                    for (const surface of rightPanelState.surfaces) {
+                      if (surface.kind === "terminal")
+                        useRightPanelStore
+                          .getState()
+                          .closeTerminal(activeThreadRef, surface.id, terminalId);
+                    }
+                  }
+                }}
+              >
+                Close {terminalId} (
+                {activeThreadKnownSessions.find((s) => s.target.terminalId === terminalId)?.state
+                  .summary?.cwd ?? "previous workspace"}
+                )
+              </button>
+            ))}
+          </>
+        ) : scratchWorkspace.error ? (
+          <>
+            <p role="alert">Could not prepare the workspace: {scratchWorkspace.error}</p>
+            <button type="button" onClick={scratchWorkspace.retry}>
+              Retry
+            </button>
+          </>
+        ) : (
+          <p>Preparing workspace…</p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       {rightPanelOpen && !shouldUseRightPanelSheet ? panelLayoutControls : null}
@@ -6171,6 +6234,10 @@ function ChatViewContent(props: ChatViewProps) {
                           draftId={draftId}
                           activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
+                          workspaceLocked={
+                            draftTerminalMetadata.data == null ||
+                            allocatableActiveTerminalIds.length > 0
+                          }
                         />
                       </div>
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
