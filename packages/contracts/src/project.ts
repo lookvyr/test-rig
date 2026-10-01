@@ -7,7 +7,10 @@ import {
   TrimmedString,
 } from "./baseSchemas.ts";
 
-export const ProjectEnsureScratchResult = Schema.Struct({ projectId: ProjectId });
+export const ProjectEnsureScratchResult = Schema.Struct({
+  projectId: ProjectId,
+  worktreePath: Schema.optional(TrimmedNonEmptyString),
+});
 export type ProjectEnsureScratchResult = typeof ProjectEnsureScratchResult.Type;
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;

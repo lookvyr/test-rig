@@ -1332,6 +1332,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const scratchProjectId = ProjectId.make("project-scratch");
       let scratchRoot = "";
       const created: Array<string | null> = [];
+      let draftWorkspace = "";
       yield* buildAppUnderTest({
         layers: {
           orchestrationEngine: {
@@ -1343,6 +1344,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             readEvents: () => Stream.empty,
           },
           projectionSnapshotQuery: {
+            getActiveProjectByWorkspaceRoot: () =>
+              Effect.succeed(
+                Option.some({
+                  id: scratchProjectId,
+                  title: "No project",
+                  workspaceRoot: scratchRoot,
+                  defaultModelSelection: null,
+                  scripts: [],
+                  deletedAt: null,
+                  createdAt: "2026-09-25T00:00:00.000Z",
+                  updatedAt: "2026-09-25T00:00:00.000Z",
+                }),
+              ),
             getProjectShellById: (projectId) =>
               Effect.succeed(
                 projectId === scratchProjectId
@@ -1378,6 +1392,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               { id: "a1b2c3d4-scratch-thread", text: "Retry with different text" },
               { id: "a1b2c3d4scratchthread", text },
             ];
+            const prepared = yield* client[WS_METHODS.projectsEnsureScratch]({
+              threadId: ThreadId.make(starts[0]!.id),
+            });
+            draftWorkspace = prepared.worktreePath ?? "";
+            assert.notEqual(draftWorkspace, "");
+            yield* fileSystem.writeFileString(
+              path.join(draftWorkspace, "before-send.txt"),
+              "draft file",
+            );
             for (const [index, { id, text: messageText }] of starts.entries()) {
               yield* client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
                 type: "thread.turn.start",
@@ -1426,6 +1449,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
 
+      assert.equal(created[0], draftWorkspace);
+      assert.equal(
+        yield* fileSystem.readFileString(path.join(created[0]!, "before-send.txt")),
+        "draft file",
+      );
       assert.equal(created[0], created[4]);
       assert.equal(created[0], created[6]);
       assert.notEqual(created[0], created[5]);

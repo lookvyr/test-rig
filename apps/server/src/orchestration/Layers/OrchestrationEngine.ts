@@ -1,3 +1,4 @@
+import { makePrepareScratchWorkspace } from "../ScratchWorkspace.ts";
 import type {
   OrchestrationEvent,
   OrchestrationReadModel,
@@ -33,6 +34,7 @@ import { OrchestrationEventStore } from "../../persistence/Services/Orchestratio
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import {
   OrchestrationCommandInvariantError,
+  OrchestrationWorkspacePreparationError,
   OrchestrationCommandPreviouslyRejectedError,
   type OrchestrationDispatchError,
   type OrchestrationProjectorDecodeError,
@@ -83,6 +85,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const crypto = yield* Crypto.Crypto;
+  const prepareWorkspace = yield* makePrepareScratchWorkspace;
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   let commandReadModel = createEmptyReadModel(yield* nowIso);
@@ -150,8 +153,29 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           });
         }
 
+        let command = envelope.command;
+        if (command.type === "thread.create") {
+          const projectId = command.projectId;
+          const project = commandReadModel.projects.find((project) => project.id === projectId);
+          if (project) {
+            const worktreePath = yield* prepareWorkspace({
+              threadId: command.threadId,
+              workspaceRoot: project.workspaceRoot,
+              worktreePath: command.worktreePath,
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationWorkspacePreparationError({
+                    message: "Failed to prepare the thread workspace.",
+                    cause,
+                  }),
+              ),
+            );
+            command = { ...command, worktreePath };
+          }
+        }
         const eventBase = yield* decideOrchestrationCommand({
-          command: envelope.command,
+          command,
           readModel: commandReadModel,
         }).pipe(
           Effect.provideService(Crypto.Crypto, crypto),

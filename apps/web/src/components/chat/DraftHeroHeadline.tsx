@@ -35,12 +35,14 @@ import {
 } from "../ui/menu";
 
 interface DraftHeroHeadlineProps {
+  readonly workspaceLocked: boolean;
   readonly draftId: DraftId | null;
   readonly activeProjectRef: ScopedProjectRef | null;
   readonly activeProjectTitle: string | null;
 }
 
 export function DraftHeroHeadline({
+  workspaceLocked,
   draftId,
   activeProjectRef,
   activeProjectTitle,
@@ -55,6 +57,7 @@ export function DraftHeroHeadline({
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const serverSettings = useAtomValue(primaryServerSettingsAtom);
   const targetKey = JSON.stringify([
+    workspaceLocked,
     draftId,
     activeProjectRef?.environmentId,
     activeProjectRef?.projectId,
@@ -67,7 +70,7 @@ export function DraftHeroHeadline({
     };
   }, [targetKey]);
   const selectProject = (project: EnvironmentProject) => {
-    if (!draftId) return;
+    if (!draftId || workspaceLocked) return;
     const scratch = isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
     const envMode = scratch ? "local" : serverSettings.defaultThreadEnvMode;
     useComposerDraftStore
@@ -152,7 +155,7 @@ export function DraftHeroHeadline({
     isScratchProject(activeProject, scratchWorkspaceRootFor(activeProject.environmentId));
   const shouldShowProjectMenu = canChooseProject || scratchTarget !== null;
   const startScratch = async () => {
-    if (!scratchTarget || !draftId) return;
+    if (!scratchTarget || !draftId || workspaceLocked) return;
     const requested = latestTarget.current;
     const project = await openScratchProject(scratchTarget);
     if (project && latestTarget.current === requested) selectProject(project);
@@ -161,12 +164,17 @@ export function DraftHeroHeadline({
   const projectSelector = shouldShowProjectMenu ? (
     <Menu>
       <MenuTrigger
+        disabled={workspaceLocked}
         aria-label={hasResolvedProject ? "Change project" : "Choose a project"}
         className={cn(
           "pointer-events-auto inline-block border-foreground/60 border-b border-dotted align-bottom text-foreground transition-colors hover:border-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
           isScratchDraft ? "whitespace-nowrap" : "max-w-[min(20rem,calc(100%-1ch))] truncate",
         )}
-        title={activeProjectDisplayName ?? undefined}
+        title={
+          workspaceLocked
+            ? "Close this draft’s terminals before changing project."
+            : (activeProjectDisplayName ?? undefined)
+        }
       >
         {isScratchDraft ? "No project" : (activeProjectDisplayName ?? "Choose a project")}
       </MenuTrigger>
@@ -238,6 +246,11 @@ export function DraftHeroHeadline({
           <>Add a project to start</>
         )}
       </h1>
+      {workspaceLocked && (
+        <p className="text-xs text-muted-foreground">
+          Close this draft’s terminals to change project.
+        </p>
+      )}
       {isScratchDraft ? (
         <div className="text-sm text-muted-foreground">{projectSelector}</div>
       ) : (
@@ -246,6 +259,7 @@ export function DraftHeroHeadline({
             type="button"
             className="pointer-events-auto text-sm text-muted-foreground hover:text-foreground"
             title={shortcutLabelForCommand(keybindings, "chat.newWithoutProject") ?? undefined}
+            disabled={workspaceLocked}
             onClick={() => void startScratch()}
           >
             or start without a project

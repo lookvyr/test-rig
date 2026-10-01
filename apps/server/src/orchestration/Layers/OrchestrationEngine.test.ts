@@ -1,3 +1,5 @@
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import {
   CheckpointRef,
   CommandId,
@@ -71,6 +73,9 @@ async function createOrchestrationSystem() {
   const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
   return {
     engine,
+    baseDir: (await runtime.runPromise(Effect.service(ServerConfig))).baseDir,
+    fs: await runtime.runPromise(Effect.service(FileSystem.FileSystem)),
+    path: await runtime.runPromise(Effect.service(Path.Path)),
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
@@ -93,6 +98,62 @@ const hasMetricSnapshot = (
   );
 
 describe("OrchestrationEngine", () => {
+  it("allocates isolated Scratch folders for direct dispatch and preserves retries and explicit paths", async () => {
+    const system = await createOrchestrationSystem();
+    try {
+      const { path, fs } = system;
+      const projectId = asProjectId("scratch");
+      const scratchRoot = path.join(system.baseDir, "scratch");
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("scratch-project"),
+          projectId,
+          title: "No project",
+          workspaceRoot: scratchRoot,
+          createdAt: now(),
+        }),
+      );
+      const create = (id: string, worktreePath: string | null = null) => ({
+        type: "thread.create" as const,
+        commandId: CommandId.make(`create-${id}`),
+        threadId: ThreadId.make(id),
+        projectId,
+        title: "Scratch draft",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access" as const,
+        branch: null,
+        worktreePath,
+        createdAt: now(),
+      });
+      const first = create("../first");
+      await system.run(fs.writeFileString(scratchRoot, "blocks directory creation"));
+      await expect(system.run(system.engine.dispatch(first))).rejects.toThrow(
+        "Failed to prepare the thread workspace",
+      );
+      await system.run(fs.remove(scratchRoot));
+      const receipt = await system.run(system.engine.dispatch(first));
+      expect(await system.run(system.engine.dispatch(first))).toEqual(receipt);
+      await system.run(system.engine.dispatch(create("second")));
+      await system.run(system.engine.dispatch(create("explicit", "/tmp/explicit-workspace")));
+      const threads = (await system.readModel()).threads;
+      const folders = threads.filter((t) => t.id !== "explicit").map((t) => t.worktreePath);
+      expect(new Set(folders).size).toBe(2);
+      for (const folder of folders) {
+        expect(folder).not.toBeNull();
+        expect(path.dirname(folder!)).toBe(scratchRoot);
+        expect(path.basename(folder!)).toMatch(/^[a-f0-9]{24}$/);
+        expect((await system.run(fs.stat(folder!))).type).toBe("Directory");
+      }
+      expect(threads.find((t) => t.id === "explicit")?.worktreePath).toBe(
+        "/tmp/explicit-workspace",
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
   it("bootstraps command handling from persisted projections without reading the full snapshot", async () => {
     let nextSequence = 8;
     const eventStore: OrchestrationEventStoreShape = {
@@ -222,6 +283,7 @@ describe("OrchestrationEngine", () => {
       Layer.provide(Layer.succeed(OrchestrationEventStore, eventStore)),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
       Layer.provide(SqlitePersistenceMemory),
+      Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "scratch-engine-test-" })),
       Layer.provideMerge(NodeServices.layer),
     );
 
@@ -938,6 +1000,7 @@ describe("OrchestrationEngine", () => {
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
         Layer.provide(RepositoryIdentityResolver.layer),
         Layer.provide(SqlitePersistenceMemory),
+        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "scratch-engine-test-" })),
         Layer.provide(NodeServices.layer),
       ),
     );
@@ -1083,6 +1146,7 @@ describe("OrchestrationEngine", () => {
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
         Layer.provide(RepositoryIdentityResolver.layer),
         Layer.provide(SqlitePersistenceMemory),
+        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "scratch-engine-test-" })),
         Layer.provide(NodeServices.layer),
       ),
     );
