@@ -9,7 +9,7 @@ import { cn } from "~/lib/utils";
 import type { ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
@@ -33,16 +33,53 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "../ui/menu";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverPopup,
+  PopoverTitle,
+  PopoverDescription,
+} from "../ui/popover";
+
+type WorkspaceLockReason = "loading" | "terminals";
+
+function WorkspaceLockNotice({
+  reason,
+  children,
+  className,
+  label,
+}: {
+  reason: WorkspaceLockReason;
+  children: ReactNode;
+  className: string;
+  label?: string;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger aria-label={label} className={className}>
+        {children}
+      </PopoverTrigger>
+      <PopoverPopup tooltipStyle side="top" className="max-w-64">
+        <PopoverTitle className="sr-only">Change project</PopoverTitle>
+        <PopoverDescription className="text-xs">
+          {reason === "loading"
+            ? "Checking this draft’s terminals. Try again in a moment."
+            : "Close this draft’s terminals before changing project."}
+        </PopoverDescription>
+      </PopoverPopup>
+    </Popover>
+  );
+}
 
 interface DraftHeroHeadlineProps {
-  readonly workspaceLocked: boolean;
+  readonly workspaceLockReason: WorkspaceLockReason | null;
   readonly draftId: DraftId | null;
   readonly activeProjectRef: ScopedProjectRef | null;
   readonly activeProjectTitle: string | null;
 }
 
 export function DraftHeroHeadline({
-  workspaceLocked,
+  workspaceLockReason,
   draftId,
   activeProjectRef,
   activeProjectTitle,
@@ -57,7 +94,7 @@ export function DraftHeroHeadline({
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const serverSettings = useAtomValue(primaryServerSettingsAtom);
   const targetKey = JSON.stringify([
-    workspaceLocked,
+    workspaceLockReason,
     draftId,
     activeProjectRef?.environmentId,
     activeProjectRef?.projectId,
@@ -70,7 +107,7 @@ export function DraftHeroHeadline({
     };
   }, [targetKey]);
   const selectProject = (project: EnvironmentProject) => {
-    if (!draftId || workspaceLocked) return;
+    if (!draftId || workspaceLockReason !== null) return;
     const scratch = isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
     const envMode = scratch ? "local" : serverSettings.defaultThreadEnvMode;
     useComposerDraftStore
@@ -155,28 +192,28 @@ export function DraftHeroHeadline({
     isScratchProject(activeProject, scratchWorkspaceRootFor(activeProject.environmentId));
   const shouldShowProjectMenu = canChooseProject || scratchTarget !== null;
   const startScratch = async () => {
-    if (!scratchTarget || !draftId || workspaceLocked) return;
+    if (!scratchTarget || !draftId || workspaceLockReason !== null) return;
     const requested = latestTarget.current;
     const project = await openScratchProject(scratchTarget);
     if (project && latestTarget.current === requested) selectProject(project);
   };
 
-  const projectSelector = shouldShowProjectMenu ? (
+  const projectSelectorClassName = cn(
+    "pointer-events-auto inline-block border-foreground/60 border-b border-dotted align-bottom text-foreground transition-colors hover:border-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+    isScratchDraft ? "whitespace-nowrap" : "max-w-[min(20rem,calc(100%-1ch))] truncate",
+  );
+  const projectSelectorLabel = hasResolvedProject ? "Change project" : "Choose a project";
+  const projectSelectorText = isScratchDraft
+    ? "No project"
+    : (activeProjectDisplayName ?? "Choose a project");
+  const projectMenu = shouldShowProjectMenu ? (
     <Menu>
       <MenuTrigger
-        disabled={workspaceLocked}
-        aria-label={hasResolvedProject ? "Change project" : "Choose a project"}
-        className={cn(
-          "pointer-events-auto inline-block border-foreground/60 border-b border-dotted align-bottom text-foreground transition-colors hover:border-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
-          isScratchDraft ? "whitespace-nowrap" : "max-w-[min(20rem,calc(100%-1ch))] truncate",
-        )}
-        title={
-          workspaceLocked
-            ? "Close this draft’s terminals before changing project."
-            : (activeProjectDisplayName ?? undefined)
-        }
+        aria-label={projectSelectorLabel}
+        className={projectSelectorClassName}
+        title={activeProjectDisplayName ?? undefined}
       >
-        {isScratchDraft ? "No project" : (activeProjectDisplayName ?? "Choose a project")}
+        {projectSelectorText}
       </MenuTrigger>
       <MenuPopup align="center" className="max-h-80 min-w-40! w-max max-w-64 overflow-y-auto">
         <MenuRadioGroup
@@ -232,6 +269,19 @@ export function DraftHeroHeadline({
       {activeProjectTitle ?? "Add a project"}
     </button>
   );
+  const projectSelector =
+    workspaceLockReason !== null && shouldShowProjectMenu ? (
+      <WorkspaceLockNotice
+        key={workspaceLockReason}
+        reason={workspaceLockReason}
+        label={projectSelectorLabel}
+        className={projectSelectorClassName}
+      >
+        {projectSelectorText}
+      </WorkspaceLockNotice>
+    ) : (
+      projectMenu
+    );
 
   return (
     <div className="mx-auto flex w-full flex-col items-center gap-2">
@@ -246,25 +296,28 @@ export function DraftHeroHeadline({
           <>Add a project to start</>
         )}
       </h1>
-      {workspaceLocked && (
-        <p className="text-xs text-muted-foreground">
-          Close this draft’s terminals to change project.
-        </p>
-      )}
       {isScratchDraft ? (
         <div className="text-sm text-muted-foreground">{projectSelector}</div>
       ) : (
-        scratchTarget !== null && (
+        scratchTarget !== null &&
+        (workspaceLockReason !== null ? (
+          <WorkspaceLockNotice
+            key={workspaceLockReason}
+            reason={workspaceLockReason}
+            className="pointer-events-auto text-sm text-muted-foreground hover:text-foreground"
+          >
+            or start without a project
+          </WorkspaceLockNotice>
+        ) : (
           <button
             type="button"
             className="pointer-events-auto text-sm text-muted-foreground hover:text-foreground"
             title={shortcutLabelForCommand(keybindings, "chat.newWithoutProject") ?? undefined}
-            disabled={workspaceLocked}
             onClick={() => void startScratch()}
           >
             or start without a project
           </button>
-        )
+        ))
       )}
     </div>
   );

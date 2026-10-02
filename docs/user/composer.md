@@ -27,8 +27,9 @@ a terminal or browse files, including before the first message. These threads ha
 worktree, checkpoints, or turn diffs. Deleting a conversation keeps its files.
 
 Before sending, you can switch between **No project** and a project using the
-heading's picker without losing the prompt. Close the draft's terminals first;
-changing projects never moves or restarts a running shell. If an older draft has
+heading's picker without losing the prompt. If the draft has terminals, trying
+to change projects explains that you need to close them first. Changing projects
+never moves or restarts a running shell. If an older draft has
 terminals in its previous workspace, Test Rig keeps them running and asks you to
 close them before preparing the new folder. Existing conversations cannot be
 moved into a project.

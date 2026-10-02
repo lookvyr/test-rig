@@ -6234,9 +6234,12 @@ function ChatViewContent(props: ChatViewProps) {
                           draftId={draftId}
                           activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
-                          workspaceLocked={
-                            draftTerminalMetadata.data == null ||
+                          workspaceLockReason={
                             allocatableActiveTerminalIds.length > 0
+                              ? "terminals"
+                              : draftTerminalMetadata.data == null
+                                ? "loading"
+                                : null
                           }
                         />
                       </div>
