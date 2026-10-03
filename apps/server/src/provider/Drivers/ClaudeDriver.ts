@@ -1,3 +1,6 @@
+import { ProviderContinuationRequests } from "../../orchestration-v2/ProviderContinuationRequests.ts";
+import { makeNativeAdapterV2 } from "../../orchestration-v2/Adapters/NativeAdapterV2.ts";
+import { nativeCapabilities } from "../../orchestration-v2/Adapters/nativeCapabilities.ts";
 /**
  * ClaudeDriver — `ProviderDriver` for the Claude Agent SDK runtime.
  *
@@ -81,6 +84,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
 });
 
 export type ClaudeDriverEnv =
+  | ProviderContinuationRequests
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -145,6 +149,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       };
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
+      const orchestrationAdapter = yield* makeNativeAdapterV2({
+        instanceId,
+        native: yield* makeClaudeAdapter(effectiveConfig, {
+          instanceId,
+          environment: processEnv,
+          ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        }),
+        capabilities: nativeCapabilities("claudeAgent"),
+      });
       const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv);
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
@@ -208,6 +221,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         enabled,
         snapshot,
         adapter,
+        orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),

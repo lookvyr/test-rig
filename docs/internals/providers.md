@@ -16,10 +16,13 @@ orchestration layer does not know which one is behind a thread.
 | `opencode`    | [`Drivers/OpenCodeDriver.ts`][opencode] |
 
 Each driver declares its `driverKind`, a `configSchema`, and a `create` function that builds an
-adapter in a child scope. Adapter implementations live beside them in
-`apps/server/src/provider/Layers/` (`CodexAdapter.ts`, `ClaudeAdapter.ts`, and so on) and conform to
+adapter in a child scope. Codex and Claude adapter implementations live in
+`apps/server/src/provider/Layers/`; OpenCode 2 lives in `provider/opencode2/`. They conform to
 [`ProviderAdapter.ts`][adapter]. Read the driver plus its adapter to see how a specific agent's
 transport, config, and event shapes are mapped.
+
+The V2 provider boundary is described in [V2 provider adapters](./orchestration-v2-providers.md).
+The current app continues to use the orchestration path documented below.
 
 ## Registry and routing
 

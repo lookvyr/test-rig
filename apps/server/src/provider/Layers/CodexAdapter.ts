@@ -1739,6 +1739,34 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
+        let forkLastTurnId: string | undefined;
+        const source = input.forkFromThreadId ? sessions.get(input.forkFromThreadId) : undefined;
+        if (input.forkFromLatestCompletedTurn && source && !source.stopped) {
+          const sourceSession = yield* source.runtime.getSession;
+          if (sourceSession.activeTurnId) {
+            const history = yield* source.runtime.readThread.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "fork",
+                    detail: "Could not read the parent's completed turn boundary.",
+                    cause,
+                  }),
+              ),
+            );
+            forkLastTurnId = history.turns.findLast(
+              (turn) => turn.id !== sourceSession.activeTurnId,
+            )?.id;
+            if (!forkLastTurnId)
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "fork",
+                issue: "The parent has no completed conversation turn to fork yet.",
+              });
+          }
+        }
+
         const serviceTier =
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)
@@ -1762,7 +1790,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             : {}),
           ...(input.forkFromThreadId !== undefined &&
           isCodexResumeCursorSchema(input.forkResumeCursor)
-            ? { forkThreadId: input.forkResumeCursor.threadId }
+            ? {
+                forkThreadId: input.forkResumeCursor.threadId,
+                ...(forkLastTurnId ? { forkLastTurnId } : {}),
+              }
             : {}),
           runtimeMode: input.runtimeMode,
           ...(input.modelSelection?.instanceId === boundInstanceId

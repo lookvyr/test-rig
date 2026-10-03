@@ -116,6 +116,13 @@ type ClaudeToolResultStreamKind = Extract<
 >;
 type ClaudeSdkEffort = NonNullable<ClaudeQueryOptions["effort"]>;
 
+const isCompletedForkBoundary = Schema.is(
+  Schema.Struct({
+    messageId: Schema.String.check(Schema.isUUID()),
+    requestId: Schema.optional(Schema.String.check(Schema.isUUID())),
+  }),
+);
+
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
   return Exit.isSuccess(result) ? result.value : undefined;
@@ -138,6 +145,10 @@ interface ClaudeResumeState {
   readonly strictResume?: true;
   readonly forkAtMessageId?: string | null;
   readonly forkAfterMessageId?: string;
+  readonly completedForkBoundary?: {
+    readonly messageId: string;
+    readonly requestId?: string | undefined;
+  };
 }
 
 interface ClaudeTurnState {
@@ -264,6 +275,7 @@ interface ClaudeSessionContext {
   forkAtMessageId: string | null | undefined;
   /** Older in-flight responses must not hide the latest submitted request. */
   forkAfterMessageId: string | undefined;
+  completedForkBoundary: ClaudeResumeState["completedForkBoundary"];
   readonly strictResume: boolean;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
@@ -660,6 +672,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     turnCount?: unknown;
     forkAtMessageId?: unknown;
     forkAfterMessageId?: unknown;
+    completedForkBoundary?: unknown;
   };
 
   const threadIdCandidate = typeof cursor.threadId === "string" ? cursor.threadId : undefined;
@@ -693,6 +706,9 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
               ? cursor.forkAtMessageId
               : null,
         }
+      : {}),
+    ...(isCompletedForkBoundary(cursor.completedForkBoundary)
+      ? { completedForkBoundary: cursor.completedForkBoundary }
       : {}),
     ...(turnCountValue !== undefined && Number.isInteger(turnCountValue) && turnCountValue >= 0
       ? { turnCount: turnCountValue }
@@ -1787,6 +1803,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ...(context.resumeSessionId ? { resume: context.resumeSessionId } : {}),
       ...(context.lastAssistantUuid ? { resumeSessionAt: context.lastAssistantUuid } : {}),
       turnCount: context.turns.length,
+      ...(context.completedForkBoundary
+        ? { completedForkBoundary: context.completedForkBoundary }
+        : {}),
       ...(context.strictResume ? { strictResume: true as const } : {}),
       ...(context.forkAfterMessageId ? { forkAfterMessageId: context.forkAfterMessageId } : {}),
       ...(context.forkAtMessageId !== undefined
@@ -3037,7 +3056,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");
     }
 
+    if (status === "completed" && context.forkAtMessageId) {
+      context.completedForkBoundary = {
+        messageId: context.forkAtMessageId,
+        ...(context.forkAfterMessageId ? { requestId: context.forkAfterMessageId } : {}),
+      };
+    }
     yield* completeTurn(context, status, errorMessage, message);
+    yield* updateResumeCursor(context);
   });
 
   /**
@@ -3848,7 +3874,20 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         }
         // Persisted cursors are captured when sending a prompt, not on every
         // response. Only a live source can supply a current stream boundary.
-        const forkAtMessageId = source ? sourceState.forkAtMessageId : undefined;
+        const completed =
+          input.forkFromLatestCompletedTurn && source?.turnState
+            ? sourceState.completedForkBoundary
+            : undefined;
+        const forkAtMessageId =
+          completed?.messageId ?? (source ? sourceState.forkAtMessageId : undefined);
+        const forkAfterMessageId = completed ? completed.requestId : sourceState.forkAfterMessageId;
+        if (input.forkFromLatestCompletedTurn && source?.turnState && !completed) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: "The parent has no completed conversation turn to fork yet.",
+          });
+        }
         if (
           forkAtMessageId === null ||
           (forkAtMessageId === undefined && source?.turnState !== undefined)
@@ -3864,9 +3903,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           sessionId: sourceState.resume,
           cwd: input.cwd,
           ...(forkAtMessageId ? { upToMessageId: forkAtMessageId } : {}),
-          ...(sourceState.forkAfterMessageId
-            ? { afterMessageId: sourceState.forkAfterMessageId }
-            : {}),
+          ...(forkAfterMessageId ? { afterMessageId: forkAfterMessageId } : {}),
         });
         resumeState = { resume: childId, strictResume: true, turnCount: 0 };
       }
@@ -4410,6 +4447,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         lastAssistantUuid: resumeState?.resumeSessionAt,
         forkAtMessageId: undefined,
         forkAfterMessageId: resumeState?.forkAfterMessageId,
+        completedForkBoundary: resumeState?.completedForkBoundary,
         strictResume,
         lastThreadStartedId: undefined,
         stopped: false,

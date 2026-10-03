@@ -4155,6 +4155,64 @@ describe("ClaudeAdapterLive", () => {
     },
   );
 
+  it.effect("V2 forks a busy parent at its last completed boundary without interrupting it", () => {
+    const forkInputs: Array<{
+      sessionId: string;
+      cwd: string;
+      upToMessageId?: string;
+      afterMessageId?: string;
+    }> = [];
+    const parentQuery = new FakeClaudeQuery();
+    const harness = makeHarness({
+      queries: [parentQuery, new FakeClaudeQuery()],
+      forkSession: (input) =>
+        Effect.sync(() => {
+          forkInputs.push(input);
+          return CHILD_NATIVE_ID;
+        }),
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/shared-side-checkout",
+        resumeCursor: {
+          resume: PARENT_NATIVE_ID,
+          completedForkBoundary: {
+            messageId: PARENT_MESSAGE_ID,
+            requestId: TOOL_RESULT_MESSAGE_ID,
+          },
+        },
+      });
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Continue investigating" });
+      yield* Effect.promise(() => readFirstPromptMessage(harness.getLastCreateQueryInput()));
+      yield* adapter.startSession({
+        threadId: RESUME_THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/shared-side-checkout",
+        forkFromThreadId: THREAD_ID,
+        forkFromLatestCompletedTurn: true,
+      });
+      assert.deepEqual(forkInputs, [
+        {
+          sessionId: PARENT_NATIVE_ID,
+          cwd: "/tmp/shared-side-checkout",
+          upToMessageId: PARENT_MESSAGE_ID,
+          afterMessageId: TOOL_RESULT_MESSAGE_ID,
+        },
+      ]);
+      assert.equal(parentQuery.interruptCalls.length, 0);
+      assert.isTrue(
+        (yield* adapter.listSessions()).some(
+          (session) => session.threadId === THREAD_ID && session.activeTurnId !== undefined,
+        ),
+      );
+    }).pipe(Effect.provide(harness.layer));
+  });
+
   it.effect(
     "keeps the latest steered prompt requirement when an older assistant snapshot arrives",
     () => {

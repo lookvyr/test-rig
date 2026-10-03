@@ -1,3 +1,4 @@
+import * as ProviderContinuationRequests from "./orchestration-v2/ProviderContinuationRequests.ts";
 import * as WorktreeCleanup from "./workspace/WorktreeCleanup.ts";
 import * as WorktreeCleanupState from "./workspace/WorktreeCleanupState.ts";
 import { EnvironmentHttpApi } from "@t3tools/contracts";
@@ -360,6 +361,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // Provided once at the runtime level so every consumer sees the same
   // logger instances.
   Layer.provideMerge(ProviderEventLoggers.layer),
+  Layer.provideMerge(ProviderContinuationRequests.layer),
   // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
   // `ProviderRegistryLive` pulled `OpenCodeRuntimeLive` in for itself, but
   // the rewritten registry reads snapshots off the instance registry and

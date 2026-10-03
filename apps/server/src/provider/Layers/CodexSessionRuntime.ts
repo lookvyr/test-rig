@@ -106,6 +106,7 @@ export interface CodexSessionRuntimeOptions {
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly forkThreadId?: string;
+  readonly forkLastTurnId?: string;
   readonly appServerArgs?: ReadonlyArray<string>;
 }
 
@@ -472,6 +473,7 @@ export const openCodexThread = (input: {
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
   readonly forkThreadId?: string;
+  readonly forkLastTurnId?: string;
   readonly strictResume?: boolean;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
@@ -485,6 +487,7 @@ export const openCodexThread = (input: {
   if (input.forkThreadId !== undefined) {
     return input.client.request("thread/fork", {
       threadId: input.forkThreadId,
+      ...(input.forkLastTurnId ? { lastTurnId: input.forkLastTurnId } : {}),
       ...startParams,
     });
   }
@@ -1860,7 +1863,12 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
-        ...(options.forkThreadId !== undefined ? { forkThreadId: options.forkThreadId } : {}),
+        ...(options.forkThreadId !== undefined
+          ? {
+              forkThreadId: options.forkThreadId,
+              ...(options.forkLastTurnId ? { forkLastTurnId: options.forkLastTurnId } : {}),
+            }
+          : {}),
         strictResume,
       });
 

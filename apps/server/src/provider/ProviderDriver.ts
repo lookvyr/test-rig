@@ -70,6 +70,8 @@ export interface ProviderInstance {
   readonly enabled: boolean;
   readonly snapshot: ServerProviderShape;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+  /** Isolated V2 native engine; legacy consumers retain their own event stream. */
+  readonly orchestrationAdapter?: import("../orchestration-v2/ProviderAdapter.ts").ProviderAdapterV2Shape;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
 }
 

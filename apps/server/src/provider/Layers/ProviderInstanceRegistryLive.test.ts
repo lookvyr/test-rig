@@ -1,3 +1,4 @@
+import * as ProviderContinuationRequests from "../../orchestration-v2/ProviderContinuationRequests.ts";
 /**
  * Multi-instance validation slices for `ProviderInstanceRegistryLive`.
  *
@@ -114,6 +115,7 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
   }).pipe(
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+    Layer.provideMerge(ProviderContinuationRequests.layer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
   );
@@ -252,6 +254,7 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
   }).pipe(
     Layer.provideMerge(infraLayer),
     Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+    Layer.provideMerge(ProviderContinuationRequests.layer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
   );

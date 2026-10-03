@@ -39,7 +39,7 @@ to use, then authenticate it.
 | -------- | ----------------------------------------------------- | -------------- |
 | Codex    | [Codex CLI](https://developers.openai.com/codex/cli)  | `codex`        |
 | Claude   | [Claude Code](https://claude.com/product/claude-code) | `claude`       |
-| OpenCode | [OpenCode](https://opencode.ai)                       | `opencode`     |
+| OpenCode | [OpenCode 2](./providers-opencode.md)                 | `opencode`     |
 
 Run the login command on the machine running the Test Rig server, not on the device you browse
 from.

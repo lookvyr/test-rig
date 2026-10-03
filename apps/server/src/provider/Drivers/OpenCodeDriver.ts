@@ -1,3 +1,4 @@
+import { ProviderContinuationRequests } from "../../orchestration-v2/ProviderContinuationRequests.ts";
 /**
  * OpenCodeDriver — `ProviderDriver` for the OpenCode runtime.
  *
@@ -25,11 +26,14 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
+import { makeOpenCode2Adapter } from "../opencode2/OpenCode2Adapter.ts";
+import { makeOpenCode2Runtime } from "../opencode2/OpenCode2Runtime.ts";
+import { makeNativeAdapterV2 } from "../../orchestration-v2/Adapters/NativeAdapterV2.ts";
+import { nativeCapabilities } from "../../orchestration-v2/Adapters/nativeCapabilities.ts";
 import {
-  checkOpenCodeProviderStatus,
-  makePendingOpenCodeProvider,
-} from "../Layers/OpenCodeProvider.ts";
+  checkOpenCode2ProviderStatus,
+  makePendingOpenCode2Provider,
+} from "../opencode2/OpenCode2Provider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { OpenCodeRuntime } from "../opencodeRuntime.ts";
@@ -65,7 +69,7 @@ function isOpenCodeNativeCommandPath(commandPath: string): boolean {
 
 const UPDATE = makePackageManagedProviderMaintenanceResolver({
   provider: DRIVER_KIND,
-  npmPackageName: "opencode-ai",
+  npmPackageName: "@opencode/cli",
   homebrewFormula: "anomalyco/tap/opencode",
   nativeUpdate: {
     executable: "opencode",
@@ -76,6 +80,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
 });
 
 export type OpenCodeDriverEnv =
+  | ProviderContinuationRequests
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -112,9 +117,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
   defaultConfig: (): OpenCodeSettings => decodeOpenCodeSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
-      const openCodeRuntime = yield* OpenCodeRuntime;
       const serverConfig = yield* ServerConfig;
-      const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -132,18 +135,20 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         env: processEnv,
       });
 
-      const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
+      const runtime = yield* makeOpenCode2Runtime(effectiveConfig, processEnv);
+      const adapter = yield* makeOpenCode2Adapter(effectiveConfig, instanceId, runtime);
+      const v2Native = yield* makeOpenCode2Adapter(effectiveConfig, instanceId, runtime);
+      const orchestrationAdapter = yield* makeNativeAdapterV2({
         instanceId,
-        environment: processEnv,
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        native: v2Native,
+        capabilities: nativeCapabilities("opencode"),
       });
-      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);
-
-      const checkProvider = checkOpenCodeProviderStatus(
+      const textGeneration = yield* makeOpenCodeTextGeneration(runtime);
+      const checkProvider = checkOpenCode2ProviderStatus(
         effectiveConfig,
         serverConfig.cwd,
-        processEnv,
-      ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime));
+        runtime,
+      ).pipe(Effect.map(stampIdentity));
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<OpenCodeSettings>>(
@@ -153,7 +158,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           streamSettings: snapshotSettings.streamSettings,
           haveSettingsChanged: haveProviderSnapshotSettingsChanged,
           initialSnapshot: (settings) =>
-            makePendingOpenCodeProvider(settings.provider).pipe(Effect.map(stampIdentity)),
+            makePendingOpenCode2Provider(settings.provider).pipe(Effect.map(stampIdentity)),
           checkProvider,
           enrichSnapshot: ({ snapshot, publishSnapshot }) =>
             enrichProviderSnapshotWithVersionAdvisory(snapshot, maintenanceCapabilities).pipe(
@@ -181,6 +186,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         enabled,
         snapshot,
         adapter,
+        orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),

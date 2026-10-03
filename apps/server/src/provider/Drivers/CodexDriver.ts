@@ -1,3 +1,6 @@
+import { ProviderContinuationRequests } from "../../orchestration-v2/ProviderContinuationRequests.ts";
+import { makeNativeAdapterV2 } from "../../orchestration-v2/Adapters/NativeAdapterV2.ts";
+import { nativeCapabilities } from "../../orchestration-v2/Adapters/nativeCapabilities.ts";
 /**
  * CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
  *
@@ -72,6 +75,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
  * registered driver and the runtime satisfies them once.
  */
 export type CodexDriverEnv =
+  | ProviderContinuationRequests
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -156,6 +160,15 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
+      const orchestrationAdapter = yield* makeNativeAdapterV2({
+        instanceId,
+        native: yield* makeCodexAdapter(effectiveConfig, {
+          instanceId,
+          environment: processEnv,
+          ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        }),
+        capabilities: nativeCapabilities("codex"),
+      });
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);
 
       // Build a managed snapshot whose settings never change — mutations come
@@ -200,6 +213,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         snapshot,
         adapter,
+        orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),

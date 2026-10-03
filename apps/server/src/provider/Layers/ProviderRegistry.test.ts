@@ -1,3 +1,4 @@
+import * as ProviderContinuationRequests from "../../orchestration-v2/ProviderContinuationRequests.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
@@ -1028,6 +1029,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
                 }),
               ),
               Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+              Layer.provideMerge(ProviderContinuationRequests.layer),
               Layer.provideMerge(NodeServices.layer),
             ),
           ).pipe(Scope.provide(scope));
@@ -1262,6 +1264,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
                 }),
               ),
               Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+              Layer.provideMerge(ProviderContinuationRequests.layer),
               Layer.provideMerge(NodeServices.layer),
             ),
           ).pipe(Scope.provide(scope));
@@ -1369,6 +1372,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
                 }),
               ),
               Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+              Layer.provideMerge(ProviderContinuationRequests.layer),
               Layer.provideMerge(NodeServices.layer),
             ),
           ).pipe(Scope.provide(scope));
@@ -1473,6 +1477,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
             ),
             Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
             Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+            Layer.provideMerge(ProviderContinuationRequests.layer),
             // NO spawner mock — `ChildProcessSpawner` is supplied by the
             // outer `NodeServices.layer` on `it.layer(...)` and will
             // genuinely spawn a subprocess. The missing-binary ENOENT is
@@ -1572,6 +1577,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
             ),
             Layer.provideMerge(NodeServices.layer),
             Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+            Layer.provideMerge(ProviderContinuationRequests.layer),
           );
           const runtimeServices = yield* Layer.build(providerRegistryLayer).pipe(
             Scope.provide(scope),
@@ -1687,6 +1693,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
             Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
             Layer.provideMerge(NodeServices.layer),
             Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+            Layer.provideMerge(ProviderContinuationRequests.layer),
           );
           const runtimeServices = yield* Layer.build(providerRegistryLayer).pipe(
             Scope.provide(scope),
@@ -1769,6 +1776,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
               ),
               Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
               Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+              Layer.provideMerge(ProviderContinuationRequests.layer),
               Layer.provideMerge(
                 mockCommandSpawnerLayer((command, args) => {
                   spawnedCommands.push(command);

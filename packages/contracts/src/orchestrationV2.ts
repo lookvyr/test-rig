@@ -787,6 +787,8 @@ export const OrchestrationV2ProviderThreadNativeMetadata = Schema.Struct({
   updatedAt: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   /** Version 2 scopes provider-derived item ids by provider instance. */
   itemIdentityVersion: Schema.optional(Schema.Literal(2)),
+  /** Provider-owned continuation cursor; preserved across runtime restarts. */
+  resumeCursor: Schema.optional(Schema.Unknown),
 });
 export type OrchestrationV2ProviderThreadNativeMetadata =
   typeof OrchestrationV2ProviderThreadNativeMetadata.Type;
@@ -927,6 +929,8 @@ export const OrchestrationV2RuntimeRequest = Schema.Struct({
   nodeId: NodeId,
   providerTurnId: Schema.NullOr(ProviderTurnId),
   nativeRequestRef: Schema.NullOr(OrchestrationV2ProviderRef),
+  isBlocking: Schema.optional(Schema.Boolean),
+  autoResolutionMs: Schema.optional(Schema.Number),
   kind: Schema.Union([
     ProviderRequestKind,
     Schema.Literals(["dynamic_tool_call", "user_input", "auth_refresh"]),
@@ -1062,6 +1066,7 @@ export const OrchestrationV2UserInputQuestion = Schema.Struct({
   multiSelect: Schema.optional(Schema.Boolean),
   allowCustomAnswer: Schema.optional(Schema.Boolean),
   required: Schema.optional(Schema.Boolean),
+  isSecret: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2UserInputQuestion = typeof OrchestrationV2UserInputQuestion.Type;
 
@@ -1212,6 +1217,9 @@ export type OrchestrationV2UserMessageInputIntent =
   typeof OrchestrationV2UserMessageInputIntent.Type;
 
 const OrchestrationV2TurnItemBaseFields = {
+  /** Native child attribution retained when the provider does not expose a child transcript. */
+  agentId: Schema.optional(TrimmedNonEmptyString),
+  parentToolUseId: Schema.optional(TrimmedNonEmptyString),
   toolSurface: Schema.optional(ToolActivitySurface),
   toolIcon: Schema.optional(ToolActivityIcon),
   toolSource: Schema.optional(ToolActivitySource),
@@ -1299,6 +1307,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     questions: Schema.Array(OrchestrationV2UserInputQuestion),
     questionAnswer: Schema.optional(UserInputAttachmentAnswerPayload),
     responseMode: Schema.optional(Schema.Literal("message")),
+    isBlocking: Schema.optional(Schema.Boolean),
+    autoResolutionMs: Schema.optional(Schema.Number),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2024,6 +2034,8 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     questions: Schema.Array(OrchestrationV2UserInputQuestion),
     questionAnswer: Schema.optional(UserInputAttachmentAnswerPayload),
     responseMode: Schema.optional(Schema.Literal("message")),
+    isBlocking: Schema.optional(Schema.Boolean),
+    autoResolutionMs: Schema.optional(Schema.Number),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,

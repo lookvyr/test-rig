@@ -45,6 +45,8 @@ export interface ProviderThreadSnapshot {
 export type ProviderAdapterStartInput = ProviderSessionStartInput & {
   /** Resolved by ProviderService from the source thread in the same provider instance. */
   readonly forkResumeCursor?: unknown;
+  /** Use the last completed native boundary while the parent continues working. */
+  readonly forkFromLatestCompletedTurn?: boolean;
 };
 
 export interface ProviderAdapterShape<TError> {

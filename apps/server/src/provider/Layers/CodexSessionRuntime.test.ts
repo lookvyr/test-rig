@@ -555,6 +555,11 @@ describe("openCodexThread", () => {
             payload: CodexRpc.ClientRequestParamsByMethod[M],
           ) => {
             NodeAssert.equal(method, `thread/${operation}`);
+            if (operation === "fork")
+              NodeAssert.equal(
+                "lastTurnId" in payload ? payload.lastTurnId : undefined,
+                "completed-turn",
+              );
             NodeAssert.equal(
               "historyMode" in payload ? payload.historyMode : undefined,
               operation === "start" ? "paginated" : undefined,
@@ -572,7 +577,9 @@ describe("openCodexThread", () => {
           requestedModel: undefined,
           serviceTier: undefined,
           resumeThreadId: operation === "resume" ? "thread-1" : undefined,
-          ...(operation === "fork" ? { forkThreadId: "parent-thread" } : {}),
+          ...(operation === "fork"
+            ? { forkThreadId: "parent-thread", forkLastTurnId: "completed-turn" }
+            : {}),
         });
       }),
     );
