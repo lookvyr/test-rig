@@ -322,6 +322,7 @@ export const ThreadTokenUsageSnapshot = Schema.Struct({
   toolUses: Schema.optional(NonNegativeInt),
   durationMs: Schema.optional(NonNegativeInt),
   compactsAutomatically: Schema.optional(Schema.Boolean),
+  autoCompactThreshold: Schema.optional(PositiveInt),
 });
 export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type;
 
@@ -1219,3 +1220,66 @@ export type ProviderRuntimeToolKind = typeof ProviderRuntimeToolKind.Type;
 
 export const ProviderRuntimeTurnStatus = RuntimeTurnState;
 export type ProviderRuntimeTurnStatus = RuntimeTurnState;
+
+const TurnTokenUsageCommonFields = {
+  usageScope: Schema.Literal("main_agent"),
+  cachedInputTokens: Schema.optional(NonNegativeInt),
+  cacheCreationTokens: Schema.optional(NonNegativeInt),
+  reasoningTokens: Schema.optional(NonNegativeInt),
+  hasSubagents: Schema.Boolean,
+};
+export const TurnTokenUsage = Schema.Union([
+  Schema.Struct({
+    ...TurnTokenUsageCommonFields,
+    usageStatus: Schema.Literal("complete"),
+    inputTokens: NonNegativeInt,
+    outputTokens: NonNegativeInt,
+  }),
+  Schema.Struct({
+    ...TurnTokenUsageCommonFields,
+    usageStatus: Schema.Literals(["partial", "unavailable"]),
+    inputTokens: Schema.optional(NonNegativeInt),
+    outputTokens: Schema.optional(NonNegativeInt),
+  }),
+]);
+export type TurnTokenUsage = typeof TurnTokenUsage.Type;
+
+export const ToolActivitySurface = Schema.Literals(["browser", "computer"]);
+export type ToolActivitySurface = typeof ToolActivitySurface.Type;
+
+export const ToolActivityNativeAppReference = Schema.Union([
+  Schema.TaggedStruct("app-id", {
+    appId: TrimmedNonEmptyStringSchema.check(
+      Schema.isMaxLength(512),
+      Schema.isPattern(/^[A-Za-z0-9._-]+$/u),
+    ),
+  }),
+  Schema.TaggedStruct("display-name", {
+    displayName: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(160)),
+  }),
+]);
+export type ToolActivityNativeAppReference = typeof ToolActivityNativeAppReference.Type;
+
+export const ToolActivityIcon = Schema.Union([
+  Schema.TaggedStruct("website", {
+    pageUrl: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(4096)),
+    faviconUrl: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(4096))),
+    faviconUrlDark: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(4096))),
+  }),
+  Schema.TaggedStruct("native-app", {
+    app: ToolActivityNativeAppReference,
+  }),
+  Schema.TaggedStruct("themed-logo", {
+    logoUrl: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(4096)),
+    logoUrlDark: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(4096))),
+  }),
+]);
+export type ToolActivityIcon = typeof ToolActivityIcon.Type;
+
+export const ToolActivitySource = Schema.Struct({
+  key: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(512)),
+  name: TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(160)),
+  kind: Schema.Literals(["browser", "computer", "integration"]),
+  icon: Schema.optional(ToolActivityIcon),
+});
+export type ToolActivitySource = typeof ToolActivitySource.Type;

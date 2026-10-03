@@ -29,3 +29,7 @@ export * from "./preview.ts";
 export * from "./previewAutomation.ts";
 export * from "./resourceTelemetry.ts";
 export * from "./rpc.ts";
+export * from "./orchestrationV2.ts";
+export * from "./composerContext.ts";
+export * from "./threadPullRequest.ts";
+export * from "./applicationEvent.ts";
