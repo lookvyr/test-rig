@@ -1,4 +1,4 @@
-import type { ApprovalRequestId, ScopedThreadRef } from "@t3tools/contracts";
+import type { RuntimeRequestId, ScopedThreadRef } from "@t3tools/contracts";
 import { useState } from "react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import type { PendingUserInput } from "../../session-logic";
@@ -14,8 +14,8 @@ export function AsyncUserInputPanel({
 }: {
   threadRef: ScopedThreadRef;
   requests: PendingUserInput[];
-  respondingRequestIds: ApprovalRequestId[];
-  onRespond: (requestId: ApprovalRequestId, answers: Record<string, unknown>) => unknown;
+  respondingRequestIds: RuntimeRequestId[];
+  onRespond: (requestId: RuntimeRequestId, answers: Record<string, unknown>) => unknown;
 }) {
   const request = requests[0] ?? null;
   const [expanded, setExpanded] = useState(true);

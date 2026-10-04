@@ -76,3 +76,7 @@ export async function showExternalLinkContextMenu({
     if (action) reportFailure(FAILURE_OPERATION_BY_ACTION[action], cause);
   }
 }
+
+export function resolveExternalWebLinkHref(href: string | null | undefined): string | null {
+  return href && resolveExternalWebLinkHost(href) ? new URL(href).href : null;
+}

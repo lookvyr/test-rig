@@ -12,7 +12,7 @@ import * as OrchestrationCommandReceipts from "./Services/OrchestrationCommandRe
 /**
  * ERRORS
  */
-export class CommandReceiptStoreWriteError extends Schema.TaggedErrorClass<CommandReceiptStoreWriteError>()(
+export class CommandReceiptStoreWriteError extends Schema.TaggedError<CommandReceiptStoreWriteError>()(
   "CommandReceiptStoreWriteError",
   {
     commandId: CommandId,
@@ -24,7 +24,7 @@ export class CommandReceiptStoreWriteError extends Schema.TaggedErrorClass<Comma
   }
 }
 
-export class CommandReceiptStoreReadError extends Schema.TaggedErrorClass<CommandReceiptStoreReadError>()(
+export class CommandReceiptStoreReadError extends Schema.TaggedError<CommandReceiptStoreReadError>()(
   "CommandReceiptStoreReadError",
   {
     commandId: CommandId,

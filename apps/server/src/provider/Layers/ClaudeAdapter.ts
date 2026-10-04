@@ -3502,6 +3502,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           message,
         );
         return;
+      case "background_tasks_changed":
+      case "control_request_progress":
+      case "informational":
+      case "model_refusal_no_fallback":
+      case "worker_shutting_down":
+        return;
       default: {
         // Exhaustiveness guard: every subtype in the SDK's typed union is
         // handled above, so `message` narrows to never here — a new SDK
@@ -3651,6 +3657,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* handleSdkTelemetryMessage(context, message);
         return;
       // Composer prompt suggestions have no T3 surface; consumed deliberately.
+      case "conversation_reset":
       case "prompt_suggestion":
         return;
       default: {
@@ -3734,7 +3741,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     context: ClaudeSessionContext,
     options?: { readonly emitExitEvent?: boolean },
   ) {
-    if (context.stopped) return;
+    if (context.session.status === "closed") return;
 
     context.stopped = true;
 
@@ -3780,7 +3787,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           cause,
         }),
     }).pipe(
-      Effect.catch((error) =>
+      Effect.tapError((error) =>
         emitRuntimeError(context, "Failed to close Claude runtime query.", {
           errorTag: error._tag,
           provider: error.provider,
@@ -4767,7 +4774,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
   const stopSession: ClaudeAdapterShape["stopSession"] = Effect.fn("stopSession")(
     function* (threadId) {
-      const context = yield* requireSession(threadId);
+      const context = sessions.get(threadId);
+      if (!context) return;
       yield* stopSessionInternal(context, {
         emitExitEvent: true,
       });

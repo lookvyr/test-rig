@@ -1,0 +1,87 @@
+import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Environment from "../../../environment/ServerEnvironment.ts";
+import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
+import * as Settings from "../../../serverSettings.ts";
+import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import { readCaller, readMutationCaller, unavailable } from "../../threadAccess.ts";
+import { EnvironmentToolkit } from "./tools.ts";
+
+export function preferences(settings: ServerSettings) {
+  const {
+    defaultThreadEnvMode,
+    newWorktreesStartFromOrigin,
+    backgroundActivity,
+    sourceControlWritingStyle,
+  } = settings;
+  const trim = (value: string) => Array.from(value).slice(0, 4000).join("");
+  return {
+    defaultThreadEnvMode,
+    newWorktreesStartFromOrigin,
+    backgroundActivity: { profile: backgroundActivity.profile },
+    sourceControlWritingStyle: {
+      ...sourceControlWritingStyle,
+      commitInstructions: trim(sourceControlWritingStyle.commitInstructions),
+      changeRequestTitleInstructions: trim(
+        sourceControlWritingStyle.changeRequestTitleInstructions,
+      ),
+      changeRequestDescriptionInstructions: trim(
+        sourceControlWritingStyle.changeRequestDescriptionInstructions,
+      ),
+      truncated: [
+        sourceControlWritingStyle.commitInstructions,
+        sourceControlWritingStyle.changeRequestTitleInstructions,
+        sourceControlWritingStyle.changeRequestDescriptionInstructions,
+      ].some((value) => Array.from(value).length > 4000),
+    },
+  };
+}
+const access = (writable = false) =>
+  Effect.gen(function* () {
+    const context = yield* writable ? readMutationCaller() : readCaller();
+    const environment = yield* Environment.ServerEnvironment;
+    const descriptor = yield* environment.getDescriptor;
+    if (descriptor.environmentId !== context.scope.environmentId)
+      return yield* new OrchestratorMcpFailure({
+        code: "capability_denied",
+        message: "This credential belongs to another environment.",
+      });
+    return { ...context, descriptor, settings: yield* Settings.ServerSettingsService };
+  });
+export const EnvironmentHandlersLive = EnvironmentToolkit.toLayer({
+  t3_environment_read: () =>
+    Effect.gen(function* () {
+      const { descriptor, settings } = yield* access();
+      const current = yield* settings.getSettings.pipe(Effect.mapError(unavailable));
+      return {
+        environmentId: descriptor.environmentId,
+        label: descriptor.label,
+        serverVersion: descriptor.serverVersion,
+        platform: descriptor.platform,
+        preferences: preferences(current),
+      };
+    }),
+  t3_environment_preferences_update: (patch) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+      return yield* executor.withLock(
+        scope.threadId,
+        Effect.gen(function* () {
+          const { caller, settings } = yield* access(true);
+          if (
+            caller.archivedAt !== null ||
+            caller.runtimeMode !== "full-access" ||
+            caller.interactionMode !== "default"
+          )
+            return yield* new OrchestratorMcpFailure({
+              code: "capability_denied",
+              message: "Preference updates require a live full-access/default thread.",
+            });
+          return preferences(
+            yield* settings.updateSettings(patch).pipe(Effect.mapError(unavailable)),
+          );
+        }),
+      );
+    }),
+});

@@ -65,7 +65,7 @@ const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")
 const buildCmd = Command.make(
   "build",
   {
-    verbose: Flag.boolean("verbose").pipe(Flag.withDefault(false)),
+    verbose: Flag.Boolean("verbose").pipe(Flag.withDefault(false)),
   },
   (config) =>
     Effect.gen(function* () {

@@ -1,3 +1,13 @@
+const SKILL_MENTION_SOURCE =
+  /(^|\s)\p{Sc}(?![0-9][0-9_]*(?:[kKmMbBtT]|[eE][0-9]+)?(?:\s|$))(?=[a-zA-Z0-9:_-]*[a-zA-Z])([a-zA-Z0-9][a-zA-Z0-9:_-]*)/u
+    .source;
+/**
+ * Skill mentions in a sent prompt, which may also end at the end of the text.
+ * Group 1 is the leading delimiter and group 2 the skill name. The pattern is
+ * global, so use it with `matchAll` or `replace`, not `test` or `exec`.
+ */
+export const SKILL_MENTION_PATTERN = new RegExp(`${SKILL_MENTION_SOURCE}(?=\\s|$)`, "gu");
+
 export interface MarkdownCodeRange {
   start: number;
   end: number;

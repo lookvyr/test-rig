@@ -326,21 +326,46 @@ export async function executeAtomCommand<A, E>(
   return result;
 }
 
+export interface AtomQueryOptions extends AtomCommandOptions {
+  /**
+   * Force a fresh execution instead of accepting a value the atom already
+   * holds (e.g. an SWR-cached result within its stale window). Used by
+   * verification flows where a cached failure must not satisfy a retry.
+   */
+  readonly refresh?: boolean;
+  /** Interrupt the query wait when its caller no longer wants the result. */
+  readonly signal?: AbortSignal;
+}
+
 export async function executeAtomQuery<A, E>(
   registry: AtomRegistry.AtomRegistry,
   atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
-  options: AtomCommandOptions = {},
+  options: AtomQueryOptions = {},
   reporter: AtomCommandReporter = console,
 ): Promise<AtomCommandResult<A, E>> {
   const query = Effect.scoped(
     Effect.gen(function* () {
       yield* AtomRegistry.mount(registry, atom);
+      if (options.refresh) {
+        yield* Effect.sync(() => {
+          // Only a settled value can be a leftover from an earlier read; a
+          // computation that mounting just started is already fresh.
+          const current = registry.get(atom);
+          if (current._tag !== "Initial" && !current.waiting) {
+            registry.refresh(atom);
+          }
+        });
+      }
       return yield* AtomRegistry.getResult(registry, atom, {
         suspendOnWaiting: true,
       });
     }),
   );
-  return executeAtomCommand(() => Effect.runPromiseExit(query), options, reporter);
+  return executeAtomCommand(
+    () => Effect.runPromiseExit(query, { signal: options.signal }),
+    options,
+    reporter,
+  );
 }
 
 export function createRuntimeCommand<R, ER, W, A, E>(

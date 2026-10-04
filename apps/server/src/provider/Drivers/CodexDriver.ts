@@ -1,6 +1,8 @@
-import { ProviderContinuationRequests } from "../../orchestration-v2/ProviderContinuationRequests.ts";
-import { makeNativeAdapterV2 } from "../../orchestration-v2/Adapters/NativeAdapterV2.ts";
-import { nativeCapabilities } from "../../orchestration-v2/Adapters/nativeCapabilities.ts";
+import {
+  createCodexAdapterV2,
+  codexAppServerClientFactoryFromSettingsLayer,
+} from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
 /**
  * CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
  *
@@ -27,6 +29,7 @@ import { nativeCapabilities } from "../../orchestration-v2/Adapters/nativeCapabi
 import { CodexSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
@@ -75,7 +78,6 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
  * registered driver and the runtime satisfies them once.
  */
 export type CodexDriverEnv =
-  | ProviderContinuationRequests
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -160,15 +162,27 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
-      const orchestrationAdapter = yield* makeNativeAdapterV2({
+      const orchestrationAdapter = yield* createCodexAdapterV2({
         instanceId,
-        native: yield* makeCodexAdapter(effectiveConfig, {
-          instanceId,
-          environment: processEnv,
-          ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-        }),
-        capabilities: nativeCapabilities("codex"),
-      });
+        displayName,
+        accentColor,
+        environment,
+        enabled,
+        config,
+      }).pipe(
+        Effect.provide(
+          Layer.merge(codexAppServerClientFactoryFromSettingsLayer, IdAllocator.layer),
+        ),
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);
 
       // Build a managed snapshot whose settings never change — mutations come

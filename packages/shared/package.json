@@ -194,10 +194,75 @@
     "./toolOutput": {
       "types": "./src/toolOutput.ts",
       "import": "./src/toolOutput.ts"
+    },
+    "./composerContextReferences": {
+      "types": "./src/composerContextReferences.ts",
+      "import": "./src/composerContextReferences.ts"
+    },
+    "./array": {
+      "types": "./src/array.ts",
+      "default": "./src/array.ts"
+    },
+    "./claudeCompaction": {
+      "types": "./src/claudeCompaction.ts",
+      "import": "./src/claudeCompaction.ts"
+    },
+    "./otelEnvironment": {
+      "types": "./src/otelEnvironment.ts",
+      "import": "./src/otelEnvironment.ts"
+    },
+    "./testing/symlinks": {
+      "types": "./src/testing/symlinks.ts",
+      "import": "./src/testing/symlinks.ts"
+    },
+    "./changeRequestUrl": "./src/changeRequestUrl.ts",
+    "./nodeSqliteClient": "./src/nodeSqliteClient.ts",
+    "./projectSettings": "./src/projectSettings.ts",
+    "./gitPatchPath": "./src/gitPatchPath.ts",
+    "./assistantCitations": "./src/assistantCitations.ts",
+    "./t3McpToolPresentation": {
+      "types": "./src/t3McpToolPresentation.ts",
+      "import": "./src/t3McpToolPresentation.ts"
+    },
+    "./favicon": {
+      "types": "./src/favicon.ts",
+      "import": "./src/favicon.ts"
+    },
+    "./composerContextClipboard": {
+      "types": "./src/composerContextClipboard.ts",
+      "import": "./src/composerContextClipboard.ts"
+    },
+    "./delimitedPreview": {
+      "types": "./src/delimitedPreview.ts",
+      "import": "./src/delimitedPreview.ts"
+    },
+    "./video": {
+      "types": "./src/video.ts",
+      "import": "./src/video.ts"
+    },
+    "./composerContextLegacy": {
+      "types": "./src/composerContextLegacy.ts",
+      "import": "./src/composerContextLegacy.ts"
+    },
+    "./image": {
+      "types": "./src/image.ts",
+      "import": "./src/image.ts"
+    },
+    "./hostClassification": {
+      "types": "./src/hostClassification.ts",
+      "import": "./src/hostClassification.ts"
+    },
+    "./imageDimensions": {
+      "types": "./src/imageDimensions.ts",
+      "import": "./src/imageDimensions.ts"
+    },
+    "./usageFormat": {
+      "types": "./src/usageFormat.ts",
+      "import": "./src/usageFormat.ts"
     }
   },
   "scripts": {
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vp test run"
   },
   "dependencies": {

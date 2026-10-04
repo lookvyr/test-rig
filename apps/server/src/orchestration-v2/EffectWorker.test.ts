@@ -1,5 +1,15 @@
+import * as EffectExecutor from "./EffectExecutor.ts";
+import * as RuntimePolicy from "./RuntimePolicy.ts";
 import { assert, it } from "@effect/vitest";
-import { CommandId, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  ProviderSessionId,
+  ProviderThreadId,
+  ProviderTurnId,
+  RunAttemptId,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -11,8 +21,143 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as CheckpointRollbackService from "./CheckpointRollbackService.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EffectWorker from "./EffectWorker.ts";
+import * as RunFinalizationService from "./RunFinalizationService.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
+import * as ProviderTurnStartService from "./ProviderTurnStartService.ts";
+import * as RuntimeRequestService from "./RuntimeRequestService.ts";
+import * as ThreadTitleRegenerationService from "./ThreadTitleRegenerationService.ts";
+import * as ThreadManagementService from "./ThreadManagementService.ts";
+import * as ServerSettings from "../serverSettings.ts";
+
+const threadId = ThreadId.make("thread:effect-worker-restart");
+const oldSessionId = ProviderSessionId.make("provider-session:effect-worker-restart:old");
+const replacementSessionId = ProviderSessionId.make(
+  "provider-session:effect-worker-restart:replacement",
+);
+const providerThreadId = ProviderThreadId.make("provider-thread:effect-worker-restart");
+const providerTurnId = ProviderTurnId.make("provider-turn:effect-worker-restart");
+const attemptId = RunAttemptId.make("run-attempt:effect-worker-restart");
+const runId = RunId.make("run:effect-worker-restart");
+
+function restartEffect(
+  now: DateTime.Utc,
+  sessionTransition: NonNullable<
+    Extract<
+      EffectOutbox.OrchestrationEffectV2["request"],
+      { readonly type: "provider-turn.restart" }
+    >["sessionTransition"]
+  >,
+): EffectOutbox.OrchestrationEffectV2 {
+  const timestamp = DateTime.formatIso(now);
+  return {
+    id: `effect:restart:${sessionTransition.type}`,
+    commandId: CommandId.make(`command:restart:${sessionTransition.type}`),
+    threadId,
+    request: {
+      type: "provider-turn.restart",
+      providerSessionId: oldSessionId,
+      providerThreadId,
+      providerTurnId,
+      interruptedAttemptId: attemptId,
+      runId,
+      sessionTransition,
+    },
+    status: "running",
+    attemptCount: 1,
+    availableAt: timestamp,
+    leaseOwner: "test-worker",
+    leaseExpiresAt: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    completedAt: null,
+    lastError: null,
+  };
+}
+
+function makeExecutorLayer(input: {
+  readonly events: Ref.Ref<ReadonlyArray<string>>;
+  readonly failFirstStart?: Ref.Ref<boolean>;
+}) {
+  const record = (event: string) => Ref.update(input.events, (events) => [...events, event]);
+  const dependencies = Layer.mergeAll(
+    Layer.succeed(
+      ProviderTurnControlService.ProviderTurnControlServiceV2,
+      ProviderTurnControlService.ProviderTurnControlServiceV2.of({
+        interrupt: () => Effect.void,
+        steer: () => Effect.void,
+        interruptAndAwaitTerminal: (request) =>
+          record(
+            request.replacementProviderSessionId === undefined
+              ? "interrupt"
+              : `interrupt:${request.replacementProviderSessionId}`,
+          ),
+      }),
+    ),
+    Layer.succeed(
+      ProviderSessionManager.ProviderSessionManagerV2,
+      ProviderSessionManager.ProviderSessionManagerV2.of({
+        shutdown: Effect.void,
+        residencies: Effect.succeed([]),
+        open: () => Effect.die("unused open"),
+        get: () => Effect.succeed(Option.none()),
+        close: () => Effect.void,
+        closeInstance: () => Effect.void,
+        release: () => record("release"),
+        detach: () => record("detach"),
+      }),
+    ),
+    Layer.succeed(
+      ProviderTurnStartService.ProviderTurnStartServiceV2,
+      ProviderTurnStartService.ProviderTurnStartServiceV2.of({
+        start: () =>
+          Effect.gen(function* () {
+            yield* record("start");
+            if (
+              input.failFirstStart !== undefined &&
+              (yield* Ref.getAndSet(input.failFirstStart, false))
+            ) {
+              return yield* new ProviderTurnStartService.ProviderTurnStartError({
+                runId,
+                cause: "simulated first start failure",
+              });
+            }
+          }),
+      }),
+    ),
+    Layer.succeed(
+      RunFinalizationService.RunFinalizationService,
+      RunFinalizationService.RunFinalizationService.of({ finalize: () => Effect.void }),
+    ),
+    Layer.succeed(
+      CheckpointRollbackService.CheckpointRollbackServiceV2,
+      CheckpointRollbackService.CheckpointRollbackServiceV2.of({ execute: () => Effect.void }),
+    ),
+    Layer.succeed(
+      RuntimeRequestService.RuntimeRequestServiceV2,
+      RuntimeRequestService.RuntimeRequestServiceV2.of({ respond: () => Effect.void }),
+    ),
+    Layer.succeed(
+      ThreadTitleRegenerationService.ThreadTitleRegenerationService,
+      ThreadTitleRegenerationService.ThreadTitleRegenerationService.of({
+        execute: () => Effect.void,
+      }),
+    ),
+  );
+  return EffectExecutor.executorLayer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        dependencies,
+        RuntimePolicy.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+        ServerSettings.layerTest(),
+      ),
+    ),
+  );
+}
 
 it("does not retry pure interrupt races where the turn is already gone", () => {
   assert.isTrue(
@@ -465,7 +610,6 @@ it.effect("keeps a max-attempt replay-safe failure terminal when fail settlement
 it.effect("uses durable deadlines, notifications, and a slow liveness poll", () =>
   Effect.gen(function* () {
     const attempts = yield* Ref.make(0);
-    const attempted = yield* Queue.unbounded<void>();
     const available = yield* Queue.unbounded<void>();
     const now = yield* DateTime.now;
     const nextClaimableAt = yield* Ref.make<Option.Option<DateTime.Utc>>(
@@ -480,11 +624,15 @@ it.effect("uses durable deadlines, notifications, and a slow liveness poll", () 
           yield* Ref.set(nextClaimableAt, Option.some(DateTime.add(now, { milliseconds: 5_000 })));
         }
         if (count === 3) yield* Ref.set(nextClaimableAt, Option.none());
-        yield* Queue.offer(attempted, undefined);
         return false;
       }),
       nextClaimableAt: Ref.get(nextClaimableAt),
       drain: () => Effect.succeed(0),
+    });
+    const awaitAttempts = Effect.fnUntraced(function* (expected: number) {
+      while ((yield* Ref.get(attempts)) < expected) {
+        yield* Effect.yieldNow;
+      }
     });
 
     yield* EffectWorker.runDaemonWithOptions({
@@ -495,35 +643,33 @@ it.effect("uses durable deadlines, notifications, and a slow liveness poll", () 
       Effect.forkScoped,
     );
 
-    yield* Queue.take(attempted);
+    yield* awaitAttempts(1);
     yield* TestClock.adjust("99 millis");
     assert.equal(yield* Ref.get(attempts), 1);
 
     yield* TestClock.adjust("1 millis");
-    yield* Queue.take(attempted);
+    yield* awaitAttempts(2);
     yield* TestClock.adjust("999 millis");
     assert.equal(yield* Ref.get(attempts), 2);
 
     yield* Queue.offer(available, undefined);
-    yield* Queue.take(attempted);
+    yield* awaitAttempts(3);
     yield* TestClock.adjust("999 millis");
     assert.equal(yield* Ref.get(attempts), 3);
 
     yield* TestClock.adjust("1 millis");
-    yield* Queue.take(attempted);
+    yield* awaitAttempts(4);
   }).pipe(Effect.provide(TestClock.layer())),
 );
 
 it.effect("does not hot-loop when a claim fails", () =>
   Effect.gen(function* () {
     const attempts = yield* Ref.make(0);
-    const attempted = yield* Queue.unbounded<void>();
     const now = yield* DateTime.now;
     const worker = EffectWorker.OrchestrationEffectWorkerV2.of({
       awaitWork: Effect.never,
       runRecoveryOnce: Effect.succeed(false),
       runOnce: Ref.update(attempts, (count) => count + 1).pipe(
-        Effect.andThen(Queue.offer(attempted, undefined)),
         Effect.andThen(
           new EffectWorker.OrchestrationEffectWorkerError({
             operation: "claim",
@@ -543,26 +689,22 @@ it.effect("does not hot-loop when a claim fails", () =>
       Effect.forkScoped,
     );
 
-    yield* Queue.take(attempted);
+    while ((yield* Ref.get(attempts)) < 1) yield* Effect.yieldNow;
     yield* TestClock.adjust("999 millis");
     assert.equal(yield* Ref.get(attempts), 1);
     yield* TestClock.adjust("1 millis");
-    yield* Queue.take(attempted);
+    while ((yield* Ref.get(attempts)) < 2) yield* Effect.yieldNow;
   }).pipe(Effect.provide(TestClock.layer())),
 );
 
 it.effect("backs off briefly when a due deadline loses a claim race", () =>
   Effect.gen(function* () {
     const attempts = yield* Ref.make(0);
-    const attempted = yield* Queue.unbounded<void>();
     const now = yield* DateTime.now;
     const worker = EffectWorker.OrchestrationEffectWorkerV2.of({
       awaitWork: Effect.never,
       runRecoveryOnce: Effect.succeed(false),
-      runOnce: Ref.update(attempts, (count) => count + 1).pipe(
-        Effect.andThen(Queue.offer(attempted, undefined)),
-        Effect.as(false),
-      ),
+      runOnce: Ref.update(attempts, (count) => count + 1).pipe(Effect.as(false)),
       nextClaimableAt: Effect.succeed(Option.some(now)),
       drain: () => Effect.succeed(0),
     });
@@ -575,10 +717,43 @@ it.effect("backs off briefly when a due deadline loses a claim race", () =>
       Effect.forkScoped,
     );
 
-    yield* Queue.take(attempted);
+    while ((yield* Ref.get(attempts)) < 1) yield* Effect.yieldNow;
     yield* TestClock.adjust("24 millis");
     assert.equal(yield* Ref.get(attempts), 1);
     yield* TestClock.adjust("1 millis");
-    yield* Queue.take(attempted);
+    while ((yield* Ref.get(attempts)) < 2) yield* Effect.yieldNow;
   }).pipe(Effect.provide(TestClock.layer())),
+);
+
+it.effect("safely retries after replacement cleanup succeeds and start fails", () =>
+  Effect.gen(function* () {
+    const now = yield* DateTime.now;
+    const events = yield* Ref.make<ReadonlyArray<string>>([]);
+    const failFirstStart = yield* Ref.make(true);
+    const effect = restartEffect(now, {
+      type: "replace",
+      replacementProviderSessionId: replacementSessionId,
+    });
+    const layer = makeExecutorLayer({ events, failFirstStart });
+
+    const first = yield* Effect.gen(function* () {
+      const executor = yield* EffectWorker.OrchestrationEffectExecutorV2;
+      return yield* Effect.exit(executor.execute(effect));
+    }).pipe(Effect.provide(layer));
+    assert.isTrue(Exit.isFailure(first));
+
+    yield* Effect.gen(function* () {
+      const executor = yield* EffectWorker.OrchestrationEffectExecutorV2;
+      yield* executor.execute(effect);
+    }).pipe(Effect.provide(layer));
+
+    assert.deepEqual(yield* Ref.get(events), [
+      `interrupt:${replacementSessionId}`,
+      "detach",
+      "start",
+      `interrupt:${replacementSessionId}`,
+      "detach",
+      "start",
+    ]);
+  }),
 );

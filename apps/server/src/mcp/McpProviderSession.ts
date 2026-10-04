@@ -7,6 +7,8 @@ export interface McpProviderSessionConfig {
   readonly providerInstanceId: ProviderInstanceId;
   readonly endpoint: string;
   readonly authorizationHeader: string;
+  readonly browserToolsAvailable: boolean;
+  readonly capabilities?: ReadonlySet<string>;
 }
 
 const sessionsByThread = new Map<ThreadId, McpProviderSessionConfig>();

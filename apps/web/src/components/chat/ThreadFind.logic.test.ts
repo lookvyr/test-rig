@@ -1,5 +1,18 @@
+import {
+  MessageId,
+  ThreadId,
+  TurnItemId,
+  type OrchestrationV2ThreadSearchMessage,
+  type OrchestrationV2ProjectedTurnItem,
+} from "@t3tools/contracts";
+import { v2Now } from "../../test/threadFixtures";
 import { describe, expect, it } from "vite-plus/test";
-import { findTextOffsets, normalizeFindText, threadMessageFindText } from "./ThreadFind.logic";
+import {
+  mergeThreadFindMessages,
+  findTextOffsets,
+  normalizeFindText,
+  threadMessageFindText,
+} from "./ThreadFind.logic";
 
 describe("thread Find text", () => {
   it("finds a phrase across Markdown formatting and soft line breaks", () => {
@@ -81,5 +94,68 @@ describe("thread Find text", () => {
         text: "| Left | Right |\n| --- | --- |\n| red | blue |",
       }),
     ).toBe("left right red blue");
+  });
+});
+
+describe("native Find merge", () => {
+  function message(id: string, position: number): OrchestrationV2ThreadSearchMessage {
+    return {
+      id: MessageId.make(id),
+      role: "assistant",
+      text: "match",
+      createdAt: v2Now,
+      sourceThreadId: ThreadId.make("source"),
+      sourceItemId: TurnItemId.make(id),
+      position,
+    };
+  }
+  function live(
+    message: OrchestrationV2ThreadSearchMessage,
+    position: number,
+  ): OrchestrationV2ProjectedTurnItem {
+    return {
+      position,
+      visibility: "local",
+      sourceThreadId: message.sourceThreadId,
+      sourceItemId: message.sourceItemId,
+      item: {
+        id: message.sourceItemId,
+        threadId: message.sourceThreadId,
+        runId: null,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: position,
+        status: "completed",
+        title: null,
+        startedAt: v2Now,
+        completedAt: v2Now,
+        updatedAt: v2Now,
+        type: "assistant_message",
+        streaming: false,
+        messageId: message.id,
+        text: "updated match",
+      },
+    };
+  }
+  it("keeps absolute search order while refreshing a bounded live window", () => {
+    const older = message("older", 90),
+      recent = message("recent", 150);
+    const merged = mergeThreadFindMessages([older, recent], [live(recent, 0)]);
+    expect(merged.map((value) => value.id)).toEqual(["older", "recent"]);
+    expect(merged[1]).toMatchObject({ position: 150, text: "updated match" });
+  });
+  it("appends streaming-only matches in live order and retains inherited identity", () => {
+    const older = message("older", 90),
+      recent = message("recent", 150),
+      streaming = message("streaming", 151);
+    const merged = mergeThreadFindMessages(
+      [older, recent],
+      [{ ...live(recent, 0), visibility: "inherited" }, live(streaming, 1)],
+    );
+    expect(merged.map((value) => value.id)).toEqual(["older", "recent", "streaming"]);
+    expect(merged[1]?.sourceThreadId).toBe("source");
   });
 });

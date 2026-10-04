@@ -1,3 +1,5 @@
+import { makeTestThread } from "../test/threadFixtures";
+import type { ThreadRunSummary } from "@t3tools/client-runtime/state/models";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   archiveSelectedThreadEntries,
@@ -31,20 +33,9 @@ import {
   sortScopedProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
-import {
-  EnvironmentId,
-  OrchestrationLatestTurn,
-  ProjectId,
-  ProviderInstanceId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 
-import {
-  DEFAULT_INTERACTION_MODE,
-  DEFAULT_RUNTIME_MODE,
-  type Project,
-  type Thread,
-} from "../types";
+import { DEFAULT_RUNTIME_MODE, type Project, type Thread } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 
@@ -242,10 +233,10 @@ describe("resolveSidebarStageBadgeLabel", () => {
 function makeLatestTurn(overrides?: {
   completedAt?: string | null;
   startedAt?: string | null;
-}): OrchestrationLatestTurn {
+}): ThreadRunSummary {
   return {
-    turnId: "turn-1" as never,
-    state: "completed",
+    runId: "turn-1" as never,
+    status: "completed",
     assistantMessageId: null,
     requestedAt: "2026-03-09T10:00:00.000Z",
     startedAt:
@@ -260,12 +251,13 @@ describe("hasUnseenCompletion", () => {
     expect(
       hasUnseenCompletion({
         hasActionableProposedPlan: false,
+        pendingBackgroundTasks: [],
         hasPendingApprovals: false,
         hasPendingUserInput: false,
         interactionMode: "default",
-        latestTurn: makeLatestTurn(),
+        latestRun: makeLatestTurn(),
         lastVisitedAt: "2026-03-09T10:04:00.000Z",
-        session: null,
+        runtime: null,
       }),
     ).toBe(true);
   });
@@ -274,12 +266,13 @@ describe("hasUnseenCompletion", () => {
     expect(
       hasUnseenCompletion({
         hasActionableProposedPlan: false,
+        pendingBackgroundTasks: [],
         hasPendingApprovals: false,
         hasPendingUserInput: false,
         interactionMode: "default",
-        latestTurn: makeLatestTurn(),
+        latestRun: makeLatestTurn(),
         lastVisitedAt: undefined,
-        session: null,
+        runtime: null,
       }),
     ).toBe(false);
   });
@@ -625,70 +618,74 @@ describe("isContextMenuPointerDown", () => {
 });
 
 describe("resolveSidebarV2Status", () => {
-  const session = {
+  const runtime = {
     threadId: ThreadId.make("thread-1"),
     status: "running" as const,
     providerName: "Codex",
     providerInstanceId: ProviderInstanceId.make("codex"),
     runtimeMode: DEFAULT_RUNTIME_MODE,
-    activeTurnId: "turn-1" as never,
+    activeRunId: "turn-1" as never,
     lastError: null,
     updatedAt: "2026-03-09T10:00:00.000Z",
   };
 
-  const idle = { hasPendingApprovals: false, hasPendingUserInput: false };
+  const idle = {
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    pendingBackgroundTasks: [],
+  };
 
-  it("prioritizes approval over a running session", () => {
-    expect(resolveSidebarV2Status({ ...idle, hasPendingApprovals: true, session })).toBe(
+  it("prioritizes approval over a running runtime", () => {
+    expect(resolveSidebarV2Status({ ...idle, hasPendingApprovals: true, runtime })).toBe(
       "approval",
     );
   });
 
-  it("prioritizes awaiting input over a running session, below approval", () => {
-    expect(resolveSidebarV2Status({ ...idle, hasPendingUserInput: true, session })).toBe("input");
+  it("prioritizes awaiting input over a running runtime, below approval", () => {
+    expect(resolveSidebarV2Status({ ...idle, hasPendingUserInput: true, runtime })).toBe("input");
     expect(
       resolveSidebarV2Status({
         ...idle,
         hasPendingApprovals: true,
         hasPendingUserInput: true,
-        session,
+        runtime,
       }),
     ).toBe("approval");
   });
 
   it("reports working for running and starting sessions", () => {
-    expect(resolveSidebarV2Status({ ...idle, session })).toBe("working");
+    expect(resolveSidebarV2Status({ ...idle, runtime })).toBe("working");
     expect(
       resolveSidebarV2Status({
         ...idle,
-        session: { ...session, status: "starting" as const },
+        runtime: { ...runtime, status: "starting" as const },
       }),
     ).toBe("working");
   });
 
-  it("reports failed only while the session status is error", () => {
+  it("reports failed only while the runtime status is error", () => {
     expect(
       resolveSidebarV2Status({
         ...idle,
-        session: { ...session, status: "error" as const, lastError: "boom" },
+        runtime: { ...runtime, status: "failed" as const, lastError: "boom" },
       }),
     ).toBe("failed");
     expect(
       resolveSidebarV2Status({
         ...idle,
-        session: { ...session, status: "stopped" as const, lastError: "persisted" },
+        runtime: { ...runtime, status: "interrupted" as const, lastError: "persisted" },
       }),
     ).toBe("ready");
     expect(
       resolveSidebarV2Status({
         ...idle,
-        session: { ...session, status: "ready" as const, lastError: "persisted" },
+        runtime: { ...runtime, status: "idle" as const, lastError: "persisted" },
       }),
     ).toBe("ready");
   });
 
-  it("defaults to ready with no session", () => {
-    expect(resolveSidebarV2Status({ ...idle, session: null })).toBe("ready");
+  it("defaults to ready with no runtime", () => {
+    expect(resolveSidebarV2Status({ ...idle, runtime: null })).toBe("ready");
   });
 });
 
@@ -743,13 +740,13 @@ describe("sortSettledThreadsForSidebarV2", () => {
     id: string;
     settledAt?: string | null;
     latestUserMessageAt?: string | null;
-    latestTurn?: OrchestrationLatestTurn | null;
+    latestRun?: ThreadRunSummary | null;
     updatedAt?: string;
   }) => ({
     id: input.id,
     settledAt: input.settledAt ?? null,
     latestUserMessageAt: input.latestUserMessageAt ?? null,
-    latestTurn: input.latestTurn ?? null,
+    latestRun: input.latestRun ?? null,
     updatedAt: input.updatedAt ?? "2026-03-09T09:00:00.000Z",
   });
 
@@ -789,7 +786,7 @@ describe("sortSettledThreadsForSidebarV2", () => {
       settled({
         id: "completed-later",
         latestUserMessageAt: "2026-03-09T10:00:00.000Z",
-        latestTurn: makeLatestTurn({ completedAt: "2026-03-09T10:30:00.000Z" }),
+        latestRun: makeLatestTurn({ completedAt: "2026-03-09T10:30:00.000Z" }),
       }),
     ]);
 
@@ -807,13 +804,13 @@ describe("sortSettledThreadsForSidebarV2", () => {
 });
 
 describe("resolveWorkingStartedAt", () => {
-  const session = {
+  const runtime = {
     threadId: ThreadId.make("thread-1"),
     status: "running" as const,
     providerName: "Codex",
     providerInstanceId: ProviderInstanceId.make("codex"),
     runtimeMode: DEFAULT_RUNTIME_MODE,
-    activeTurnId: "turn-1" as never,
+    activeRunId: "turn-1" as never,
     lastError: null,
     updatedAt: "2026-03-09T10:02:00.000Z",
   };
@@ -821,8 +818,8 @@ describe("resolveWorkingStartedAt", () => {
   it("uses the running turn's start time", () => {
     expect(
       resolveWorkingStartedAt({
-        latestTurn: makeLatestTurn({ completedAt: null }),
-        session,
+        latestRun: makeLatestTurn({ completedAt: null }),
+        runtime,
       }),
     ).toBe("2026-03-09T10:00:00.000Z");
   });
@@ -830,17 +827,17 @@ describe("resolveWorkingStartedAt", () => {
   it("uses the request time while a turn awaits adoption", () => {
     expect(
       resolveWorkingStartedAt({
-        latestTurn: makeLatestTurn({ startedAt: null, completedAt: null }),
-        session,
+        latestRun: makeLatestTurn({ startedAt: null, completedAt: null }),
+        runtime,
       }),
     ).toBe("2026-03-09T10:00:00.000Z");
   });
 
-  it("falls back to the session transition when the latest turn already completed", () => {
+  it("falls back to the runtime transition when the latest turn already completed", () => {
     expect(
       resolveWorkingStartedAt({
-        latestTurn: makeLatestTurn(),
-        session,
+        latestRun: makeLatestTurn(),
+        runtime,
       }),
     ).toBe("2026-03-09T10:02:00.000Z");
   });
@@ -848,14 +845,14 @@ describe("resolveWorkingStartedAt", () => {
   it("skips a malformed startedAt instead of returning it", () => {
     expect(
       resolveWorkingStartedAt({
-        latestTurn: makeLatestTurn({ startedAt: "not-a-date", completedAt: null }),
-        session,
+        latestRun: makeLatestTurn({ startedAt: "not-a-date", completedAt: null }),
+        runtime,
       }),
     ).toBe("2026-03-09T10:00:00.000Z");
   });
 
-  it("returns null with neither a running turn nor a session", () => {
-    expect(resolveWorkingStartedAt({ latestTurn: null, session: null })).toBeNull();
+  it("returns null with neither a running turn nor a runtime", () => {
+    expect(resolveWorkingStartedAt({ latestRun: null, runtime: null })).toBeNull();
   });
 });
 
@@ -876,18 +873,19 @@ describe("formatWorkingDurationLabel", () => {
 describe("resolveThreadStatusPill", () => {
   const baseThread = {
     hasActionableProposedPlan: false,
+    pendingBackgroundTasks: [],
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     interactionMode: "plan" as const,
-    latestTurn: null,
+    latestRun: null,
     lastVisitedAt: undefined,
-    session: {
+    runtime: {
       threadId: ThreadId.make("thread-1"),
       status: "running" as const,
       providerName: "Codex",
       providerInstanceId: ProviderInstanceId.make("codex"),
       runtimeMode: DEFAULT_RUNTIME_MODE,
-      activeTurnId: "turn-1" as never,
+      activeRunId: "turn-1" as never,
       lastError: null,
       updatedAt: "2026-03-09T10:00:00.000Z",
     },
@@ -930,11 +928,11 @@ describe("resolveThreadStatusPill", () => {
         thread: {
           ...baseThread,
           hasActionableProposedPlan: true,
-          latestTurn: makeLatestTurn(),
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            activeTurnId: null,
+          latestRun: makeLatestTurn(),
+          runtime: {
+            ...baseThread.runtime,
+            status: "idle",
+            activeRunId: null,
           },
         },
       }),
@@ -946,11 +944,11 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          latestTurn: makeLatestTurn(),
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            activeTurnId: null,
+          latestRun: makeLatestTurn(),
+          runtime: {
+            ...baseThread.runtime,
+            status: "idle",
+            activeRunId: null,
           },
         },
       }),
@@ -963,12 +961,12 @@ describe("resolveThreadStatusPill", () => {
         thread: {
           ...baseThread,
           interactionMode: "default",
-          latestTurn: makeLatestTurn(),
+          latestRun: makeLatestTurn(),
           lastVisitedAt: "2026-03-09T10:04:00.000Z",
-          session: {
-            ...baseThread.session,
-            status: "ready",
-            activeTurnId: null,
+          runtime: {
+            ...baseThread.runtime,
+            status: "idle",
+            activeRunId: null,
           },
         },
       }),
@@ -1120,34 +1118,11 @@ function makeProject(overrides: Partial<Project> = {}): Project {
 }
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
-  return {
-    id: ThreadId.make("thread-1"),
-    environmentId: localEnvironmentId,
-    projectId: ProjectId.make("project-1"),
-    title: "Thread",
-    modelSelection: {
-      instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-5.4",
-      ...overrides?.modelSelection,
-    },
-    runtimeMode: DEFAULT_RUNTIME_MODE,
-    interactionMode: DEFAULT_INTERACTION_MODE,
-    session: null,
-    messages: [],
-    proposedPlans: [],
+  return makeTestThread({
     createdAt: "2026-03-09T10:00:00.000Z",
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
     updatedAt: "2026-03-09T10:00:00.000Z",
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
-    checkpoints: [],
-    activities: [],
     ...overrides,
-  };
+  });
 }
 
 describe("getFallbackThreadIdAfterDelete", () => {
@@ -1175,25 +1150,25 @@ describe("getFallbackThreadIdAfterDelete", () => {
           id: ThreadId.make("thread-oldest"),
           projectId: ProjectId.make("project-1"),
           createdAt: "2026-03-09T10:00:00.000Z",
-          messages: [],
+          latestUserMessageAt: null,
         }),
         makeThread({
           id: ThreadId.make("thread-active"),
           projectId: ProjectId.make("project-1"),
           createdAt: "2026-03-09T10:05:00.000Z",
-          messages: [],
+          latestUserMessageAt: null,
         }),
         makeThread({
           id: ThreadId.make("thread-newest"),
           projectId: ProjectId.make("project-1"),
           createdAt: "2026-03-09T10:10:00.000Z",
-          messages: [],
+          latestUserMessageAt: null,
         }),
         makeThread({
           id: ThreadId.make("thread-other-project"),
           projectId: ProjectId.make("project-2"),
           createdAt: "2026-03-09T10:20:00.000Z",
-          messages: [],
+          latestUserMessageAt: null,
         }),
       ],
       deletedThreadId: ThreadId.make("thread-active"),
@@ -1210,19 +1185,19 @@ describe("getFallbackThreadIdAfterDelete", () => {
           id: ThreadId.make("thread-active"),
           projectId: ProjectId.make("project-1"),
           createdAt: "2026-03-09T10:05:00.000Z",
-          messages: [],
+          latestUserMessageAt: null,
         }),
         makeThread({
           id: ThreadId.make("thread-newest"),
           projectId: ProjectId.make("project-1"),
           createdAt: "2026-03-09T10:10:00.000Z",
-          messages: [],
+          latestUserMessageAt: null,
         }),
         makeThread({
           id: ThreadId.make("thread-next"),
           projectId: ProjectId.make("project-1"),
           createdAt: "2026-03-09T10:07:00.000Z",
-          messages: [],
+          latestUserMessageAt: null,
         }),
       ],
       deletedThreadId: ThreadId.make("thread-active"),
@@ -1243,33 +1218,13 @@ describe("sortProjectsForSidebar", () => {
       makeThread({
         projectId: ProjectId.make("project-1"),
         updatedAt: "2026-03-09T10:20:00.000Z",
-        messages: [
-          {
-            id: "message-1" as never,
-            role: "user",
-            text: "older project user message",
-            turnId: null,
-            createdAt: "2026-03-09T10:01:00.000Z",
-            updatedAt: "2026-03-09T10:01:00.000Z",
-            streaming: false,
-          },
-        ],
+        latestUserMessageAt: "2026-03-09T10:01:00.000Z",
       }),
       makeThread({
         id: ThreadId.make("thread-2"),
         projectId: ProjectId.make("project-2"),
         updatedAt: "2026-03-09T10:05:00.000Z",
-        messages: [
-          {
-            id: "message-2" as never,
-            role: "user",
-            text: "newer project user message",
-            turnId: null,
-            createdAt: "2026-03-09T10:05:00.000Z",
-            updatedAt: "2026-03-09T10:05:00.000Z",
-            streaming: false,
-          },
-        ],
+        latestUserMessageAt: "2026-03-09T10:05:00.000Z",
       }),
     ];
 

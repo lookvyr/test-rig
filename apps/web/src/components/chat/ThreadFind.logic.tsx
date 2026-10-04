@@ -12,7 +12,12 @@ import {
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import { CHAT_MARKDOWN_SANITIZE_SCHEMA } from "../chatMarkdownSchema";
-import type { MessageId, OrchestrationThreadSearchMessage } from "@t3tools/contracts";
+import type {
+  MessageId,
+  OrchestrationThreadSearchMessage,
+  OrchestrationV2ThreadSearchMessage,
+  OrchestrationV2ProjectedTurnItem,
+} from "@t3tools/contracts";
 import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import { extractTrailingElementContexts } from "../../lib/elementContext";
 import { extractTrailingPreviewAnnotation } from "../../lib/previewAnnotation";
@@ -156,4 +161,30 @@ export function findMessageRanges(element: Element, query: string): Range[] {
     range.setEnd(end.node, end.offset + 1);
     return [range];
   });
+}
+
+/** Keep whole-thread search order while refreshing text from the bounded live window. */
+export function mergeThreadFindMessages(
+  search: readonly OrchestrationV2ThreadSearchMessage[],
+  live: readonly OrchestrationV2ProjectedTurnItem[],
+): OrchestrationV2ThreadSearchMessage[] {
+  const key = (row: { sourceThreadId: string; sourceItemId: string }) =>
+    `${row.sourceThreadId}:${row.sourceItemId}`;
+  const bySource = new Map(search.map((message) => [key(message), message]));
+  const nextPosition = Math.max(-1, ...search.map((message) => message.position)) + 1;
+  for (const row of live) {
+    const item = row.item;
+    if (item.type !== "user_message" && item.type !== "assistant_message") continue;
+    const previous = bySource.get(key(row));
+    bySource.set(key(row), {
+      id: item.messageId,
+      role: item.type === "user_message" ? "user" : "assistant",
+      text: item.text,
+      createdAt: item.startedAt ?? item.updatedAt,
+      sourceThreadId: row.sourceThreadId,
+      sourceItemId: row.sourceItemId,
+      position: previous?.position ?? nextPosition + row.position,
+    });
+  }
+  return [...bySource.values()].sort((a, b) => a.position - b.position);
 }

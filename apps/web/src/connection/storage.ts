@@ -18,8 +18,9 @@ import {
 } from "@t3tools/client-runtime/connection";
 import {
   EnvironmentId,
-  OrchestrationShellSnapshot,
-  OrchestrationThreadDetailSnapshot,
+  OrchestrationV2ShellSnapshotJson,
+  OrchestrationV2ThreadDetailSnapshot,
+  OrchestrationV2ThreadProjectionJson,
   ServerConfig,
   ThreadId,
   VcsListRefsResult,
@@ -40,25 +41,23 @@ const THREAD_STORE_NAME = "thread";
 const SERVER_CONFIG_STORE_NAME = "server-config";
 const VCS_REFS_STORE_NAME = "vcs-refs";
 const CATALOG_KEY = "document";
-const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
+const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 2;
 
 const StoredShellSnapshot = Schema.Struct({
   schemaVersion: Schema.Literal(SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION),
   environmentId: EnvironmentId,
-  snapshot: OrchestrationShellSnapshot,
+  snapshot: OrchestrationV2ShellSnapshotJson,
 });
 const StoredShellSnapshotJson = Schema.fromJsonString(StoredShellSnapshot);
-// v2 stores the snapshot sequence alongside the thread so a warm cache can
-// resume via `afterSequence` instead of re-downloading the full thread body.
-// v3 adds windowed (paginated) snapshots carrying `page` metadata. The bump
-// exists for rollback safety: a pre-pagination client would decode a windowed
-// v2 record, silently drop the unknown `page` field, and treat the partial
-// thread as complete forever. Older entries fail to decode → cold cache.
+// V2 projections have a separate cache generation; legacy flattened transcripts are discarded.
 const StoredThreadSnapshot = Schema.Struct({
-  schemaVersion: Schema.Literal(3),
+  schemaVersion: Schema.Literal(4),
   environmentId: EnvironmentId,
   threadId: ThreadId,
-  snapshot: OrchestrationThreadDetailSnapshot,
+  snapshot: OrchestrationV2ThreadDetailSnapshot.mapFields((fields) => ({
+    ...fields,
+    projection: OrchestrationV2ThreadProjectionJson,
+  })),
 });
 const StoredThreadSnapshotJson = Schema.fromJsonString(StoredThreadSnapshot);
 const StoredServerConfig = Schema.Struct({
@@ -552,15 +551,15 @@ export const connectionStorageLayer = Layer.effectContext(
       saveThread: (environmentId, snapshot) =>
         Effect.gen(function* () {
           const encoded = yield* encodeStoredThreadSnapshot({
-            schemaVersion: 3,
+            schemaVersion: 4,
             environmentId,
-            threadId: snapshot.thread.id,
+            threadId: snapshot.projection.thread.id,
             snapshot,
           }).pipe(Effect.mapError((cause) => persistenceError("save-thread", cause)));
           yield* writeDatabaseValue(
             database,
             THREAD_STORE_NAME,
-            threadCacheKey(environmentId, snapshot.thread.id),
+            threadCacheKey(environmentId, snapshot.projection.thread.id),
             encoded,
           );
         }).pipe(

@@ -122,7 +122,7 @@ effectIt.layer(TestPortDiscoveryLive)("PortDiscovery integration (TCP probe fall
   );
 });
 
-effectIt("does not swallow process probe defects", () =>
+effectIt.effect("does not swallow process probe defects", () =>
   Effect.gen(function* () {
     const defect = new Error("unexpected process probe defect");
     const layer = makeProbeFailureLayer(() => Effect.die(defect));
@@ -140,7 +140,7 @@ effectIt("does not swallow process probe defects", () =>
   }),
 );
 
-effectIt("does not swallow process probe interruption", () =>
+effectIt.effect("does not swallow process probe interruption", () =>
   Effect.gen(function* () {
     const layer = makeProbeFailureLayer(() => Effect.interrupt);
 

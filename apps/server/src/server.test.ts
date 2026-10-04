@@ -1,3 +1,7 @@
+import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
+import * as OrchestratorV2 from "./orchestration-v2/Orchestrator.ts";
+import * as ProviderAdapterRegistryV2 from "./orchestration-v2/ProviderAdapterRegistry.ts";
+import * as ScheduledTaskService from "./scheduledTasks/ScheduledTaskService.ts";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -10,18 +14,18 @@ import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
-  EventId,
   GitCommandError,
   KeybindingRule,
-  MessageId,
   ExternalLauncherCommandNotFoundError,
-  OrchestrationThreadDetailSnapshot,
-  type OrchestrationThreadStreamItem,
-  type OrchestrationThreadShell,
   TerminalNotRunningError,
-  type OrchestrationCommand,
-  type OrchestrationEvent,
-  ORCHESTRATION_WS_METHODS,
+  ORCHESTRATION_V2_WS_METHODS,
+  ORCHESTRATION_PROTOCOL_QUERY_PARAM,
+  ORCHESTRATION_PROTOCOL_HEADER,
+  MessageId,
+  TurnItemId,
+  ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+  type OrchestrationV2ServerCommand,
+  type OrchestrationV2ProjectedTurnItem,
   type PreviewEvent,
   ProjectId,
   ProviderDriverKind,
@@ -35,7 +39,6 @@ import {
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import * as Clock from "effect/Clock";
-import * as Config from "effect/Config";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -48,7 +51,6 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
-import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -64,49 +66,34 @@ import {
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
-import { vi } from "vite-plus/test";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
-const decodeTransferThreadSnapshot = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(OrchestrationThreadDetailSnapshot),
-);
 
-const collectQueueUntil = Effect.fn("TransferBudget.collectQueueUntil")(function* <A>(
-  queue: Queue.Queue<A>,
-  predicate: (value: A) => boolean,
-  waitDescription: string,
-) {
-  return yield* Effect.gen(function* () {
-    const values: A[] = [];
-    while (true) {
-      const value = yield* Queue.take(queue);
-      values.push(value);
-      if (predicate(value)) return values;
-    }
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: "10 seconds",
-      orElse: () => Effect.die(new Error(`Timed out waiting for ${waitDescription}`)),
-    }),
-  );
-});
-
+import {
+  v2Projection,
+  v2Project,
+  v2ThreadShell,
+  v2ThreadId,
+} from "./orchestration-v2/testkit/fixtures.ts";
+import { OrchestratorProjectionError } from "./orchestration-v2/Orchestrator.ts";
+import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
+import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
+import * as ProjectService from "./project/ProjectService.ts";
+import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
+import * as ProjectEnrichment from "./project/ProjectEnrichmentService.ts";
+import * as ApplicationEvents from "./orchestration-v2/Services/OrchestrationEventStore.ts";
+import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
-import { isThreadDetailEvent, resolveAvailableEditorsForConfig } from "./ws.ts";
+import { resolveAvailableEditorsForConfig } from "./ws.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
-import {
-  OrchestrationCommandInvariantError,
-  OrchestrationListenerCallbackError,
-} from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
-import { PersistenceSqlError } from "./persistence/Errors.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -144,34 +131,6 @@ import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClien
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as Data from "effect/Data";
-
-import { makeOrchestrationIntegrationHarness } from "../integration/OrchestrationEngineHarness.integration.ts";
-import {
-  countingWsRpcProtocolLayer,
-  makeCountingWsRpcClient,
-  makeWebSocketTransferRecorder,
-  measureHttpGet,
-  transferDelta,
-} from "../integration/NetworkTransferMeasurement.integration.ts";
-import {
-  expectedMeasuredAssistantText,
-  queueMeasuredTransferTurn,
-  seedTransferBudgetHistory,
-  TRANSFER_HISTORY_TURN_COUNT,
-  TRANSFER_MEASURED_TURN_CREATED_AT,
-  TRANSFER_MEASURED_TURN_INDEX,
-  TRANSFER_THREAD_ID,
-  transferModelSelection,
-  waitForTurnQuiesced,
-} from "../integration/TransferBudgetScenario.integration.ts";
-import {
-  formatTransferBudgetReport,
-  formatTransferBudgetResult,
-  type TransferBudgetRun,
-  transferBudgetViolations,
-} from "../integration/TransferBudgetReport.integration.ts";
-
-const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
 const defaultDesktopBootstrapToken = "test-desktop-bootstrap-token";
 const defaultModelSelection = {
@@ -189,77 +148,6 @@ const testEnvironmentDescriptor = {
   capabilities: {
     repositoryIdentity: true,
   },
-};
-const makeDefaultOrchestrationReadModel = () => {
-  const now = "2026-01-01T00:00:00.000Z";
-  return {
-    snapshotSequence: 0,
-    updatedAt: now,
-    projects: [
-      {
-        id: defaultProjectId,
-        title: "Default Project",
-        workspaceRoot: "/tmp/default-project",
-        defaultModelSelection,
-        scripts: [],
-        createdAt: now,
-        updatedAt: now,
-        deletedAt: null,
-      },
-    ],
-    threads: [
-      {
-        id: defaultThreadId,
-        projectId: defaultProjectId,
-        title: "Default Thread",
-        modelSelection: defaultModelSelection,
-        interactionMode: "default" as const,
-        runtimeMode: "full-access" as const,
-        branch: null,
-        worktreePath: null,
-        createdAt: now,
-        updatedAt: now,
-        archivedAt: null,
-        settledOverride: null,
-        settledAt: null,
-        latestTurn: null,
-        messages: [],
-        session: null,
-        activities: [],
-        proposedPlans: [],
-        checkpoints: [],
-        deletedAt: null,
-      },
-    ],
-  };
-};
-
-const makeDefaultOrchestrationThreadShell = (
-  overrides: Partial<OrchestrationThreadShell> = {},
-): OrchestrationThreadShell => {
-  const now = "2026-01-01T00:00:00.000Z";
-  return {
-    id: defaultThreadId,
-    projectId: defaultProjectId,
-    title: "Default Thread",
-    modelSelection: defaultModelSelection,
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    latestTurn: null,
-    createdAt: now,
-    updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    session: null,
-    latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
-    hasActionableProposedPlan: false,
-    ...overrides,
-  };
 };
 
 const browserOtlpTracingLayer = Layer.mergeAll(
@@ -396,6 +284,11 @@ const buildAppUnderTest = (options?: {
       ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]
     >;
     terminalManager?: Partial<TerminalManager.TerminalManager["Service"]>;
+    threads?: Partial<ThreadManagement.ThreadManagementService["Service"]>;
+    threadLaunch?: Partial<ThreadLaunch.ThreadLaunchService["Service"]>;
+    projects?: Partial<ProjectService.ProjectService["Service"]>;
+    projectStore?: Partial<ProjectStore.ProjectStoreV2["Service"]>;
+    applicationEvents?: Partial<ApplicationEvents.OrchestrationEventStore["Service"]>;
     orchestrationEngine?: Partial<OrchestrationEngine.OrchestrationEngineService["Service"]>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQuery.ProjectionSnapshotQuery["Service"]>;
     checkpointDiffQuery?: Partial<CheckpointDiffQuery.CheckpointDiffQuery["Service"]>;
@@ -747,48 +640,72 @@ const buildAppUnderTest = (options?: {
         ),
       ),
       Layer.provide(
-        Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
-          readEvents: () => Stream.empty,
-          dispatch: () => Effect.succeed({ sequence: 0 }),
-          streamDomainEvents: Stream.empty,
-          latestSequence: Effect.succeed(0),
-          ...options?.layers?.orchestrationEngine,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            dispatch: () => Effect.succeed({ sequence: 0, storedEvents: [] }),
+            getShellSnapshot: () =>
+              Effect.succeed({
+                schemaVersion: 1,
+                snapshotSequence: 0,
+                threads: [],
+                archivedThreads: [],
+              }),
+            getThreadShell: () => Effect.succeed(v2ThreadShell),
+            getThreadProjection: () => Effect.succeed(v2Projection),
+            getThreadSnapshotWindow: () =>
+              Effect.succeed({ schemaVersion: 1, snapshotSequence: 0, projection: v2Projection }),
+            ensureLegacyTranscript: () => Effect.void,
+            streamStoredEventsFrom: () => Stream.never,
+            streamStoredEvents: Stream.never,
+            streamDomainEvents: Stream.never,
+            ...options?.layers?.threads,
+          }),
+          Layer.mock(ThreadLaunch.ThreadLaunchService)({ ...options?.layers?.threadLaunch }),
+          Layer.mock(ProjectService.ProjectService)({
+            getByWorkspaceRoot: () => Effect.succeedNone,
+            getShell: () => Effect.succeedNone,
+            snapshot: Effect.succeed({ projects: [], updatedAt: "1970-01-01T00:00:00.000Z" }),
+            listShells: () => Effect.succeed([]),
+            ...options?.layers?.projects,
+          }),
+          Layer.mock(ProjectStore.ProjectStoreV2)({
+            listShells: () => Effect.succeed([]),
+            ...options?.layers?.projectStore,
+          }),
+          Layer.mock(ProjectEnrichment.ProjectEnrichmentService)({
+            peek: () =>
+              Effect.succeed({
+                repositoryIdentity: null,
+                faviconPath: null,
+                repositoryIdentityResolved: true,
+              }),
+            getAvailable: () =>
+              Effect.succeed({
+                repositoryIdentity: null,
+                faviconPath: null,
+                repositoryIdentityResolved: true,
+              }),
+            subscribeChanges: PubSub.unbounded<ProjectEnrichment.ProjectEnrichmentChange>().pipe(
+              Effect.flatMap(PubSub.subscribe),
+            ),
+            request: () => Effect.void,
+          }),
+          Layer.mock(ApplicationEvents.OrchestrationEventStore)({
+            latestApplicationSequence: Effect.succeed(0),
+            readApplicationEvents: () => Stream.empty,
+            getReplayStats: () => Effect.succeed({ eventCount: 0, rawPayloadBytes: 0 }),
+            latestAgentSequence: () => Effect.succeed(0),
+            getAgentReplayStats: () =>
+              Effect.succeed({ eventCount: 0, rawPayloadBytes: 0, hasCreateEvent: false }),
+            readAgentEvents: () => Stream.empty,
+            streamApplicationEvents: () => Stream.never,
+            streamProjectedApplicationEvents: () => Stream.never,
+            ...options?.layers?.applicationEvents,
+          }),
+          Layer.mock(ThreadSearch.ThreadSearch)({ search: () => Effect.succeed({ matches: [] }) }),
+        ),
       ),
-      Layer.provide(
-        Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
-          getCommandReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          getShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: 0,
-              projects: [],
-              threads: [],
-              updatedAt: "1970-01-01T00:00:00.000Z",
-            }),
-          getArchivedShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: 0,
-              projects: [],
-              threads: [],
-              updatedAt: "1970-01-01T00:00:00.000Z",
-            }),
-          getThreadSearchContext: () => Effect.succeed({ thread: null }),
-          searchThreadMessages: () =>
-            Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
-          searchThreads: () => Effect.succeed({ matches: [] }),
-          getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-          getProjectShellById: () => Effect.succeed(Option.none()),
-          getThreadShellById: () => Effect.succeed(Option.none()),
-          getThreadDetailById: () => Effect.succeed(Option.none()),
-          getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-          getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-          ...options?.layers?.projectionSnapshotQuery,
-        }),
-      ),
+      Layer.provide(SqlitePersistenceMemory),
       Layer.provide(
         Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
           getTurnDiff: () =>
@@ -811,6 +728,14 @@ const buildAppUnderTest = (options?: {
     );
 
     const appLayer = servedRoutesLayer.pipe(
+      Layer.provide(
+        Layer.mock(NativeAppIconResolver.NativeAppIconResolver)({
+          resolve: () => Effect.succeed(null),
+        }),
+      ),
+      Layer.provide(Layer.mock(OrchestratorV2.OrchestratorV2)({})),
+      Layer.provide(Layer.mock(ProviderAdapterRegistryV2.ProviderAdapterRegistryV2)({})),
+      Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
       Layer.provide(resourceTelemetryLayer),
       Layer.provide(
         Layer.mock(BrowserTraceCollector.BrowserTraceCollector)({
@@ -918,6 +843,7 @@ const parseSessionCookieFromWsUrl = (
     ? decodeURIComponent(next.hash.slice("#cookie=".length))
     : null;
   next.hash = "";
+  next.searchParams.set(ORCHESTRATION_PROTOCOL_QUERY_PARAM, ORCHESTRATION_PROTOCOL_VERSION_TEXT);
   return {
     cookie,
     url: next.toString(),
@@ -931,7 +857,7 @@ const wsRpcProtocolLayer = (wsUrl: string) => {
     (socketUrl, protocols) =>
       new NodeSocket.NodeWS.WebSocket(
         socketUrl,
-        protocols,
+        typeof protocols === "string" || Array.isArray(protocols) ? protocols : undefined,
         cookie ? { headers: { cookie } } : undefined,
       ) as unknown as globalThis.WebSocket,
   );
@@ -955,13 +881,14 @@ const appendSessionCookieToWsUrl = (url: string, sessionCookieHeader: string) =>
   const isAbsoluteUrl = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(url);
   const next = new URL(url, "http://localhost");
   next.hash = `cookie=${encodeURIComponent(sessionCookieHeader)}`;
+  next.searchParams.set(ORCHESTRATION_PROTOCOL_QUERY_PARAM, ORCHESTRATION_PROTOCOL_VERSION_TEXT);
   return isAbsoluteUrl ? next.toString() : `${next.pathname}${next.search}${next.hash}`;
 };
 
 const getHttpServerUrl = (pathname = "") =>
   Effect.gen(function* () {
     const server = yield* HttpServer.HttpServer;
-    const address = server.address as HttpServer.TcpAddress;
+    const address = server.address as { readonly port: number };
     return `http://127.0.0.1:${address.port}${pathname}`;
   });
 
@@ -1184,6 +1111,7 @@ const assertBrowserApiCorsPreflightHeaders = (
     "b3",
     "content-type",
     "traceparent",
+    "x-t3-orchestration-protocol",
   ]);
 };
 const crossOriginClientOrigin = "http://remote-client.test:3773";
@@ -1194,8 +1122,13 @@ const getWsServerUrl = (
 ) =>
   Effect.gen(function* () {
     const server = yield* HttpServer.HttpServer;
-    const address = server.address as HttpServer.TcpAddress;
-    const baseUrl = `ws://127.0.0.1:${address.port}${pathname}`;
+    const address = server.address as { readonly port: number };
+    const socketUrl = new URL(`ws://127.0.0.1:${address.port}${pathname}`);
+    socketUrl.searchParams.set(
+      ORCHESTRATION_PROTOCOL_QUERY_PARAM,
+      ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+    );
+    const baseUrl = socketUrl.toString();
     if (options?.authenticated === false) {
       return baseUrl;
     }
@@ -1234,31 +1167,27 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const created: Array<{ readonly projectId: ProjectId; readonly workspaceRoot: string }> = [];
       yield* buildAppUnderTest({
         layers: {
-          orchestrationEngine: {
-            dispatch: (command) =>
+          projects: {
+            bootstrap: (input) =>
               Effect.sync(() => {
-                if (command.type === "project.create") {
-                  created.push({
-                    projectId: command.projectId,
-                    workspaceRoot: command.workspaceRoot,
-                  });
+                let existing = created.find(
+                  (project) => project.workspaceRoot === input.workspaceRoot,
+                );
+                const fresh = existing === undefined;
+                if (!existing) {
+                  existing = { projectId: input.projectId, workspaceRoot: input.workspaceRoot };
+                  created.push(existing);
                 }
-                return { sequence: created.length };
+                return {
+                  project: {
+                    ...v2Project,
+                    id: existing.projectId,
+                    workspaceRoot: existing.workspaceRoot,
+                    deletedAt: null,
+                  },
+                  created: fresh,
+                };
               }),
-          },
-          projectionSnapshotQuery: {
-            getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
-              Effect.succeed(
-                Option.fromNullishOr(
-                  created.find((project) => project.workspaceRoot === workspaceRoot),
-                ).pipe(
-                  Option.map((project) => ({
-                    ...makeDefaultOrchestrationReadModel().projects[0]!,
-                    id: project.projectId,
-                    workspaceRoot,
-                  })),
-                ),
-              ),
           },
         },
       });
@@ -1285,37 +1214,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("resolves a lost Scratch create race to the winning project", () =>
+  it.effect("uses the project chosen by the serialized Scratch bootstrap", () =>
     Effect.gen(function* () {
       const winnerId = ProjectId.make("project-scratch-winner");
-      let lookups = 0;
       yield* buildAppUnderTest({
         layers: {
-          orchestrationEngine: {
-            dispatch: (command) =>
-              Effect.fail(
-                new OrchestrationCommandInvariantError({
-                  commandType: command.type,
-                  detail: "Active project already exists for workspace root.",
-                }),
-              ),
-          },
-          projectionSnapshotQuery: {
-            // Empty before the create, then the other client's project.
-            getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
-              Effect.sync(() =>
-                lookups++ === 0
-                  ? Option.none()
-                  : Option.some({
-                      ...makeDefaultOrchestrationReadModel().projects[0]!,
-                      id: winnerId,
-                      workspaceRoot,
-                    }),
-              ),
+          projects: {
+            bootstrap: (input) =>
+              Effect.succeed({
+                project: {
+                  ...v2Project,
+                  id: winnerId,
+                  workspaceRoot: input.workspaceRoot,
+                  deletedAt: null,
+                },
+                created: false,
+              }),
           },
         },
       });
-
       const result = yield* Effect.scoped(
         withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
           client[WS_METHODS.projectsEnsureScratch]({}),
@@ -1325,144 +1242,44 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("gives each new Scratch thread its own folder", () =>
+  it.effect("gives Scratch drafts stable isolated folders even for hostile ids", () =>
     Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const scratchProjectId = ProjectId.make("project-scratch");
       let scratchRoot = "";
-      const created: Array<string | null> = [];
-      let draftWorkspace = "";
       yield* buildAppUnderTest({
         layers: {
-          orchestrationEngine: {
-            dispatch: (command) =>
+          projects: {
+            bootstrap: (input) =>
               Effect.sync(() => {
-                if (command.type === "thread.create") created.push(command.worktreePath);
-                return { sequence: created.length };
+                scratchRoot = input.workspaceRoot;
+                return {
+                  project: { ...v2Project, workspaceRoot: scratchRoot, deletedAt: null },
+                  created: false,
+                };
               }),
-            readEvents: () => Stream.empty,
-          },
-          projectionSnapshotQuery: {
-            getActiveProjectByWorkspaceRoot: () =>
-              Effect.succeed(
-                Option.some({
-                  id: scratchProjectId,
-                  title: "No project",
-                  workspaceRoot: scratchRoot,
-                  defaultModelSelection: null,
-                  scripts: [],
-                  deletedAt: null,
-                  createdAt: "2026-09-25T00:00:00.000Z",
-                  updatedAt: "2026-09-25T00:00:00.000Z",
-                }),
-              ),
-            getProjectShellById: (projectId) =>
-              Effect.succeed(
-                projectId === scratchProjectId
-                  ? Option.some({
-                      id: scratchProjectId,
-                      title: "Scratch",
-                      workspaceRoot: scratchRoot,
-                      defaultModelSelection: null,
-                      scripts: [],
-                      createdAt: "2026-09-25T00:00:00.000Z",
-                      updatedAt: "2026-09-25T00:00:00.000Z",
-                    })
-                  : Option.none(),
-              ),
+            getShell: () =>
+              Effect.succeed(Option.some({ ...v2Project, workspaceRoot: scratchRoot })),
           },
         },
       });
-
       yield* Effect.scoped(
         withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
           Effect.gen(function* () {
-            scratchRoot =
-              (yield* client[WS_METHODS.serverGetConfig]({})).scratchWorkspaceRoot ?? "";
-            const createdAt = "2026-09-25T10:00:00.000Z";
-            // The second id shares the first's short prefix, the third tries to
-            // climb out of the scratch root, and the fourth pastes a long token.
-            const text = "Convert these PNGs to WebP, please!";
-            const starts = [
-              { id: "a1b2c3d4-scratch-thread", text },
-              { id: "a1b2c3d4-other", text },
-              { id: "../../escape", text },
-              { id: "f00dcafe-long", text: "x".repeat(300) },
-              { id: "a1b2c3d4-scratch-thread", text: "Retry with different text" },
-              { id: "a1b2c3d4scratchthread", text },
-            ];
-            const prepared = yield* client[WS_METHODS.projectsEnsureScratch]({
-              threadId: ThreadId.make(starts[0]!.id),
+            const first = yield* client[WS_METHODS.projectsEnsureScratch]({
+              threadId: ThreadId.make("../../escape"),
             });
-            draftWorkspace = prepared.worktreePath ?? "";
-            assert.notEqual(draftWorkspace, "");
-            yield* fileSystem.writeFileString(
-              path.join(draftWorkspace, "before-send.txt"),
-              "draft file",
-            );
-            for (const [index, { id, text: messageText }] of starts.entries()) {
-              yield* client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-                type: "thread.turn.start",
-                commandId: CommandId.make(`cmd-scratch-turn-start-${index}`),
-                threadId: ThreadId.make(id),
-                message: {
-                  messageId: MessageId.make(`msg-scratch-${index}`),
-                  role: "user",
-                  text: messageText,
-                  attachments: [],
-                },
-                modelSelection: defaultModelSelection,
-                runtimeMode: "full-access",
-                interactionMode: "default",
-                bootstrap: {
-                  createThread: {
-                    projectId: scratchProjectId,
-                    title: "New thread",
-                    modelSelection: defaultModelSelection,
-                    runtimeMode: "full-access",
-                    interactionMode: "default",
-                    branch: null,
-                    worktreePath: null,
-                    createdAt,
-                  },
-                },
-                createdAt,
-              });
-            }
-            // Direct creation (used outside the composer's bootstrap flow)
-            // must resolve to the same folder for the same thread id.
-            yield* client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-              type: "thread.create",
-              commandId: CommandId.make("cmd-scratch-direct-create"),
-              threadId: ThreadId.make(starts[0]!.id),
-              projectId: scratchProjectId,
-              title: "Direct Scratch thread",
-              modelSelection: defaultModelSelection,
-              runtimeMode: "full-access",
-              interactionMode: "default",
-              branch: null,
-              worktreePath: null,
-              createdAt,
+            const second = yield* client[WS_METHODS.projectsEnsureScratch]({
+              threadId: ThreadId.make("other"),
             });
+            const retry = yield* client[WS_METHODS.projectsEnsureScratch]({
+              threadId: ThreadId.make("../../escape"),
+            });
+            assert.equal(first.worktreePath, retry.worktreePath);
+            assert.notEqual(first.worktreePath, second.worktreePath);
+            assert.isTrue(first.worktreePath!.startsWith(scratchRoot + "/"));
+            assert.isTrue(yield* (yield* FileSystem.FileSystem).exists(first.worktreePath!));
           }),
         ),
       );
-
-      assert.equal(created[0], draftWorkspace);
-      assert.equal(
-        yield* fileSystem.readFileString(path.join(created[0]!, "before-send.txt")),
-        "draft file",
-      );
-      assert.equal(created[0], created[4]);
-      assert.equal(created[0], created[6]);
-      assert.notEqual(created[0], created[5]);
-      assert.equal(new Set(created).size, 5);
-      for (const folder of created) assert.match(path.basename(folder ?? ""), /^[a-f0-9]{24}$/);
-      for (const folder of created) {
-        assert.equal(path.dirname(folder ?? ""), scratchRoot);
-        assert.isTrue(yield* fileSystem.exists(folder ?? ""));
-      }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1561,6 +1378,22 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("tells older clients which orchestration protocol to use", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const response = yield* HttpClient.get("/ws");
+      const body = yield* responseJsonEffect<{
+        code: string;
+        message: string;
+        orchestrationProtocolVersion: number;
+      }>(response);
+      assert.equal(response.status, 426);
+      assert.equal(body.code, "orchestration_protocol_incompatible");
+      assert.equal(body.orchestrationProtocolVersion, 2);
+      assert.include(body.message, "Update this client");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("compresses large JSON responses through the composed routes", () =>
     Effect.gen(function* () {
       const descriptor = {
@@ -1588,6 +1421,88 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.headers.vary, "Accept-Encoding");
       assert.deepEqual(body, descriptor);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "serves bounded native history as compressed JSON without loading the full projection",
+    () =>
+      Effect.gen(function* () {
+        const items: OrchestrationV2ProjectedTurnItem[] = Array.from(
+          { length: 150 },
+          (_, index) => {
+            const id = TurnItemId.make(`history-${index}`);
+            const item = {
+              id,
+              threadId: v2ThreadId,
+              runId: null,
+              nodeId: null,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: index + 1,
+              type: "assistant_message" as const,
+              messageId: MessageId.make(`message-${index}`),
+              text: `History ${index}: ${"bounded transport ".repeat(150)}`,
+              streaming: false,
+              status: "completed" as const,
+              title: null,
+              startedAt: v2Projection.thread.createdAt,
+              completedAt: v2Projection.thread.createdAt,
+              updatedAt: v2Projection.thread.createdAt,
+            };
+            return {
+              item,
+              position: index + 1,
+              sourceThreadId: v2ThreadId,
+              sourceItemId: id,
+              visibility: "local" as const,
+            };
+          },
+        );
+        yield* buildAppUnderTest({
+          layers: {
+            threads: {
+              getThreadProjection: () =>
+                Effect.die("Full transcript reads are forbidden on bounded HTTP"),
+              getThreadSnapshotWindow: (_id, options) => {
+                assert.isAtMost(options.rowLimit, 77);
+                return Effect.succeed({
+                  schemaVersion: 1,
+                  snapshotSequence: 150,
+                  projection: {
+                    ...v2Projection,
+                    turnItems: items.map((row) => row.item),
+                    visibleTurnItems: items,
+                  },
+                });
+              },
+            },
+          },
+        });
+        const bearer = yield* getAuthenticatedBearerSessionToken();
+        const url = yield* getHttpServerUrl(`/api/orchestration/threads/${v2ThreadId}/bounded`);
+        const response = yield* fetchEffect(url, {
+          headers: {
+            authorization: `Bearer ${bearer}`,
+            [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+            "accept-encoding": "gzip",
+          },
+        });
+        const body = yield* responseJsonEffect<{
+          snapshotSequence: number;
+          hasMoreHistory: boolean;
+          historyCursor: string | null;
+          projection: { visibleTurnItems: unknown[] };
+        }>(response);
+        assert.equal(response.status, 200);
+        assert.equal(response.headers["content-encoding"], "gzip");
+        assert.equal(body.snapshotSequence, 150);
+        assert.isTrue(body.hasMoreHistory);
+        assert.isNotNull(body.historyCursor);
+        assert.isAtMost(body.projection.visibleTurnItems.length, 75);
+        assert.isBelow(jsonRequestBody(body).length, 1_048_576);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("includes CORS headers on public environment descriptor responses", () =>
@@ -1876,7 +1791,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(overbroadPairingBody.requiredScope, "orchestration:read");
       assert.equal(pairingResponse.status, 200);
       assert.equal(wsTicketResponse.status, 200);
-      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
+      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}&wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
       const rpcError = yield* Effect.flip(
         Effect.scoped(withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({}))),
       );
@@ -1989,6 +1904,40 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   );
 
   for (const desktopOrigin of ["test-rig://app", "test-rig-dev://app"]) {
+    it.effect(`allows V2 orchestration snapshot preflights from ${desktopOrigin}`, () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest({
+          config: { devUrl: new URL(crossOriginClientOrigin) },
+        });
+
+        for (const pathname of [
+          "/api/orchestration/shell",
+          "/api/orchestration/threads/cors-test-thread/bounded",
+        ]) {
+          const url = yield* getHttpServerUrl(pathname);
+          const response = yield* fetchEffect(url, {
+            method: "OPTIONS",
+            headers: {
+              origin: desktopOrigin,
+              "access-control-request-method": "GET",
+              "access-control-request-headers": `authorization,${ORCHESTRATION_PROTOCOL_HEADER}`,
+            },
+          });
+
+          assert.equal(response.status, 204);
+          assertBrowserApiCorsResponseHeaders(response.headers, {
+            origin: desktopOrigin,
+            credentials: true,
+          });
+          assert.ok(
+            splitHeaderTokens(response.headers["access-control-allow-headers"]).includes(
+              ORCHESTRATION_PROTOCOL_HEADER,
+            ),
+          );
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+
     it.effect(`allows credentialed preflights from ${desktopOrigin} in development`, () =>
       Effect.gen(function* () {
         yield* buildAppUnderTest({
@@ -2500,7 +2449,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         const { cookie } = yield* bootstrapBrowserSession();
         assert.isDefined(cookie);
         const sessionToken = extractSessionTokenFromSetCookie(cookie ?? "");
-        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?token=${encodeURIComponent(sessionToken)}`;
+        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}&token=${encodeURIComponent(sessionToken)}`;
 
         const error = yield* Effect.flip(
           Effect.scoped(withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({}))),
@@ -2528,7 +2477,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         const wsTicketBody = yield* responseJsonEffect<{
           readonly ticket: string;
         }>(wsTicketResponse);
-        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
+        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}&wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
 
         const response = yield* Effect.scoped(
           withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({})),
@@ -3445,37 +3394,40 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("creates a missing workspace root during websocket project.create dispatch", () =>
+  it.effect("routes project creation through the native mutation endpoint", () =>
     Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const parentDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-create-" });
-      const missingWorkspaceRoot = path.join(parentDir, "nested", "new-project");
-
-      yield* buildAppUnderTest();
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const response = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+      const commands: ProjectService.ProjectCreateInput[] = [];
+      yield* buildAppUnderTest({
+        layers: {
+          projects: {
+            create: (input) =>
+              Effect.sync(() => {
+                commands.push(input);
+                return {
+                  ...v2Project,
+                  id: input.projectId,
+                  title: input.title,
+                  workspaceRoot: input.workspaceRoot,
+                  deletedAt: null,
+                };
+              }),
+          },
+        },
+      });
+      const result = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client["projects.mutate"]({
             type: "project.create",
-            commandId: CommandId.make("cmd-project-create-missing-root"),
-            projectId: ProjectId.make("project-create-missing-root"),
-            title: "New Project",
-            workspaceRoot: missingWorkspaceRoot,
+            commandId: CommandId.make("create-project"),
+            projectId: v2Project.id,
+            title: "New",
+            workspaceRoot: "/tmp/new",
             createWorkspaceRootIfMissing: true,
-            defaultModelSelection: {
-              instanceId: ProviderInstanceId.make("codex"),
-              model: "gpt-5-codex",
-            },
-            createdAt: "2026-01-01T00:00:00.000Z",
           }),
         ),
       );
-      const stat = yield* fs.stat(missingWorkspaceRoot);
-
-      assert.isAtLeast(response.sequence, 0);
-      assert.equal(stat.type, "Directory");
+      assert.equal(result.title, "New");
+      assert.equal(commands[0]?.createWorkspaceRootIfMissing, true);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -4371,2009 +4323,164 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("routes websocket rpc orchestration methods", () =>
+  it.effect("routes native commands and retains the diff RPC contract", () =>
     Effect.gen(function* () {
-      const now = "2026-01-01T00:00:00.000Z";
-      const snapshot = {
-        snapshotSequence: 1,
-        updatedAt: now,
-        projects: [
-          {
-            id: ProjectId.make("project-a"),
-            title: "Project A",
-            workspaceRoot: "/tmp/project-a",
-            defaultModelSelection,
-            scripts: [],
-            createdAt: now,
-            updatedAt: now,
-            deletedAt: null,
-          },
-        ],
-        threads: [
-          {
-            id: ThreadId.make("thread-1"),
-            projectId: ProjectId.make("project-a"),
-            title: "Thread A",
-            modelSelection: defaultModelSelection,
-            interactionMode: "default" as const,
-            runtimeMode: "full-access" as const,
-            branch: null,
-            worktreePath: null,
-            createdAt: now,
-            updatedAt: now,
-            archivedAt: null,
-            settledOverride: null,
-            settledAt: null,
-            latestTurn: null,
-            messages: [],
-            session: null,
-            activities: [],
-            proposedPlans: [],
-            checkpoints: [],
-            deletedAt: null,
-          },
-        ],
-      };
-
+      const commands: OrchestrationV2ServerCommand[] = [];
       yield* buildAppUnderTest({
         layers: {
-          projectionSnapshotQuery: {
-            getSnapshot: () => Effect.succeed(snapshot),
-            getThreadSearchContext: () => Effect.succeed({ thread: null }),
-            searchThreadMessages: () =>
-              Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
-            searchThreads: () =>
-              Effect.succeed({
-                matches: [
-                  {
-                    threadId: ThreadId.make("thread-1"),
-                    projectId: ProjectId.make("project-a"),
-                    source: "assistant",
-                    snippet: "Search reached the final response.",
-                    messageCreatedAt: now,
-                  },
-                ],
-              }),
-          },
-          orchestrationEngine: {
-            dispatch: () => Effect.succeed({ sequence: 7 }),
-            readEvents: () => Stream.empty,
-          },
-          checkpointDiffQuery: {
-            getTurnDiff: () =>
-              Effect.succeed({
-                threadId: ThreadId.make("thread-1"),
-                fromTurnCount: 0,
-                toTurnCount: 1,
-                diff: "turn-diff",
-              }),
-            getFullThreadDiff: () =>
-              Effect.succeed({
-                threadId: ThreadId.make("thread-1"),
-                fromTurnCount: 0,
-                toTurnCount: 1,
-                diff: "full-diff",
-              }),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const dispatchResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.session.stop",
-            commandId: CommandId.make("cmd-1"),
-            threadId: ThreadId.make("thread-1"),
-            createdAt: now,
-          }),
-        ),
-      );
-      assert.equal(dispatchResult.sequence, 7);
-
-      const turnDiffResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.getTurnDiff]({
-            threadId: ThreadId.make("thread-1"),
-            fromTurnCount: 0,
-            toTurnCount: 1,
-          }),
-        ),
-      );
-      assert.equal(turnDiffResult.diff, "turn-diff");
-
-      const fullDiffResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.getFullThreadDiff]({
-            threadId: ThreadId.make("thread-1"),
-            toTurnCount: 1,
-          }),
-        ),
-      );
-      assert.equal(fullDiffResult.diff, "full-diff");
-
-      const searchResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.searchThreads]({
-            query: "final response",
-          }),
-        ),
-      );
-      assert.deepEqual(searchResult.matches, [
-        {
-          threadId: ThreadId.make("thread-1"),
-          projectId: ProjectId.make("project-a"),
-          source: "assistant",
-          snippet: "Search reached the final response.",
-          messageCreatedAt: now,
-        },
-      ]);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("routes websocket rpc orchestration shell snapshot errors", () =>
-    Effect.gen(function* () {
-      const projectionError = new PersistenceSqlError({
-        operation: "ProjectionSnapshotQuery.getShellSnapshot:test",
-        detail: "failed to read projection shell snapshot",
-      });
-      yield* buildAppUnderTest({
-        layers: {
-          projectionSnapshotQuery: {
-            getShellSnapshot: () => Effect.fail(projectionError),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const result = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({}).pipe(Stream.runCollect),
-        ).pipe(Effect.result),
-      );
-
-      assertTrue(result._tag === "Failure");
-      assertTrue(result.failure._tag === "OrchestrationGetSnapshotError");
-      assertTrue(result.failure.cause instanceof Error);
-      assert.include(result.failure.cause.message, projectionError.message);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("marks an empty shell catch-up replay as synchronized when requested", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            readEvents: () => Stream.empty,
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const firstItem = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({
-            afterSequence: 0,
-            requestCompletionMarker: true,
-          }).pipe(Stream.runHead),
-        ),
-      );
-
-      assert.deepEqual(Option.getOrThrow(firstItem), { kind: "synchronized" });
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("marks a socket thread snapshot as synchronized when requested", () =>
-    Effect.gen(function* () {
-      const thread = makeDefaultOrchestrationReadModel().threads[0]!;
-      yield* buildAppUnderTest({
-        layers: {
-          projectionSnapshotQuery: {
-            getThreadDetailSnapshot: () =>
-              Effect.succeed(Option.some({ snapshotSequence: 1, thread })),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
-            threadId: defaultThreadId,
-            requestCompletionMarker: true,
-          }).pipe(Stream.take(2), Stream.runCollect),
-        ),
-      );
-
-      assert.equal(items[0]?.kind, "snapshot");
-      assert.deepEqual(items[1], { kind: "synchronized" });
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("buffers shell events published while the fallback snapshot loads", () =>
-    Effect.gen(function* () {
-      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
-      const deletedEvent = {
-        sequence: 2,
-        eventId: EventId.make("event-shell-thread-deleted"),
-        aggregateKind: "thread",
-        aggregateId: defaultThreadId,
-        occurredAt: "2026-01-01T00:00:01.000Z",
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        type: "thread.deleted",
-        payload: {
-          threadId: defaultThreadId,
-          deletedAt: "2026-01-01T00:00:01.000Z",
-        },
-      } satisfies Extract<OrchestrationEvent, { type: "thread.deleted" }>;
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            streamDomainEvents: Stream.fromPubSub(liveEvents),
-          },
-          projectionSnapshotQuery: {
-            getShellSnapshot: () =>
-              Effect.gen(function* () {
-                yield* PubSub.publish(liveEvents, deletedEvent);
-                return {
-                  snapshotSequence: 1,
-                  projects: [],
-                  threads: [makeDefaultOrchestrationThreadShell()],
-                  updatedAt: "2026-01-01T00:00:00.000Z",
-                };
-              }),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({
-            requestCompletionMarker: true,
-          }).pipe(Stream.take(3), Stream.runCollect),
-        ),
-      ).pipe(Effect.timeout("2 seconds"));
-
-      assert.equal(items[0]?.kind, "snapshot");
-      assert.equal(items[1]?.kind, "thread-removed");
-      assert.deepEqual(items[2], { kind: "synchronized" });
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
-  );
-
-  it.effect("buffers thread events published while the initial snapshot loads", () =>
-    Effect.gen(function* () {
-      const thread = makeDefaultOrchestrationReadModel().threads[0]!;
-      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
-      const messageEvent = {
-        sequence: 2,
-        eventId: EventId.make("event-message"),
-        aggregateKind: "thread",
-        aggregateId: defaultThreadId,
-        occurredAt: "2026-01-01T00:00:01.000Z",
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        type: "thread.message-sent",
-        payload: {
-          threadId: defaultThreadId,
-          messageId: MessageId.make("message-1"),
-          role: "user",
-          text: "First message",
-          turnId: null,
-          streaming: false,
-          createdAt: "2026-01-01T00:00:01.000Z",
-          updatedAt: "2026-01-01T00:00:01.000Z",
-        },
-      } satisfies Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            streamDomainEvents: Stream.fromPubSub(liveEvents),
-          },
-          projectionSnapshotQuery: {
-            getThreadDetailSnapshot: () =>
-              Effect.gen(function* () {
-                yield* Effect.sleep("25 millis");
-                yield* PubSub.publish(liveEvents, messageEvent);
-                return Option.some({ snapshotSequence: 1, thread });
-              }),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
-            threadId: defaultThreadId,
-          }).pipe(Stream.take(2), Stream.runCollect),
-        ),
-      ).pipe(Effect.timeout("2 seconds"));
-
-      assert.equal(items[0]?.kind, "snapshot");
-      assert.equal(items[1]?.kind, "event");
-      assert.equal(items[1]?.kind === "event" ? items[1].event.sequence : null, 2);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
-  );
-
-  it.effect("subscribeThread sends a fresh snapshot instead of replaying a large gap", () =>
-    Effect.gen(function* () {
-      let readEventsCalls = 0;
-      const thread = makeDefaultOrchestrationReadModel().threads[0]!;
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            // Head is far ahead of the client's afterSequence (gap > 1000).
-            latestSequence: Effect.succeed(100_000),
-            readEvents: () =>
-              Stream.sync(() => {
-                readEventsCalls += 1;
-                return {} as OrchestrationEvent;
-              }),
-          },
-          projectionSnapshotQuery: {
-            getThreadDetailSnapshot: () =>
-              Effect.succeed(Option.some({ snapshotSequence: 100_000, thread })),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
-            threadId: defaultThreadId,
-            afterSequence: 5,
-            requestCompletionMarker: true,
-          }).pipe(Stream.take(2), Stream.runCollect),
-        ),
-      );
-
-      const [first, second] = Array.from(items);
-      // Large gap => fresh thread snapshot, and the global replay never starts.
-      assert.equal(first?.kind, "snapshot");
-      if (first?.kind === "snapshot") {
-        assert.equal(first.snapshot.thread.id, defaultThreadId);
-        assert.equal(first.snapshot.snapshotSequence, 100_000);
-      }
-      assert.equal(second?.kind, "synchronized");
-      assert.equal(readEventsCalls, 0);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("subscribeThread replaces a cursor ahead of the authoritative head", () =>
-    Effect.gen(function* () {
-      let readEventsCalls = 0;
-      const thread = makeDefaultOrchestrationReadModel().threads[0]!;
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(5),
-            readEvents: () =>
-              Stream.sync(() => {
-                readEventsCalls += 1;
-                return {} as OrchestrationEvent;
-              }),
-          },
-          projectionSnapshotQuery: {
-            getThreadDetailSnapshot: () =>
-              Effect.succeed(Option.some({ snapshotSequence: 5, thread })),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const first = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
-            threadId: defaultThreadId,
-            afterSequence: 10,
-          }).pipe(Stream.runHead),
-        ),
-      );
-
-      assert.equal(Option.getOrThrow(first).kind, "snapshot");
-      assert.equal(readEventsCalls, 0);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("subscribeThread bounds catch-up replay to the captured head", () =>
-    Effect.gen(function* () {
-      let replayLimit: number | undefined;
-      const now = "2026-01-01T00:00:00.000Z";
-      const messageEvent = {
-        sequence: 3,
-        eventId: EventId.make("event-replay-message"),
-        aggregateKind: "thread",
-        aggregateId: defaultThreadId,
-        occurredAt: now,
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        type: "thread.message-sent",
-        payload: {
-          threadId: defaultThreadId,
-          messageId: MessageId.make("message-replay"),
-          role: "user",
-          text: "Replayed message",
-          turnId: null,
-          streaming: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      } satisfies Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(50),
-            readEvents: (_afterSequence, limit) => {
-              replayLimit = limit;
-              return Stream.make(messageEvent);
-            },
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
-            threadId: defaultThreadId,
-            afterSequence: 0,
-            requestCompletionMarker: true,
-          }).pipe(Stream.take(2), Stream.runCollect),
-        ),
-      );
-
-      const [first, second] = Array.from(items);
-      assert.equal(first?.kind, "event");
-      assert.equal(first?.kind === "event" ? first.event.sequence : null, 3);
-      assert.equal(second?.kind, "synchronized");
-      // The replay is bounded to the head captured before the read, not
-      // Number.MAX_SAFE_INTEGER.
-      assert.equal(replayLimit, 50);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("subscribeShell sends a fresh snapshot instead of replaying a large gap", () =>
-    Effect.gen(function* () {
-      let readEventsCalls = 0;
-      const snapshotThreadId = ThreadId.make("thread-from-snapshot");
-      const now = "2026-01-01T00:00:00.000Z";
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            // Head is far ahead of the client's afterSequence (gap > 1000).
-            latestSequence: Effect.succeed(100_000),
-            readEvents: () =>
-              Stream.sync(() => {
-                readEventsCalls += 1;
-                return {
-                  sequence: 1,
-                  eventId: EventId.make("event-should-not-be-read"),
-                  aggregateKind: "thread",
-                  aggregateId: snapshotThreadId,
-                  occurredAt: now,
-                  commandId: null,
-                  causationEventId: null,
-                  correlationId: null,
-                  metadata: {},
-                  type: "thread.created",
-                  payload: {} as never,
-                } satisfies OrchestrationEvent;
-              }),
-          },
-          projectionSnapshotQuery: {
-            getShellSnapshot: () =>
-              Effect.succeed({
-                snapshotSequence: 100_000,
-                projects: [],
-                threads: [makeDefaultOrchestrationThreadShell({ id: snapshotThreadId })],
-                updatedAt: now,
-              }),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({
-            afterSequence: 5,
-            requestCompletionMarker: true,
-          }).pipe(Stream.take(2), Stream.runCollect),
-        ),
-      );
-
-      const [first, second] = Array.from(items);
-      // Large gap => fresh snapshot, and the unbounded replay is never started.
-      assert.equal(first?.kind, "snapshot");
-      if (first?.kind === "snapshot") {
-        assert.equal(first.snapshot.threads[0]?.id, snapshotThreadId);
-      }
-      assert.equal(second?.kind, "synchronized");
-      assert.equal(readEventsCalls, 0);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("subscribeShell replaces a cursor ahead of the authoritative head", () =>
-    Effect.gen(function* () {
-      let readEventsCalls = 0;
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(5),
-            readEvents: () =>
-              Stream.sync(() => {
-                readEventsCalls += 1;
-                return {} as OrchestrationEvent;
-              }),
-          },
-          projectionSnapshotQuery: {
-            getShellSnapshot: () =>
-              Effect.succeed({
-                snapshotSequence: 5,
-                projects: [],
-                threads: [],
-                updatedAt: "2026-01-01T00:00:00.000Z",
-              }),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const first = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({ afterSequence: 10 }).pipe(
-            Stream.runHead,
-          ),
-        ),
-      );
-
-      assert.equal(Option.getOrThrow(first).kind, "snapshot");
-      assert.equal(readEventsCalls, 0);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("subscribeShell coalesces a per-thread burst without stalling other threads", () =>
-    Effect.gen(function* () {
-      const busyThreadId = ThreadId.make("thread-busy");
-      const newThreadId = ThreadId.make("thread-new");
-      const now = "2026-01-01T00:00:00.000Z";
-      const shellFetches: Array<string> = [];
-      let replayLimit: number | undefined;
-
-      const messageEvent = (sequence: number): OrchestrationEvent =>
-        ({
-          sequence,
-          eventId: EventId.make(`event-${sequence}`),
-          aggregateKind: "thread",
-          aggregateId: busyThreadId,
-          occurredAt: now,
-          commandId: null,
-          causationEventId: null,
-          correlationId: null,
-          metadata: {},
-          type: "thread.message-sent",
-          payload: {} as never,
-        }) satisfies OrchestrationEvent;
-
-      const createdEvent: OrchestrationEvent = {
-        sequence: 50,
-        eventId: EventId.make("event-created"),
-        aggregateKind: "thread",
-        aggregateId: newThreadId,
-        occurredAt: now,
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        type: "thread.created",
-        payload: {} as never,
-      };
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(50),
-            // A burst of message-sent deltas for the busy thread, plus one
-            // thread.created for a different thread, all within one batch.
-            readEvents: (_afterSequence, limit) => {
-              replayLimit = limit;
-              return Stream.fromIterable([
-                ...Array.from({ length: 20 }, (_unused, index) => messageEvent(index + 1)),
-                createdEvent,
-              ]);
-            },
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: (threadId) =>
-              Effect.sync(() => {
-                shellFetches.push(threadId);
-                return Option.some(makeDefaultOrchestrationThreadShell({ id: threadId }));
-              }),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({
-            afterSequence: 0,
-            requestCompletionMarker: true,
-          }).pipe(Stream.take(3), Stream.runCollect),
-        ),
-      );
-
-      const collected = Array.from(items);
-      const upsertedIds = collected.flatMap((item) =>
-        item.kind === "thread-upserted" ? [item.thread.id] : [],
-      );
-      // Both threads surface, and the busy thread's 20-event burst collapses to
-      // a single shell refetch (not 20). The new thread is not stuck behind it.
-      assert.include(upsertedIds, busyThreadId);
-      assert.include(upsertedIds, newThreadId);
-      assert.equal(collected[2]?.kind, "synchronized");
-      assert.equal(shellFetches.filter((id) => id === busyThreadId).length, 1);
-      assert.equal(replayLimit, 50);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("subscribeShell coalesces live bursts after the synchronization marker", () =>
-    Effect.gen(function* () {
-      const busyThreadId = ThreadId.make("thread-live-busy");
-      const newThreadId = ThreadId.make("thread-live-new");
-      const now = "2026-01-01T00:00:00.000Z";
-      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
-      const synchronized = yield* Deferred.make<void>();
-      const shellFetches: Array<string> = [];
-      const observedLiveThreadIds = new Set<string>();
-
-      const messageEvent = (sequence: number): OrchestrationEvent =>
-        ({
-          sequence,
-          eventId: EventId.make(`event-live-${sequence}`),
-          aggregateKind: "thread",
-          aggregateId: busyThreadId,
-          occurredAt: now,
-          commandId: null,
-          causationEventId: null,
-          correlationId: null,
-          metadata: {},
-          type: "thread.message-sent",
-          payload: {} as never,
-        }) satisfies OrchestrationEvent;
-
-      const createdEvent: OrchestrationEvent = {
-        sequence: 50,
-        eventId: EventId.make("event-live-created"),
-        aggregateKind: "thread",
-        aggregateId: newThreadId,
-        occurredAt: now,
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        type: "thread.created",
-        payload: {} as never,
-      };
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            streamDomainEvents: Stream.fromPubSub(liveEvents),
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: (threadId) =>
-              Effect.sync(() => {
-                shellFetches.push(threadId);
-                return Option.some(makeDefaultOrchestrationThreadShell({ id: threadId }));
-              }),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const itemsFiber = yield* withWsRpcClient(wsUrl, (client) =>
-            client[ORCHESTRATION_WS_METHODS.subscribeShell]({
-              requestCompletionMarker: true,
-            }).pipe(
-              Stream.tap((item) =>
-                item.kind === "synchronized"
-                  ? Deferred.succeed(synchronized, undefined).pipe(Effect.ignore)
-                  : Effect.void,
-              ),
-              Stream.takeUntil((item) => {
-                if (item.kind === "thread-upserted") {
-                  observedLiveThreadIds.add(item.thread.id);
-                }
-                return (
-                  observedLiveThreadIds.has(busyThreadId) && observedLiveThreadIds.has(newThreadId)
-                );
-              }),
-              Stream.runCollect,
-            ),
-          ).pipe(Effect.forkScoped);
-
-          yield* Deferred.await(synchronized);
-          for (const event of [
-            ...Array.from({ length: 20 }, (_unused, index) => messageEvent(index + 1)),
-            createdEvent,
-          ]) {
-            yield* PubSub.publish(liveEvents, event);
-          }
-
-          return yield* Fiber.join(itemsFiber);
-        }),
-      ).pipe(Effect.timeout("2 seconds"));
-
-      assert.equal(items[0]?.kind, "snapshot");
-      assert.equal(items[1]?.kind, "synchronized");
-      const liveUpsertedIds = Array.from(items)
-        .slice(2)
-        .flatMap((item) => (item.kind === "thread-upserted" ? [item.thread.id] : []));
-      assert.include(liveUpsertedIds, busyThreadId);
-      assert.include(liveUpsertedIds, newThreadId);
-      assert.isBelow(shellFetches.filter((id) => id === busyThreadId).length, 20);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
-  );
-
-  it.effect("subscribeShell coalescing still emits a removal for a deleted thread", () =>
-    Effect.gen(function* () {
-      const goneThreadId = ThreadId.make("thread-gone");
-      const now = "2026-01-01T00:00:00.000Z";
-
-      const makeThreadEvent = (
-        sequence: number,
-        type: "thread.deleted" | "thread.message-sent",
-      ): OrchestrationEvent =>
-        ({
-          sequence,
-          eventId: EventId.make(`event-${sequence}`),
-          aggregateKind: "thread",
-          aggregateId: goneThreadId,
-          occurredAt: now,
-          commandId: null,
-          causationEventId: null,
-          correlationId: null,
-          metadata: {},
-          type,
-          payload: type === "thread.deleted" ? { threadId: goneThreadId, deletedAt: now } : {},
-        }) as OrchestrationEvent;
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(2),
-            // A thread.deleted followed, within the same coalescing window, by a
-            // later refetchable event for the same thread. The later event wins
-            // coalescing; its shell refetch returns none (the row is gone), which
-            // must still surface a removal rather than be swallowed.
-            readEvents: () =>
-              Stream.fromIterable([
-                makeThreadEvent(1, "thread.deleted"),
-                makeThreadEvent(2, "thread.message-sent"),
-              ]),
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: () => Effect.succeed(Option.none()),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({ afterSequence: 0 }).pipe(
-            Stream.take(1),
-            Stream.runCollect,
-          ),
-        ),
-      );
-
-      const [first] = Array.from(items);
-      assert.equal(first?.kind, "thread-removed");
-      assert.equal(first?.kind === "thread-removed" ? first.threadId : null, goneThreadId);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("subscribeShell retries a transient shell projection refetch failure", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread-transient-refetch");
-      const now = "2026-01-01T00:00:00.000Z";
-      let attempts = 0;
-
-      const event: OrchestrationEvent = {
-        sequence: 1,
-        eventId: EventId.make("event-transient-refetch"),
-        aggregateKind: "thread",
-        aggregateId: threadId,
-        occurredAt: now,
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        type: "thread.message-sent",
-        payload: {} as never,
-      };
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(1),
-            readEvents: () => Stream.make(event),
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: () =>
-              Effect.suspend(() => {
-                attempts += 1;
-                return attempts === 1
-                  ? Effect.fail(
-                      new PersistenceSqlError({
-                        operation: "test.shell-refetch",
-                        detail: "transient failure",
-                      }),
-                    )
-                  : Effect.succeed(
-                      Option.some(makeDefaultOrchestrationThreadShell({ id: threadId })),
-                    );
-              }),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({ afterSequence: 0 }).pipe(
-            Stream.take(1),
-            Stream.runCollect,
-          ),
-        ),
-      );
-
-      const [first] = Array.from(items);
-      assert.equal(first?.kind, "thread-upserted");
-      assert.equal(first?.kind === "thread-upserted" ? first.thread.id : null, threadId);
-      assert.equal(attempts, 2);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("subscribeShell coalescing still removes a project after a trailing update", () =>
-    Effect.gen(function* () {
-      const projectId = ProjectId.make("project-gone");
-      const now = "2026-01-01T00:00:00.000Z";
-
-      const makeProjectEvent = (
-        sequence: number,
-        type: "project.deleted" | "project.meta-updated",
-      ): OrchestrationEvent =>
-        ({
-          sequence,
-          eventId: EventId.make(`event-project-${sequence}`),
-          aggregateKind: "project",
-          aggregateId: projectId,
-          occurredAt: now,
-          commandId: null,
-          causationEventId: null,
-          correlationId: null,
-          metadata: {},
-          type,
-          payload:
-            type === "project.deleted"
-              ? { projectId, deletedAt: now }
-              : { projectId, title: "Still deleted", updatedAt: now },
-        }) as OrchestrationEvent;
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(2),
-            readEvents: () =>
-              Stream.fromIterable([
-                makeProjectEvent(1, "project.deleted"),
-                makeProjectEvent(2, "project.meta-updated"),
-              ]),
-          },
-          projectionSnapshotQuery: {
-            getProjectShellById: () => Effect.succeed(Option.none()),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({ afterSequence: 0 }).pipe(
-            Stream.take(1),
-            Stream.runCollect,
-          ),
-        ),
-      );
-
-      const [first] = Array.from(items);
-      assert.equal(first?.kind, "project-removed");
-      assert.equal(first?.kind === "project-removed" ? first.projectId : null, projectId);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("stops the provider session and closes thread terminals after archive", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread-archive");
-      const effects: string[] = [];
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const now = "2026-01-01T00:00:00.000Z";
-
-      yield* buildAppUnderTest({
-        layers: {
-          terminalManager: {
-            close: (input) =>
-              Effect.sync(() => {
-                effects.push(`terminal.close:${input.threadId}`);
-              }),
-          },
-          orchestrationEngine: {
+          threads: {
             dispatch: (command) =>
               Effect.sync(() => {
-                dispatchedCommands.push(command);
-                effects.push(`dispatch:${command.type}`);
-                return { sequence: dispatchedCommands.length };
-              }),
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: () =>
-              Effect.succeed(
-                Option.some(
-                  makeDefaultOrchestrationThreadShell({
-                    id: threadId,
-                    updatedAt: now,
-                    session: {
-                      threadId,
-                      status: "ready",
-                      providerName: "claudeAgent",
-                      runtimeMode: "full-access",
-                      activeTurnId: null,
-                      lastError: null,
-                      updatedAt: now,
-                    },
-                  }),
-                ),
-              ),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const dispatchResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.archive",
-            commandId: CommandId.make("cmd-thread-archive"),
-            threadId,
-          }),
-        ),
-      );
-
-      assert.equal(dispatchResult.sequence, 1);
-      assert.deepEqual(effects, [
-        "dispatch:thread.archive",
-        "dispatch:thread.session.stop",
-        `terminal.close:${threadId}`,
-      ]);
-      const sessionStopCommand = dispatchedCommands[1];
-      assert.equal(sessionStopCommand?.type, "thread.session.stop");
-      if (sessionStopCommand?.type === "thread.session.stop") {
-        assert.equal(sessionStopCommand.threadId, threadId);
-      }
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("checks session status before archiving removes the thread from active lookups", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread-archive-precheck");
-      const effects: string[] = [];
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const now = "2026-01-01T00:00:00.000Z";
-      let archived = false;
-
-      yield* buildAppUnderTest({
-        layers: {
-          terminalManager: {
-            close: (input) =>
-              Effect.sync(() => {
-                effects.push(`terminal.close:${input.threadId}`);
-              }),
-          },
-          orchestrationEngine: {
-            dispatch: (command) =>
-              Effect.sync(() => {
-                dispatchedCommands.push(command);
-                effects.push(`dispatch:${command.type}`);
-                if (command.type === "thread.archive") {
-                  archived = true;
-                }
-                return { sequence: dispatchedCommands.length };
-              }),
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: () =>
-              Effect.sync(() => {
-                effects.push(`query:thread-shell:${archived ? "archived" : "active"}`);
-                return archived
-                  ? Option.none()
-                  : Option.some(
-                      makeDefaultOrchestrationThreadShell({
-                        id: threadId,
-                        updatedAt: now,
-                        session: {
-                          threadId,
-                          status: "ready",
-                          providerName: "claudeAgent",
-                          runtimeMode: "full-access",
-                          activeTurnId: null,
-                          lastError: null,
-                          updatedAt: now,
-                        },
-                      }),
-                    );
+                commands.push(command);
+                return { sequence: 7, storedEvents: [] };
               }),
           },
         },
       });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const dispatchResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.archive",
-            commandId: CommandId.make("cmd-thread-archive-precheck"),
-            threadId,
-          }),
-        ),
-      );
-
-      assert.equal(dispatchResult.sequence, 1);
-      assert.deepEqual(effects, [
-        "query:thread-shell:active",
-        "dispatch:thread.archive",
-        "dispatch:thread.session.stop",
-        `terminal.close:${threadId}`,
-      ]);
-      assert.deepEqual(
-        dispatchedCommands.map((command) => command.type),
-        ["thread.archive", "thread.session.stop"],
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("archives without dispatching session stop when the thread has no session", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread-archive-no-session");
-      const effects: string[] = [];
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-
-      yield* buildAppUnderTest({
-        layers: {
-          terminalManager: {
-            close: (input) =>
-              Effect.sync(() => {
-                effects.push(`terminal.close:${input.threadId}`);
-              }),
-          },
-          orchestrationEngine: {
-            dispatch: (command) =>
-              Effect.sync(() => {
-                dispatchedCommands.push(command);
-                effects.push(`dispatch:${command.type}`);
-                return { sequence: dispatchedCommands.length };
-              }),
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: () =>
-              Effect.succeed(
-                Option.some(makeDefaultOrchestrationThreadShell({ id: threadId, session: null })),
-              ),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const dispatchResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.archive",
-            commandId: CommandId.make("cmd-thread-archive-no-session"),
-            threadId,
-          }),
-        ),
-      );
-
-      assert.equal(dispatchResult.sequence, 1);
-      assert.deepEqual(effects, ["dispatch:thread.archive", `terminal.close:${threadId}`]);
-      assert.deepEqual(
-        dispatchedCommands.map((command) => command.type),
-        ["thread.archive"],
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect(
-    "archives without dispatching session stop when the thread session is already stopped",
-    () =>
-      Effect.gen(function* () {
-        const threadId = ThreadId.make("thread-archive-stopped-session");
-        const effects: string[] = [];
-        const dispatchedCommands: Array<OrchestrationCommand> = [];
-        const now = "2026-01-01T00:00:00.000Z";
-
-        yield* buildAppUnderTest({
-          layers: {
-            terminalManager: {
-              close: (input) =>
-                Effect.sync(() => {
-                  effects.push(`terminal.close:${input.threadId}`);
-                }),
-            },
-            orchestrationEngine: {
-              dispatch: (command) =>
-                Effect.sync(() => {
-                  dispatchedCommands.push(command);
-                  effects.push(`dispatch:${command.type}`);
-                  return { sequence: dispatchedCommands.length };
-                }),
-            },
-            projectionSnapshotQuery: {
-              getThreadShellById: () =>
-                Effect.succeed(
-                  Option.some(
-                    makeDefaultOrchestrationThreadShell({
-                      id: threadId,
-                      updatedAt: now,
-                      session: {
-                        threadId,
-                        status: "stopped",
-                        providerName: "claudeAgent",
-                        runtimeMode: "full-access",
-                        activeTurnId: null,
-                        lastError: null,
-                        updatedAt: now,
-                      },
-                    }),
-                  ),
-                ),
-            },
-          },
-        });
-
-        const wsUrl = yield* getWsServerUrl("/ws");
-        const dispatchResult = yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+      yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          Effect.gen(function* () {
+            const result = yield* client[ORCHESTRATION_V2_WS_METHODS.dispatchCommand]({
               type: "thread.archive",
-              commandId: CommandId.make("cmd-thread-archive-stopped-session"),
-              threadId,
-            }),
-          ),
-        );
-
-        assert.equal(dispatchResult.sequence, 1);
-        assert.deepEqual(effects, ["dispatch:thread.archive", `terminal.close:${threadId}`]);
-        assert.deepEqual(
-          dispatchedCommands.map((command) => command.type),
-          ["thread.archive"],
-        );
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("archives and still closes terminals when session stop fails", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread-archive-stop-failure");
-      const effects: string[] = [];
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const now = "2026-01-01T00:00:00.000Z";
-
-      yield* buildAppUnderTest({
-        layers: {
-          terminalManager: {
-            close: (input) =>
-              Effect.sync(() => {
-                effects.push(`terminal.close:${input.threadId}`);
-              }),
-          },
-          orchestrationEngine: {
-            dispatch: (command) => {
-              dispatchedCommands.push(command);
-              effects.push(`dispatch:${command.type}`);
-              if (command.type === "thread.session.stop") {
-                return Effect.fail(
-                  new OrchestrationListenerCallbackError({
-                    listener: "domain-event",
-                    detail: "simulated archive stop failure",
-                  }),
-                );
-              }
-              return Effect.succeed({ sequence: dispatchedCommands.length });
-            },
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: () =>
-              Effect.succeed(
-                Option.some(
-                  makeDefaultOrchestrationThreadShell({
-                    id: threadId,
-                    updatedAt: now,
-                    session: {
-                      threadId,
-                      status: "ready",
-                      providerName: "claudeAgent",
-                      runtimeMode: "full-access",
-                      activeTurnId: null,
-                      lastError: null,
-                      updatedAt: now,
-                    },
-                  }),
-                ),
-              ),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const dispatchResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.archive",
-            commandId: CommandId.make("cmd-thread-archive-stop-failure"),
-            threadId,
+              commandId: CommandId.make("archive"),
+              threadId: v2ThreadId,
+            });
+            assert.deepEqual(result, { sequence: 7 });
+            const diff = yield* client[ORCHESTRATION_V2_WS_METHODS.getTurnDiff]({
+              threadId: v2ThreadId,
+              fromTurnCount: 0,
+              toTurnCount: 1,
+            });
+            assert.equal(diff.threadId, defaultThreadId);
           }),
         ),
       );
-
-      assert.equal(dispatchResult.sequence, 1);
-      assert.deepEqual(effects, [
-        "dispatch:thread.archive",
-        "dispatch:thread.session.stop",
-        `terminal.close:${threadId}`,
-      ]);
-      assert.deepEqual(
-        dispatchedCommands.map((command) => command.type),
-        ["thread.archive", "thread.session.stop"],
-      );
+      assert.equal(commands[0]?.type, "thread.archive");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("archives and still closes terminals when session stop defects", () =>
+  it.effect("maps native shell errors at the RPC boundary", () =>
     Effect.gen(function* () {
-      const threadId = ThreadId.make("thread-archive-stop-defect");
-      const effects: string[] = [];
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const now = "2026-01-01T00:00:00.000Z";
-
       yield* buildAppUnderTest({
         layers: {
-          terminalManager: {
-            close: (input) =>
-              Effect.sync(() => {
-                effects.push(`terminal.close:${input.threadId}`);
-              }),
-          },
-          orchestrationEngine: {
-            dispatch: (command) => {
-              dispatchedCommands.push(command);
-              effects.push(`dispatch:${command.type}`);
-              if (command.type === "thread.session.stop") {
-                return Effect.die(new Error("simulated archive stop defect"));
-              }
-              return Effect.succeed({ sequence: dispatchedCommands.length });
-            },
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: () =>
-              Effect.succeed(
-                Option.some(
-                  makeDefaultOrchestrationThreadShell({
-                    id: threadId,
-                    updatedAt: now,
-                    session: {
-                      threadId,
-                      status: "ready",
-                      providerName: "claudeAgent",
-                      runtimeMode: "full-access",
-                      activeTurnId: null,
-                      lastError: null,
-                      updatedAt: now,
-                    },
-                  }),
-                ),
-              ),
+          threads: {
+            getShellSnapshot: () =>
+              Effect.fail(new OrchestratorProjectionError({ threadId: v2ThreadId })),
           },
         },
       });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const dispatchResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.archive",
-            commandId: CommandId.make("cmd-thread-archive-stop-defect"),
-            threadId,
-          }),
+      const error = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client[ORCHESTRATION_V2_WS_METHODS.subscribeShell]({}).pipe(
+            Stream.runCollect,
+            Effect.flip,
+          ),
         ),
       );
-
-      assert.equal(dispatchResult.sequence, 1);
-      assert.deepEqual(effects, [
-        "dispatch:thread.archive",
-        "dispatch:thread.session.stop",
-        `terminal.close:${threadId}`,
-      ]);
-      assert.deepEqual(
-        dispatchedCommands.map((command) => command.type),
-        ["thread.archive", "thread.session.stop"],
-      );
+      assert.equal(error._tag, "OrchestrationV2GetShellSnapshotError");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect(
-    "bootstraps first-send worktree turns on the server before dispatching turn start",
-    () =>
-      Effect.gen(function* () {
-        const dispatchedCommands: Array<OrchestrationCommand> = [];
-        const bootstrapGitOperations: string[] = [];
-        const refreshStatus = vi.fn((_: string) =>
-          Effect.succeed({
-            isRepo: true,
-            hasPrimaryRemote: true,
-            isDefaultRef: false,
-            refName: "t3code/bootstrap-refName",
-            hasWorkingTreeChanges: false,
-            workingTree: {
-              files: [],
-              insertions: 0,
-              deletions: 0,
-            },
-            hasUpstream: true,
-            aheadCount: 0,
-            behindCount: 0,
-            pr: null,
-          }),
-        );
-        const remoteExists = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteExists"]>[0]) =>
-            Effect.sync(() => {
-              bootstrapGitOperations.push("remote-exists");
-              return true;
-            }),
-        );
-        const fetchRemote = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["fetchRemote"]>[0]) =>
-            Effect.sync(() => {
-              bootstrapGitOperations.push("fetch");
-            }),
-        );
-        const remoteBranchExists = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteBranchExists"]>[0]) =>
-            Effect.sync(() => {
-              bootstrapGitOperations.push("remote-branch-exists");
-              return true;
-            }),
-        );
-        const fetchedOriginCommit = "0123456789abcdef0123456789abcdef01234567";
-        const resolveRemoteTrackingCommit = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["resolveRemoteTrackingCommit"]>[0]) =>
-            Effect.sync(() => {
-              bootstrapGitOperations.push("resolve-remote-commit");
-              return {
-                commitSha: fetchedOriginCommit,
-                remoteRefName: "origin/main",
-              };
-            }),
-        );
-        const createWorktree = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
-            Effect.sync(() => {
-              bootstrapGitOperations.push("create-worktree");
-              return {
-                worktree: {
-                  refName: "t3code/bootstrap-refName",
-                  path: "/tmp/bootstrap-worktree",
-                },
-              };
-            }),
-        );
-        const runForThread = vi.fn(
-          (
-            _: Parameters<
-              ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
-            >[0],
-          ) =>
-            Effect.succeed({
-              status: "started" as const,
-              scriptId: "setup",
-              scriptName: "Setup",
-              terminalId: "setup-setup",
-              cwd: "/tmp/bootstrap-worktree",
-            }),
-        );
-
-        yield* buildAppUnderTest({
-          layers: {
-            gitVcsDriver: {
-              remoteExists,
-              remoteBranchExists,
-              fetchRemote,
-              resolveRemoteTrackingCommit,
-              createWorktree,
-            },
-            vcsStatusBroadcaster: {
-              refreshStatus,
-            },
-            orchestrationEngine: {
-              dispatch: (command) =>
-                Effect.sync(() => {
-                  dispatchedCommands.push(command);
-                  return { sequence: dispatchedCommands.length };
-                }),
-              readEvents: () => Stream.empty,
-            },
-            projectSetupScriptRunner: {
-              runForThread,
-            },
-          },
-        });
-
-        const createdAt = "2026-01-01T00:00:00.000Z";
-        const wsUrl = yield* getWsServerUrl("/ws");
-        const response = yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-              type: "thread.turn.start",
-              commandId: CommandId.make("cmd-bootstrap-turn-start"),
-              threadId: ThreadId.make("thread-bootstrap"),
-              message: {
-                messageId: MessageId.make("msg-bootstrap"),
-                role: "user",
-                text: "hello",
-                attachments: [],
-              },
-              modelSelection: defaultModelSelection,
-              runtimeMode: "full-access",
-              interactionMode: "default",
-              bootstrap: {
-                createThread: {
-                  projectId: defaultProjectId,
-                  title: "Bootstrap Thread",
-                  modelSelection: defaultModelSelection,
-                  runtimeMode: "full-access",
-                  interactionMode: "default",
-                  branch: "main",
-                  worktreePath: null,
-                  createdAt,
-                },
-                prepareWorktree: {
-                  projectCwd: "/tmp/project",
-                  baseBranch: "main",
-                  branch: "t3code/bootstrap-refName",
-                  startFromOrigin: true,
-                },
-                runSetupScript: true,
-              },
-              createdAt,
-            }),
+  it.effect("marks empty native shell replay synchronized", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const items = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client[ORCHESTRATION_V2_WS_METHODS.subscribeShell]({
+            afterSequence: 0,
+            requestCompletionMarker: true,
+          }).pipe(
+            Stream.takeUntil((item) => item.kind === "synchronized"),
+            Stream.runCollect,
           ),
-        );
-
-        assert.equal(response.sequence, 5);
-        assert.deepEqual(
-          dispatchedCommands.map((command) => command.type),
-          [
-            "thread.create",
-            "thread.meta.update",
-            "thread.activity.append",
-            "thread.activity.append",
-            "thread.turn.start",
-          ],
-        );
-        assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          refName: fetchedOriginCommit,
-          newRefName: "t3code/bootstrap-refName",
-          baseRefName: "main",
-          path: null,
-        });
-        assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          remoteName: "origin",
-        });
-        assert.deepEqual(remoteBranchExists.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          refName: "main",
-          remoteName: "origin",
-        });
-        assert.deepEqual(resolveRemoteTrackingCommit.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          refName: "main",
-          fallbackRemoteName: "origin",
-        });
-        assert.deepEqual(bootstrapGitOperations, [
-          "remote-exists",
-          "fetch",
-          "remote-branch-exists",
-          "resolve-remote-commit",
-          "create-worktree",
-        ]);
-        assert.deepEqual(runForThread.mock.calls[0]?.[0], {
-          threadId: ThreadId.make("thread-bootstrap"),
-          projectId: defaultProjectId,
-          projectCwd: "/tmp/project",
-          worktreePath: "/tmp/bootstrap-worktree",
-        });
-        assert.deepEqual(refreshStatus.mock.calls[0]?.[0], "/tmp/bootstrap-worktree");
-
-        const setupActivities = dispatchedCommands.filter(
-          (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
-            command.type === "thread.activity.append",
-        );
-        assert.deepEqual(
-          setupActivities.map((command) => command.activity.kind),
-          ["setup-script.requested", "setup-script.started"],
-        );
-        const finalCommand = dispatchedCommands[4];
-        assertTrue(finalCommand?.type === "thread.turn.start");
-        if (finalCommand?.type === "thread.turn.start") {
-          assert.equal(finalCommand.bootstrap, undefined);
-        }
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+        ),
+      );
+      assert.equal(items.at(-1)?.kind, "synchronized");
+      assert.isFalse(items.some((item) => item.kind === "thread.updated"));
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  for (const scenario of ["no-origin", "local-only", "fetch-failed"] as const) {
-    const hasOrigin = scenario !== "no-origin";
-    const fetchFails = scenario === "fetch-failed";
-    it.effect(`handles worktree bootstrap with ${scenario}`, () =>
-      Effect.gen(function* () {
-        const dispatchedCommands: Array<OrchestrationCommand> = [];
-        const remoteExists = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteExists"]>[0]) =>
-            Effect.succeed(hasOrigin),
-        );
-        const remoteBranchExists = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteBranchExists"]>[0]) =>
-            Effect.succeed(false),
-        );
-        const fetchRemote = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["fetchRemote"]>[0]) =>
-            fetchFails
-              ? Effect.fail(
-                  new GitCommandError({
-                    operation: "fetchRemote",
-                    command: "git fetch origin",
-                    cwd: "/tmp/project",
-                    detail: "Synthetic fetch failure",
-                  }),
-                )
-              : Effect.void,
-        );
-        const resolveRemoteTrackingCommit = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["resolveRemoteTrackingCommit"]>[0]) =>
-            Effect.succeed({
-              commitSha: "0123456789abcdef0123456789abcdef01234567",
-              remoteRefName: "origin/main",
-            }),
-        );
-        const createWorktree = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
-            Effect.succeed({
-              worktree: {
-                refName: "t3code/bootstrap-refName",
-                path: "/tmp/bootstrap-worktree",
-              },
-            }),
-        );
-
-        yield* buildAppUnderTest({
-          layers: {
-            gitVcsDriver: {
-              remoteExists,
-              remoteBranchExists,
-              fetchRemote,
-              resolveRemoteTrackingCommit,
-              createWorktree,
-            },
-            orchestrationEngine: {
-              dispatch: (command) =>
-                Effect.sync(() => {
-                  dispatchedCommands.push(command);
-                  return { sequence: dispatchedCommands.length };
-                }),
-              readEvents: () => Stream.empty,
-            },
-          },
-        });
-
-        const createdAt = "2026-01-01T00:00:00.000Z";
-        const wsUrl = yield* getWsServerUrl("/ws");
-        const result = yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-              type: "thread.turn.start",
-              commandId: CommandId.make("cmd-bootstrap-turn-start-no-origin"),
-              threadId: ThreadId.make("thread-bootstrap-no-origin"),
-              message: {
-                messageId: MessageId.make("msg-bootstrap-no-origin"),
-                role: "user",
-                text: "hello",
-                attachments: [],
-              },
-              modelSelection: defaultModelSelection,
-              runtimeMode: "full-access",
-              interactionMode: "default",
-              bootstrap: {
-                createThread: {
-                  projectId: defaultProjectId,
-                  title: "Bootstrap Thread",
-                  modelSelection: defaultModelSelection,
-                  runtimeMode: "full-access",
-                  interactionMode: "default",
-                  branch: "main",
-                  worktreePath: null,
-                  createdAt,
-                },
-                prepareWorktree: {
-                  projectCwd: "/tmp/project",
-                  baseBranch: "main",
-                  branch: "t3code/bootstrap-refName",
-                  startFromOrigin: true,
-                },
-              },
-              createdAt,
-            }),
-          ),
-        ).pipe(Effect.result);
-
-        if (fetchFails) {
-          assert.equal(result._tag, "Failure");
-          assert.equal(createWorktree.mock.calls.length, 0);
-          assert.equal(remoteBranchExists.mock.calls.length, 0);
-          assert.equal(resolveRemoteTrackingCommit.mock.calls.length, 0);
-          assert.isFalse(
-            dispatchedCommands.some((command) => command.type === "thread.turn.start"),
-          );
-          return;
-        }
-        assert.equal(result._tag, "Success");
-        assert.deepEqual(remoteExists.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          remoteName: "origin",
-        });
-        assert.equal(fetchRemote.mock.calls.length, hasOrigin ? 1 : 0);
-        assert.equal(remoteBranchExists.mock.calls.length, hasOrigin ? 1 : 0);
-        assert.equal(resolveRemoteTrackingCommit.mock.calls.length, 0);
-        assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
-          cwd: "/tmp/project",
-          refName: "main",
-          newRefName: "t3code/bootstrap-refName",
-          baseRefName: "main",
-          path: null,
-        });
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-    );
-  }
-
-  it.effect("records setup-script failures without aborting bootstrap turn start", () =>
+  it.effect("sends a bounded native thread snapshot followed by its completion marker", () =>
     Effect.gen(function* () {
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const createWorktree = vi.fn(
-        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
-          Effect.succeed({
-            worktree: {
-              refName: "t3code/bootstrap-refName",
-              path: "/tmp/bootstrap-worktree",
-            },
-          }),
+      yield* buildAppUnderTest();
+      const items = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client[ORCHESTRATION_V2_WS_METHODS.subscribeThread]({
+            threadId: v2ThreadId,
+            requestCompletionMarker: true,
+          }).pipe(Stream.take(2), Stream.runCollect),
+        ),
       );
-      const runForThread = vi.fn(
-        (
-          input: Parameters<
-            ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
-          >[0],
-        ) =>
-          Effect.fail(
-            new ProjectSetupScriptRunner.ProjectSetupScriptOperationError({
-              threadId: input.threadId,
-              worktreePath: input.worktreePath,
-              operation: "openTerminal",
-              cause: { message: "pty unavailable" },
-            }),
-          ),
-      );
+      assert.equal(items[0]?.kind, "snapshot");
+      if (items[0]?.kind === "snapshot") {
+        assert.equal(items[0].projection.thread.id, v2ThreadId);
+        assert.equal(items[0].historyCursor, null);
+      }
+      assert.equal(items[1]?.kind, "synchronized");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
 
+  it.effect("replaces a thread cursor ahead of the native event head", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const items = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client[ORCHESTRATION_V2_WS_METHODS.subscribeThread]({
+            threadId: v2ThreadId,
+            afterSequence: 99,
+          }).pipe(Stream.take(1), Stream.runCollect),
+        ),
+      );
+      assert.equal(items[0]?.kind, "snapshot");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("replaces a shell cursor ahead of the native application head", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const items = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client[ORCHESTRATION_V2_WS_METHODS.subscribeShell]({ afterSequence: 99 }).pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          ),
+        ),
+      );
+      assert.equal(items[0]?.kind, "snapshot");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("launches with explicit user provenance through the native service", () =>
+    Effect.gen(function* () {
+      const launches: ThreadLaunch.ThreadLaunchInput[] = [];
       yield* buildAppUnderTest({
         layers: {
-          gitVcsDriver: {
-            createWorktree,
-          },
-          orchestrationEngine: {
-            dispatch: (command) =>
+          threadLaunch: {
+            launch: (input) =>
               Effect.sync(() => {
-                dispatchedCommands.push(command);
-                return { sequence: dispatchedCommands.length };
+                launches.push(input);
+                return { threadId: v2ThreadId, projection: v2Projection, resumed: false };
               }),
-            readEvents: () => Stream.empty,
-          },
-          projectSetupScriptRunner: {
-            runForThread,
           },
         },
       });
-
-      const createdAt = "2026-01-01T00:00:00.000Z";
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const response = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.turn.start",
-            commandId: CommandId.make("cmd-bootstrap-turn-start-setup-failure"),
-            threadId: ThreadId.make("thread-bootstrap-setup-failure"),
-            message: {
-              messageId: MessageId.make("msg-bootstrap-setup-failure"),
-              role: "user",
-              text: "hello",
-              attachments: [],
-            },
+      yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client[ORCHESTRATION_V2_WS_METHODS.launchThread]({
+            commandId: CommandId.make("launch"),
+            projectId: v2Project.id,
+            title: "New thread",
             modelSelection: defaultModelSelection,
             runtimeMode: "full-access",
             interactionMode: "default",
-            bootstrap: {
-              createThread: {
-                projectId: defaultProjectId,
-                title: "Bootstrap Thread",
-                modelSelection: defaultModelSelection,
-                runtimeMode: "full-access",
-                interactionMode: "default",
-                branch: "main",
-                worktreePath: null,
-                createdAt,
-              },
-              prepareWorktree: {
-                projectCwd: "/tmp/project",
-                baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
-              },
-              runSetupScript: true,
-            },
-            createdAt,
+            workspaceStrategy: { type: "root" },
+            initialMessage: { text: "Hello", attachments: [] },
           }),
         ),
       );
-
-      assert.equal(response.sequence, 4);
-      assert.deepEqual(
-        dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.meta.update", "thread.activity.append", "thread.turn.start"],
-      );
-      const setupFailureActivity = dispatchedCommands.find(
-        (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
-          command.type === "thread.activity.append",
-      );
-      assert.equal(setupFailureActivity?.activity.kind, "setup-script.failed");
-      assert.deepEqual(setupFailureActivity?.activity.payload, {
-        detail: "pty unavailable",
-        worktreePath: "/tmp/bootstrap-worktree",
-      });
-      assertTrue(dispatchedCommands.every((command) => command.type !== "thread.delete"));
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("does not misattribute setup activity dispatch failures as setup launch failures", () =>
-    Effect.gen(function* () {
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const createWorktree = vi.fn(
-        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
-          Effect.succeed({
-            worktree: {
-              refName: "t3code/bootstrap-refName",
-              path: "/tmp/bootstrap-worktree",
-            },
-          }),
-      );
-      const runForThread = vi.fn(
-        (
-          _: Parameters<
-            ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
-          >[0],
-        ) =>
-          Effect.succeed({
-            status: "started" as const,
-            scriptId: "setup",
-            scriptName: "Setup",
-            terminalId: "setup-setup",
-            cwd: "/tmp/bootstrap-worktree",
-          }),
-      );
-      let setupActivityAppendAttempt = 0;
-
-      yield* buildAppUnderTest({
-        layers: {
-          gitVcsDriver: {
-            createWorktree,
-          },
-          orchestrationEngine: {
-            dispatch: (command) => {
-              if (
-                command.type === "thread.activity.append" &&
-                command.activity.kind.startsWith("setup-script.")
-              ) {
-                setupActivityAppendAttempt += 1;
-                if (setupActivityAppendAttempt === 2) {
-                  return Effect.fail(
-                    new OrchestrationListenerCallbackError({
-                      listener: "domain-event",
-                      detail: "failed to append setup-script.started activity",
-                    }),
-                  );
-                }
-              }
-
-              return Effect.sync(() => {
-                dispatchedCommands.push(command);
-                return { sequence: dispatchedCommands.length };
-              });
-            },
-            readEvents: () => Stream.empty,
-          },
-          projectSetupScriptRunner: {
-            runForThread,
-          },
-        },
-      });
-
-      const createdAt = "2026-01-01T00:00:00.000Z";
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const response = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.turn.start",
-            commandId: CommandId.make("cmd-bootstrap-turn-start-setup-activity-failure"),
-            threadId: ThreadId.make("thread-bootstrap-setup-activity-failure"),
-            message: {
-              messageId: MessageId.make("msg-bootstrap-setup-activity-failure"),
-              role: "user",
-              text: "hello",
-              attachments: [],
-            },
-            modelSelection: defaultModelSelection,
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            bootstrap: {
-              createThread: {
-                projectId: defaultProjectId,
-                title: "Bootstrap Thread",
-                modelSelection: defaultModelSelection,
-                runtimeMode: "full-access",
-                interactionMode: "default",
-                branch: "main",
-                worktreePath: null,
-                createdAt,
-              },
-              prepareWorktree: {
-                projectCwd: "/tmp/project",
-                baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
-              },
-              runSetupScript: true,
-            },
-            createdAt,
-          }),
-        ),
-      );
-
-      assert.equal(response.sequence, 4);
-      assert.deepEqual(
-        dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.meta.update", "thread.activity.append", "thread.turn.start"],
-      );
-      const setupActivities = dispatchedCommands.filter(
-        (command): command is Extract<OrchestrationCommand, { type: "thread.activity.append" }> =>
-          command.type === "thread.activity.append",
-      );
-      assert.deepEqual(
-        setupActivities.map((command) => command.activity.kind),
-        ["setup-script.requested"],
-      );
-      assertTrue(
-        setupActivities.every((command) => command.activity.kind !== "setup-script.failed"),
-      );
-      assertTrue(dispatchedCommands.every((command) => command.type !== "thread.delete"));
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("cleans up created bootstrap threads when worktree creation defects", () =>
-    Effect.gen(function* () {
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const createWorktree = vi.fn(
-        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
-          Effect.die(new Error("worktree exploded")),
-      );
-
-      yield* buildAppUnderTest({
-        layers: {
-          gitVcsDriver: {
-            createWorktree,
-          },
-          orchestrationEngine: {
-            dispatch: (command) =>
-              Effect.sync(() => {
-                dispatchedCommands.push(command);
-                return { sequence: dispatchedCommands.length };
-              }),
-            readEvents: () => Stream.empty,
-          },
-        },
-      });
-
-      const createdAt = "2026-01-01T00:00:00.000Z";
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const result = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.turn.start",
-            commandId: CommandId.make("cmd-bootstrap-turn-start-defect"),
-            threadId: ThreadId.make("thread-bootstrap-defect"),
-            message: {
-              messageId: MessageId.make("msg-bootstrap-defect"),
-              role: "user",
-              text: "hello",
-              attachments: [],
-            },
-            modelSelection: defaultModelSelection,
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            bootstrap: {
-              createThread: {
-                projectId: defaultProjectId,
-                title: "Bootstrap Thread",
-                modelSelection: defaultModelSelection,
-                runtimeMode: "full-access",
-                interactionMode: "default",
-                branch: "main",
-                worktreePath: null,
-                createdAt,
-              },
-              prepareWorktree: {
-                projectCwd: "/tmp/project",
-                baseBranch: "main",
-                branch: "t3code/bootstrap-refName",
-              },
-              runSetupScript: false,
-            },
-            createdAt,
-          }),
-        ).pipe(Effect.result),
-      );
-
-      assertTrue(result._tag === "Failure");
-      assertTrue(result.failure._tag === "OrchestrationDispatchCommandError");
-      assert.include(result.failure.message, "worktree exploded");
-      assert.deepEqual(
-        dispatchedCommands.map((command) => command.type),
-        ["thread.create", "thread.delete"],
-      );
+      assert.equal(launches[0]?.createdBy, "user");
+      assert.equal(launches[0]?.creationSource, "web");
+      assert.equal(launches[0]?.initialMessage?.text, "Hello");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -6502,167 +4609,3 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 });
-
-it.live(
-  "reports thread HTTP and WebSocket transfer budgets",
-  () =>
-    Effect.gen(function* () {
-      const providers = [
-        ProviderDriverKind.make("codex"),
-        ProviderDriverKind.make("claudeAgent"),
-      ] as const;
-
-      const runs = yield* Effect.forEach(
-        providers,
-        (provider) =>
-          Effect.acquireUseRelease(
-            makeOrchestrationIntegrationHarness({ provider }),
-            (harness) =>
-              Effect.gen(function* () {
-                yield* seedTransferBudgetHistory(harness, provider);
-                yield* buildAppUnderTest({
-                  layers: {
-                    orchestrationEngine: harness.engine,
-                    projectionSnapshotQuery: harness.snapshotQuery,
-                  },
-                });
-
-                const baseUrl = yield* getHttpServerUrl();
-                const cookie = yield* getAuthenticatedSessionCookieHeader();
-
-                const recorder = makeWebSocketTransferRecorder();
-                const wsUrl = baseUrl.replace(/^http:/, "ws:") + "/ws";
-                const protocolLayer = countingWsRpcProtocolLayer({
-                  url: wsUrl,
-                  cookie,
-                  recorder,
-                });
-
-                return yield* Effect.scoped(
-                  Effect.gen(function* () {
-                    const client = yield* makeCountingWsRpcClient;
-
-                    const threadSnapshot = yield* measureHttpGet({
-                      url: `${baseUrl}/api/orchestration/threads/${TRANSFER_THREAD_ID}`,
-                      headers: { cookie },
-                    });
-                    assert.equal(threadSnapshot.status, 200);
-                    assert.equal(threadSnapshot.contentEncoding, "gzip");
-                    const decodedThread = yield* decodeTransferThreadSnapshot(
-                      Buffer.from(threadSnapshot.decodedBody).toString("utf8"),
-                    );
-                    assert.equal(
-                      decodedThread.thread.messages.length,
-                      TRANSFER_HISTORY_TURN_COUNT * 2,
-                    );
-
-                    const threadItems = yield* Queue.unbounded<OrchestrationThreadStreamItem>();
-                    yield* client[ORCHESTRATION_WS_METHODS.subscribeThread]({
-                      threadId: TRANSFER_THREAD_ID,
-                      afterSequence: decodedThread.snapshotSequence,
-                      requestCompletionMarker: true,
-                    }).pipe(
-                      Stream.runForEach((item) =>
-                        Queue.offer(threadItems, item).pipe(Effect.asVoid),
-                      ),
-                      Effect.forkScoped,
-                    );
-                    const initialThreadItems = yield* collectQueueUntil(
-                      threadItems,
-                      (item) => item.kind === "synchronized",
-                      `${provider} thread subscription to synchronize`,
-                    );
-                    assert.isFalse(initialThreadItems.some((item) => item.kind === "snapshot"));
-                    assert.include(recorder.negotiatedExtensions(), "permessage-deflate");
-
-                    yield* queueMeasuredTransferTurn(harness, provider);
-                    const turnStartTotals = recorder.totals();
-                    yield* client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-                      type: "thread.turn.start",
-                      commandId: CommandId.make(`transfer:${provider}:measured-turn`),
-                      threadId: TRANSFER_THREAD_ID,
-                      message: {
-                        messageId: MessageId.make("transfer-user-measured"),
-                        role: "user",
-                        text: "Measure the client-bound transfer for this turn.",
-                        attachments: [],
-                      },
-                      modelSelection: transferModelSelection(provider),
-                      runtimeMode: "approval-required",
-                      interactionMode: "default",
-                      createdAt: TRANSFER_MEASURED_TURN_CREATED_AT,
-                    });
-                    yield* waitForTurnQuiesced(harness, TRANSFER_MEASURED_TURN_INDEX + 1);
-                    const finalThreadSequence = yield* harness.engine
-                      .readEvents(decodedThread.snapshotSequence, 10_000)
-                      .pipe(
-                        Stream.runFold(
-                          () => decodedThread.snapshotSequence,
-                          (sequence, event) =>
-                            event.aggregateId === TRANSFER_THREAD_ID && isThreadDetailEvent(event)
-                              ? Math.max(sequence, event.sequence)
-                              : sequence,
-                        ),
-                      );
-                    assert.isAbove(finalThreadSequence, decodedThread.snapshotSequence);
-
-                    yield* collectQueueUntil(
-                      threadItems,
-                      (item) =>
-                        item.kind === "event" && item.event.sequence === finalThreadSequence,
-                      `${provider} thread stream to reach sequence ${finalThreadSequence}`,
-                    );
-                    const measuredTurnWebSocket = transferDelta(turnStartTotals, recorder.totals());
-
-                    const finalThreadSnapshot = yield* harness.snapshotQuery
-                      .getThreadDetailSnapshot(TRANSFER_THREAD_ID)
-                      .pipe(Effect.map(Option.getOrThrow));
-                    const expectedAssistantText = expectedMeasuredAssistantText(provider);
-                    const measuredAssistant = finalThreadSnapshot.thread.messages.find(
-                      (message) =>
-                        message.role === "assistant" && message.text === expectedAssistantText,
-                    );
-                    assert.isDefined(measuredAssistant);
-                    assert.isTrue(
-                      finalThreadSnapshot.thread.messages.length >= TRANSFER_HISTORY_TURN_COUNT * 2,
-                    );
-                    assert.equal(measuredAssistant?.streaming, false);
-                    assert.equal(finalThreadSnapshot.thread.session?.status, "ready");
-                    assert.equal(
-                      finalThreadSnapshot.thread.checkpoints.length,
-                      TRANSFER_HISTORY_TURN_COUNT + 1,
-                    );
-
-                    return {
-                      provider,
-                      threadSnapshot,
-                      measuredTurnWebSocket,
-                    } satisfies TransferBudgetRun;
-                  }).pipe(Effect.provide(protocolLayer)),
-                );
-              }),
-            (harness) => harness.dispose,
-          ).pipe(Effect.provide(NodeHttpServerTestWithWsDeflate)),
-        { concurrency: 1 },
-      );
-
-      const report = formatTransferBudgetReport(runs);
-      yield* Effect.logInfo(`\n${report}`);
-      const reportPath = yield* Config.string("T3CODE_TRANSFER_BUDGET_REPORT_PATH").pipe(
-        Config.option,
-      );
-      if (Option.isSome(reportPath)) {
-        const fileSystem = yield* FileSystem.FileSystem;
-        yield* fileSystem.writeFileString(reportPath.value, report);
-      }
-      const resultPath = yield* Config.string("T3CODE_TRANSFER_BUDGET_RESULT_PATH").pipe(
-        Config.option,
-      );
-      if (Option.isSome(resultPath)) {
-        const fileSystem = yield* FileSystem.FileSystem;
-        yield* fileSystem.writeFileString(resultPath.value, formatTransferBudgetResult(runs));
-      }
-      assert.deepEqual(transferBudgetViolations(runs), []);
-    }).pipe(Effect.provide(NodeServices.layer)),
-  120_000,
-);

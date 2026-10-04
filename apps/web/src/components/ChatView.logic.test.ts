@@ -1,3 +1,4 @@
+import { makeTestThread, v2Projection, v2Now } from "../test/threadFixtures";
 import {
   EnvironmentId,
   MessageId,
@@ -5,7 +6,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
-  TurnId,
+  RunId,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -43,38 +44,19 @@ const threadId = ThreadId.make("thread-1");
 const now = "2026-03-29T00:00:00.000Z";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
-  return {
+  return makeTestThread({
     id: threadId,
-    environmentId,
     projectId,
-    title: "Thread",
-    modelSelection: {
-      instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-5.4",
-    },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    session: null,
-    messages: [],
-    proposedPlans: [],
-    activities: [],
-    checkpoints: [],
+    environmentId,
     createdAt: now,
     updatedAt: now,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: null,
-    worktreePath: null,
     ...overrides,
-  };
+  });
 }
 
 const completedTurn = {
-  turnId: TurnId.make("turn-1"),
-  state: "completed" as const,
+  runId: RunId.make("turn-1"),
+  status: "completed" as const,
   requestedAt: now,
   startedAt: "2026-03-29T00:00:01.000Z",
   completedAt: "2026-03-29T00:00:10.000Z",
@@ -83,11 +65,11 @@ const completedTurn = {
 
 const readySession = {
   threadId,
-  status: "ready" as const,
+  status: "idle" as const,
   providerName: "codex",
   providerInstanceId: ProviderInstanceId.make("codex"),
   runtimeMode: "full-access" as const,
-  activeTurnId: null,
+  activeRunId: null,
   lastError: null,
   updatedAt: "2026-03-29T00:00:10.000Z",
 };
@@ -171,12 +153,12 @@ describe("thread completion visits", () => {
     "keeps a first background completion unread after visiting (turn already running: %s)",
     (running) => {
       const firstThread = makeThread({
-        latestTurn: running ? { ...completedTurn, state: "running", completedAt: null } : null,
+        latestRun: running ? { ...completedTurn, status: "running", completedAt: null } : null,
       });
       let state = visit(useUiStateStore.getInitialState(), firstThread);
       // Navigating to another thread must not acknowledge this thread's result.
       state = visit(state, makeThread({ id: ThreadId.make("other-thread") }));
-      const finishedThread = makeThread({ latestTurn: completedTurn });
+      const finishedThread = makeThread({ latestRun: completedTurn });
       expect(isUnread(finishedThread, state)).toBe(true);
 
       state = visit(state, finishedThread);
@@ -185,10 +167,10 @@ describe("thread completion visits", () => {
       state = visit(
         state,
         makeThread({
-          latestTurn: {
+          latestRun: {
             ...completedTurn,
-            turnId: TurnId.make("turn-2"),
-            state: "running",
+            runId: RunId.make("turn-2"),
+            status: "running",
             completedAt: null,
           },
         }),
@@ -197,9 +179,9 @@ describe("thread completion visits", () => {
       expect(
         isUnread(
           makeThread({
-            latestTurn: {
+            latestRun: {
               ...completedTurn,
-              turnId: TurnId.make("turn-2"),
+              runId: RunId.make("turn-2"),
               completedAt: "2026-03-29T00:01:00.000Z",
             },
           }),
@@ -211,7 +193,7 @@ describe("thread completion visits", () => {
 
   it("acknowledges only the displayed completion, even when metadata is newer", () => {
     const thread = makeThread({
-      latestTurn: completedTurn,
+      latestRun: completedTurn,
       updatedAt: "2026-03-29T00:02:00.000Z",
     });
     const state = visit(useUiStateStore.getInitialState(), thread);
@@ -224,7 +206,7 @@ describe("thread completion visits", () => {
 
   it("leaves never-visited historical threads read", () => {
     expect(
-      isUnread(makeThread({ latestTurn: completedTurn }), useUiStateStore.getInitialState()),
+      isUnread(makeThread({ latestRun: completedTurn }), useUiStateStore.getInitialState()),
     ).toBe(false);
     expect(getThreadVisitTimestamp(null)).toBeNull();
   });
@@ -233,6 +215,8 @@ describe("thread completion visits", () => {
 describe("buildLoadingThreadFromShell", () => {
   it("preserves shell metadata and supplies empty detail collections", () => {
     const shell = {
+      ...makeTestThread(),
+      source: makeTestThread().source!,
       environmentId,
       id: threadId,
       projectId,
@@ -245,7 +229,7 @@ describe("buildLoadingThreadFromShell", () => {
       interactionMode: "default",
       branch: "main",
       worktreePath: null,
-      latestTurn: null,
+      latestRun: null,
       createdAt: now,
       updatedAt: now,
       archivedAt: null,
@@ -253,7 +237,7 @@ describe("buildLoadingThreadFromShell", () => {
       settledAt: null,
       snoozedUntil: null,
       snoozedAt: null,
-      session: null,
+      runtime: null,
       latestUserMessageAt: now,
       hasPendingApprovals: false,
       hasPendingUserInput: false,
@@ -267,10 +251,7 @@ describe("buildLoadingThreadFromShell", () => {
       title: "Loading thread",
       branch: "main",
       deletedAt: null,
-      messages: [],
-      proposedPlans: [],
-      activities: [],
-      checkpoints: [],
+      projection: null,
     });
   });
 });
@@ -304,24 +285,24 @@ describe("resolveThreadMetadataUpdateForNextTurn", () => {
 });
 
 describe("buildThreadTurnInterruptInput", () => {
-  it("targets the session's active running turn", () => {
-    const activeTurnId = TurnId.make("turn-running");
+  it("targets the runtime's active running turn", () => {
+    const activeRunId = RunId.make("turn-running");
 
     expect(
       buildThreadTurnInterruptInput(
         makeThread({
-          session: {
+          runtime: {
             ...readySession,
             status: "running",
-            activeTurnId,
+            activeRunId,
           },
         }),
       ),
-    ).toEqual({ threadId, turnId: activeTurnId });
+    ).toEqual({ threadId, runId: activeRunId });
   });
 
-  it("omits a turn id when the session is not running", () => {
-    expect(buildThreadTurnInterruptInput(makeThread({ session: readySession }))).toEqual({
+  it("omits a turn id when the runtime is not running", () => {
+    expect(buildThreadTurnInterruptInput(makeThread({ runtime: readySession }))).toEqual({
       threadId,
     });
   });
@@ -329,33 +310,33 @@ describe("buildThreadTurnInterruptInput", () => {
 
 describe("buildRunningThreadTurnInterruptInput", () => {
   it("targets only the active turn of a running thread", () => {
-    const activeTurnId = TurnId.make("turn-running");
+    const activeRunId = RunId.make("turn-running");
     const runningThread = makeThread({
-      session: {
+      runtime: {
         ...readySession,
         status: "running",
-        activeTurnId,
+        activeRunId,
       },
     });
 
     expect(buildRunningThreadTurnInterruptInput(runningThread)).toEqual({
       threadId,
-      turnId: activeTurnId,
+      runId: activeRunId,
     });
-    expect(buildRunningThreadTurnInterruptInput(makeThread({ session: readySession }))).toBeNull();
+    expect(buildRunningThreadTurnInterruptInput(makeThread({ runtime: readySession }))).toBeNull();
     expect(buildRunningThreadTurnInterruptInput(null)).toBeNull();
   });
 
-  it("targets a running thread before its active turn has been projected", () => {
+  it("waits for the durable run identity before targeting Stop", () => {
     const runningThread = makeThread({
-      session: {
+      runtime: {
         ...readySession,
         status: "running",
-        activeTurnId: null,
+        activeRunId: null,
       },
     });
 
-    expect(buildRunningThreadTurnInterruptInput(runningThread)).toEqual({ threadId });
+    expect(buildRunningThreadTurnInterruptInput(runningThread)).toBeNull();
   });
 });
 
@@ -456,7 +437,7 @@ describe("getStartedThreadModelChangeBlockReason", () => {
     },
   ];
 
-  it("allows model changes before a provider session has started", () => {
+  it("allows model changes before a provider runtime has started", () => {
     expect(
       getStartedThreadModelChangeBlockReason({
         providers,
@@ -490,7 +471,7 @@ describe("getStartedThreadModelChangeBlockReason", () => {
     ).toBeNull();
   });
 
-  it("blocks started-session model changes when either provider requires a new thread", () => {
+  it("blocks started-runtime model changes when either provider requires a new thread", () => {
     expect(
       getStartedThreadModelChangeBlockReason({
         providers,
@@ -564,7 +545,7 @@ describe("shouldShowBranchMismatchBanner", () => {
   });
 });
 
-describe("session branch mismatch dismissal", () => {
+describe("runtime branch mismatch dismissal", () => {
   it("tracks dismissed keys and treats other keys as active", () => {
     expect(isBranchMismatchDismissedForSession("t1:a:b")).toBe(false);
     dismissBranchMismatchForSession("t1:a:b");
@@ -703,14 +684,14 @@ describe("startNewThreadForProject", () => {
 describe("hasServerAcknowledgedLocalDispatch", () => {
   it("does not acknowledge unchanged server state", () => {
     const localDispatch = createLocalDispatchSnapshot(
-      makeThread({ latestTurn: completedTurn, session: readySession }),
+      makeThread({ latestRun: completedTurn, runtime: readySession }),
     );
 
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: "ready",
-        latestTurn: completedTurn,
+        latestRun: completedTurn,
         latestUserMessageId: localDispatch.latestUserMessageId,
         session: readySession,
         hasPendingApproval: false,
@@ -722,11 +703,11 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
 
   it("acknowledges a settled newer turn", () => {
     const localDispatch = createLocalDispatchSnapshot(
-      makeThread({ latestTurn: completedTurn, session: readySession }),
+      makeThread({ latestRun: completedTurn, runtime: readySession }),
     );
     const newerTurn = {
       ...completedTurn,
-      turnId: TurnId.make("turn-2"),
+      runId: RunId.make("turn-2"),
       requestedAt: "2026-03-29T00:01:00.000Z",
       startedAt: "2026-03-29T00:01:01.000Z",
       completedAt: "2026-03-29T00:01:30.000Z",
@@ -736,7 +717,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: "ready",
-        latestTurn: newerTurn,
+        latestRun: newerTurn,
         latestUserMessageId: localDispatch.latestUserMessageId,
         session: { ...readySession, updatedAt: newerTurn.completedAt },
         hasPendingApproval: false,
@@ -748,12 +729,12 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
 
   it("waits for the matching running turn before acknowledging", () => {
     const localDispatch = createLocalDispatchSnapshot(
-      makeThread({ latestTurn: completedTurn, session: readySession }),
+      makeThread({ latestRun: completedTurn, runtime: readySession }),
     );
     const runningTurn = {
       ...completedTurn,
-      turnId: TurnId.make("turn-2"),
-      state: "running" as const,
+      runId: RunId.make("turn-2"),
+      status: "running" as const,
       requestedAt: "2026-03-29T00:01:00.000Z",
       startedAt: "2026-03-29T00:01:01.000Z",
       completedAt: null,
@@ -763,12 +744,12 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: "running",
-        latestTurn: runningTurn,
+        latestRun: runningTurn,
         latestUserMessageId: localDispatch.latestUserMessageId,
         session: {
           ...readySession,
           status: "running",
-          activeTurnId: TurnId.make("turn-other"),
+          activeRunId: RunId.make("turn-other"),
         },
         hasPendingApproval: false,
         hasPendingUserInput: false,
@@ -779,12 +760,12 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: "running",
-        latestTurn: runningTurn,
+        latestRun: runningTurn,
         latestUserMessageId: localDispatch.latestUserMessageId,
         session: {
           ...readySession,
           status: "running",
-          activeTurnId: runningTurn.turnId,
+          activeRunId: runningTurn.runId,
         },
         hasPendingApproval: false,
         hasPendingUserInput: false,
@@ -796,29 +777,37 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
   it("acknowledges a steering message projected onto the current running turn", () => {
     const runningTurn = {
       ...completedTurn,
-      state: "running" as const,
+      status: "running" as const,
       completedAt: null,
     };
     const runningSession = {
       ...readySession,
       status: "running" as const,
-      activeTurnId: runningTurn.turnId,
+      activeRunId: runningTurn.runId,
     };
     const localDispatch = createLocalDispatchSnapshot(
       makeThread({
-        latestTurn: runningTurn,
-        session: runningSession,
-        messages: [
-          {
-            id: MessageId.make("message-before-steer"),
-            role: "user",
-            text: "Initial prompt",
-            turnId: runningTurn.turnId,
-            createdAt: runningTurn.requestedAt,
-            updatedAt: runningTurn.requestedAt,
-            streaming: false,
-          },
-        ],
+        latestRun: runningTurn,
+        runtime: runningSession,
+        projection: {
+          ...v2Projection,
+          messages: [
+            {
+              id: MessageId.make("message-before-steer"),
+              threadId,
+              nodeId: null,
+              streaming: false,
+              attachments: [],
+              createdBy: "user",
+              creationSource: "web",
+              role: "user",
+              text: "Initial prompt",
+              runId: runningTurn.runId,
+              createdAt: v2Now,
+              updatedAt: v2Now,
+            },
+          ],
+        },
       }),
     );
 
@@ -826,7 +815,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: "running",
-        latestTurn: runningTurn,
+        latestRun: runningTurn,
         latestUserMessageId: MessageId.make("message-steer"),
         session: runningSession,
         hasPendingApproval: false,
@@ -841,7 +830,7 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     const common = {
       localDispatch,
       phase: "ready" as const,
-      latestTurn: null,
+      latestRun: null,
       latestUserMessageId: localDispatch.latestUserMessageId,
       session: null,
       hasPendingApproval: false,

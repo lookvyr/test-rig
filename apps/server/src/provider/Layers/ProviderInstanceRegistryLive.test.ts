@@ -1,3 +1,4 @@
+import * as OpenCodeServerLedger from "../OpenCodeServerLedger.ts";
 import * as ProviderContinuationRequests from "../../orchestration-v2/ProviderContinuationRequests.ts";
 /**
  * Multi-instance validation slices for `ProviderInstanceRegistryLive`.
@@ -41,7 +42,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
 import { BUILT_IN_DRIVERS } from "../builtInDrivers.ts";
-import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
+import { OpenCodeRuntimeLayer } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
 
@@ -87,6 +88,7 @@ const makeCodexConfig = (overrides: Partial<CodexSettings>): CodexSettings => ({
 });
 
 const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings => ({
+  autoCompactWindow: "",
   enabled: false,
   binaryPath: "claude",
   homePath: "",
@@ -248,7 +250,10 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
   // provides `OpenCodeRuntimeLive`'s deps while keeping its own outputs
   // surfaced; that merged layer then provides `ServerConfig.layerTest`'s
   // `FileSystem` dep while keeping everything else surfaced to the test.
-  const infraLayer = OpenCodeRuntimeLive.pipe(Layer.provideMerge(NodeServices.layer));
+  const infraLayer = OpenCodeRuntimeLayer.pipe(
+    Layer.provide(OpenCodeServerLedger.layerTest),
+    Layer.provideMerge(NodeServices.layer),
+  );
   const testLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "provider-instance-registry-built-in-drivers-test",
   }).pipe(
@@ -284,6 +289,7 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
           enabled: false,
           config: makeClaudeConfig({
             homePath: "/home/julius/.claude-work",
+            autoCompactWindow: "",
             launchArgs: "--verbose",
           }),
         },

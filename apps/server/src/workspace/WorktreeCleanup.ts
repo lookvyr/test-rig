@@ -1,8 +1,10 @@
-import { CheckpointReactor } from "../orchestration/Services/CheckpointReactor.ts";
+import { EffectOutboxV2 } from "../orchestration-v2/EffectOutbox.ts";
+import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
+import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
+import { ProviderSessionManagerV2 } from "../orchestration-v2/ProviderSessionManager.ts";
 import {
   CommandId,
-  EventId,
-  type OrchestrationThreadShell,
+  type OrchestrationV2ThreadShell,
   type TerminalSummary,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -18,43 +20,33 @@ import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { GitManager } from "../git/GitManager.ts";
 import { forkParked } from "../serverActivation.ts";
-import { WorktreeCleanupState } from "./WorktreeCleanupState.ts";
 import { withWorktreeLease } from "./worktreeLifecycle.ts";
 
-type Thread = OrchestrationThreadShell;
+type Thread = OrchestrationV2ThreadShell;
 type Status = NonNullable<Thread["worktreeCleanup"]>;
 
 /** A settlement never overrides active work, including provider background tasks. */
 export function worktreeHasActiveThread(thread: Thread, now: number): boolean {
   const messageAt =
-    thread.latestUserMessageAt == null ? -Infinity : Date.parse(thread.latestUserMessageAt);
+    thread.latestUserMessageAt == null
+      ? -Infinity
+      : DateTime.toEpochMillis(thread.latestUserMessageAt);
   const turnAt = Math.max(
-    ...[
-      thread.latestTurn?.requestedAt,
-      thread.latestTurn?.startedAt,
-      thread.latestTurn?.completedAt,
-    ].map((at) => (at == null ? -Infinity : Date.parse(at))),
+    ...[thread.latestRunRequestedAt, thread.latestRunStartedAt, thread.latestRunCompletedAt].map(
+      (at) => (at == null ? -Infinity : DateTime.toEpochMillis(at)),
+    ),
   );
-  const queued =
-    thread.session?.status !== "error" &&
-    messageAt > turnAt &&
-    Math.abs(now - messageAt) <= 120_000;
   return (
-    queued ||
-    thread.hasPendingApprovals ||
-    thread.hasPendingUserInput ||
-    thread.backgroundLiveness != null ||
-    thread.session?.status === "starting" ||
-    thread.session?.status === "running" ||
-    thread.session?.activeTurnId != null ||
-    thread.latestTurn?.state === "running"
+    (thread.status !== "failed" && messageAt > turnAt && Math.abs(now - messageAt) <= 120_000) ||
+    thread.pendingRuntimeRequest != null ||
+    (thread.pendingBackgroundTasks?.length ?? 0) > 0 ||
+    thread.activityRunStatus != null ||
+    thread.activeRunId != null ||
+    thread.status === "queued"
   );
 }
 
@@ -68,17 +60,16 @@ export class WorktreeCleanup extends Context.Service<
 >()("t3/workspace/WorktreeCleanup") {}
 
 export const make = Effect.gen(function* () {
-  const checkpoints = yield* CheckpointReactor;
+  const outbox = yield* EffectOutboxV2;
   const config = yield* ServerConfig;
   const crypto = yield* Crypto.Crypto;
   const settings = yield* ServerSettingsService;
-  const snapshots = yield* ProjectionSnapshotQuery;
-  const engine = yield* OrchestrationEngineService;
-  const providers = yield* ProviderService;
+  const projects = yield* ProjectStoreV2;
+  const engine = yield* ThreadManagementService;
+  const providers = yield* ProviderSessionManagerV2;
   const terminals = yield* TerminalManager;
   const git = yield* GitVcsDriver;
   const manager = yield* GitManager;
-  const statuses = yield* WorktreeCleanupState;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const liveTerminals = new Map<string, TerminalSummary>();
@@ -101,31 +92,26 @@ export const make = Effect.gen(function* () {
           (terminal.worktreePath != null && atCheckout(terminal.worktreePath, checkout))),
     );
   const readSnapshot = Effect.gen(function* () {
-    const active = yield* snapshots.getShellSnapshot();
-    const archived = yield* snapshots.getArchivedShellSnapshot();
-    return { projects: active.projects, threads: [...active.threads, ...archived.threads] };
+    const shell = yield* engine.getShellSnapshot();
+    return {
+      projects: yield* projects.listShells(),
+      threads: [...shell.threads, ...shell.archivedThreads],
+    };
   });
   const report = Effect.fn("WorktreeCleanup.report")(function* (
     thread: Thread,
     status: Status | null,
   ) {
-    if (!statuses.set(thread.id, status)) return;
-    const now = DateTime.formatIso(yield* DateTime.now);
-    // This event refreshes the existing shell subscription; the notice itself is transient.
+    if (
+      thread.worktreeCleanup?.state === status?.state &&
+      thread.worktreeCleanup?.reason === status?.reason
+    )
+      return;
     yield* engine.dispatch({
-      type: "thread.activity.append",
+      type: "thread.worktree-cleanup.set",
       commandId: CommandId.make(yield* crypto.randomUUIDv4),
       threadId: thread.id,
-      activity: {
-        id: EventId.make(yield* crypto.randomUUIDv4),
-        kind: "worktree.cleanup",
-        tone: "info",
-        summary: status?.reason ?? "Worktree cleanup notice cleared",
-        payload: {},
-        turnId: null,
-        createdAt: now,
-      },
-      createdAt: now,
+      status,
     });
   });
   const settled = (thread: Thread) =>
@@ -134,7 +120,7 @@ export const make = Effect.gen(function* () {
     thread.settledOverride !== "active" &&
     thread.pullRequestAssociation?.mode !== "unlinked" &&
     thread.pinnedAt == null &&
-    (thread.snoozedUntil == null || Date.parse(thread.snoozedUntil) <= now) &&
+    (thread.snoozedUntil == null || DateTime.toEpochMillis(thread.snoozedUntil) <= now) &&
     !worktreeHasActiveThread(thread, now);
 
   const clean = Effect.fn("WorktreeCleanup.clean")(function* (checkout: string, initial: Thread[]) {
@@ -196,7 +182,8 @@ export const make = Effect.gen(function* () {
       for (const thread of refreshed) {
         if (!settled(thread))
           yield* engine.dispatch({
-            type: "thread.settle",
+            type: "thread.auto-settle",
+            snapshotAt: thread.updatedAt,
             threadId: thread.id,
             commandId: CommandId.make(yield* crypto.randomUUIDv4),
           });
@@ -216,6 +203,7 @@ export const make = Effect.gen(function* () {
           settled(thread) &&
           !worktreeHasActiveThread(thread, now) &&
           thread.pinnedAt == null &&
+          (thread.snoozedUntil == null || DateTime.toEpochMillis(thread.snoozedUntil) <= now) &&
           thread.branch === local.branch,
       );
     if (!eligible(yield* currentGroup)) {
@@ -235,21 +223,31 @@ export const make = Effect.gen(function* () {
       return;
     }
 
-    for (const session of yield* providers.listSessions()) {
-      if (session.status === "closed") continue;
+    const workspaceEffectsPending = outbox.hasPendingWorkspaceEffects(
+      initial.map((thread) => thread.id),
+    );
+    if (yield* workspaceEffectsPending) {
+      yield* notice("pending", "Worktree cleanup is waiting for checkpoint work to finish.");
+      return;
+    }
+    const atResidency = (
+      session: (typeof providers.residencies extends Effect.Effect<infer A> ? A : never)[number],
+    ) =>
+      session.threadIds.some((id) => initial.some((thread) => thread.id === id)) ||
+      (session.cwd != null && atCheckout(session.cwd, checkout));
+    for (const session of (yield* providers.residencies).filter(atResidency)) {
       if (
-        !initial.some((thread) => thread.id === session.threadId) &&
-        (session.cwd === undefined || !atCheckout(session.cwd, checkout))
-      )
-        continue;
-      if (!initial.some((thread) => thread.id === session.threadId)) {
+        session.closing ||
+        session.busy ||
+        session.threadIds.some((id) => !initial.some((thread) => thread.id === id))
+      ) {
         yield* notice(
           "pending",
           "Worktree cleanup is waiting for another agent using this checkout.",
         );
         return;
       }
-      yield* providers.stopSession({ threadId: session.threadId });
+      yield* providers.close(session.providerSessionId);
     }
     for (const terminal of checkoutTerminals(checkout)) {
       if (terminal.hasRunningSubprocess) return;
@@ -257,6 +255,12 @@ export const make = Effect.gen(function* () {
     }
     // Settlement, preferences and files may change while provider shutdown is in progress.
     if (!(yield* settings.getSettings).autoRemoveSettledWorktrees || !eligible(yield* currentGroup))
+      return;
+    if (
+      (yield* workspaceEffectsPending) ||
+      (yield* providers.residencies).some(atResidency) ||
+      checkoutTerminals(checkout).length > 0
+    )
       return;
     const finalStatus = yield* git.statusDetailsLocal(checkout);
     if (finalStatus.hasWorkingTreeChanges || finalStatus.branch !== local.branch) {
@@ -270,10 +274,9 @@ export const make = Effect.gen(function* () {
   const sweep = Effect.gen(function* () {
     const snapshot = yield* readSnapshot;
     const enabled = (yield* settings.getSettings).autoRemoveSettledWorktrees;
-    for (const id of statuses.ids()) {
-      const thread = snapshot.threads.find((entry) => entry.id === id);
-      if (!thread) statuses.set(id, null);
-      else if (!enabled || !settled(thread)) yield* report(thread, null);
+    for (const thread of snapshot.threads) {
+      if (thread.worktreeCleanup != null && (!enabled || !settled(thread)))
+        yield* report(thread, null);
     }
     if (!enabled) return;
     const groups = new Map<string, Thread[]>();
@@ -286,7 +289,6 @@ export const make = Effect.gen(function* () {
       groups.set(checkout, group);
     }
     for (const [checkout, group] of groups) {
-      yield* checkpoints.drain;
       yield* withWorktreeLease(checkout, clean(checkout, group)).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
@@ -324,9 +326,14 @@ export const make = Effect.gen(function* () {
       Stream.runForEach(engine.streamDomainEvents, (event) =>
         event.type === "thread.settled" ||
         event.type === "thread.unsettled" ||
-        event.type === "thread.archived"
+        event.type === "thread.archived" ||
+        event.type === "thread.unarchived"
           ? worker.enqueue(undefined)
           : Effect.void,
+      ).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("worktree cleanup subscription failed", { error }),
+        ),
       ),
     );
     yield* forkParked(

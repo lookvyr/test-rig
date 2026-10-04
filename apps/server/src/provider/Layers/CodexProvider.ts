@@ -109,8 +109,7 @@ function codexAccountAuthLabel(account: CodexSchema.V2GetAccountResponse["accoun
     case "unknown":
       return "ChatGPT Subscription";
     default:
-      account.planType satisfies never;
-      return undefined;
+      return "ChatGPT Subscription";
   }
 }
 

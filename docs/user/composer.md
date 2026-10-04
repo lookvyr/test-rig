@@ -77,3 +77,16 @@ directly to a particular turn.
 
 The controls share the minimap's side gutter and appear when there is room beside
 the conversation.
+
+## Conversation history and Find
+
+Long conversations open with their recent turns. Choose **Load earlier turns** at
+the top to read further back. A turn stays together with its tool activity.
+
+Press **Cmd+F** on macOS or **Ctrl+F** elsewhere to find text throughout the
+conversation, including earlier turns that have not loaded yet. Previous and
+next match controls move between results. Closing Find returns to the recent
+conversation view.
+
+Tool details show the input, status, and command exit code when available. Raw
+tool output is omitted from the conversation details.

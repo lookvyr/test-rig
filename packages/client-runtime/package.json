@@ -134,16 +134,263 @@
     "./state/vcs": {
       "types": "./src/state/vcs.ts",
       "default": "./src/state/vcs.ts"
+    },
+    "./state/threadState": {
+      "types": "./src/state/threadState.ts",
+      "default": "./src/state/threadState.ts"
+    },
+    "./state/orchestrationV2Projection": {
+      "types": "./src/state/orchestrationV2Projection.ts",
+      "default": "./src/state/orchestrationV2Projection.ts"
+    },
+    "./state/threadHistoryMerge": {
+      "types": "./src/state/threadHistoryMerge.ts",
+      "default": "./src/state/threadHistoryMerge.ts"
+    },
+    "./state/threadHistoryController": {
+      "types": "./src/state/threadHistoryController.ts",
+      "default": "./src/state/threadHistoryController.ts"
+    },
+    "./state/threadHistoryHttp": {
+      "types": "./src/state/threadHistoryHttp.ts",
+      "default": "./src/state/threadHistoryHttp.ts"
+    },
+    "./state/threadSnapshotHttp": {
+      "types": "./src/state/threadSnapshotHttp.ts",
+      "default": "./src/state/threadSnapshotHttp.ts"
+    },
+    "./state/boundedThreadSnapshotHttp": {
+      "types": "./src/state/boundedThreadSnapshotHttp.ts",
+      "default": "./src/state/boundedThreadSnapshotHttp.ts"
+    },
+    "./state/shellSnapshotHttp": {
+      "types": "./src/state/shellSnapshotHttp.ts",
+      "default": "./src/state/shellSnapshotHttp.ts"
+    },
+    "./state/cachePersistence": {
+      "types": "./src/state/cachePersistence.ts",
+      "default": "./src/state/cachePersistence.ts"
+    },
+    "./state/shellReducer": {
+      "types": "./src/state/shellReducer.ts",
+      "default": "./src/state/shellReducer.ts"
+    },
+    "./state/threadShell": {
+      "types": "./src/state/threadShell.ts",
+      "default": "./src/state/threadShell.ts"
+    },
+    "./state/threadDetail": {
+      "types": "./src/state/threadDetail.ts",
+      "default": "./src/state/threadDetail.ts"
+    },
+    "./state/threadCommands": {
+      "types": "./src/state/threadCommands.ts",
+      "default": "./src/state/threadCommands.ts"
+    },
+    "./state/shellCommands": {
+      "types": "./src/state/shellCommands.ts",
+      "default": "./src/state/shellCommands.ts"
+    },
+    "./state/projectCommands": {
+      "types": "./src/state/projectCommands.ts",
+      "default": "./src/state/projectCommands.ts"
+    },
+    "./state/archivedThreads": {
+      "types": "./src/state/archivedThreads.ts",
+      "default": "./src/state/archivedThreads.ts"
+    },
+    "./state/threadRetention": {
+      "types": "./src/state/threadRetention.ts",
+      "default": "./src/state/threadRetention.ts"
+    },
+    "./state/threadRelationships": {
+      "types": "./src/state/threadRelationships.ts",
+      "default": "./src/state/threadRelationships.ts"
+    },
+    "./state/threadExecution": {
+      "types": "./src/state/threadExecution.ts",
+      "default": "./src/state/threadExecution.ts"
+    },
+    "./state/threadRequests": {
+      "types": "./src/state/threadRequests.ts",
+      "default": "./src/state/threadRequests.ts"
+    },
+    "./state/threadWorkflows": {
+      "types": "./src/state/threadWorkflows.ts",
+      "default": "./src/state/threadWorkflows.ts"
+    },
+    "./state/composerDispatch": {
+      "types": "./src/state/composerDispatch.ts",
+      "default": "./src/state/composerDispatch.ts"
+    },
+    "./state/subagentDisplay": {
+      "types": "./src/state/subagentDisplay.ts",
+      "default": "./src/state/subagentDisplay.ts"
+    },
+    "./state/snapshots": {
+      "types": "./src/state/snapshots.ts",
+      "default": "./src/state/snapshots.ts"
+    },
+    "./state/threadLifecycle": {
+      "types": "./src/state/threadLifecycle.ts",
+      "default": "./src/state/threadLifecycle.ts"
+    },
+    "./state/threadSubagents": {
+      "types": "./src/state/threadSubagents.ts",
+      "default": "./src/state/threadSubagents.ts"
+    },
+    "./state/thread-checkpoints": "./src/state/threadCheckpoints.ts",
+    "./worktree-setup": {
+      "types": "./src/worktreeSetup.ts",
+      "default": "./src/worktreeSetup.ts"
+    },
+    "./codex-markdown-directives": {
+      "types": "./src/codexMarkdownDirectives.ts",
+      "default": "./src/codexMarkdownDirectives.ts"
+    },
+    "./work-log/command-label": {
+      "types": "./src/work-log/commandLabel.ts",
+      "default": "./src/work-log/commandLabel.ts"
+    },
+    "./work-log/presentation": {
+      "types": "./src/work-log/presentation.ts",
+      "default": "./src/work-log/presentation.ts"
+    },
+    "./work-log/user-input": {
+      "types": "./src/work-log/userInput.ts",
+      "default": "./src/work-log/userInput.ts"
+    },
+    "./user-message": {
+      "types": "./src/userMessage.ts",
+      "default": "./src/userMessage.ts"
+    },
+    "./state/thread-workflows": {
+      "types": "./src/state/threadWorkflows.ts",
+      "default": "./src/state/threadWorkflows.ts"
+    },
+    "./state/thread-execution": {
+      "types": "./src/state/threadExecution.ts",
+      "default": "./src/state/threadExecution.ts"
+    },
+    "./work-log/scroll-anchor": {
+      "types": "./src/work-log/scrollAnchor.ts",
+      "default": "./src/work-log/scrollAnchor.ts"
+    },
+    "./state/attachments": {
+      "types": "./src/state/attachments.ts",
+      "default": "./src/state/attachments.ts"
+    },
+    "./state/subagent-display": {
+      "types": "./src/state/subagentDisplay.ts",
+      "default": "./src/state/subagentDisplay.ts"
+    },
+    "./codex-artifact-templates": {
+      "types": "./src/codexArtifactTemplates.ts",
+      "default": "./src/codexArtifactTemplates.ts"
+    },
+    "./markdown-links": {
+      "types": "./src/markdownLinks.ts",
+      "default": "./src/markdownLinks.ts"
+    },
+    "./state/thread-relationships": {
+      "types": "./src/state/threadRelationships.ts",
+      "default": "./src/state/threadRelationships.ts"
+    },
+    "./handoff": {
+      "types": "./src/handoff.ts",
+      "default": "./src/handoff.ts"
+    },
+    "./file-preview": {
+      "types": "./src/filePreview.ts",
+      "default": "./src/filePreview.ts"
+    },
+    "./media-actions": {
+      "types": "./src/mediaActions.ts",
+      "default": "./src/mediaActions.ts"
+    },
+    "./media-reference": {
+      "types": "./src/mediaReference.ts",
+      "default": "./src/mediaReference.ts"
+    },
+    "./work-log/tool-presentation": {
+      "types": "./src/work-log/toolPresentation.ts",
+      "default": "./src/work-log/toolPresentation.ts"
+    },
+    "./state/thread-requests": {
+      "types": "./src/state/threadRequests.ts",
+      "default": "./src/state/threadRequests.ts"
+    },
+    "./state/turn-item-presentation": {
+      "types": "./src/state/turnItemPresentation.ts",
+      "default": "./src/state/turnItemPresentation.ts"
+    },
+    "./state/item-support": {
+      "types": "./src/state/itemSupport.ts",
+      "default": "./src/state/itemSupport.ts"
+    },
+    "./media-source": {
+      "types": "./src/mediaSource.ts",
+      "default": "./src/mediaSource.ts"
+    },
+    "./device/stream": {
+      "types": "./src/device/stream.ts",
+      "default": "./src/device/stream.ts"
+    },
+    "./device/hub-access": {
+      "types": "./src/device/hubAccess.ts",
+      "default": "./src/device/hubAccess.ts"
+    },
+    "./markdown-images": {
+      "types": "./src/markdownImages.ts",
+      "default": "./src/markdownImages.ts"
+    },
+    "./codex-file-citations": {
+      "types": "./src/codexFileCitations.ts",
+      "default": "./src/codexFileCitations.ts"
+    },
+    "./state/orchestration-v2-projection": {
+      "types": "./src/state/orchestrationV2Projection.ts",
+      "default": "./src/state/orchestrationV2Projection.ts"
+    },
+    "./state/composer-dispatch": {
+      "types": "./src/state/composerDispatch.ts",
+      "default": "./src/state/composerDispatch.ts"
+    },
+    "./state/thread-subagents": {
+      "types": "./src/state/threadSubagents.ts",
+      "default": "./src/state/threadSubagents.ts"
+    },
+    "./device/frame": {
+      "types": "./src/device/frame.ts",
+      "default": "./src/device/frame.ts"
+    },
+    "./device/duo-control": {
+      "types": "./src/device/duoControl.ts",
+      "default": "./src/device/duoControl.ts"
+    },
+    "./t3ToolSummary": {
+      "types": "./src/t3ToolSummary.ts",
+      "default": "./src/t3ToolSummary.ts"
+    },
+    "./providerSkills": {
+      "types": "./src/providerSkills.ts",
+      "default": "./src/providerSkills.ts"
     }
   },
   "scripts": {
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vp test run"
   },
   "dependencies": {
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "mdast-util-directive": "^3.1.0",
+    "micromark-extension-directive": "^4.0.0",
+    "micromark-util-character": "^2.1.1",
+    "micromark-util-types": "^2.0.2",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

@@ -131,7 +131,7 @@ export function BranchToolbarBranchSelector({
     draftId ? store.getDraftSession(draftId) : store.getDraftThreadByRef(threadRef),
   );
   const serverThread = useThread(threadRef, { waitForShell: draftThread !== null });
-  const serverSession = serverThread?.session ?? null;
+  const serverSession = serverThread?.runtime ?? null;
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
 
   const activeProjectRef = serverThread

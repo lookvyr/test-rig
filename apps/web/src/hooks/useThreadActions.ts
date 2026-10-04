@@ -40,7 +40,7 @@ import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
 
-export class ThreadArchiveBlockedError extends Schema.TaggedErrorClass<ThreadArchiveBlockedError>()(
+export class ThreadArchiveBlockedError extends Schema.TaggedError<ThreadArchiveBlockedError>()(
   "ThreadArchiveBlockedError",
   {
     environmentId: EnvironmentId,
@@ -52,7 +52,7 @@ export class ThreadArchiveBlockedError extends Schema.TaggedErrorClass<ThreadArc
   }
 }
 
-export class ThreadSettlementUnsupportedError extends Schema.TaggedErrorClass<ThreadSettlementUnsupportedError>()(
+export class ThreadSettlementUnsupportedError extends Schema.TaggedError<ThreadSettlementUnsupportedError>()(
   "ThreadSettlementUnsupportedError",
   {
     environmentId: EnvironmentId,
@@ -64,7 +64,7 @@ export class ThreadSettlementUnsupportedError extends Schema.TaggedErrorClass<Th
   }
 }
 
-export class ThreadSettleBlockedError extends Schema.TaggedErrorClass<ThreadSettleBlockedError>()(
+export class ThreadSettleBlockedError extends Schema.TaggedError<ThreadSettleBlockedError>()(
   "ThreadSettleBlockedError",
   {
     environmentId: EnvironmentId,
@@ -76,7 +76,7 @@ export class ThreadSettleBlockedError extends Schema.TaggedErrorClass<ThreadSett
   }
 }
 
-export class ThreadSnoozeUnsupportedError extends Schema.TaggedErrorClass<ThreadSnoozeUnsupportedError>()(
+export class ThreadSnoozeUnsupportedError extends Schema.TaggedError<ThreadSnoozeUnsupportedError>()(
   "ThreadSnoozeUnsupportedError",
   {
     environmentId: EnvironmentId,
@@ -88,7 +88,7 @@ export class ThreadSnoozeUnsupportedError extends Schema.TaggedErrorClass<Thread
   }
 }
 
-export class ThreadSnoozeBlockedError extends Schema.TaggedErrorClass<ThreadSnoozeBlockedError>()(
+export class ThreadSnoozeBlockedError extends Schema.TaggedError<ThreadSnoozeBlockedError>()(
   "ThreadSnoozeBlockedError",
   {
     environmentId: EnvironmentId,
@@ -100,7 +100,7 @@ export class ThreadSnoozeBlockedError extends Schema.TaggedErrorClass<ThreadSnoo
   }
 }
 
-export class ThreadPinningUnsupportedError extends Schema.TaggedErrorClass<ThreadPinningUnsupportedError>()(
+export class ThreadPinningUnsupportedError extends Schema.TaggedError<ThreadPinningUnsupportedError>()(
   "ThreadPinningUnsupportedError",
   {
     environmentId: EnvironmentId,
@@ -185,7 +185,7 @@ export function useThreadActions() {
       const resolved = resolveThreadTarget(target);
       if (!resolved) return AsyncResult.success(undefined);
       const { thread, threadRef } = resolved;
-      if (thread.session?.status === "running" && thread.session.activeTurnId != null) {
+      if (thread.runtime?.status === "running" && thread.runtime.activeRunId != null) {
         return AsyncResult.failure(
           Cause.fail(
             new ThreadArchiveBlockedError({
@@ -313,7 +313,7 @@ export function useThreadActions() {
         shouldDeleteWorktree = confirmationResult.value;
       }
 
-      if (thread.session && thread.session.status !== "stopped") {
+      if (thread.activeProviderThreadId !== null) {
         await stopThreadSession({
           environmentId: threadRef.environmentId,
           input: { threadId: threadRef.threadId },

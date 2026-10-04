@@ -108,6 +108,8 @@ import type {
 } from "./sourceControl.ts";
 
 export interface ContextMenuItem<T extends string = string> {
+  separatorBefore?: boolean;
+  checked?: boolean;
   id: T;
   label: string;
   destructive?: boolean;

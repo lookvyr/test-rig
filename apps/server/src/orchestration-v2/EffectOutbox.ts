@@ -25,6 +25,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 export const OrchestrationEffectRequestV2 = Schema.Union([
   Schema.Struct({
+    type: Schema.Literal("thread.side.open"),
+    parentThreadId: ThreadId,
+  }),
+  Schema.Struct({
     type: Schema.Literal("provider-runtime.continue"),
     sourceRunId: RunId,
   }),
@@ -116,6 +120,7 @@ export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
 ] as const satisfies ReadonlyArray<OrchestrationEffectRequestV2["type"]>;
 
 export const PROCESS_BOUND_EFFECT_TYPES = [
+  "thread.side.open",
   "provider-turn.start",
   "provider-turn.interrupt",
   "provider-turn.steer",
@@ -156,7 +161,7 @@ export interface PendingOrchestrationEffectV2 {
   readonly availableAt?: DateTime.Utc;
 }
 
-export class EffectOutboxError extends Schema.TaggedErrorClass<EffectOutboxError>()(
+export class EffectOutboxError extends Schema.TaggedError<EffectOutboxError>()(
   "EffectOutboxError",
   {
     operation: Schema.String,
@@ -172,6 +177,9 @@ export class EffectOutboxError extends Schema.TaggedErrorClass<EffectOutboxError
 const isEffectOutboxError = Schema.is(EffectOutboxError);
 
 export interface EffectOutboxV2Shape {
+  readonly hasPendingWorkspaceEffects: (
+    threadIds: ReadonlyArray<ThreadId>,
+  ) => Effect.Effect<boolean, EffectOutboxError>;
   readonly awaitAvailable: Effect.Effect<void>;
   readonly notifyAvailable: (count?: number) => Effect.Effect<void>;
   /** Persist rows only. Notify workers after the surrounding transaction commits. */
@@ -247,23 +255,21 @@ const decodeRequest = Schema.decodeUnknownEffect(
 
 const rowToEffect = (row: EffectRow) =>
   decodeRequest(row.payload_json).pipe(
-    Effect.map(
-      (request): OrchestrationEffectV2 => ({
-        id: row.effect_id,
-        commandId: CommandId.make(row.command_id),
-        threadId: ThreadId.make(row.thread_id),
-        request,
-        status: row.status as OrchestrationEffectStatusV2,
-        attemptCount: row.attempt_count,
-        availableAt: row.available_at,
-        leaseOwner: row.lease_owner,
-        leaseExpiresAt: row.lease_expires_at,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        completedAt: row.completed_at,
-        lastError: row.last_error,
-      }),
-    ),
+    Effect.map((request): OrchestrationEffectV2 => ({
+      id: row.effect_id,
+      commandId: CommandId.make(row.command_id),
+      threadId: ThreadId.make(row.thread_id),
+      request,
+      status: row.status as OrchestrationEffectStatusV2,
+      attemptCount: row.attempt_count,
+      availableAt: row.available_at,
+      leaseOwner: row.lease_owner,
+      leaseExpiresAt: row.lease_expires_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at,
+      lastError: row.last_error,
+    })),
   );
 
 export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = Layer.effect(
@@ -280,9 +286,16 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
         available,
         Array.from({ length: Math.min(64, Math.max(0, Math.floor(count))) }, () => undefined),
       ).pipe(Effect.asVoid);
+    // Each thread runs its effects one at a time, in enqueue (rowid) order. An earlier
+    // effect waiting out a retry backoff still blocks later ones, so a turn
+    // cannot start while a failed rollback is about to restore files. A claim
+    // that skips restart continuations is not blocked by them either.
     // Title generation is correlated metadata work, so it has its own
     // per-thread lane and cannot delay provider lifecycle effects.
-    const claimableCandidatePredicate = (availableBefore?: string) =>
+    const claimableCandidatePredicate = (
+      availableBefore?: string,
+      excludeRestartContinuations = false,
+    ) =>
       sql`
         ${
           availableBefore === undefined
@@ -294,7 +307,18 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           SELECT 1
           FROM orchestration_v2_effect_outbox AS active
           WHERE active.thread_id = candidate.thread_id
-            AND active.status = 'running'
+            AND (
+              active.status = 'running'
+              OR (
+                active.status = 'pending'
+                AND active.rowid < candidate.rowid
+                AND ${
+                  excludeRestartContinuations
+                    ? sql`active.effect_type != 'provider-runtime.continue'`
+                    : sql`1 = 1`
+                }
+              )
+            )
             AND (
               (
                 candidate.effect_type = 'thread-title.generate'
@@ -377,6 +401,17 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
           }),
           Effect.mapError((cause) => new EffectOutboxError({ operation: "get", effectId, cause })),
         ),
+      hasPendingWorkspaceEffects: (threadIds) =>
+        threadIds.length === 0
+          ? Effect.succeed(false)
+          : sql`SELECT 1 FROM orchestration_v2_effect_outbox
+          WHERE thread_id IN ${sql.in(threadIds)} AND status IN ('pending', 'running')
+            AND effect_type IN ('checkpoint.capture', 'provider-thread.rollback') LIMIT 1`.pipe(
+              Effect.map((rows) => rows.length > 0),
+              Effect.mapError(
+                (cause) => new EffectOutboxError({ operation: "workspace-pending", cause }),
+              ),
+            ),
       awaitAvailable: Queue.take(available),
       notifyAvailable,
       listByCommandId: (commandId) =>
@@ -494,7 +529,7 @@ export const layer: Layer.Layer<EffectOutboxV2, never, SqlClient.SqlClient> = La
             WHERE effect_id = (
               SELECT candidate.effect_id
               FROM orchestration_v2_effect_outbox AS candidate
-              WHERE ${claimableCandidatePredicate(nowIso)}
+              WHERE ${claimableCandidatePredicate(nowIso, excludeRestartContinuations)}
                 AND ${excludeRestartContinuations ? sql`candidate.effect_type != 'provider-runtime.continue'` : sql`1 = 1`}
               ORDER BY candidate.available_at ASC, candidate.created_at ASC, candidate.effect_id ASC
               LIMIT 1

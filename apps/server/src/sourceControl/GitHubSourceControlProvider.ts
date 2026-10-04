@@ -1,3 +1,5 @@
+import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -10,7 +12,10 @@ import {
 
 import * as GitHubCli from "./GitHubCli.ts";
 import { findAuthenticatedGitHubAccount, parseGitHubAuthStatus } from "./gitHubAuthStatus.ts";
-import { decodeGitHubPullRequestListJson } from "./gitHubPullRequests.ts";
+import {
+  decodeGitHubPullRequestListJson,
+  type NormalizedGitHubPullRequestRecord,
+} from "./gitHubPullRequests.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import {
   combinedAuthOutput,
@@ -20,7 +25,9 @@ import {
   type SourceControlCliDiscoverySpec,
 } from "./SourceControlProviderDiscovery.ts";
 
-function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeRequest {
+function toChangeRequest(
+  summary: NormalizedGitHubPullRequestRecord | GitHubCli.GitHubPullRequestSummary,
+): ChangeRequest {
   return {
     provider: "github",
     number: summary.number,
@@ -29,7 +36,15 @@ function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeReq
     baseRefName: summary.baseRefName,
     headRefName: summary.headRefName,
     state: summary.state ?? "open",
-    updatedAt: Option.none(),
+    updatedAt:
+      "updatedAt" in summary
+        ? typeof summary.updatedAt === "string"
+          ? DateTime.make(summary.updatedAt)
+          : summary.updatedAt
+        : Option.none(),
+    ...(summary.isDraft === undefined ? {} : { isDraft: summary.isDraft }),
+    closedAt: summary.closedAt ?? null,
+    mergedAt: summary.mergedAt ?? null,
     ...(summary.isCrossRepository !== undefined
       ? { isCrossRepository: summary.isCrossRepository }
       : {}),
@@ -150,7 +165,7 @@ export const make = Effect.gen(function* () {
             "--limit",
             String(input.limit ?? 20),
             "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            "number,title,url,baseRefName,headRefName,state,isDraft,mergedAt,closedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
           ],
         })
         .pipe(
@@ -199,23 +214,32 @@ export const make = Effect.gen(function* () {
     kind: "github",
     listChangeRequests,
     getChangeRequest: (input) =>
-      github.getPullRequest(input).pipe(
-        Effect.map(toChangeRequest),
-        Effect.mapError(
-          (error) =>
-            new SourceControlProviderError({
-              provider: "github",
-              operation: "getChangeRequest",
-              command: error.command,
-              cwd: input.cwd,
-              reference: SourceControlProvider.transportSafeSourceControlErrorValue(
-                input.reference,
-              ),
-              detail: error.detail,
-              cause: error,
-            }),
+      github
+        .getPullRequest({
+          ...input,
+          // gh otherwise prefers a fork's upstream repository for numeric references.
+          reference:
+            input.context !== undefined && /^#?\d+$/.test(input.reference.trim())
+              ? `https://${normalizeGitRemoteUrl(input.context.remoteUrl)}/pull/${input.reference.trim().replace(/^#/, "")}`
+              : input.reference,
+        })
+        .pipe(
+          Effect.map(toChangeRequest),
+          Effect.mapError(
+            (error) =>
+              new SourceControlProviderError({
+                provider: "github",
+                operation: "getChangeRequest",
+                command: error.command,
+                cwd: input.cwd,
+                reference: SourceControlProvider.transportSafeSourceControlErrorValue(
+                  input.reference,
+                ),
+                detail: error.detail,
+                cause: error,
+              }),
+          ),
         ),
-      ),
     createChangeRequest: (input) =>
       github
         .createPullRequest({

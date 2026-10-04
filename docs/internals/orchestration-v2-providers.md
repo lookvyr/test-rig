@@ -1,7 +1,11 @@
 # V2 provider adapters
 
-LOO-20 adds the provider boundary for the V2 foundation. The active app still uses
-the existing orchestration engine. LOO-21/22 own the V2 worker and client cutover.
+> Historical staged implementation. The [nightly integration](./orchestration-v2-nightly-sync.md)
+> supersedes the runtime, adapter, dependency, and verification descriptions below.
+
+LOO-20 adds the provider boundary for the V2 foundation. The native worker and
+client are now active through [the LOO-21 cutover](./orchestration-v2-cutover.md).
+The verification below records the earlier provider-boundary slice.
 
 Each approved driver exposes an `orchestrationAdapter`. The V2 registry resolves
 only enabled instances from the existing provider-instance registry; it does not

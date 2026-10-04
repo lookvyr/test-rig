@@ -1,6 +1,12 @@
+import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
+import {
+  ProjectServiceLayerLive,
+  ProjectSetupScriptRunnerLayerLive,
+} from "./orchestration-v2/runtimeLayer.ts";
+import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
+import { projectHttpApiLayer } from "./project/http.ts";
 import * as ProviderContinuationRequests from "./orchestration-v2/ProviderContinuationRequests.ts";
 import * as WorktreeCleanup from "./workspace/WorktreeCleanup.ts";
-import * as WorktreeCleanupState from "./workspace/WorktreeCleanupState.ts";
 import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -25,12 +31,7 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
-import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
-import * as ProviderSessionRuntime from "./persistence/ProviderSessionRuntime.ts";
-import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts";
-import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
-import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper.ts";
 import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
@@ -50,12 +51,6 @@ import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
-import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor.ts";
-import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
-import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
-import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
-import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.ts";
-import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
@@ -76,6 +71,7 @@ import * as GitHubPullRequestWorkspace from "./sourceControl/GitHubPullRequestWo
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
+import * as ProjectStoreV2 from "./orchestration-v2/ProjectStore.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
@@ -89,13 +85,24 @@ import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClien
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
 import * as ResourceMonitorBinary from "./resourceTelemetry/ResourceMonitorBinary.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
-import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
+import { OrchestrationV2ProductionLayerLive } from "./orchestration-v2/runtimeLayer.ts";
+import * as PullRequestService from "./pullRequest/PullRequestService.ts";
+import * as PullRequestProviderRegistry from "./pullRequest/PullRequestProviderRegistry.ts";
+import * as PullRequestReadCache from "./pullRequest/PullRequestReadCache.ts";
+import * as PullRequestFilesViewed from "./persistence/PullRequestFilesViewed.ts";
+import * as SourceControlRateLimit from "./sourceControl/SourceControlRateLimit.ts";
+import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
+import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
+import * as ThreadPullRequestService from "./orchestration-v2/ThreadPullRequestService.ts";
+import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
+import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
+import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
-import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
+import { orchestrationHttpApiLayer } from "./orchestration-v2/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { ServerActivation } from "./serverActivation.ts";
 
@@ -209,32 +216,6 @@ const PlatformServicesLive = Layer.unwrap(
   }),
 );
 
-const ReactorLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(OrchestrationReactorLive),
-  Layer.provideMerge(WorktreeCleanup.layer),
-  Layer.provideMerge(WorktreeCleanupState.layer),
-  Layer.provideMerge(ProviderRuntimeIngestionLive),
-  Layer.provideMerge(ProviderCommandReactorLive),
-  Layer.provideMerge(CheckpointReactorLive),
-  Layer.provideMerge(ThreadDeletionReactorLive),
-  Layer.provideMerge(RuntimeReceiptBusLive),
-);
-
-const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
-  Layer.provide(ProviderSessionRuntime.layer),
-);
-
-// `ProviderAdapterRegistryLive` is now a facade that resolves kind → adapter
-// by looking up the default `ProviderInstance` per driver in the instance
-// registry. Adapter construction itself moved inside each driver's
-// `create()`; `ProviderEventLoggers.layer` owns the shared native/canonical
-// NDJSON writers and is provided at the outer runtime layer so both
-// `ProviderService` and the per-instance drivers read the same logger pair.
-const ProviderLayerLive = ProviderServiceLive.pipe(
-  Layer.provide(ProviderAdapterRegistryLive),
-  Layer.provideMerge(ProviderSessionDirectoryLayerLive),
-);
-
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
@@ -250,7 +231,10 @@ const SourceControlProviderRegistryLayerLive = SourceControlProviderRegistry.lay
 );
 
 const GitManagerLayerLive = GitManager.layer.pipe(
-  Layer.provideMerge(ProjectSetupScriptRunner.layer),
+  Layer.provideMerge(ProjectSetupScriptRunnerLayerLive),
+  Layer.provideMerge(ProjectServiceLayerLive),
+  Layer.provideMerge(ProjectionStoreV2.layer),
+  Layer.provideMerge(ProjectStoreV2.layer),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(TextGeneration.layer),
@@ -293,7 +277,6 @@ const VcsLayerLive = Layer.empty.pipe(
 );
 
 const CheckpointingLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(CheckpointDiffQuery.layer),
   Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
 );
 
@@ -332,52 +315,90 @@ const AuthLayerLive = EnvironmentAuth.layer.pipe(
   Layer.provide(ServerSecretStore.layer),
 );
 
-const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
-  Layer.provideMerge(ProviderLayerLive),
-  Layer.provideMerge(OrchestrationLayerLive),
+const PullRequestServiceLive = PullRequestService.layer.pipe(
+  Layer.provide(PullRequestProviderRegistry.layer),
+  Layer.provide(PullRequestFilesViewed.layer),
+  Layer.provide(PullRequestReadCache.layer),
+  Layer.provide(SourceControlProviderRegistryLayerLive),
+  Layer.provide(SourceControlRateLimit.layer),
+  Layer.provide(ProjectServiceLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
-  // Core Services
-  Layer.provideMerge(ServerSettingsLayerLive),
-  Layer.provideMerge(CheckpointingLayerLive),
-  Layer.provideMerge(SourceControlProviderRegistryLayerLive),
-  Layer.provideMerge(GitLayerLive),
-  Layer.provideMerge(VcsLayerLive),
-  Layer.provideMerge(ProviderRuntimeLayerLive),
-  Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
-  Layer.provideMerge(PersistenceLayerLive),
-  Layer.provideMerge(Keybindings.layer),
-  Layer.provideMerge(ProviderRegistryLive),
-  // The instance registry is the new routing keystone — text generation,
-  // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
-  // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
-  // `providerInstances` hydration merges `settings.providers.<kind>`
-  // with explicit `providerInstances` entries on boot.
-  Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
-  // Shared native/canonical NDJSON writers used by both the per-instance
-  // drivers (native stream, written from inside each `<X>Adapter`) and
-  // `ProviderService` (canonical stream, written after event normalization).
-  // Provided once at the runtime level so every consumer sees the same
-  // logger instances.
-  Layer.provideMerge(ProviderEventLoggers.layer),
-  Layer.provideMerge(ProviderContinuationRequests.layer),
-  // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
-  // `ProviderRegistryLive` pulled `OpenCodeRuntimeLive` in for itself, but
-  // the rewritten registry reads snapshots off the instance registry and
-  // no longer transitively provides it. Exposing it at the runtime level
-  // keeps a single Live for all opencode consumers.
-  Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
-  Layer.provideMerge(WorkspaceLayerLive),
-  Layer.provideMerge(ProjectFaviconResolverLayerLive),
-  Layer.provideMerge(RepositoryIdentityResolver.layer),
-  Layer.provideMerge(ServerEnvironment.layer),
-  Layer.provideMerge(AuthLayerLive),
-  Layer.provideMerge(ServerSecretStore.layer),
+const OrchestrationWorkersLive = Layer.mergeAll(
+  Layer.effectDiscard(
+    ThreadSettlementService.make.pipe(Effect.flatMap((service) => service.start())),
+  ),
+  Layer.effectDiscard(
+    ThreadPullRequestService.make.pipe(Effect.flatMap((service) => service.start())),
+  ),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      yield* (yield* PullRequestSyncReactor.PullRequestSyncReactor).start();
+    }),
+  ).pipe(Layer.provide(PullRequestSyncReactor.layer)),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      yield* (yield* PullRequestWatchReactor.PullRequestWatchReactor).start();
+    }),
+  ).pipe(Layer.provide(PullRequestWatchReactor.layer)),
+).pipe(
+  Layer.provide(PullRequestServiceLive),
+  Layer.provide(ProjectionStoreV2.layer),
+  Layer.provide(ProjectStoreV2.layer),
 );
 
-const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
+const RuntimeCoreDependenciesLive = Layer.mergeAll(
+  OrchestrationWorkersLive.pipe(Layer.provideMerge(OrchestrationV2ProductionLayerLive)),
+  ThreadSearch.layer,
+)
+  .pipe(
+    // Core Services
+    Layer.provideMerge(McpSessionRegistry.layer),
+    Layer.provideMerge(NativeAppIconResolver.layer),
+    Layer.provideMerge(ServerSettingsLayerLive),
+    Layer.provideMerge(CheckpointingLayerLive),
+    Layer.provideMerge(SourceControlProviderRegistryLayerLive),
+    Layer.provideMerge(GitLayerLive),
+    Layer.provideMerge(VcsLayerLive),
+    Layer.provideMerge(SourceControlRepositoryServiceLayerLive),
+    Layer.provideMerge(ProjectEnrichmentService.layer),
+    Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
+    Layer.provideMerge(PersistenceLayerLive),
+    Layer.provideMerge(Keybindings.layer),
+    Layer.provideMerge(ProviderRegistryLive),
+    // The instance registry is the new routing keystone — text generation,
+    // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
+    // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
+    // `providerInstances` hydration merges `settings.providers.<kind>`
+    // with explicit `providerInstances` entries on boot.
+    Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+    // Shared native/canonical NDJSON writers used by both the per-instance
+    // drivers (native stream, written from inside each `<X>Adapter`) and
+    // `ProviderService` (canonical stream, written after event normalization).
+    // Provided once at the runtime level so every consumer sees the same
+    // logger instances.
+    Layer.provideMerge(ProviderEventLoggers.layer),
+    Layer.provideMerge(ProviderContinuationRequests.layer),
+    // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
+    // `ProviderRegistryLive` pulled `OpenCodeRuntimeLive` in for itself, but
+    // the rewritten registry reads snapshots off the instance registry and
+    // no longer transitively provides it. Exposing it at the runtime level
+    // keeps a single Live for all opencode consumers.
+    Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
+    Layer.provideMerge(WorkspaceLayerLive),
+  )
+  .pipe(
+    Layer.provideMerge(ProjectFaviconResolverLayerLive),
+    Layer.provideMerge(RepositoryIdentityResolver.layer),
+    Layer.provideMerge(ServerEnvironment.layer),
+    Layer.provideMerge(AuthLayerLive),
+    Layer.provideMerge(ServerSecretStore.layer),
+  );
+
+const RuntimeDependenciesLive = Layer.merge(CheckpointDiffQuery.layer, WorktreeCleanup.layer).pipe(
+  Layer.provideMerge(RuntimeCoreDependenciesLive),
   // Misc.
+  Layer.provideMerge(ProviderContinuationRequests.layer),
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
   Layer.provideMerge(TraceDiagnostics.layer),
@@ -400,6 +421,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(authHttpApiLayer),
       Layer.provide(orchestrationHttpApiLayer),
+      Layer.provide(projectHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),

@@ -1,3 +1,4 @@
+import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 import * as React from "react";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
@@ -10,7 +11,7 @@ import {
 import type { SidebarThreadSummary, Thread } from "../types";
 import type { ThreadRouteTarget } from "../threadRoutes";
 import { cn } from "../lib/utils";
-import { isLatestTurnSettled } from "../session-logic";
+import { isLatestRunSettled } from "../session-logic";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
@@ -150,9 +151,9 @@ type ThreadStatusInput = Pick<
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "interactionMode"
-  | "latestTurn"
-  | "session"
-  | "backgroundLiveness"
+  | "latestRun"
+  | "runtime"
+  | "pendingBackgroundTasks"
 > & {
   lastVisitedAt?: string | undefined;
 };
@@ -250,8 +251,8 @@ export function useThreadJumpHintVisibility(): {
 }
 
 export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
-  if (!thread.latestTurn?.completedAt) return false;
-  const completedAt = Date.parse(thread.latestTurn.completedAt);
+  if (!thread.latestRun?.completedAt) return false;
+  const completedAt = Date.parse(thread.latestRun.completedAt);
   if (Number.isNaN(completedAt)) return false;
   if (!thread.lastVisitedAt) return false;
 
@@ -434,7 +435,7 @@ export type SidebarV2Status = "approval" | "input" | "working" | "monitoring" | 
 
 type SidebarV2StatusInput = Pick<
   SidebarThreadSummary,
-  "hasPendingApprovals" | "hasPendingUserInput" | "session" | "backgroundLiveness"
+  "hasPendingApprovals" | "hasPendingUserInput" | "runtime" | "pendingBackgroundTasks"
 >;
 
 export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2Status {
@@ -444,20 +445,20 @@ export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2S
   if (thread.hasPendingUserInput) {
     return "input";
   }
-  if (thread.session?.status === "running" || thread.session?.status === "starting") {
+  if (threadRuntimeIsActive(thread.runtime)) {
     return "working";
   }
   // A failed session outranks lingering background liveness: the user must
   // see the failure, not a stale Working (review finding).
-  if (thread.session?.status === "error") {
+  if (thread.runtime?.status === "failed") {
     return "failed";
   }
   // Background work outlives the turn: fleets read as working; monitoring
   // only when watch loops are the sole live work.
-  if (thread.backgroundLiveness === "working") {
+  if (backgroundLiveness(thread.pendingBackgroundTasks) === "working") {
     return "working";
   }
-  if (thread.backgroundLiveness === "monitoring") {
+  if (backgroundLiveness(thread.pendingBackgroundTasks) === "monitoring") {
     return "monitoring";
   }
   return "ready";
@@ -526,13 +527,13 @@ export function searchSidebarThreadsByTitle<T extends { readonly title: string }
 
 type SettledTimestampInput = Pick<
   SidebarThreadSummary,
-  "settledAt" | "latestUserMessageAt" | "latestTurn" | "updatedAt"
+  "settledAt" | "latestUserMessageAt" | "latestRun" | "updatedAt"
 >;
 
 /** The timestamp a settled row sorts and labels by: settledAt when stamped
     (explicit settles), otherwise last activity — the same candidates
     threadLastActivityAt feeds the auto-settle window (user message plus all
-    latestTurn stamps), so a thread whose last activity was a turn completion
+    latestRun stamps), so a thread whose last activity was a turn completion
     doesn't sort by an older message time. updatedAt is the final net. */
 export function resolveSettledTimestamp(thread: SettledTimestampInput): string | null {
   const settledAt = firstValidTimestamp(thread.settledAt);
@@ -541,9 +542,9 @@ export function resolveSettledTimestamp(thread: SettledTimestampInput): string |
   let latestMs = Number.NEGATIVE_INFINITY;
   for (const candidate of [
     thread.latestUserMessageAt,
-    thread.latestTurn?.requestedAt,
-    thread.latestTurn?.startedAt,
-    thread.latestTurn?.completedAt,
+    thread.latestRun?.requestedAt,
+    thread.latestRun?.startedAt,
+    thread.latestRun?.completedAt,
   ]) {
     if (candidate == null) continue;
     const parsed = Date.parse(candidate);
@@ -574,13 +575,13 @@ export function sortSettledThreadsForSidebarV2<
     last transition when the turn projection lags behind. Malformed
     timestamps fall through to the next candidate, not just missing ones. */
 export function resolveWorkingStartedAt(
-  thread: Pick<SidebarThreadSummary, "latestTurn" | "session">,
+  thread: Pick<SidebarThreadSummary, "latestRun" | "runtime">,
 ): string | null {
-  const turn = thread.latestTurn;
+  const turn = thread.latestRun;
   if (turn && turn.completedAt === null) {
-    return firstValidTimestamp(turn.startedAt, turn.requestedAt, thread.session?.updatedAt);
+    return firstValidTimestamp(turn.startedAt, turn.requestedAt, thread.runtime?.updatedAt);
   }
-  return firstValidTimestamp(thread.session?.updatedAt);
+  return firstValidTimestamp(thread.runtime?.updatedAt);
 }
 
 export function formatWorkingDurationLabel(elapsedMs: number): string {
@@ -614,7 +615,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.session?.status === "running") {
+  if (thread.runtime?.status === "running") {
     return {
       label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",
@@ -623,7 +624,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.session?.status === "starting") {
+  if (thread.runtime?.status === "starting") {
     return {
       label: "Connecting",
       colorClass: "text-sky-600 dark:text-sky-300/80",
@@ -637,7 +638,7 @@ export function resolveThreadStatusPill(input: {
   const hasPlanReadyPrompt =
     !thread.hasPendingUserInput &&
     thread.interactionMode === "plan" &&
-    isLatestTurnSettled(thread.latestTurn, thread.session) &&
+    isLatestRunSettled(thread.latestRun, thread.runtime) &&
     thread.hasActionableProposedPlan;
   if (hasPlanReadyPrompt) {
     return {
@@ -652,7 +653,7 @@ export function resolveThreadStatusPill(input: {
   // workflow fleets read as plain Working; Monitoring is reserved for watch
   // loops (a parent agent babysitting a PR, tailing checks) with no other
   // live work. Same recede treatment as Working per inbox-zero.
-  if (thread.backgroundLiveness === "working") {
+  if (backgroundLiveness(thread.pendingBackgroundTasks) === "working") {
     return {
       label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",
@@ -661,7 +662,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.backgroundLiveness === "monitoring") {
+  if (backgroundLiveness(thread.pendingBackgroundTasks) === "monitoring") {
     return {
       label: "Monitoring",
       colorClass: "text-sky-600 dark:text-sky-300/80",
@@ -909,4 +910,11 @@ export function sortScopedProjectsForSidebar<
       left.environmentId.localeCompare(right.environmentId) ||
       left.id.localeCompare(right.id),
   );
+}
+
+function backgroundLiveness(
+  tasks: SidebarThreadSummary["pendingBackgroundTasks"],
+): "working" | "monitoring" | null {
+  if (tasks.length === 0) return null;
+  return tasks.every((task) => task.kind === "monitor") ? "monitoring" : "working";
 }

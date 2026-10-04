@@ -1,3 +1,5 @@
+import { ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
+import { ConnectionBlockedError } from "../connection/model.ts";
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -60,6 +62,13 @@ export const make = Effect.gen(function* () {
           Effect.mapError(mapRemoteEnvironmentError),
           Effect.provideService(HttpClient.HttpClient, httpClient),
         );
+    if (descriptor.capabilities.orchestrationProtocolVersion !== ORCHESTRATION_PROTOCOL_VERSION) {
+      return yield* new ConnectionBlockedError({
+        reason: "configuration",
+        detail:
+          "This environment uses an incompatible orchestration protocol. Update its server and client together.",
+      });
+    }
     if (descriptor.environmentId !== input.expectedEnvironmentId) {
       return yield* environmentMismatchError({
         expected: input.expectedEnvironmentId,

@@ -11,7 +11,7 @@ import {
 import { type VcsRefTarget } from "@t3tools/client-runtime/state/vcs";
 import type {
   EnvironmentId,
-  OrchestrationThread,
+  OrchestrationV2ThreadProjection,
   ProjectContentMatch,
   ProjectEntryKind,
   ThreadId,
@@ -56,7 +56,7 @@ const threadSearchResultsAtom = createThreadSearchResultsAtomFamily({
 });
 
 export interface ThreadDetailView {
-  readonly data: OrchestrationThread | null;
+  readonly data: OrchestrationV2ThreadProjection | null;
   readonly error: string | null;
   readonly isPending: boolean;
   readonly isDeleted: boolean;

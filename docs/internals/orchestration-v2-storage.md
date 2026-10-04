@@ -1,8 +1,11 @@
 # Orchestration V2 storage foundation
 
+> Historical staged implementation. The [nightly integration](./orchestration-v2-nightly-sync.md)
+> supersedes the runtime, adapter, dependency, and verification descriptions below.
+
 LOO-19 adds the V2 storage and durable-effect services on `codex/orchestration-v2`.
-The active application still runs V1. Provider execution, RPC/client integration,
-and startup cutover belong to LOO-20, LOO-21, and LOO-22 respectively.
+This document records that staged foundation. LOO-21 now activates it; see
+[the runtime cutover](./orchestration-v2-cutover.md) for the current application path.
 
 The port is based on upstream `de343914273eceb852a1d1d739cd1d38df7796ee`.
 It uses Test Rig's existing Effect version and Node SQLite client; it does not

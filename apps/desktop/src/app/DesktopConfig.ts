@@ -8,7 +8,7 @@ const trimNonEmptyOption = (value: string): Option.Option<string> => {
 };
 
 const trimmedString = (name: string) =>
-  Config.string(name).pipe(Config.option, Config.map(Option.flatMap(trimNonEmptyOption)));
+  Config.String(name).pipe(Config.option, Config.map(Option.flatMap(trimNonEmptyOption)));
 
 const commaSeparatedStrings = (name: string) =>
   trimmedString(name).pipe(
@@ -34,10 +34,10 @@ export const DesktopConfig = Config.all({
   xdgConfigHome: trimmedString("XDG_CONFIG_HOME"),
   xdgDataHome: trimmedString("XDG_DATA_HOME"),
   t3Home: trimmedString("TEST_RIG_HOME"),
-  devServerUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option),
+  devServerUrl: Config.URL("VITE_DEV_SERVER_URL").pipe(Config.option),
   appUserModelIdOverride: trimmedString("T3CODE_DESKTOP_APP_USER_MODEL_ID"),
   devRemoteT3ServerEntryPath: trimmedString("T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH"),
-  configuredBackendPort: Config.port("T3CODE_PORT").pipe(Config.option),
+  configuredBackendPort: Config.Port("T3CODE_PORT").pipe(Config.option),
   commitHashOverride: trimmedString("T3CODE_COMMIT_HASH"),
   desktopLanHostOverride: trimmedString("T3CODE_DESKTOP_LAN_HOST"),
   desktopHttpsEndpointUrls: commaSeparatedStrings("T3CODE_DESKTOP_HTTPS_ENDPOINTS"),

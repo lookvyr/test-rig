@@ -29,9 +29,9 @@ function changedFileScope(pathValue: string): string {
 
 export function shouldAutoExpandChangedFiles(
   files: ReadonlyArray<TurnDiffFileChange>,
-  isLatestTurn: boolean,
+  isLatestRun: boolean,
 ): boolean {
-  if (!isLatestTurn || files.length > CHANGED_FILES_AUTO_EXPAND_FILE_LIMIT) {
+  if (!isLatestRun || files.length > CHANGED_FILES_AUTO_EXPAND_FILE_LIMIT) {
     return false;
   }
   const stat = summarizeTurnDiffStats(files);

@@ -1,3 +1,5 @@
+import { RuntimeMode } from "./orchestration.ts";
+import { ServerProviderUsageLimits } from "./providerUsageLimits.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
@@ -62,6 +64,8 @@ export const ServerProviderAuth = Schema.Struct({
 export type ServerProviderAuth = typeof ServerProviderAuth.Type;
 
 export const ServerProviderModel = Schema.Struct({
+  aliases: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  badge: Schema.optional(Schema.Literal("new")),
   slug: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
   shortName: Schema.optional(TrimmedNonEmptyString),
@@ -93,6 +97,8 @@ export const ServerProviderSkill = Schema.Struct({
   enabled: Schema.Boolean,
   displayName: Schema.optional(TrimmedNonEmptyString),
   shortDescription: Schema.optional(TrimmedNonEmptyString),
+  userInvocationOnly: Schema.optional(Schema.Boolean),
+  userInvocable: Schema.optional(Schema.Boolean),
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
 
@@ -120,6 +126,22 @@ export const ServerProviderContinuation = Schema.Struct({
   groupKey: TrimmedNonEmptyString,
 });
 export type ServerProviderContinuation = typeof ServerProviderContinuation.Type;
+
+export const ServerProviderCompatibilityStatus = Schema.Literals([
+  "unknown",
+  "supported",
+  "graceful",
+  "unsupported",
+  "broken",
+]);
+export const ServerProviderCompatibilityAdvisory = Schema.Struct({
+  status: ServerProviderCompatibilityStatus,
+  latestVersionStatus: Schema.optionalKey(ServerProviderCompatibilityStatus),
+  message: Schema.NullOr(TrimmedNonEmptyString),
+  recommendedVersion: Schema.NullOr(TrimmedNonEmptyString),
+  recommendedRange: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ServerProviderCompatibilityAdvisory = typeof ServerProviderCompatibilityAdvisory.Type;
 
 export const ServerProviderVersionAdvisoryStatus = Schema.Literals([
   "unknown",
@@ -194,6 +216,9 @@ export const ServerProvider = Schema.Struct({
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
+  usageLimits: Schema.optional(ServerProviderUsageLimits),
+  supportedRuntimeModes: Schema.optional(Schema.Array(RuntimeMode)),
+  compatibilityAdvisory: Schema.optionalKey(ServerProviderCompatibilityAdvisory),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 
@@ -582,7 +607,7 @@ export const ServerProviderUpdateInput = Schema.Struct({
 });
 export type ServerProviderUpdateInput = typeof ServerProviderUpdateInput.Type;
 
-export class ServerProviderUpdateError extends Schema.TaggedErrorClass<ServerProviderUpdateError>()(
+export class ServerProviderUpdateError extends Schema.TaggedError<ServerProviderUpdateError>()(
   "ServerProviderUpdateError",
   {
     provider: ProviderDriverKind,

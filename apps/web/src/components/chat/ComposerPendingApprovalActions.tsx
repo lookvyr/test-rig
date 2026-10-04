@@ -1,12 +1,12 @@
-import { type ApprovalRequestId, type ProviderApprovalDecision } from "@t3tools/contracts";
+import { type RuntimeRequestId, type ProviderApprovalDecision } from "@t3tools/contracts";
 import { memo } from "react";
 import { Button } from "../ui/button";
 
 interface ComposerPendingApprovalActionsProps {
-  requestId: ApprovalRequestId;
+  requestId: RuntimeRequestId;
   isResponding: boolean;
   onRespondToApproval: (
-    requestId: ApprovalRequestId,
+    requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,
   ) => Promise<unknown>;
 }

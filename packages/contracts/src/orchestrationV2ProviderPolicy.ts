@@ -24,3 +24,6 @@ export const UserInputAttachmentAnswerPayload = Schema.Struct({
   answers: ProviderUserInputAnswers,
   attachmentsByQuestionId: UserInputAttachments,
 });
+
+export type ProviderApprovalOption = typeof ProviderApprovalOption.Type;
+export type UserInputAttachments = typeof UserInputAttachments.Type;

@@ -60,7 +60,7 @@ const LINK_ICON_HTML_RE =
 const LINK_ICON_OBJ_RE =
   /(?=[^}]*\brel\s*:\s*["'](?:icon|shortcut icon)["'])(?=[^}]*\bhref\s*:\s*["']([^"'?]+))[^}]*/i;
 
-export class ProjectFaviconResolutionError extends Schema.TaggedErrorClass<ProjectFaviconResolutionError>()(
+export class ProjectFaviconResolutionError extends Schema.TaggedError<ProjectFaviconResolutionError>()(
   "ProjectFaviconResolutionError",
   {
     operation: Schema.Literals([

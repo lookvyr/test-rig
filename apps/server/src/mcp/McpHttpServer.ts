@@ -1,3 +1,22 @@
+import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
+import * as ThreadMetadataMcpService from "./ThreadMetadataMcpService.ts";
+import * as WorktreeMcpService from "./WorktreeMcpService.ts";
+import { OrchestratorToolkit } from "./toolkits/orchestrator/tools.ts";
+import { OrchestratorToolkitHandlersLive } from "./toolkits/orchestrator/handlers.ts";
+import { ThreadToolkit } from "./toolkits/thread/tools.ts";
+import { ThreadToolkitHandlersLive } from "./toolkits/thread/handlers.ts";
+import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
+import { WorktreeToolkitHandlersLive } from "./toolkits/worktree/handlers.ts";
+import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
+import { PreviewControlsHandlersLive } from "./toolkits/previewControls/handlers.ts";
+import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
+import { EnvironmentHandlersLive } from "./toolkits/environment/handlers.ts";
+import { ProjectToolkit } from "./toolkits/project/tools.ts";
+import { ProjectHandlersLive } from "./toolkits/project/handlers.ts";
+import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
+import { AttachmentHandlersLive } from "./toolkits/attachment/handlers.ts";
+import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
+import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import type * as Crypto from "effect/Crypto";
@@ -73,30 +92,29 @@ export const normalizeMcpHttpResponse = (
 };
 
 const makeMcpAuthMiddleware = McpSessionRegistry.McpSessionRegistry.pipe(
-  Effect.map(
-    (registry): McpAuthMiddleware =>
-      Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const authorization = request.headers.authorization;
-        const token =
-          authorization?.startsWith("Bearer ") === true
-            ? authorization.slice("Bearer ".length).trim()
-            : "";
-        const invocation = yield* registry.resolve(token);
-        if (!invocation) {
-          // Without this the only symptom of a dead credential is the agent
-          // quietly losing the product-native toolkit for the rest of its
-          // session, with nothing on the server to explain why.
-          yield* Effect.logWarning("rejected MCP request with an unusable credential", {
-            reason: token.length === 0 ? "missing_bearer_token" : "unknown_or_expired_token",
-          });
-          return unauthorized;
-        }
-        return yield* httpEffect.pipe(
-          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
-          Effect.map(normalizeMcpHttpResponse),
-        );
-      }),
+  Effect.map((registry): McpAuthMiddleware =>
+    Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const authorization = request.headers.authorization;
+      const token =
+        authorization?.startsWith("Bearer ") === true
+          ? authorization.slice("Bearer ".length).trim()
+          : "";
+      const invocation = yield* registry.resolve(token);
+      if (!invocation) {
+        // Without this the only symptom of a dead credential is the agent
+        // quietly losing the product-native toolkit for the rest of its
+        // session, with nothing on the server to explain why.
+        yield* Effect.logWarning("rejected MCP request with an unusable credential", {
+          reason: token.length === 0 ? "missing_bearer_token" : "unknown_or_expired_token",
+        });
+        return unauthorized;
+      }
+      return yield* httpEffect.pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+        Effect.map(normalizeMcpHttpResponse),
+      );
+    }),
   ),
   Effect.withSpan("McpHttpServer.makeAuthMiddleware"),
 );
@@ -224,6 +242,41 @@ export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewSnapshotRegistrationLive,
 );
 
+export const OrchestratorToolkitRegistrationLive = McpServer.toolkit(OrchestratorToolkit).pipe(
+  Layer.provide(OrchestratorToolkitHandlersLive),
+  Layer.provide(OrchestratorMcpService.layer),
+  Layer.provide(ThreadMetadataMcpService.layer),
+);
+
+export const ThreadToolkitRegistrationLive = McpServer.toolkit(ThreadToolkit).pipe(
+  Layer.provide(ThreadToolkitHandlersLive),
+);
+
+const WorktreeToolkitRegistrationLive = McpServer.toolkit(WorktreeToolkit).pipe(
+  Layer.provide(WorktreeToolkitHandlersLive),
+  Layer.provide(WorktreeMcpService.layer),
+);
+
+const PreviewControlsRegistrationLive = McpServer.toolkit(PreviewControlsToolkit).pipe(
+  Layer.provide(PreviewControlsHandlersLive),
+);
+
+const EnvironmentRegistrationLive = McpServer.toolkit(EnvironmentToolkit).pipe(
+  Layer.provide(EnvironmentHandlersLive),
+);
+
+const ProjectRegistrationLive = McpServer.toolkit(ProjectToolkit).pipe(
+  Layer.provide(ProjectHandlersLive),
+);
+
+const AttachmentRegistrationLive = McpServer.toolkit(AttachmentToolkit).pipe(
+  Layer.provide(AttachmentHandlersLive),
+);
+
+export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequestsToolkit).pipe(
+  Layer.provide(PullRequestsToolkitHandlersLive),
+);
+
 const McpTransportLive = McpServer.layerHttp({
   name: "Test Rig",
   version: packageJson.version,
@@ -231,4 +284,14 @@ const McpTransportLive = McpServer.layerHttp({
   protocols: [McpProtocol.v2025_06_18],
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
-export const layer = PreviewToolkitRegistrationLive.pipe(Layer.provideMerge(McpTransportLive));
+export const layer = Layer.mergeAll(
+  PreviewToolkitRegistrationLive,
+  OrchestratorToolkitRegistrationLive,
+  ThreadToolkitRegistrationLive,
+  WorktreeToolkitRegistrationLive,
+  PreviewControlsRegistrationLive,
+  EnvironmentRegistrationLive,
+  ProjectRegistrationLive,
+  AttachmentRegistrationLive,
+  PullRequestsToolkitRegistrationLive,
+).pipe(Layer.provideMerge(McpTransportLive));

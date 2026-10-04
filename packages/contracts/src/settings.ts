@@ -1,14 +1,25 @@
+const CLAUDE_AUTO_COMPACT_WINDOW_PATTERN = /^(?:|[1-9]\d{5}|1000000)$/;
 import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
+import {
+  ProjectId,
+  ForwardCompatibleOptional,
+  ForwardCompatibleNullable,
+  TrimmedNonEmptyString,
+  TrimmedString,
+} from "./baseSchemas.ts";
 import {
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   ProviderOptionSelections,
 } from "./model.ts";
-import { ModelSelection } from "./orchestration.ts";
+import { ModelSelection } from "./modelSelection.ts";
+import { RuntimeMode, DEFAULT_RUNTIME_MODE } from "./providerPolicy.ts";
+import { WorktreeSubmodules } from "./environment.ts";
+import { ProjectScript } from "./project.ts";
+import { PullRequestMergeMethod } from "./pullRequest.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
@@ -225,7 +236,7 @@ const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
     Schema.decodeTo(
       Schema.String,
-      SchemaTransformation.transformOrFail({
+      SchemaTransformation.transformEffect({
         decode: (value) => Effect.succeed(value || fallback),
         encode: (value) => Effect.succeed(value),
       }),
@@ -348,6 +359,20 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         description:
           "Custom Claude home and config directory. Keeps .claude.json and .claude separate.",
         providerSettingsForm: { placeholder: "~/.claude", clearWhenEmpty: "omit" },
+      }),
+    ),
+    autoCompactWindow: TrimmedString.check(
+      Schema.isPattern(CLAUDE_AUTO_COMPACT_WINDOW_PATTERN),
+    ).pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Auto-compact after",
+        description:
+          "Compact after 100,000 to 1,000,000 tokens. Leave empty to use Claude's default.",
+        providerSettingsForm: {
+          placeholder: "e.g. 300000",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
     customModels: Schema.Array(Schema.String).pipe(
@@ -561,7 +586,179 @@ export const BackgroundActivitySettings = Schema.Struct({
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type BackgroundActivitySettings = typeof BackgroundActivitySettings.Type;
 
+export const BranchNamingMode = Schema.Literals(["static", "semantic", "custom"]);
+export type BranchNamingMode = typeof BranchNamingMode.Type;
+
+export interface BranchNamingOptions {
+  mode: BranchNamingMode;
+  prefix: string;
+  instructions: string;
+}
+
+export const ResponseStreamingMode = Schema.Literals(["turn", "paragraph"]);
+export type ResponseStreamingMode = typeof ResponseStreamingMode.Type;
+
+/**
+ * Server settings a project may override. Every other server setting is
+ * environment-wide: providers, keybindings, observability, device hosts,
+ * background activity, theme. UI, search and the write planner derive
+ * eligibility from this list, so adding a key here is the whole opt-in.
+ */
+const StorageRetentionDays = Schema.NullOr(
+  Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3650 })),
+);
+
+export const WorktreeCleanupRules = Schema.Struct({
+  worktreeAfterDays: StorageRetentionDays,
+  worktreeOnMerge: Schema.Boolean,
+  worktreeOnDelete: Schema.Boolean,
+  worktreeUnchanged: Schema.Boolean,
+});
+export type WorktreeCleanupRules = typeof WorktreeCleanupRules.Type;
+
+export const WorktreeCleanup = Schema.NullOr(
+  Schema.Union([
+    Schema.Struct({ mode: Schema.Literal("off") }),
+    Schema.Struct({ mode: Schema.Literal("custom"), rules: WorktreeCleanupRules }),
+  ]),
+);
+export type WorktreeCleanup = typeof WorktreeCleanup.Type;
+
+export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
+  "worktreeCleanup",
+  "defaultModelSelection",
+  "defaultRuntimeMode",
+  "defaultThreadEnvMode",
+  "newWorktreesStartFromOrigin",
+  "worktreeSubmodules",
+  "defaultAutoPull",
+  "defaultProjectScripts",
+  "enableAgentBrowserAccess",
+  "textGenerationModelSelection",
+  "sourceControlWriterModelSelection",
+  "sourceControlWritingStyle",
+  "branchNamingMode",
+  "branchNamePrefix",
+  "branchNameInstructions",
+  "pullRequestMergeMethod",
+  "sidebarAutoSettleOnMerge",
+  "sidebarAutoSettleAfterDays",
+  "continueThreadsAfterServerUpdate",
+  "responseStreamingMode",
+] as const;
+export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
+
+/**
+ * One project's overrides. An absent key inherits the environment value;
+ * `null` is a real value where the environment type is nullable (no default
+ * model, no dedicated writer model, never auto-settle).
+ */
+export const ProjectSettingsOverrides = Schema.Struct({
+  worktreeCleanup: Schema.optionalKey(WorktreeCleanup),
+  defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
+  defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
+  worktreeSubmodules: ForwardCompatibleOptional(WorktreeSubmodules),
+  defaultAutoPull: Schema.optionalKey(Schema.Boolean),
+  defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
+  enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  textGenerationModelSelection: Schema.optionalKey(ModelSelection),
+  sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  sourceControlWritingStyle: Schema.optionalKey(SourceControlWritingStyleSettings),
+  branchNamingMode: Schema.optionalKey(BranchNamingMode),
+  branchNamePrefix: Schema.optionalKey(TrimmedString),
+  branchNameInstructions: Schema.optionalKey(TrimmedString),
+  pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
+  sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
+  sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
+  continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
+  responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
+} satisfies Record<ProjectScopedServerSettingKey, unknown>);
+export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
+
+/**
+ * Whether `null` is a stored override value for this key rather than "unset".
+ * Clients writing a project override treat null for every other key as a
+ * request to remove the override, so a picker's "Inherit" item and the row's
+ * reset do the same thing.
+ */
+export function isNullableProjectSettingsOverride(key: ProjectScopedServerSettingKey): boolean {
+  return NULLABLE_PROJECT_SETTINGS_OVERRIDES.has(key);
+}
+const NULLABLE_PROJECT_SETTINGS_OVERRIDES: ReadonlySet<ProjectScopedServerSettingKey> = new Set<
+  {
+    [K in ProjectScopedServerSettingKey]: null extends ProjectSettingsOverrides[K] ? K : never;
+  }[ProjectScopedServerSettingKey]
+>([
+  "defaultModelSelection",
+  "sourceControlWriterModelSelection",
+  "pullRequestMergeMethod",
+  "sidebarAutoSettleAfterDays",
+]);
+
+export const StorageCleanupSettings = Schema.Struct({
+  worktreeAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  worktreeOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  worktreeOnDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  worktreeUnchanged: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  browserArtifactsAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
+
 export const ServerSettings = Schema.Struct({
+  worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  storageCleanup: StorageCleanupSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  responseStreamingMode: ResponseStreamingMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed("paragraph" as const)),
+  ),
+  continueThreadsAfterServerUpdate: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+  enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  defaultProjectScripts: Schema.Array(ProjectScript).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  projectScriptOverrides: Schema.Record(ProjectId, Schema.NullOr(Schema.Array(ProjectScript))).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  projectAutoPullOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  defaultModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  defaultRuntimeMode: RuntimeMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
+  ),
+  projectSettingsOverrides: Schema.Record(ProjectId, ProjectSettingsOverrides).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  projectSettingsFolded: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  sidebarAutoSettleAfterDays: Schema.NullOr(SidebarAutoSettleAfterDays).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
+  ),
+  sidebarAutoSettleOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  worktreeSubmodules: ForwardCompatibleNullable(WorktreeSubmodules).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  branchNamingMode: BranchNamingMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed("static" as const)),
+  ),
+  branchNamePrefix: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("codex"))),
+  branchNameInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  pullRequestMergeMethod: Schema.NullOr(PullRequestMergeMethod).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   autoRemoveSettledWorktrees: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   backgroundActivity: BackgroundActivitySettings,
@@ -652,7 +849,7 @@ export const ServerSettingsOperation = Schema.Literals([
 ]);
 export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
 
-export class ServerSettingsError extends Schema.TaggedErrorClass<ServerSettingsError>()(
+export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>()(
   "ServerSettingsError",
   {
     settingsPath: Schema.String,
@@ -699,6 +896,9 @@ const CodexSettingsPatch = Schema.Struct({
 });
 
 const ClaudeSettingsPatch = Schema.Struct({
+  autoCompactWindow: Schema.optionalKey(
+    TrimmedString.check(Schema.isPattern(CLAUDE_AUTO_COMPACT_WINDOW_PATTERN)),
+  ),
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
   homePath: Schema.optionalKey(TrimmedString),
@@ -715,6 +915,61 @@ const OpenCodeSettingsPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  worktreeCleanup: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Union([
+        Schema.Struct({ mode: Schema.Literal("off") }),
+        Schema.Struct({
+          mode: Schema.Literal("custom"),
+          rules: Schema.Struct({
+            worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
+            worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
+            worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
+            worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
+          }),
+        }),
+      ]),
+    ),
+  ),
+  storageCleanup: Schema.optionalKey(
+    Schema.Struct({
+      worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
+      worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
+      worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
+      worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
+      browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
+      logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+    }),
+  ),
+  responseStreamingMode: Schema.optionalKey(ServerSettings.fields.responseStreamingMode),
+  continueThreadsAfterServerUpdate: Schema.optionalKey(
+    ServerSettings.fields.continueThreadsAfterServerUpdate,
+  ),
+  enableAgentBrowserAccess: Schema.optionalKey(ServerSettings.fields.enableAgentBrowserAccess),
+  defaultAutoPull: Schema.optionalKey(ServerSettings.fields.defaultAutoPull),
+  defaultProjectScripts: Schema.optionalKey(ServerSettings.fields.defaultProjectScripts),
+  projectAgentBrowserAccessOverrides: Schema.optionalKey(
+    Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
+  ),
+  projectScriptOverrides: Schema.optionalKey(ServerSettings.fields.projectScriptOverrides),
+  projectAutoPullOverrides: Schema.optionalKey(
+    Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
+  ),
+  defaultModelSelection: Schema.optionalKey(ServerSettings.fields.defaultModelSelection),
+  defaultRuntimeMode: Schema.optionalKey(ServerSettings.fields.defaultRuntimeMode),
+  projectSettingsOverrides: Schema.optionalKey(
+    Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
+  ),
+  projectSettingsFolded: Schema.optionalKey(ServerSettings.fields.projectSettingsFolded),
+  sidebarAutoSettleAfterDays: Schema.optionalKey(ServerSettings.fields.sidebarAutoSettleAfterDays),
+  sidebarAutoSettleOnMerge: Schema.optionalKey(ServerSettings.fields.sidebarAutoSettleOnMerge),
+  snoozeLimitedThreads: Schema.optionalKey(ServerSettings.fields.snoozeLimitedThreads),
+  autoResumeLimitedThreads: Schema.optionalKey(ServerSettings.fields.autoResumeLimitedThreads),
+  worktreeSubmodules: Schema.optionalKey(ServerSettings.fields.worktreeSubmodules),
+  branchNamingMode: Schema.optionalKey(ServerSettings.fields.branchNamingMode),
+  branchNamePrefix: Schema.optionalKey(ServerSettings.fields.branchNamePrefix),
+  branchNameInstructions: Schema.optionalKey(ServerSettings.fields.branchNameInstructions),
+  pullRequestMergeMethod: Schema.optionalKey(ServerSettings.fields.pullRequestMergeMethod),
   autoRemoveSettledWorktrees: Schema.optionalKey(Schema.Boolean),
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
@@ -824,3 +1079,22 @@ export const ClientSettingsPatch = Schema.Struct({
   wordWrap: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
+
+export const resolveProviderInstanceEnabled = (
+  instance: Pick<ProviderInstanceConfig, "driver" | "enabled" | "config">,
+): boolean => {
+  const configEnabled =
+    typeof instance.config === "object" &&
+    instance.config !== null &&
+    "enabled" in instance.config &&
+    typeof instance.config.enabled === "boolean"
+      ? instance.config.enabled
+      : undefined;
+  return (
+    instance.enabled !== false &&
+    configEnabled !== false &&
+    (instance.enabled ??
+      configEnabled ??
+      ["codex", "claudeAgent", "opencode"].includes(instance.driver))
+  );
+};

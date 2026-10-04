@@ -345,7 +345,8 @@ function collectThreadAttachmentRelativePaths(
       if (!attachmentThreadSegment || attachmentThreadSegment !== threadSegment) {
         continue;
       }
-      relativePaths.add(attachmentRelativePath(attachment));
+      const relativePath = attachmentRelativePath(attachment);
+      if (relativePath !== null) relativePaths.add(relativePath);
     }
   }
   return relativePaths;

@@ -1,6 +1,7 @@
+import type { AssetImageDimensions, AssetCreateUrlResult } from "@t3tools/contracts";
 import { AssetResource, EnvironmentId, WS_METHODS } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
@@ -9,7 +10,7 @@ const ASSET_URL_REFRESH_INTERVAL_MS = 30 * 60_000;
 const ASSET_URL_STALE_TIME_MS = 5 * 60_000;
 const ASSET_URL_IDLE_TTL_MS = 60 * 60_000;
 
-export class InvalidAssetCollectionKeyError extends Schema.TaggedErrorClass<InvalidAssetCollectionKeyError>()(
+export class InvalidAssetCollectionKeyError extends Schema.TaggedError<InvalidAssetCollectionKeyError>()(
   "InvalidAssetCollectionKeyError",
   {
     key: Schema.String,
@@ -41,6 +42,40 @@ export function resolveAssetUrl(httpBaseUrl: string, relativeUrl: string): strin
   } catch {
     return null;
   }
+}
+
+export const EMPTY_ASSET_URL_ATOM = Atom.make(AsyncResult.initial<never, never>(false)).pipe(
+  Atom.withLabel("asset-url:empty"),
+);
+
+export type AssetUrlState =
+  | { readonly _tag: "Loading" }
+  | { readonly _tag: "Failure" }
+  | {
+      readonly _tag: "Success";
+      readonly url: string;
+      /** The host path the server chose to serve, when it differs from what was asked for. */
+      readonly sourcePath?: string;
+      /** Pixel size from the image header, when the server could read one. */
+      readonly imageDimensions?: AssetImageDimensions;
+    };
+
+export function assetUrlStateFromResult(
+  result: AsyncResult.AsyncResult<AssetCreateUrlResult, unknown>,
+  httpBaseUrl: string | null,
+): AssetUrlState {
+  if (result._tag === "Failure") return { _tag: "Failure" };
+  if (httpBaseUrl === null || result._tag !== "Success") return { _tag: "Loading" };
+  const url = resolveAssetUrl(httpBaseUrl, result.value.relativeUrl);
+  if (url === null) return { _tag: "Failure" };
+  return {
+    _tag: "Success",
+    url,
+    ...(result.value.sourcePath !== undefined ? { sourcePath: result.value.sourcePath } : {}),
+    ...(result.value.imageDimensions !== undefined
+      ? { imageDimensions: result.value.imageDimensions }
+      : {}),
+  };
 }
 
 export function createAssetEnvironmentAtoms<R, E>(

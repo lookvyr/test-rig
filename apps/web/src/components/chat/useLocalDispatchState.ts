@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import type { ApprovalRequestId } from "@t3tools/contracts";
+import type { RuntimeRequestId } from "@t3tools/contracts";
 import type { Thread, SessionPhase } from "../../types";
 import {
   createLocalDispatchSnapshot,
@@ -9,15 +9,16 @@ import {
 
 export function useLocalDispatchState(input: {
   activeThread: Thread | undefined;
-  activeLatestTurn: Thread["latestTurn"] | null;
+  activeLatestRun: Thread["latestRun"] | null;
   phase: SessionPhase;
-  activePendingApproval: ApprovalRequestId | null;
-  activePendingUserInput: ApprovalRequestId | null;
+  activePendingApproval: RuntimeRequestId | null;
+  activePendingUserInput: RuntimeRequestId | null;
   threadError: string | null | undefined;
 }) {
   const [localDispatch, setLocalDispatch] = useState<LocalDispatchSnapshot | null>(null);
   const latestUserMessageId =
-    input.activeThread?.messages.findLast((message) => message.role === "user")?.id ?? null;
+    input.activeThread?.projection?.messages.findLast((message) => message.role === "user")?.id ??
+    null;
 
   const resetLocalDispatch = useCallback(() => {
     setLocalDispatch(null);
@@ -28,18 +29,18 @@ export function useLocalDispatchState(input: {
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: input.phase,
-        latestTurn: input.activeLatestTurn,
+        latestRun: input.activeLatestRun,
         latestUserMessageId,
-        session: input.activeThread?.session ?? null,
+        session: input.activeThread?.runtime ?? null,
         hasPendingApproval: input.activePendingApproval !== null,
         hasPendingUserInput: input.activePendingUserInput !== null,
         threadError: input.threadError,
       }),
     [
-      input.activeLatestTurn,
+      input.activeLatestRun,
       input.activePendingApproval,
       input.activePendingUserInput,
-      input.activeThread?.session,
+      input.activeThread?.runtime,
       input.phase,
       input.threadError,
       latestUserMessageId,

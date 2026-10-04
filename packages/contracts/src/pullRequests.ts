@@ -74,7 +74,7 @@ export const GitGetPullRequestDetailsResult = Schema.Struct({
   truncated: Schema.Boolean,
 });
 export type GitGetPullRequestDetailsResult = typeof GitGetPullRequestDetailsResult.Type;
-export class GitPullRequestWorkspaceError extends Schema.TaggedErrorClass<GitPullRequestWorkspaceError>()(
+export class GitPullRequestWorkspaceError extends Schema.TaggedError<GitPullRequestWorkspaceError>()(
   "GitPullRequestWorkspaceError",
   { message: Schema.String },
 ) {}

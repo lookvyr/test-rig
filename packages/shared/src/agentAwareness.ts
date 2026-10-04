@@ -1,3 +1,6 @@
+import type { OrchestrationV2ThreadShell } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import { backgroundWorkHoldsCompletion } from "./orchestrationV2PendingBackgroundWork.ts";
 import type {
   EnvironmentId,
   OrchestrationProjectShell,
@@ -149,4 +152,86 @@ function detailForPhase(
     return `${thread.session.providerName} is active.`;
   }
   return undefined;
+}
+
+export interface ProjectThreadAwarenessV2Input {
+  readonly environmentId: EnvironmentId;
+  readonly project: Pick<OrchestrationProjectShell, "title">;
+  readonly thread: Pick<
+    OrchestrationV2ThreadShell,
+    | "activityRunStatus"
+    | "id"
+    | "lineage"
+    | "modelSelection"
+    | "pendingBackgroundTasks"
+    | "pendingRuntimeRequest"
+    | "status"
+    | "title"
+    | "updatedAt"
+  >;
+}
+
+/** Build relay activity directly from the V2 shell projection. */
+export function projectThreadAwarenessV2(
+  input: ProjectThreadAwarenessV2Input,
+): AgentAwarenessState | null {
+  const { environmentId, project, thread } = input;
+  if (thread.lineage.relationshipToParent === "subagent") return null;
+  const phase = resolveThreadAwarenessPhaseV2(thread);
+  if (phase === null) {
+    return null;
+  }
+  const detail =
+    phase === "completed"
+      ? "Review the completed task."
+      : phase === "failed"
+        ? "The agent run failed."
+        : undefined;
+  return {
+    environmentId,
+    threadId: thread.id,
+    projectTitle: project.title,
+    threadTitle: thread.title,
+    phase,
+    headline: headlineForPhase(phase),
+    ...(detail === undefined ? {} : { detail }),
+    modelTitle: thread.modelSelection.model,
+    updatedAt: DateTime.formatIso(thread.updatedAt),
+    deepLink: buildAgentAwarenessDeepLink({ environmentId, threadId: thread.id }),
+  };
+}
+
+function resolveThreadAwarenessPhaseV2(
+  thread: ProjectThreadAwarenessV2Input["thread"],
+): AgentAwarenessPhase | null {
+  if (thread.pendingRuntimeRequest?.kind === "user_input") {
+    return "waiting_for_input";
+  }
+  if (
+    thread.pendingRuntimeRequest !== null &&
+    thread.pendingRuntimeRequest.kind !== "auth_refresh"
+  ) {
+    return "waiting_for_approval";
+  }
+  switch (thread.activityRunStatus ?? thread.status) {
+    case "preparing":
+    case "starting":
+      return "starting";
+    case "running":
+    case "waiting":
+      return "running";
+    case "completed":
+      // Work that will wake the agent keeps the run going; a dev server does not.
+      return backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])
+        ? "running"
+        : "completed";
+    case "failed":
+      return "failed";
+    case "idle":
+    case "queued":
+    case "interrupted":
+    case "cancelled":
+    case "rolled_back":
+      return null;
+  }
 }

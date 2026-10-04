@@ -3651,3 +3651,12 @@ export function finalizePromotedDraftThreadsByRef(
     finalizePromotedDraftThreadByRef(threadRef);
   }
 }
+
+export interface ComposerFileAttachment extends Omit<
+  import("./types").ChatFileAttachment,
+  "previewUrl"
+> {
+  file: File | null;
+  uploadedAttachmentId?: string;
+  uploadEnvironmentId?: EnvironmentId;
+}

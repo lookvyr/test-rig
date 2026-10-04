@@ -1,3 +1,4 @@
+import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AssetResource, ThreadId } from "@t3tools/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
@@ -24,6 +25,7 @@ const configLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-asset-access-test-",
 });
 const testLayer = Layer.mergeAll(
+  Layer.mock(NativeAppIconResolver.NativeAppIconResolver)({ resolve: () => Effect.succeed(null) }),
   configLayer,
   WorkspacePaths.layer,
   ProjectFaviconResolver.layer.pipe(

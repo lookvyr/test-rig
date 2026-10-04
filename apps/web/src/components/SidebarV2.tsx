@@ -5,7 +5,6 @@ import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import {
   canSnooze,
-  effectiveSettled,
   effectiveSnoozed,
   threadWokeAt,
 } from "@t3tools/client-runtime/state/thread-settled";
@@ -296,7 +295,7 @@ function SidebarV2ThreadTooltip({
             <div className="flex min-w-0 items-center gap-2">
               <ProviderInstanceIcon
                 driverKind={driverKind}
-                displayName={thread.session?.providerName ?? modelInstanceId}
+                displayName={thread.runtime?.providerName ?? modelInstanceId}
                 iconClassName="size-3 shrink-0 grayscale opacity-60"
               />
               <div className="min-w-0 truncate text-foreground/75">{modelLabel}</div>
@@ -313,7 +312,7 @@ function SidebarV2ThreadTooltip({
               </div>
             </div>
           ) : null}
-          {thread.session?.lastError ? (
+          {thread.runtime?.lastError ? (
             <div className="flex min-w-0 items-center gap-2 text-red-600 dark:text-red-400">
               <CircleAlertIcon className="size-3 shrink-0 stroke-current" />
               <div className="min-w-0 truncate">Error occurred</div>
@@ -591,7 +590,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     onChangeRequestState(threadKey, prState);
   }, [onChangeRequestState, prState, threadKey]);
 
-  const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
+  const modelInstanceId = thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
   const driverKind = providerEntry?.driverKind ?? null;
   const selectedModel = providerEntry?.models.find(
@@ -989,7 +988,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     );
   }
 
-  const diff = latestTurnDiff(thread);
+  const diff = latestRunDiff(thread);
 
   return (
     <li
@@ -1206,7 +1205,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                   <span className="inline-flex shrink-0 items-center opacity-60">
                     <ProviderInstanceIcon
                       driverKind={driverKind}
-                      displayName={thread.session?.providerName ?? modelInstanceId}
+                      displayName={thread.runtime?.providerName ?? modelInstanceId}
                       iconClassName="size-3.5"
                     />
                   </span>
@@ -1222,7 +1221,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   );
 });
 
-function latestTurnDiff(
+function latestRunDiff(
   thread: SidebarThreadSummary,
 ): { insertions: number; deletions: number } | null {
   // Shells don't carry checkpoint summaries; diff stats render only when the
@@ -1261,7 +1260,7 @@ const SidebarV2SearchResultRow = memo(function SidebarV2SearchResultRow(props: {
     activeThreadBranch: thread.branch,
     currentGitBranch: gitStatus.data?.refName ?? null,
   });
-  const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
+  const modelInstanceId = thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
   const driverKind = providerEntry?.driverKind ?? null;
   const selectedModel = providerEntry?.models.find(
@@ -1751,6 +1750,7 @@ export default function SidebarV2() {
       const visible = threads.filter(
         (thread) =>
           thread.archivedAt === null &&
+          thread.lineage.relationshipToParent !== "subagent" &&
           !thread.sideOfThreadId &&
           (scopedProjectKeys === null ||
             scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
@@ -1785,10 +1785,7 @@ export default function SidebarV2() {
           // arise from stale or raced writes.)
         } else if (thread.pinnedAt != null) {
           pinned.push(thread);
-        } else if (
-          supportsSettlement &&
-          effectiveSettled(thread, { now, autoSettleAfterDays, changeRequestState })
-        ) {
+        } else if (supportsSettlement && thread.settledAt !== null) {
           settled.push(thread);
         } else {
           active.push(thread);
@@ -2503,7 +2500,7 @@ export default function SidebarV2() {
       if (clicked.value === "mark-unread") {
         for (const threadKey of threadKeys) {
           const thread = threadByKeyRef.current.get(threadKey);
-          markThreadUnread(threadKey, thread?.latestTurn?.completedAt);
+          markThreadUnread(threadKey, thread?.latestRun?.completedAt);
         }
         clearSelection();
         return;
@@ -2693,7 +2690,7 @@ export default function SidebarV2() {
             return;
           }
           case "mark-unread":
-            markThreadUnread(threadKey, thread.latestTurn?.completedAt);
+            markThreadUnread(threadKey, thread.latestRun?.completedAt);
             return;
           case "copy-path":
             if (!threadWorkspacePath) {

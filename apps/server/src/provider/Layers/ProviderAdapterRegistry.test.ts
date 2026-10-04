@@ -98,6 +98,7 @@ const makeFakeInstance = (
     displayName: undefined,
     enabled: true,
     snapshot: {
+      applyUsageLimits: () => Effect.void,
       maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
         provider: driverKind,
       }),

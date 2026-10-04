@@ -1,3 +1,6 @@
+import * as DateTime from "effect/DateTime";
+import { presentThreadShell } from "@t3tools/client-runtime/state/models";
+import { threadRuntimeHasInterruptibleRun } from "@t3tools/client-runtime/state/threadExecution";
 import {
   DEFAULT_RUNTIME_MODE,
   type EnvironmentId,
@@ -10,7 +13,7 @@ import {
   type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
-  type TurnId,
+  type RunId,
 } from "@t3tools/contracts";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
@@ -90,48 +93,53 @@ export function buildLocalDraftThread(
   draftThread: DraftThreadState,
   fallbackModelSelection: ModelSelection,
 ): Thread {
+  const timestamp = DateTime.makeUnsafe(draftThread.createdAt);
   return {
-    id: threadId,
-    environmentId: draftThread.environmentId,
-    projectId: draftThread.projectId,
-    title: "New thread",
-    modelSelection: fallbackModelSelection,
-    runtimeMode: draftThread.runtimeMode,
-    interactionMode: draftThread.interactionMode,
-    session: null,
-    messages: [],
-    createdAt: draftThread.createdAt,
-    updatedAt: draftThread.createdAt,
-    archivedAt: null,
-    settledOverride: null,
-    settledAt: null,
-    deletedAt: null,
-    latestTurn: null,
-    branch: draftThread.branch,
-    worktreePath: draftThread.worktreePath,
-    checkpoints: [],
-    activities: [],
-    proposedPlans: [],
+    ...presentThreadShell(draftThread.environmentId, {
+      id: threadId,
+      projectId: draftThread.projectId,
+      title: "New thread",
+      providerInstanceId: fallbackModelSelection.instanceId,
+      modelSelection: fallbackModelSelection,
+      runtimeMode: draftThread.runtimeMode,
+      interactionMode: draftThread.interactionMode,
+      branch: draftThread.branch,
+      worktreePath: draftThread.worktreePath,
+      activeProviderThreadId: null,
+      lineage: { rootThreadId: threadId, parentThreadId: null, relationshipToParent: null },
+      forkedFrom: null,
+      createdBy: "user",
+      creationSource: "web",
+      latestRunId: null,
+      activeRunId: null,
+      status: "idle",
+      pendingRuntimeRequest: null,
+      latestVisibleMessage: null,
+      latestUserMessageAt: null,
+      hasActionableProposedPlan: false,
+      itemCount: 0,
+      visibleItemCount: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      archivedAt: null,
+      settledOverride: null,
+      settledAt: null,
+      deletedAt: null,
+    }),
+    projection: null,
   };
 }
 
 export function buildLoadingThreadFromShell(shell: ThreadShell): Thread {
-  return {
-    ...shell,
-    messages: [],
-    proposedPlans: [],
-    activities: [],
-    checkpoints: [],
-    deletedAt: null,
-  };
+  return { ...shell, projection: null };
 }
 
 export function getThreadVisitTimestamp(
-  thread: Pick<Thread, "createdAt" | "latestTurn"> | null,
+  thread: Pick<Thread, "createdAt" | "latestRun"> | null,
 ): string | null {
   // A first visit needs a baseline before any turn finishes. Creation time
   // cannot acknowledge a later completion or snooze wake that wasn't read.
-  return thread?.latestTurn?.completedAt ?? thread?.createdAt ?? null;
+  return thread?.latestRun?.completedAt ?? thread?.createdAt ?? null;
 }
 
 export function shouldWriteThreadErrorToCurrentServerThread(input: {
@@ -154,22 +162,22 @@ export function shouldWriteThreadErrorToCurrentServerThread(input: {
 }
 
 export function buildRunningThreadTurnInterruptInput(
-  thread: Pick<Thread, "id" | "session"> | null | undefined,
-): { threadId: ThreadId; turnId?: TurnId } | null {
-  if (thread?.session?.status !== "running") {
+  thread: Pick<Thread, "id" | "runtime"> | null | undefined,
+): { threadId: ThreadId; runId?: RunId } | null {
+  if (!thread || !threadRuntimeHasInterruptibleRun(thread.runtime)) {
     return null;
   }
   return buildThreadTurnInterruptInput(thread);
 }
 
-export function buildThreadTurnInterruptInput(thread: Pick<Thread, "id" | "session">): {
+export function buildThreadTurnInterruptInput(thread: Pick<Thread, "id" | "runtime">): {
   threadId: ThreadId;
-  turnId?: TurnId;
+  runId?: RunId;
 } {
-  const runningTurnId = thread.session?.status === "running" ? thread.session.activeTurnId : null;
+  const runningTurnId = thread.runtime?.activeRunId ?? null;
   return {
     threadId: thread.id,
-    ...(runningTurnId !== null ? { turnId: runningTurnId } : {}),
+    ...(runningTurnId !== null ? { runId: runningTurnId } : {}),
   };
 }
 
@@ -390,7 +398,10 @@ export function isBranchMismatchDismissedForSession(key: string | null): boolean
 
 export function threadHasStarted(thread: Thread | null | undefined): boolean {
   return Boolean(
-    thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
+    thread &&
+    (thread.latestRun !== null ||
+      (thread.projection?.visibleTurnItems.length ?? 0) > 0 ||
+      thread.runtime !== null),
   );
 }
 
@@ -414,7 +425,7 @@ export function deriveLockedProvider(input: {
   if (!threadHasStarted(input.thread)) {
     return null;
   }
-  const sessionProvider = input.thread?.session?.providerName ?? null;
+  const sessionProvider = input.thread?.runtime?.providerName ?? null;
   if (sessionProvider && isProviderDriverKind(sessionProvider)) {
     return sessionProvider;
   }
@@ -471,11 +482,11 @@ export async function waitForStartedServerThread(
   threadRef: ScopedThreadRef,
   timeoutMs = 1_000,
 ): Promise<boolean> {
-  const threadAtom = environmentThreadDetails.detailAtom(threadRef);
+  const threadAtom = environmentThreadDetails.threadAtom(threadRef);
   const getThread = () => appAtomRegistry.get(threadAtom);
   const thread = getThread();
 
-  if (threadHasStarted(thread)) {
+  if (thread?.projection.runs.length) {
     return true;
   }
 
@@ -495,13 +506,13 @@ export async function waitForStartedServerThread(
     };
 
     const unsubscribe = appAtomRegistry.subscribe(threadAtom, (thread) => {
-      if (!threadHasStarted(thread)) {
+      if (!thread?.projection.runs.length) {
         return;
       }
       finish(true);
     });
 
-    if (threadHasStarted(getThread())) {
+    if (getThread()?.projection.runs.length) {
       finish(true);
       return;
     }
@@ -516,11 +527,11 @@ export interface LocalDispatchSnapshot {
   startedAt: string;
   preparingWorktree: boolean;
   latestUserMessageId: ChatMessage["id"] | null;
-  latestTurnTurnId: TurnId | null;
-  latestTurnRequestedAt: string | null;
-  latestTurnStartedAt: string | null;
-  latestTurnCompletedAt: string | null;
-  sessionStatus: NonNullable<Thread["session"]>["status"] | null;
+  latestRunTurnId: RunId | null;
+  latestRunRequestedAt: string | null;
+  latestRunStartedAt: string | null;
+  latestRunCompletedAt: string | null;
+  sessionStatus: NonNullable<Thread["runtime"]>["status"] | null;
   sessionUpdatedAt: string | null;
 }
 
@@ -528,17 +539,19 @@ export function createLocalDispatchSnapshot(
   activeThread: Thread | undefined,
   options?: { preparingWorktree?: boolean },
 ): LocalDispatchSnapshot {
-  const latestTurn = activeThread?.latestTurn ?? null;
-  const session = activeThread?.session ?? null;
-  const latestUserMessage = activeThread?.messages.findLast((message) => message.role === "user");
+  const latestRun = activeThread?.latestRun ?? null;
+  const session = activeThread?.runtime ?? null;
+  const latestUserMessage = activeThread?.projection?.messages.findLast(
+    (message) => message.role === "user",
+  );
   return {
     startedAt: new Date().toISOString(),
     preparingWorktree: Boolean(options?.preparingWorktree),
     latestUserMessageId: latestUserMessage?.id ?? null,
-    latestTurnTurnId: latestTurn?.turnId ?? null,
-    latestTurnRequestedAt: latestTurn?.requestedAt ?? null,
-    latestTurnStartedAt: latestTurn?.startedAt ?? null,
-    latestTurnCompletedAt: latestTurn?.completedAt ?? null,
+    latestRunTurnId: latestRun?.runId ?? null,
+    latestRunRequestedAt: latestRun?.requestedAt ?? null,
+    latestRunStartedAt: latestRun?.startedAt ?? null,
+    latestRunCompletedAt: latestRun?.completedAt ?? null,
     sessionStatus: session?.status ?? null,
     sessionUpdatedAt: session?.updatedAt ?? null,
   };
@@ -547,9 +560,9 @@ export function createLocalDispatchSnapshot(
 export function hasServerAcknowledgedLocalDispatch(input: {
   localDispatch: LocalDispatchSnapshot | null;
   phase: SessionPhase;
-  latestTurn: Thread["latestTurn"] | null;
+  latestRun: Thread["latestRun"] | null;
   latestUserMessageId: ChatMessage["id"] | null;
-  session: Thread["session"] | null;
+  session: Thread["runtime"] | null;
   hasPendingApproval: boolean;
   hasPendingUserInput: boolean;
   threadError: string | null | undefined;
@@ -561,15 +574,15 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     return true;
   }
 
-  const latestTurn = input.latestTurn ?? null;
+  const latestRun = input.latestRun ?? null;
   const session = input.session ?? null;
   const latestUserMessageChanged =
     input.localDispatch.latestUserMessageId !== input.latestUserMessageId;
-  const latestTurnChanged =
-    input.localDispatch.latestTurnTurnId !== (latestTurn?.turnId ?? null) ||
-    input.localDispatch.latestTurnRequestedAt !== (latestTurn?.requestedAt ?? null) ||
-    input.localDispatch.latestTurnStartedAt !== (latestTurn?.startedAt ?? null) ||
-    input.localDispatch.latestTurnCompletedAt !== (latestTurn?.completedAt ?? null);
+  const latestRunChanged =
+    input.localDispatch.latestRunTurnId !== (latestRun?.runId ?? null) ||
+    input.localDispatch.latestRunRequestedAt !== (latestRun?.requestedAt ?? null) ||
+    input.localDispatch.latestRunStartedAt !== (latestRun?.startedAt ?? null) ||
+    input.localDispatch.latestRunCompletedAt !== (latestRun?.completedAt ?? null);
 
   if (input.phase === "running") {
     // Steering adds a user message to the current running turn without
@@ -579,16 +592,16 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     if (latestUserMessageChanged) {
       return true;
     }
-    if (!latestTurnChanged) {
+    if (!latestRunChanged) {
       return false;
     }
-    if (latestTurn?.startedAt === null || latestTurn === null) {
+    if (latestRun?.startedAt === null || latestRun === null) {
       return false;
     }
     if (
-      session?.activeTurnId !== null &&
-      session?.activeTurnId !== undefined &&
-      latestTurn?.turnId !== session.activeTurnId
+      session?.activeRunId !== null &&
+      session?.activeRunId !== undefined &&
+      latestRun?.runId !== session.activeRunId
     ) {
       return false;
     }
@@ -596,7 +609,7 @@ export function hasServerAcknowledgedLocalDispatch(input: {
   }
 
   return (
-    latestTurnChanged ||
+    latestRunChanged ||
     input.localDispatch.sessionStatus !== (session?.status ?? null) ||
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
   );

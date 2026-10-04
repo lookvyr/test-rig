@@ -1,6 +1,8 @@
-import { ProviderContinuationRequests } from "../../orchestration-v2/ProviderContinuationRequests.ts";
-import { makeNativeAdapterV2 } from "../../orchestration-v2/Adapters/NativeAdapterV2.ts";
-import { nativeCapabilities } from "../../orchestration-v2/Adapters/nativeCapabilities.ts";
+import {
+  createClaudeAdapterV2,
+  claudeAgentSdkQueryRunnerLiveLayer,
+} from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
+import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
 /**
  * ClaudeDriver — `ProviderDriver` for the Claude Agent SDK runtime.
  *
@@ -20,6 +22,7 @@ import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
@@ -84,7 +87,6 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
 });
 
 export type ClaudeDriverEnv =
-  | ProviderContinuationRequests
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -149,15 +151,28 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       };
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
-      const orchestrationAdapter = yield* makeNativeAdapterV2({
-        instanceId,
-        native: yield* makeClaudeAdapter(effectiveConfig, {
+      const orchestrationAdapter = yield* createClaudeAdapterV2(
+        {
           instanceId,
-          environment: processEnv,
-          ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-        }),
-        capabilities: nativeCapabilities("claudeAgent"),
-      });
+          displayName,
+          accentColor,
+          environment,
+          enabled,
+          config,
+        },
+        {},
+      ).pipe(
+        Effect.provide(Layer.merge(claudeAgentSdkQueryRunnerLiveLayer, IdAllocator.layer)),
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: cause.message,
+              cause,
+            }),
+        ),
+      );
       const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv);
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so

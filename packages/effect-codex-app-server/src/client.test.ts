@@ -2,11 +2,6 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
-import * as Deferred from "effect/Deferred";
-import * as Fiber from "effect/Fiber";
-import * as Logger from "effect/Logger";
-import * as Queue from "effect/Queue";
-import * as Schema from "effect/Schema";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -15,16 +10,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 
 import * as CodexClient from "./client.ts";
-import { makeInMemoryStdio } from "./_internal/stdio.ts";
 
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/codex-app-server-mock-peer.ts"),
 );
 const mockPeerArgs = (path: string) => [path];
-const decodeRequestId = Schema.decodeEffect(
-  Schema.fromJsonString(Schema.Struct({ id: Schema.Number })),
-);
-const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
   const makeHandle = (env?: Record<string, string>) =>
@@ -42,7 +32,6 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
   it.effect("initializes, handles typed server requests, and reads account and skills data", () =>
     Effect.gen(function* () {
       const userInputRequests = yield* Ref.make<Array<unknown>>([]);
-      const requestIds = yield* Ref.make<Array<string | number>>([]);
       const messageDeltas = yield* Ref.make<Array<unknown>>([]);
       const handle = yield* makeHandle();
       const scope = yield* Scope.make();
@@ -52,9 +41,8 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       const result = yield* Effect.gen(function* () {
         const client = yield* CodexClient.CodexAppServerClient;
 
-        yield* client.handleServerRequest("item/tool/requestUserInput", (payload, context) =>
+        yield* client.handleServerRequest("item/tool/requestUserInput", (payload) =>
           Ref.update(userInputRequests, (current) => [...current, payload]).pipe(
-            Effect.andThen(Ref.update(requestIds, (current) => [...current, context.requestId])),
             Effect.as({
               answers: {
                 approved: {
@@ -105,7 +93,6 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
 
       assert.equal(result.skills.data[0]?.skills.length, 0);
-      assert.deepEqual(yield* Ref.get(requestIds), [10000]);
       assert.deepEqual(yield* Ref.get(userInputRequests), [
         {
           isBlocking: true,
@@ -137,60 +124,6 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       ]);
     }),
   );
-  it.effect("logs incompatible notifications and continues delivering valid events", () => {
-    const messages: Array<unknown> = [];
-    const logger = Logger.make<unknown, void>(({ message }) => {
-      messages.push(...(Array.isArray(message) ? message : [message]));
-    });
-    return Effect.gen(function* () {
-      const { stdio, input, output } = yield* makeInMemoryStdio();
-      const client = yield* CodexClient.make(stdio);
-      const received = yield* Deferred.make<string>();
-      yield* client.handleServerNotification("item/agentMessage/delta", (payload) =>
-        Deferred.succeed(received, payload.delta).pipe(Effect.asVoid),
-      );
-
-      const initialize = yield* client
-        .request("initialize", { clientInfo: { name: "compatibility-test", version: "1" } })
-        .pipe(Effect.forkScoped);
-      const request = yield* decodeRequestId(yield* Queue.take(output));
-      const encode = (value: unknown) => new TextEncoder().encode(`${encodeJson(value)}\n`);
-      yield* Queue.offer(
-        input,
-        encode({
-          id: request.id,
-          result: {
-            userAgent: "codex/0.156.1",
-            codexHome: "/tmp/codex-test",
-            platformFamily: "unix",
-            platformOs: "macos",
-          },
-        }),
-      );
-      yield* Fiber.join(initialize);
-
-      yield* Queue.offer(
-        input,
-        encode({
-          method: "item/agentMessage/delta",
-          params: { delta: { privateContent: "do-not-log-this" } },
-        }),
-      );
-      yield* Queue.offer(
-        input,
-        encode({
-          method: "item/agentMessage/delta",
-          params: { delta: "Still working", itemId: "i", threadId: "t", turnId: "turn" },
-        }),
-      );
-      assert.equal(yield* Deferred.await(received), "Still working");
-      assert.include(messages, "Codex app-server payload could not be decoded.");
-      const logged = encodeJson(messages);
-      assert.include(logged, '"method":"item/agentMessage/delta"');
-      assert.include(logged, '"serverUserAgent":"codex/0.156.1"');
-      assert.notInclude(logged, "do-not-log-this");
-    }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
-  });
   it.effect("drains child stderr so large diagnostics cannot block protocol responses", () =>
     Effect.gen(function* () {
       const handle = yield* makeHandle({

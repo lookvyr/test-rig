@@ -68,7 +68,7 @@ const LegacyProviderOptionSelectionsObject = Schema.Record(Schema.String, Schema
 const ProviderOptionSelectionsFromLegacyObject = LegacyProviderOptionSelectionsObject.pipe(
   Schema.decodeTo(
     Schema.Array(ProviderOptionSelection),
-    SchemaTransformation.transformOrFail({
+    SchemaTransformation.transformEffect({
       decode: (record) => Effect.succeed(coerceLegacyOptionsObjectToArray(record)),
       encode: (selections) => Effect.succeed(canonicalSelectionsToLegacyObject(selections)),
     }),
@@ -209,3 +209,14 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CLAUDE_DRIVER_KIND]: "Claude",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
 };
+
+export const CustomModelEntry = Schema.Struct({
+  slug: TrimmedNonEmptyString,
+  name: Schema.optional(TrimmedNonEmptyString),
+  capabilities: Schema.optional(ModelCapabilities),
+});
+export type CustomModelEntry = typeof CustomModelEntry.Type;
+
+/** On-disk custom model setting: the legacy bare slug, or a full entry. */
+export const CustomModelSetting = Schema.Union([Schema.String, CustomModelEntry]);
+export type CustomModelSetting = typeof CustomModelSetting.Type;

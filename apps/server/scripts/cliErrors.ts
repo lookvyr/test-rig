@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-export class ServerCliCommandExitError extends Schema.TaggedErrorClass<ServerCliCommandExitError>()(
+export class ServerCliCommandExitError extends Schema.TaggedError<ServerCliCommandExitError>()(
   "ServerCliCommandExitError",
   {
     command: Schema.String,
@@ -14,7 +14,7 @@ export class ServerCliCommandExitError extends Schema.TaggedErrorClass<ServerCli
   }
 }
 
-export class ServerCliDevelopmentIconSourceMissingError extends Schema.TaggedErrorClass<ServerCliDevelopmentIconSourceMissingError>()(
+export class ServerCliDevelopmentIconSourceMissingError extends Schema.TaggedError<ServerCliDevelopmentIconSourceMissingError>()(
   "ServerCliDevelopmentIconSourceMissingError",
   {
     sourcePath: Schema.String,
@@ -25,7 +25,7 @@ export class ServerCliDevelopmentIconSourceMissingError extends Schema.TaggedErr
   }
 }
 
-export class ServerCliDevelopmentIconTargetMissingError extends Schema.TaggedErrorClass<ServerCliDevelopmentIconTargetMissingError>()(
+export class ServerCliDevelopmentIconTargetMissingError extends Schema.TaggedError<ServerCliDevelopmentIconTargetMissingError>()(
   "ServerCliDevelopmentIconTargetMissingError",
   {
     targetPath: Schema.String,

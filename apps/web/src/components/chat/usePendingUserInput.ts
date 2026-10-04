@@ -56,7 +56,7 @@ export function usePendingUserInput(input: {
   );
   const initialDraft = useMemo<QuestionDraft>(
     () =>
-      request?.delivery === "async"
+      request?.responseMode === "message"
         ? {
             index: 0,
             answers: Object.fromEntries(

@@ -1,7 +1,9 @@
+import { PullRequestContextMetadata } from "@t3tools/contracts";
 import type { FileDiffMetadata, SelectedLineRange, SelectionSide } from "@pierre/diffs";
 import * as Schema from "effect/Schema";
 
 export const ReviewCommentContextSchema = Schema.Struct({
+  pullRequest: Schema.optional(PullRequestContextMetadata),
   id: Schema.String,
   sectionId: Schema.String,
   sectionTitle: Schema.String,
@@ -15,6 +17,7 @@ export const ReviewCommentContextSchema = Schema.Struct({
 });
 
 export interface ReviewCommentContext {
+  readonly pullRequest?: import("@t3tools/contracts").PullRequestContextMetadata | undefined;
   readonly id: string;
   readonly sectionId: string;
   readonly sectionTitle: string;

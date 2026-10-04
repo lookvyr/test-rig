@@ -1,8 +1,12 @@
 import { CommandId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { type CxOptions, cx } from "class-variance-authority";
 import * as Encoding from "effect/Encoding";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
 import { DraftId } from "../composerDraftStore";
+
+const twMerge = extendTailwindMerge({
+  extend: { classGroups: { "font-size": ["text-2xs", "text-3xs", "text-4xs", "text-5xs"] } },
+});
 
 export function cn(...inputs: CxOptions) {
   return twMerge(cx(inputs));

@@ -8,7 +8,7 @@
     "dev": "vp dev",
     "build": "vp build",
     "preview": "vp preview",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vp test run --passWithNoTests --project unit"
   },
   "dependencies": {
@@ -20,7 +20,7 @@
     "@effect/atom-react": "catalog:",
     "@effect/platform-browser": "catalog:",
     "@formkit/auto-animate": "^0.9.0",
-    "@legendapp/list": "3.3.3",
+    "@legendapp/list": "3.3.5",
     "@pierre/diffs": "catalog:",
     "@pierre/trees": "1.0.0-beta.4",
     "@t3tools/client-runtime": "workspace:*",
@@ -54,12 +54,15 @@
     "@tanstack/router-plugin": "^1.161.0",
     "@types/babel__core": "^7.20.5",
     "@types/compression": "^1.8.1",
+    "@types/mdast": "^4.0.4",
     "@types/react": "~19.2.14",
     "@types/react-dom": "~19.2.3",
+    "@types/react-test-renderer": "^19.1.0",
     "@vitejs/plugin-react": "^6.0.0",
     "babel-plugin-react-compiler": "1.0.0",
     "compression": "^1.8.1",
     "msw": "2.12.11",
+    "react-test-renderer": "19.2.6",
     "tailwindcss": "^4.0.0",
     "vite": "catalog:",
     "vite-plus": "catalog:"

@@ -314,3 +314,61 @@ export function applyGitStatusStreamEvent(
       return mergeGitStatusParts(toLocalStatusPart(current), event.remote);
   }
 }
+
+export function parseOriginUrlFromGitConfig(configText: string): string | null {
+  let section: string | null = null;
+  let originUrl: string | null = null;
+  let firstRemoteUrl: string | null = null;
+  // A trailing backslash continues the value on the next line.
+  const joined = configText.replace(/\\\r?\n[ \t]*/g, "");
+  for (const rawLine of joined.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith("#") || line.startsWith(";")) continue;
+    // Both `[remote "origin"]` and the legacy `[remote.origin]` form, with an
+    // optional trailing comment. Git keeps quoted subsections case-sensitive
+    // but folds the dotted form to lowercase.
+    const header = /^\[\s*remote(?:\s+"([^"]+)"|\.([^\]\s]+))\s*\](?:\s*[#;].*)?$/i.exec(line);
+    if (header) {
+      section = header[1] ?? header[2]?.toLowerCase() ?? null;
+      continue;
+    }
+    if (line.startsWith("[")) {
+      section = null;
+      continue;
+    }
+    if (section === null) continue;
+    const match = /^url\s*=\s*(.*)$/i.exec(line);
+    if (!match) continue;
+    const url = parseGitConfigValue(match[1] ?? "");
+    if (url.length === 0) continue;
+    if (section === "origin") {
+      originUrl ??= url;
+    } else {
+      firstRemoteUrl ??= url;
+    }
+  }
+  return originUrl ?? firstRemoteUrl;
+}
+
+/**
+ * Best-effort parse of a GitHub `owner/repo` identifier from common remote URL shapes.
+ */
+function parseGitConfigValue(raw: string): string {
+  let out = "";
+  let quoted = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index]!;
+    if (char === "\\" && index + 1 < raw.length) {
+      out += raw[index + 1];
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (!quoted && (char === "#" || char === ";")) break;
+    out += char;
+  }
+  return out.trim();
+}

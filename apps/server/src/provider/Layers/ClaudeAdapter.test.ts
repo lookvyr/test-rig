@@ -817,7 +817,9 @@ describe("ClaudeAdapterLive", () => {
         mimeType: "image/png",
         sizeBytes: 4,
       };
-      const attachmentPath = NodePath.join(attachmentsDir, attachmentRelativePath(attachment));
+      const relativeAttachmentPath = attachmentRelativePath(attachment);
+      if (relativeAttachmentPath === null) throw new Error("Invalid test attachment");
+      const attachmentPath = NodePath.join(attachmentsDir, relativeAttachmentPath);
       NodeFS.mkdirSync(NodePath.dirname(attachmentPath), { recursive: true });
       NodeFS.writeFileSync(attachmentPath, Uint8Array.from([1, 2, 3, 4]));
 
@@ -2002,6 +2004,27 @@ describe("ClaudeAdapterLive", () => {
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(layer),
+    );
+  });
+
+  it.effect("keeps failed query teardown retryable and reports the failure", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({ threadId: THREAD_ID, runtimeMode: "full-access" });
+      const close = harness.query.close.bind(harness.query);
+      (harness.query as { close: () => void }).close = () => {
+        throw new Error("close failed");
+      };
+      const result = yield* adapter.stopSession(THREAD_ID).pipe(Effect.result);
+      assert.equal(result._tag, "Failure");
+      assert.equal((yield* adapter.listSessions()).length, 1);
+      (harness.query as { close: () => void }).close = close;
+      yield* adapter.stopSession(THREAD_ID);
+      assert.equal((yield* adapter.listSessions()).length, 0);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
     );
   });
 
@@ -3551,6 +3574,7 @@ describe("ClaudeAdapterLive", () => {
               destination: "session",
             },
           ],
+          requestId: "test-permission-request",
           toolUseID: "tool-use-1",
         },
       );
@@ -3627,6 +3651,7 @@ describe("ClaudeAdapterLive", () => {
         {},
         {
           signal: new AbortController().signal,
+          requestId: "test-permission-request",
           toolUseID: "tool-agent-1",
         },
       );
@@ -3651,6 +3676,7 @@ describe("ClaudeAdapterLive", () => {
         { pattern: "foo", path: "src" },
         {
           signal: new AbortController().signal,
+          requestId: "test-permission-request",
           toolUseID: "tool-grep-approval-1",
         },
       );
@@ -5047,6 +5073,7 @@ describe("ClaudeAdapterLive", () => {
         },
         {
           signal: new AbortController().signal,
+          requestId: "test-permission-request",
           toolUseID: "tool-exit-1",
         },
       );
@@ -5213,6 +5240,7 @@ describe("ClaudeAdapterLive", () => {
 
       const permissionPromise = canUseTool("AskUserQuestion", askInput, {
         signal: new AbortController().signal,
+        requestId: "test-permission-request",
         toolUseID: "tool-ask-1",
       });
 
@@ -5339,6 +5367,7 @@ describe("ClaudeAdapterLive", () => {
 
       const permissionPromise = canUseTool("AskUserQuestion", askInput, {
         signal: new AbortController().signal,
+        requestId: "test-permission-request",
         toolUseID: "tool-ask-2",
       });
 
@@ -5404,6 +5433,7 @@ describe("ClaudeAdapterLive", () => {
         },
         {
           signal: controller.signal,
+          requestId: "test-permission-request",
           toolUseID: "tool-ask-abort",
         },
       );

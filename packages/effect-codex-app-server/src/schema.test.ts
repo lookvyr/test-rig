@@ -1,88 +1,227 @@
-import { assert, describe, it } from "@effect/vitest";
+import { assert, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import * as CodexSchema from "./schema.ts";
 
-const decodeUserInput = Schema.decodeUnknownSync(
-  CodexSchema.SERVER_REQUEST_PARAMS["item/tool/requestUserInput"],
-);
-const encodeThreadStart = Schema.encodeSync(CodexSchema.CLIENT_REQUEST_PARAMS["thread/start"]);
-const encodeClientRequest = Schema.encodeSync(CodexSchema.ClientRequest);
+const isGetAccountResponse = Schema.is(CodexSchema.V2GetAccountResponse);
+const isThreadReadResponse = Schema.is(CodexSchema.V2ThreadReadResponse);
+const isThreadResumeResponse = Schema.is(CodexSchema.V2ThreadResumeResponse);
+const isThreadForkResponse = Schema.is(CodexSchema.V2ThreadForkResponse);
+const isTurnCompletedNotification = Schema.is(CodexSchema.V2TurnCompletedNotification);
+const decodeThreadResumeResponse = Schema.decodeUnknownSync(CodexSchema.V2ThreadResumeResponse);
 
-const itemSchemas = [
-  ["started notification", CodexSchema.V2ItemStartedNotification__ThreadItem],
-  ["completed notification", CodexSchema.V2ItemCompletedNotification__ThreadItem],
-  ["read history", CodexSchema.V2ThreadReadResponse__ThreadItem],
-  ["resumed history", CodexSchema.V2ThreadResumeResponse__ThreadItem],
-  ["forked history", CodexSchema.V2ThreadForkResponse__ThreadItem],
-  ["paginated history", CodexSchema.V2ThreadTurnsListResponse__ThreadItem],
-] as const;
-
-describe.each(itemSchemas)("Codex 0.156 %s", (_name, schema) => {
-  const decode = Schema.decodeUnknownSync(schema);
-
-  it.each(["sendMessage", "followupTask", "interruptAgent", "listAgents"] as const)(
-    "preserves interrupted %s activity",
-    (tool) => {
-      const item = {
-        type: "collabAgentToolCall",
-        id: "item-1",
-        tool,
-        status: "interrupted",
-        senderThreadId: "thread-1",
-        receiverThreadIds: ["child-1"],
-        agentsStates: { "child-1": { status: "interrupted" } },
-      } as const;
-      assert.deepEqual(decode(item), item);
-    },
-  );
-
-  it("preserves asynchronous agent questions", () => {
-    const item = {
-      type: "agentMessage",
-      id: "item-1",
-      text: "Which approach?",
-      delivery: "async",
-      questions: [{ title: "Choose an approach", options: ["Small", "Large"] }],
-    } as const;
-    assert.deepEqual(decode(item), item);
-  });
+it("keeps async questions in live notifications and thread history", () => {
+  const item = {
+    type: "agentMessage",
+    id: "question-1",
+    text: "Which package?\n- pnpm\n- npm\n\nWhat should it be named?",
+    phase: "final_answer",
+    delivery: "async",
+    questions: [
+      { title: "Which package manager?", options: ["pnpm", "npm"] },
+      { title: "What should it be named?" },
+    ],
+  } as const;
+  for (const schema of [
+    CodexSchema.ServerNotification__ThreadItem,
+    CodexSchema.V2ItemStartedNotification__ThreadItem,
+    CodexSchema.V2ItemCompletedNotification__ThreadItem,
+    CodexSchema.V2ThreadReadResponse__ThreadItem,
+    CodexSchema.V2ThreadResumeResponse__ThreadItem,
+  ]) {
+    assert.deepEqual(Schema.decodeSync(schema)(item), item);
+  }
 });
 
-it("preserves nonblocking tool questions", () => {
-  const params = {
-    threadId: "thread-1",
-    turnId: "turn-1",
-    itemId: "item-1",
-    isBlocking: false,
-    questions: [{ id: "approach", header: "Approach", question: "Which approach?" }],
-  };
-  assert.deepEqual(decodeUserInput(params), params);
-});
+it("accepts Codex 0.150 multi-agent values", () => {
+  const schemas = [
+    CodexSchema.ServerNotification__SubAgentActivityKind,
+    CodexSchema.V2ItemStartedNotification__SubAgentActivityKind,
+    CodexSchema.V2ItemCompletedNotification__SubAgentActivityKind,
+    CodexSchema.V2ThreadReadResponse__SubAgentActivityKind,
+    CodexSchema.V2ThreadResumeResponse__SubAgentActivityKind,
+  ];
 
-it("encodes the experimental history mode needed for revert-compatible new threads", () => {
-  const params = { historyMode: "paginated" } as const;
-  assert.deepEqual(encodeThreadStart(params), params);
-  const request = { method: "thread/start", id: 1, params } as const;
-  assert.deepEqual(encodeClientRequest(request), request);
-});
+  for (const schema of schemas) {
+    assert.equal(Schema.is(schema)("completed"), true);
+  }
 
-it("registers methods whose upstream TypeScript declaration uses optional params", () => {
+  for (const tool of ["sendMessage", "followupTask", "interruptAgent", "listAgents"]) {
+    assert.equal(Schema.is(CodexSchema.ServerNotification__CollabAgentTool)(tool), true);
+    assert.equal(Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentTool)(tool), true);
+  }
+
   assert.equal(
-    CodexSchema.CLIENT_REQUEST_METHODS["account/rateLimits/read"],
-    "account/rateLimits/read",
+    Schema.is(CodexSchema.ServerNotification__CollabAgentToolCallStatus)("interrupted"),
+    true,
   );
-  assert.strictEqual(
-    CodexSchema.CLIENT_REQUEST_PARAMS["account/rateLimits/read"],
-    CodexSchema.V2NullableGetAccountRateLimitsParams,
+  assert.equal(
+    Schema.is(CodexSchema.V2ThreadResumeResponse__CollabAgentToolCallStatus)("interrupted"),
+    true,
   );
-  const decode = Schema.decodeUnknownSync(
-    CodexSchema.CLIENT_REQUEST_PARAMS["account/rateLimits/read"],
+
+  const resumeResponse = {
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    cwd: "/tmp/project",
+    model: "gpt-5.6-sol",
+    modelProvider: "openai",
+    sandbox: { type: "dangerFullAccess" },
+    thread: {
+      cliVersion: "0.150.0",
+      createdAt: 0,
+      cwd: "/tmp/project",
+      ephemeral: false,
+      id: "root-thread",
+      modelProvider: "openai",
+      preview: "",
+      projectId: null,
+      sessionId: "session-1",
+      source: "cli",
+      status: { type: "idle" },
+      turns: [
+        {
+          id: "turn-1",
+          status: "completed",
+          items: [
+            {
+              agentsStates: {},
+              id: "item-1",
+              receiverThreadIds: ["child-thread"],
+              senderThreadId: "root-thread",
+              status: "interrupted",
+              tool: "followupTask",
+              type: "collabAgentToolCall",
+            },
+          ],
+        },
+      ],
+      updatedAt: 0,
+    },
+  };
+
+  assert.equal(Schema.is(CodexSchema.V2ThreadResumeResponse)(resumeResponse), true);
+});
+
+it("accepts Codex rate limit errors for thread responses", () => {
+  const failedThread = {
+    cliVersion: "0.150.0",
+    createdAt: 0,
+    cwd: "/tmp/project",
+    ephemeral: false,
+    id: "thread-1",
+    modelProvider: "openai",
+    preview: "",
+    projectId: null,
+    sessionId: "session-1",
+    source: "cli",
+    status: { type: "idle" },
+    turns: [
+      {
+        error: {
+          codexErrorInfo: "rateLimitExceeded",
+          message: "Rate limit exceeded",
+        },
+        id: "turn-1",
+        items: [],
+        status: "failed",
+      },
+    ],
+    updatedAt: 0,
+  };
+  assert.equal(isThreadReadResponse({ thread: failedThread }), true);
+  assert.equal(
+    isThreadResumeResponse({
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
+      cwd: "/tmp/project",
+      model: "gpt-5.6-sol",
+      modelProvider: "openai",
+      sandbox: { type: "dangerFullAccess" },
+      thread: failedThread,
+    }),
+    true,
   );
-  assert.equal(decode(null), null);
-  assert.deepEqual(decode({}), {});
-  assert.strictEqual(
-    CodexSchema.CLIENT_REQUEST_RESPONSES["account/rateLimits/read"],
-    CodexSchema.V2GetAccountRateLimitsResponse,
+});
+
+it("accepts Codex misalignment policy errors for thread responses", () => {
+  const failedThread = {
+    cliVersion: "0.150.0",
+    createdAt: 0,
+    cwd: "/tmp/project",
+    ephemeral: false,
+    id: "thread-1",
+    modelProvider: "openai",
+    preview: "",
+    projectId: null,
+    sessionId: "session-1",
+    source: "cli",
+    status: { type: "idle" },
+    turns: [
+      {
+        error: {
+          codexErrorInfo: "misalignmentPolicyViolation",
+          message: "Misalignment policy violation",
+        },
+        id: "turn-1",
+        items: [],
+        status: "failed",
+      },
+    ],
+    updatedAt: 0,
+  };
+  const resumeLikeResponse = {
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    cwd: "/tmp/project",
+    model: "gpt-5.6-sol",
+    modelProvider: "openai",
+    sandbox: { type: "dangerFullAccess" },
+    thread: failedThread,
+  };
+  assert.equal(isThreadReadResponse({ thread: failedThread }), true);
+  assert.equal(isThreadResumeResponse(resumeLikeResponse), true);
+  assert.equal(isThreadForkResponse(resumeLikeResponse), true);
+  const decodedResume = decodeThreadResumeResponse(resumeLikeResponse);
+  assert.equal(decodedResume.thread.turns[0]?.error?.codexErrorInfo, "misalignmentPolicyViolation");
+  assert.equal(
+    isTurnCompletedNotification({
+      threadId: "thread-1",
+      turn: {
+        error: {
+          codexErrorInfo: "misalignmentPolicyViolation",
+          message: "Misalignment policy violation",
+        },
+        id: "turn-1",
+        items: [],
+        status: "failed",
+      },
+    }),
+    true,
   );
+});
+
+it("accepts account plan slugs newer than the pinned protocol", () => {
+  const planTypes = [
+    "self_serve_business_prolite",
+    "ent26",
+    "enterprise_cbp_automation",
+    "edu_plus",
+    "edu_pro",
+    "promax",
+    "some_future_plan",
+  ];
+
+  for (const planType of planTypes) {
+    const accountResponse = {
+      account: {
+        email: "user@example.com",
+        planType,
+        type: "chatgpt",
+      },
+      requiresOpenaiAuth: true,
+    };
+
+    assert.equal(isGetAccountResponse(accountResponse), true);
+  }
 });

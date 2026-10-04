@@ -1,3 +1,4 @@
+import * as OpenCodeServerLedger from "../OpenCodeServerLedger.ts";
 import * as ProviderContinuationRequests from "../../orchestration-v2/ProviderContinuationRequests.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
@@ -841,6 +842,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
             displayName: undefined,
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
               maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: codexDriver,
               }),
@@ -995,6 +997,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
             displayName: undefined,
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
               maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: cursorDriver,
               }),
@@ -1124,6 +1127,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
               displayName: undefined,
               enabled: true,
               snapshot: {
+                applyUsageLimits: () => Effect.void,
                 maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                   provider: openCodeDriver,
                 }),
@@ -1230,6 +1234,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
             displayName: undefined,
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
               maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: codexDriver,
               }),
@@ -1323,6 +1328,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
             displayName: undefined,
             enabled: true,
             snapshot: {
+              applyUsageLimits: () => Effect.void,
               maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
                 provider: provider.driver,
               }),
@@ -1475,7 +1481,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
                 ProviderEventLoggers.NoOpProviderEventLoggers,
               ),
             ),
-            Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
+            Layer.provideMerge(
+              OpenCodeRuntime.OpenCodeRuntimeLayer.pipe(
+                Layer.provide(OpenCodeServerLedger.layerTest),
+              ),
+            ),
             Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
             Layer.provideMerge(ProviderContinuationRequests.layer),
             // NO spawner mock — `ChildProcessSpawner` is supplied by the
@@ -1568,7 +1578,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
                 ProviderEventLoggers.NoOpProviderEventLoggers,
               ),
             ),
-            Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
+            Layer.provideMerge(
+              OpenCodeRuntime.OpenCodeRuntimeLayer.pipe(
+                Layer.provide(OpenCodeServerLedger.layerTest),
+              ),
+            ),
             Layer.updateService(ChildProcessSpawner.ChildProcessSpawner, (spawner) =>
               ChildProcessSpawner.make((command) => {
                 spawnedCommands.push((command as { readonly command: string }).command);
@@ -1690,7 +1704,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
                 ProviderEventLoggers.NoOpProviderEventLoggers,
               ),
             ),
-            Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
+            Layer.provideMerge(
+              OpenCodeRuntime.OpenCodeRuntimeLayer.pipe(
+                Layer.provide(OpenCodeServerLedger.layerTest),
+              ),
+            ),
             Layer.provideMerge(NodeServices.layer),
             Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
             Layer.provideMerge(ProviderContinuationRequests.layer),
@@ -1774,7 +1792,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
                   ProviderEventLoggers.NoOpProviderEventLoggers,
                 ),
               ),
-              Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
+              Layer.provideMerge(
+                OpenCodeRuntime.OpenCodeRuntimeLayer.pipe(
+                  Layer.provide(OpenCodeServerLedger.layerTest),
+                ),
+              ),
               Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
               Layer.provideMerge(ProviderContinuationRequests.layer),
               Layer.provideMerge(

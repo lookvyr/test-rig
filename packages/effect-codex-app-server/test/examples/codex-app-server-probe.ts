@@ -74,7 +74,6 @@ const program = Effect.gen(function* () {
       cwd: workspace,
       approvalPolicy: "never",
       sandbox: "read-only",
-      historyMode: "paginated",
       ...(process.env.CODEX_MODEL ? { model: process.env.CODEX_MODEL } : {}),
     });
     yield* Effect.sync(() => NodeAssert.equal(thread.historyMode, "paginated"));

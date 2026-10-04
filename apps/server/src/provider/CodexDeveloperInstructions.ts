@@ -1,4 +1,7 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
+import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
+import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "./T3OrchestrationInstructions.ts";
 import { SIDE_CHAT_INSTRUCTIONS } from "./SideChatInstructions.ts";
 
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
@@ -132,7 +135,6 @@ plan content should be human and agent digestible. The final plan must be plan-o
 Do not ask "should I proceed?" in the final output. The user can easily switch out of Plan mode and request implementation if you have included a \`<proposed_plan>\` block in your response. Alternatively, they can decide to stay in Plan mode and continue refining the plan.
 
 Only produce at most one \`<proposed_plan>\` block per turn, and only when you are presenting a complete spec.
-${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
 </collaboration_mode>`;
 
 export const CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Default
@@ -144,7 +146,6 @@ Your active mode changes only when new developer instructions with a different \
 ## request_user_input availability
 
 Use the question tools exposed in this session for missing information or decisions that materially affect the work. Prefer \`request_user_input_async\`, when available, if you can continue independent work while waiting. Use \`request_user_input\` when you need an answer before proceeding. Do not assume an unanswered question or a preselected option is approval. If neither tool is available, ask a concise plain-text question.
-${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
 </collaboration_mode>`;
 
 export interface CodexRuntimeInfo {
@@ -159,14 +160,42 @@ function toSingleLine(value: string): string {
 
 export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
-  runtime: CodexRuntimeInfo,
+  runtime?: CodexRuntimeInfo,
   sideChat = false,
 ): string {
   const base =
     interactionMode === "plan"
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
       : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+  if (!runtime) return base;
   return `${base}${sideChat ? `\n\n${SIDE_CHAT_INSTRUCTIONS}` : ""}
 
 <runtime_info>In case you're asked: you are running in Test Rig through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
+}
+
+/** Stable app context survives model-provided collaboration-mode prompts. */
+export function buildCodexAdditionalContext(
+  runtime: CodexRuntimeInfo,
+  toolsAvailable: boolean | { readonly browser: boolean; readonly device: boolean } = true,
+  sideChat = false,
+): Record<string, V2TurnStartParams__AdditionalContextEntry> {
+  const browser = typeof toolsAvailable === "boolean" ? toolsAvailable : toolsAvailable.browser;
+  return {
+    test_rig_orchestration: { kind: "application", value: T3_CODE_ORCHESTRATION_INSTRUCTIONS },
+    test_rig_runtime: {
+      kind: "application",
+      value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),
+    },
+    ...(browser
+      ? {
+          test_rig_tools: {
+            kind: "application" as const,
+            value: T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
+          },
+        }
+      : {}),
+    ...(sideChat
+      ? { test_rig_side_chat: { kind: "application" as const, value: SIDE_CHAT_INSTRUCTIONS } }
+      : {}),
+  };
 }

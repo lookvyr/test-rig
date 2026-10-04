@@ -10,7 +10,7 @@ import * as Schema from "effect/Schema";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 
-export class TransferHttpRequestError extends Schema.TaggedErrorClass<TransferHttpRequestError>()(
+export class TransferHttpRequestError extends Schema.TaggedError<TransferHttpRequestError>()(
   "TransferHttpRequestError",
   {
     url: Schema.String,
@@ -161,7 +161,11 @@ export function countingWsRpcProtocolLayer(input: {
   readonly recorder: WebSocketTransferRecorder;
 }) {
   const webSocketConstructorLayer = Layer.succeed(Socket.WebSocketConstructor, (url, protocols) =>
-    input.recorder.connect(url, protocols, input.cookie),
+    input.recorder.connect(
+      url,
+      typeof protocols === "string" || Array.isArray(protocols) ? protocols : undefined,
+      input.cookie,
+    ),
   );
   return RpcClient.layerProtocolSocket().pipe(
     Layer.provide(

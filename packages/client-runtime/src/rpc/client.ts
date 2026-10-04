@@ -13,7 +13,7 @@ import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
 
-export class EnvironmentRpcUnavailableError extends Schema.TaggedErrorClass<EnvironmentRpcUnavailableError>()(
+export class EnvironmentRpcUnavailableError extends Schema.TaggedError<EnvironmentRpcUnavailableError>()(
   "EnvironmentRpcUnavailableError",
   {
     environmentId: Schema.String,
@@ -165,6 +165,9 @@ export function runStream<TTag extends EnvironmentStreamCommandRpcTag>(
 }
 
 interface SubscriptionOptions<TTag extends EnvironmentSubscriptionRpcTag> {
+  readonly onDefect?: (
+    cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>,
+  ) => Effect.Effect<void>;
   readonly onExpectedFailure?: (
     cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>,
   ) => Effect.Effect<void, never, never>;
@@ -221,6 +224,18 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
                       });
                       return method(input).pipe(
                         Stream.ensuring(completeObservation),
+                        Stream.tapCause((cause) =>
+                          options?.onDefect !== undefined &&
+                          cause.reasons.some(
+                            (reason) =>
+                              reason._tag === "Die" ||
+                              (reason._tag === "Fail" &&
+                                isRpcClientError(reason.error) &&
+                                reason.error.reason._tag === "RpcClientDefect"),
+                          )
+                            ? options.onDefect(cause)
+                            : Effect.void,
+                        ),
                         Stream.catchCause((cause) => {
                           const hasOnlyExpectedFailures =
                             cause.reasons.length > 0 &&

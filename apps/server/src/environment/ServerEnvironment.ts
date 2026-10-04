@@ -13,7 +13,7 @@ import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 
-export class ServerEnvironmentIdPersistenceError extends Schema.TaggedErrorClass<ServerEnvironmentIdPersistenceError>()(
+export class ServerEnvironmentIdPersistenceError extends Schema.TaggedError<ServerEnvironmentIdPersistenceError>()(
   "ServerEnvironmentIdPersistenceError",
   {
     operation: Schema.Literals(["check", "read", "write"]),
@@ -134,6 +134,7 @@ export const make = Effect.gen(function* () {
     },
     serverVersion: packageJson.version,
     capabilities: {
+      orchestrationProtocolVersion: 2,
       repositoryIdentity: true,
       connectionProbe: true,
       threadSettlement: true,

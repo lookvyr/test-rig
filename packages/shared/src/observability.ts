@@ -1,3 +1,6 @@
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import type * as Exit from "effect/Exit";
@@ -683,3 +686,53 @@ function parseBigInt(input: string): bigint {
     return 0n;
   }
 }
+
+export const OtlpProtocol = Schema.Literals(["http/json", "http/protobuf"]);
+export type OtlpProtocol = typeof OtlpProtocol.Type;
+
+export interface SignalExport {
+  readonly protocol: OtlpProtocol;
+  readonly headers: Readonly<Record<string, string>> | undefined;
+  readonly exportIntervalMs: number;
+}
+
+export const OtlpHeadersFromString = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.Record(Schema.String, Schema.String),
+    SchemaTransformation.transformEffect({
+      decode: (input) => {
+        const headers: Record<string, string> = {};
+        for (const pair of input.split(",")) {
+          if (pair.trim() === "") {
+            continue;
+          }
+          const separator = pair.indexOf("=");
+          const key = separator === -1 ? "" : pair.slice(0, separator).trim();
+          if (key === "") {
+            return Effect.fail(
+              new SchemaIssue.InvalidValue({
+                message: `Expected key=value but received ${JSON.stringify(pair.trim())}.`,
+              }),
+            );
+          }
+          try {
+            headers[key] = decodeURIComponent(pair.slice(separator + 1).trim());
+          } catch {
+            return Effect.fail(
+              new SchemaIssue.InvalidValue({
+                message: `Header ${JSON.stringify(key)} has a malformed percent-encoded value.`,
+              }),
+            );
+          }
+        }
+        return Effect.succeed(headers);
+      },
+      encode: (headers) =>
+        Effect.succeed(
+          Object.entries(headers)
+            .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+            .join(","),
+        ),
+    }),
+  ),
+);

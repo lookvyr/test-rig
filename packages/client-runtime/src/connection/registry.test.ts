@@ -1,7 +1,7 @@
 import {
   type DesktopSshEnvironmentTarget,
   EnvironmentId,
-  type OrchestrationShellSnapshot,
+  type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -100,11 +100,12 @@ const SSH_PROFILE = new SshConnectionProfile({
   target: SSH_TARGET,
 });
 
-const CACHED_SNAPSHOT: OrchestrationShellSnapshot = {
+const CACHED_SNAPSHOT: OrchestrationV2ShellSnapshot = {
+  schemaVersion: 2,
   snapshotSequence: 1,
   projects: [],
   threads: [],
-  updatedAt: "2026-06-06T00:00:00.000Z",
+  archivedThreads: [],
 };
 
 interface SessionControl {

@@ -1840,56 +1840,6 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("commit context", () => {
-    it.effect(
-      "reads staged context without changing partial staging or adding selected paths",
-      () =>
-        Effect.gen(function* () {
-          const cwd = yield* makeTmpDir();
-          yield* initRepoWithCommit(cwd);
-          const driver = yield* GitVcsDriver.GitVcsDriver;
-          yield* writeTextFile(cwd, "partial.txt", "staged\n");
-          yield* git(cwd, ["add", "partial.txt"]);
-          yield* writeTextFile(cwd, "partial.txt", "unstaged\n");
-          yield* writeTextFile(cwd, "other.txt", "untracked\n");
-          const before = yield* git(cwd, ["write-tree"]);
-          const context = yield* driver.prepareCommitContext(cwd, ["other.txt"], true);
-          assert.include(context?.stagedPatch ?? "", "+staged");
-          assert.notInclude(context?.stagedPatch ?? "", "+unstaged");
-          assert.notInclude(context?.stagedSummary ?? "", "other.txt");
-          assert.equal(yield* git(cwd, ["write-tree"]), before);
-        }),
-    );
-
-    it.effect(
-      "commits the existing index before the first commit and for staged renames and deletions",
-      () =>
-        Effect.gen(function* () {
-          const cwd = yield* makeTmpDir();
-          const driver = yield* GitVcsDriver.GitVcsDriver;
-          yield* driver.initRepo({ cwd });
-          yield* git(cwd, ["config", "user.email", "test@test.com"]);
-          yield* git(cwd, ["config", "user.name", "Test"]);
-          yield* writeTextFile(cwd, "before.txt", "original\n");
-          yield* writeTextFile(cwd, "delete.txt", "delete me\n");
-          yield* git(cwd, ["add", "."]);
-          yield* writeTextFile(cwd, "untracked.txt", "leave untracked\n");
-          const initial = yield* driver.prepareCommitContext(cwd, undefined, true);
-          assert.include(initial?.stagedSummary ?? "", "before.txt");
-          assert.notInclude(initial?.stagedSummary ?? "", "untracked.txt");
-          yield* driver.commit(cwd, "initial", "");
-          yield* git(cwd, ["mv", "before.txt", "after.txt"]);
-          yield* git(cwd, ["rm", "delete.txt"]);
-          const beforeTree = yield* git(cwd, ["write-tree"]);
-          const context = yield* driver.prepareCommitContext(cwd, undefined, true);
-          assert.include(context?.stagedSummary ?? "", "R100\tbefore.txt\tafter.txt");
-          assert.include(context?.stagedSummary ?? "", "D\tdelete.txt");
-          assert.equal(yield* git(cwd, ["write-tree"]), beforeTree);
-          yield* driver.commit(cwd, "rename and remove", "");
-          assert.equal(yield* git(cwd, ["ls-tree", "--name-only", "HEAD"]), "after.txt");
-          assert.include(yield* git(cwd, ["status", "--porcelain"]), "?? untracked.txt");
-        }),
-    );
-
     it.effect("stages selected files and commits only those files", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

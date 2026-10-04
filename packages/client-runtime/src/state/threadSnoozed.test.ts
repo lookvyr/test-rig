@@ -1,6 +1,4 @@
 // @effect-diagnostics globalDate:off -- Tests exercise local calendar snooze boundaries.
-import { ThreadId } from "@t3tools/contracts";
-import { TurnId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -29,33 +27,33 @@ function makeShell(input: {
   readonly pending?: "approval" | "user-input";
   readonly turnCompletedAt?: string | null;
 }): ThreadSnoozeShell {
-  const threadId = ThreadId.make("thread-1");
   return {
     snoozedUntil: input.snoozedUntil ?? null,
     snoozedAt: input.snoozedAt ?? (input.snoozedUntil != null ? SNOOZED_AT : null),
     hasPendingApprovals: input.pending === "approval",
     hasPendingUserInput: input.pending === "user-input",
-    session:
+    runtime:
       input.sessionStatus === undefined
         ? null
         : {
-            threadId,
-            status: input.sessionStatus,
+            status:
+              input.sessionStatus === "error"
+                ? "failed"
+                : input.sessionStatus === "ready"
+                  ? "idle"
+                  : input.sessionStatus,
             providerName: "Codex",
-            runtimeMode: "full-access",
-            activeTurnId: null,
             lastError: input.sessionStatus === "error" ? "boom" : null,
             updatedAt: "2026-04-10T11:00:00.000Z",
           },
-    latestTurn:
-      input.turnCompletedAt === undefined
+    latestRun:
+      input.turnCompletedAt === undefined && input.sessionStatus !== "error"
         ? null
         : {
-            turnId: TurnId.make("turn-1"),
-            state: "completed",
+            status: input.sessionStatus === "error" ? "failed" : "completed",
             requestedAt: SNOOZED_AT,
             startedAt: null,
-            completedAt: input.turnCompletedAt,
+            completedAt: input.turnCompletedAt ?? "2026-04-10T11:00:00.000Z",
             assistantMessageId: null,
           },
   };
@@ -92,7 +90,7 @@ describe("effectiveSnoozed", () => {
   });
 
   it("wakes early on a failure that happened after the snooze", () => {
-    // makeShell stamps session.updatedAt at 11:00, after SNOOZED_AT (9:00).
+    // The failed run completed at 11:00, after SNOOZED_AT (9:00).
     expect(
       effectiveSnoozed(makeShell({ snoozedUntil: FUTURE_WAKE, sessionStatus: "error" }), {
         now: NOW,
@@ -184,21 +182,15 @@ describe("canSnooze", () => {
     ).toBe(false);
   });
 
-  it("refuses a queued turn start — same invisible-pending-work rule as settle", () => {
-    // Fresh user message, no turn has adopted it, within the grace window.
-    expect(
-      canSnooze(
-        { ...makeShell({}), latestUserMessageAt: "2026-04-10T11:59:30.000Z" },
-        { now: NOW },
-      ),
-    ).toBe(false);
-    // Outside the grace window the message is stale data, not queued work.
-    expect(
-      canSnooze(
-        { ...makeShell({}), latestUserMessageAt: "2026-04-10T11:00:00.000Z" },
-        { now: NOW },
-      ),
-    ).toBe(true);
+  it("refuses explicitly queued work independently of message age", () => {
+    const base = makeShell({ turnCompletedAt: NOW });
+    const queued = {
+      ...base,
+      latestRun: { ...base.latestRun!, status: "queued" as const },
+      latestUserMessageAt: SNOOZED_AT,
+    };
+    expect(canSnooze(queued, { now: NOW })).toBe(false);
+    expect(canSnooze({ ...base, latestUserMessageAt: NOW }, { now: NOW })).toBe(true);
   });
 });
 
@@ -207,6 +199,16 @@ describe("threadWokeAt", () => {
     expect(threadWokeAt(makeShell({}), { now: NOW })).toBe(null);
     expect(threadWokeAt(makeShell({ snoozedUntil: FUTURE_WAKE }), { now: NOW })).toBe(null);
   });
+
+  it.each(["approval", "user-input"] as const)(
+    "dates a new %s wake after a visit during the snooze",
+    (pending) => {
+      const shell = makeShell({ snoozedUntil: FUTURE_WAKE, pending, sessionStatus: "running" });
+      const wokeAt = threadWokeAt(shell, { now: NOW });
+      expect(wokeAt).toBe("2026-04-10T11:00:00.000Z");
+      expect(Date.parse(wokeAt!) > Date.parse("2026-04-10T10:00:00.000Z")).toBe(true);
+    },
+  );
 
   it("reports the wake time for a timer wake", () => {
     expect(threadWokeAt(makeShell({ snoozedUntil: PAST_WAKE }), { now: NOW })).toBe(PAST_WAKE);
@@ -265,6 +267,7 @@ describe("resolveSnoozePresets", () => {
     const presets = resolveSnoozePresets(localDate(2026, 4, 8, 10));
     expect(presets.map((preset) => preset.id)).toEqual([
       "hour",
+      "three-hours",
       "evening",
       "tomorrow",
       "next-week",
@@ -278,6 +281,7 @@ describe("resolveSnoozePresets", () => {
   it("drops the evening choice once evening is near or past", () => {
     expect(resolveSnoozePresets(localDate(2026, 4, 8, 17, 30)).map((preset) => preset.id)).toEqual([
       "hour",
+      "three-hours",
       "tomorrow",
       "next-week",
     ]);

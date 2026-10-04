@@ -4,8 +4,8 @@ import type { LegendListRef } from "@legendapp/list/react";
 import type {
   MessageId,
   ScopedThreadRef,
-  OrchestrationThread,
-  OrchestrationThreadSearchMessage,
+  OrchestrationV2ThreadProjection,
+  OrchestrationV2ThreadSearchMessage,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { orchestrationEnvironment } from "../../state/orchestration";
@@ -15,6 +15,7 @@ import { useEnvironmentThread } from "../../state/threads";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   findMessageRanges,
+  mergeThreadFindMessages,
   findTextOffsets,
   normalizeFindText,
   threadMessageFindText,
@@ -32,7 +33,7 @@ interface ThreadFindProps {
   onSelectMessage: (id: MessageId | null) => void;
   onManualNavigation: () => void;
   onClose: () => void;
-  onSearchHistory: (thread: OrchestrationThread | null) => void;
+  onSearchHistory: (thread: OrchestrationV2ThreadProjection | null) => void;
 }
 
 export function ThreadFind({
@@ -66,7 +67,7 @@ export function ThreadFind({
     reportFailure: false,
   });
   const [search, setSearch] = useState<{
-    messages: readonly OrchestrationThreadSearchMessage[];
+    messages: readonly OrchestrationV2ThreadSearchMessage[];
     pending: boolean;
     error: boolean;
   }>({ messages: [], pending: false, error: false });
@@ -78,15 +79,15 @@ export function ThreadFind({
     }
     setSearch({ messages: [], pending: true, error: false });
     async function load() {
-      const messages: OrchestrationThreadSearchMessage[] = [];
-      let cursor: { createdAt: string; id: MessageId } | undefined;
+      const messages: OrchestrationV2ThreadSearchMessage[] = [];
+      let cursor: number | undefined;
       do {
         const result = await runSearch({
           environmentId: threadRef.environmentId,
           input: {
             threadId: threadRef.threadId,
             query: settledQuery,
-            ...(cursor ? { cursor } : {}),
+            ...(cursor === undefined ? {} : { cursor }),
           },
         });
         if (cancelled) return;
@@ -96,7 +97,7 @@ export function ThreadFind({
         }
         messages.push(...result.value.messages);
         cursor = result.value.nextCursor ?? undefined;
-      } while (cursor);
+      } while (cursor !== undefined);
       if (!cancelled) setSearch({ messages, pending: false, error: false });
     }
     void load();
@@ -129,14 +130,9 @@ export function ThreadFind({
 
   const messages = useMemo(() => {
     if (!open) return [];
-    const byId = new Map(search.messages.map((message) => [message.id, message]));
-    // The subscription owns live text, including a response still streaming.
-    for (const message of Option.getOrNull(state.data)?.messages ?? []) {
-      if (message.role === "user" || message.role === "assistant")
-        byId.set(message.id, { ...message, role: message.role });
-    }
-    return [...byId.values()].sort(
-      (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+    return mergeThreadFindMessages(
+      search.messages,
+      Option.getOrNull(state.data)?.visibleTurnItems ?? [],
     );
   }, [open, search.messages, state.data]);
 
@@ -183,29 +179,37 @@ export function ThreadFind({
   const pending = normalizedQuery !== settledQuery || search.pending || indexing;
   const active = open && !pending ? matches[index] : undefined;
   const activeMessageId = active?.messageId ?? null;
+  const activeMessage = messages.find((message) => message.id === activeMessageId);
   useEffect(() => {
     onSelectMessage(activeMessageId);
   }, [activeMessageId, onSelectMessage]);
 
   const activeIsLive = active
-    ? (Option.getOrNull(state.data)?.messages.some((message) => message.id === active.messageId) ??
-      false)
+    ? (Option.getOrNull(state.data)?.visibleTurnItems.some(
+        ({ item }) =>
+          (item.type === "user_message" || item.type === "assistant_message") &&
+          item.messageId === active.messageId,
+      ) ?? false)
     : false;
   const context = useEnvironmentQuery(
-    active && !activeIsLive
+    activeMessage && !activeIsLive
       ? orchestrationEnvironment.threadSearchContext({
           environmentId: threadRef.environmentId,
-          input: { threadId: threadRef.threadId, messageId: active.messageId },
+          input: {
+            threadId: threadRef.threadId,
+            sourceThreadId: activeMessage.sourceThreadId,
+            sourceItemId: activeMessage.sourceItemId,
+          },
         })
       : null,
   );
   useEffect(() => {
     if (!active || !navigationRef.current) return;
     if (activeIsLive) onSearchHistory(null);
-    else if (context.data?.thread) onSearchHistory(context.data.thread);
+    else if (context.data?.projection) onSearchHistory(context.data.projection);
   }, [active, activeIsLive, context.data, onSearchHistory, navigationRequest]);
   const navigationError = Boolean(
-    context.error || (active && !activeIsLive && context.data && !context.data.thread),
+    context.error || (active && !activeIsLive && context.data && !context.data.projection),
   );
 
   const rowIndex = active

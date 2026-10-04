@@ -1,3 +1,8 @@
+import {
+  ORCHESTRATION_PROTOCOL_QUERY_PARAM,
+  ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+  ORCHESTRATION_PROTOCOL_VERSION,
+} from "@t3tools/contracts";
 import { type ServerConfig, WS_METHODS } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
@@ -92,7 +97,12 @@ export const make = Effect.gen(function* () {
         Effect.asVoid,
       ),
     });
-    const socketLayer = Socket.layerWebSocket(connection.socketUrl, {
+    const socketUrl = new URL(connection.socketUrl);
+    socketUrl.searchParams.set(
+      ORCHESTRATION_PROTOCOL_QUERY_PARAM,
+      ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+    );
+    const socketLayer = Socket.layerWebSocket(socketUrl.toString(), {
       openTimeout: SOCKET_OPEN_TIMEOUT,
     }).pipe(Layer.provide(Layer.succeed(Socket.WebSocketConstructor, webSocketConstructor)));
     const protocolLayer = Layer.effect(
@@ -117,6 +127,18 @@ export const make = Effect.gen(function* () {
     const initialConfig = yield* Effect.cached(
       client[WS_METHODS.serverGetConfig]({}).pipe(
         Effect.mapError(mapSessionRpcError),
+        Effect.flatMap((config) =>
+          config.environment.capabilities.orchestrationProtocolVersion ===
+          ORCHESTRATION_PROTOCOL_VERSION
+            ? Effect.succeed(config)
+            : Effect.fail(
+                new ConnectionBlockedError({
+                  reason: "configuration",
+                  detail:
+                    "This environment uses an incompatible orchestration protocol. Update its server and client together.",
+                }),
+              ),
+        ),
         Effect.withSpan("environment.initialSync"),
       ),
     );

@@ -118,3 +118,5 @@ export function createEnvironmentCatalogAtoms<R, E>(
     retryNow,
   };
 }
+
+export const enabledEnvironmentIds = (catalog: EnvironmentCatalogState) => catalog.entries.keys();

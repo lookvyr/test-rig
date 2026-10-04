@@ -7,7 +7,7 @@ import { useThreadShell } from "~/state/entities";
 export function useOnTurnCompleted(threadRef: ScopedThreadRef | null, refresh: () => void) {
   const thread = useThreadShell(threadRef);
   const scope = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
-  const completedAt = thread?.latestTurn?.completedAt ?? null;
+  const completedAt = thread?.latestRun?.completedAt ?? null;
   const previous = useRef<{ scope: string | null; completedAt: string | null } | null>(null);
   const onCompleted = useEffectEvent(refresh);
 

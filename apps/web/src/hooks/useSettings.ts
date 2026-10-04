@@ -25,7 +25,6 @@ import {
   type UnifiedSettings,
 } from "@t3tools/contracts/settings";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import { resolveSidebarV2Enabled } from "~/branding.logic";
 import { ensureLocalApi } from "~/localApi";
 import * as Struct from "effect/Struct";
 import { primaryServerSettingsAtom, serverEnvironment } from "~/state/server";
@@ -246,19 +245,6 @@ export function useEnvironmentIdentificationMode(): EnvironmentIdentificationMod
  * the schema defaults, so resolving against it would mount one sidebar and then
  * swap it out once persisted settings land — remounting the whole tree.
  */
-export function useSidebarV2Enabled(): boolean {
-  const settingsHydrated = useClientSettingsHydrated();
-  const settings = useClientSettingsValue();
-  return useMemo(
-    () =>
-      resolveSidebarV2Enabled({
-        enabled: settings.sidebarV2Enabled,
-        configuredByUser: settings.sidebarV2ConfiguredByUser,
-        settingsHydrated,
-      }),
-    [settings.sidebarV2Enabled, settings.sidebarV2ConfiguredByUser, settingsHydrated],
-  );
-}
 
 /** Read current settings for one environment, merged with client-local preferences. */
 export function useEnvironmentSettings<T = UnifiedSettings>(

@@ -61,10 +61,58 @@ it.effect("maps GitHub PR summaries into provider-neutral change requests", () =
       headRefName: "feature/source-control",
       state: "open",
       updatedAt: Option.none(),
+      closedAt: null,
+      mergedAt: null,
       isCrossRepository: true,
       headRepositoryNameWithOwner: "fork/t3code",
       headRepositoryOwnerLogin: "fork",
     });
+  }),
+);
+
+it.effect.each([
+  {
+    remote: "git@github.com:lookvyr/test-rig.git",
+    reference: "5",
+    expected: "https://github.com/lookvyr/test-rig/pull/5",
+  },
+  {
+    remote: "ssh://git@github.enterprise.test/team/fork.git",
+    reference: "#5",
+    expected: "https://github.enterprise.test/team/fork/pull/5",
+  },
+  {
+    remote: "https://github.com/lookvyr/test-rig.git",
+    reference: "https://github.com/other/repo/pull/9",
+    expected: "https://github.com/other/repo/pull/9",
+  },
+])("resolves $reference using the selected project remote", ({ remote, reference, expected }) =>
+  Effect.gen(function* () {
+    let requested = "";
+    const provider = yield* makeProvider({
+      getPullRequest: (input) => {
+        requested = input.reference;
+        return Effect.fail(
+          new GitHubCli.GitHubPullRequestNotFoundError({
+            command: "gh",
+            cwd: input.cwd,
+            cause: null,
+          }),
+        );
+      },
+    });
+    yield* provider
+      .getChangeRequest({
+        cwd: "/fork",
+        reference,
+        context: {
+          provider: { kind: "github", name: "GitHub", baseUrl: "https://github.com" },
+          remoteName: "origin",
+          remoteUrl: remote,
+        },
+      })
+      .pipe(Effect.flip);
+    assert.equal(requested, expected);
   }),
 );
 
@@ -150,7 +198,7 @@ it.effect("uses gh json listing for non-open change request state queries", () =
       "--limit",
       "10",
       "--json",
-      "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
+      "number,title,url,baseRefName,headRefName,state,isDraft,mergedAt,closedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
     ]);
     assert.strictEqual(changeRequests[0]?.provider, "github");
     assert.strictEqual(changeRequests[0]?.state, "merged");

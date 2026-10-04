@@ -1280,8 +1280,19 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const { attachments, ...request } = sendTurnRequest.value;
     yield* providerService
-      .sendTurn(sendTurnRequest.value)
+      .sendTurn({
+        ...request,
+        ...(attachments === undefined
+          ? {}
+          : {
+              attachments: attachments.filter(
+                (attachment): attachment is Extract<typeof attachment, { type: "image" }> =>
+                  attachment.type === "image",
+              ),
+            }),
+      })
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 

@@ -1,4 +1,3 @@
-import { ProviderContinuationRequests } from "../../orchestration-v2/ProviderContinuationRequests.ts";
 /**
  * OpenCodeDriver — `ProviderDriver` for the OpenCode runtime.
  *
@@ -16,6 +15,7 @@ import { ProviderContinuationRequests } from "../../orchestration-v2/ProviderCon
 import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
@@ -28,8 +28,11 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCode2Adapter } from "../opencode2/OpenCode2Adapter.ts";
 import { makeOpenCode2Runtime } from "../opencode2/OpenCode2Runtime.ts";
-import { makeNativeAdapterV2 } from "../../orchestration-v2/Adapters/NativeAdapterV2.ts";
-import { nativeCapabilities } from "../../orchestration-v2/Adapters/nativeCapabilities.ts";
+import * as OpenCode2AdapterV2 from "../../orchestration-v2/Adapters/OpenCode2AdapterV2.ts";
+import * as OpenCode2Server from "../opencode2/OpenCode2Server.ts";
+import * as OpenCode2Client from "../opencode2/OpenCode2Client.ts";
+import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import {
   checkOpenCode2ProviderStatus,
   makePendingOpenCode2Provider,
@@ -80,7 +83,6 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
 });
 
 export type OpenCodeDriverEnv =
-  | ProviderContinuationRequests
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -135,14 +137,19 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         env: processEnv,
       });
 
-      const runtime = yield* makeOpenCode2Runtime(effectiveConfig, processEnv);
+      const server = yield* OpenCode2Server.make({
+        binaryPath: effectiveConfig.binaryPath,
+        serverUrl: effectiveConfig.serverUrl,
+        serverPassword: effectiveConfig.serverPassword,
+        directory: serverConfig.cwd,
+        environment: processEnv,
+      }).pipe(Effect.provide(OpenCode2Client.layer.pipe(Layer.provide(FetchHttpClient.layer))));
+      const runtime = makeOpenCode2Runtime(server);
       const adapter = yield* makeOpenCode2Adapter(effectiveConfig, instanceId, runtime);
-      const v2Native = yield* makeOpenCode2Adapter(effectiveConfig, instanceId, runtime);
-      const orchestrationAdapter = yield* makeNativeAdapterV2({
-        instanceId,
-        native: v2Native,
-        capabilities: nativeCapabilities("opencode"),
-      });
+      const orchestrationAdapter = yield* OpenCode2AdapterV2.make(instanceId).pipe(
+        Effect.provideService(OpenCode2Server.OpenCode2Server, server),
+        Effect.provide(IdAllocator.layer),
+      );
       const textGeneration = yield* makeOpenCodeTextGeneration(runtime);
       const checkProvider = checkOpenCode2ProviderStatus(
         effectiveConfig,

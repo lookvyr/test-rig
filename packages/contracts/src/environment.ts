@@ -3,6 +3,11 @@ import * as Schema from "effect/Schema";
 
 import { EnvironmentId, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
+export const ORCHESTRATION_PROTOCOL_VERSION = 2;
+export const ORCHESTRATION_PROTOCOL_VERSION_TEXT = "2";
+export const ORCHESTRATION_PROTOCOL_QUERY_PARAM = "orchestrationProtocol";
+export const ORCHESTRATION_PROTOCOL_HEADER = "x-t3-orchestration-protocol";
+
 export const ExecutionEnvironmentPlatformOs = Schema.Literals([
   "darwin",
   "linux",
@@ -21,6 +26,7 @@ export const ExecutionEnvironmentPlatform = Schema.Struct({
 export type ExecutionEnvironmentPlatform = typeof ExecutionEnvironmentPlatform.Type;
 
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
+  orchestrationProtocolVersion: Schema.optionalKey(Schema.Int),
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   connectionProbe: Schema.optionalKey(Schema.Boolean),
   /** Server understands thread.settle / thread.unsettle commands. Absent on
@@ -91,3 +97,9 @@ export const ScopedThreadSessionRef = Schema.Struct({
   threadId: ThreadId,
 });
 export type ScopedThreadSessionRef = typeof ScopedThreadSessionRef.Type;
+
+export const ThreadEnvMode = Schema.Literals(["local", "worktree"]);
+export type ThreadEnvMode = typeof ThreadEnvMode.Type;
+
+export const WorktreeSubmodules = Schema.Literals(["recursive", "top-level", "none"]);
+export type WorktreeSubmodules = typeof WorktreeSubmodules.Type;

@@ -1,11 +1,11 @@
 import { useMemo } from "react";
-import type { EnvironmentId, OrchestrationMessage } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import type { ChatMessage } from "../../types";
 import { useAssetUrls } from "../../assets/assetUrls";
 
 export function useMessagesWithImages(
   environmentId: EnvironmentId,
-  serverMessages: ReadonlyArray<OrchestrationMessage> | undefined,
+  serverMessages: ReadonlyArray<ChatMessage> | undefined,
 ) {
   const serverAttachmentIds = useMemo(() => {
     const attachmentIds = new Set<string>();

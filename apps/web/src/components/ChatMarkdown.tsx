@@ -1,3 +1,14 @@
+import { ChatMarkdownAssetImage } from "./ChatMarkdownAssetImage";
+export { ChatMarkdownAssetImage };
+import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
+import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
+import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
+export interface ChatMarkdownContextReference {
+  kind: string;
+  contextId: string;
+  label: string;
+}
+
 import { MarkdownPre, nodeToPlainText, remarkPreserveCodeMeta } from "./MarkdownCodeBlock";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -110,6 +121,11 @@ function MarkdownBrowserScreenshot({
 }
 
 interface ChatMarkdownProps {
+  parseRawHtml?: boolean;
+  extraRemarkPlugins?: NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
+  renderContextReference?: ((reference: ChatMarkdownContextReference) => ReactNode) | undefined;
+  headingLevelOffset?: number | undefined;
+  onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
   text: string;
   cwd: string | undefined;
   threadRef?: ScopedThreadRef | undefined;
@@ -764,6 +780,11 @@ function ChatMarkdown({
   skills = EMPTY_MARKDOWN_SKILLS,
   className,
   lineBreaks = false,
+  parseRawHtml = true,
+  extraRemarkPlugins,
+  renderContextReference,
+  headingLevelOffset = 0,
+  onImageExpand,
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
@@ -781,11 +802,17 @@ function ChatMarkdown({
   );
   const { markdownFileLinkMetaByHref, inlineCodeFileLinkMetaByText, fileLinkParentSuffixByPath } =
     useMemo(() => getChatMarkdownFileLinks(text, cwd), [cwd, text]);
-  const markdownUrlTransform = useCallback((href: string, key: string) => {
-    const screenshot = key === "src" ? resolveMarkdownBrowserScreenshotFileName(href) : null;
-    if (screenshot) return `/browser-artifacts/${screenshot}`;
-    return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
-  }, []);
+  const markdownUrlTransform = useCallback(
+    (href: string, key: string) => {
+      if (parseComposerContextHref(href)) return href;
+      if (key === "src" && classifyMarkdownImageSource(href, cwd)._tag === "WorkspaceFile")
+        return href;
+      const screenshot = key === "src" ? resolveMarkdownBrowserScreenshotFileName(href) : null;
+      if (screenshot) return `/browser-artifacts/${screenshot}`;
+      return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
+    },
+    [cwd],
+  );
   // Re-emit highlighted content as markdown so copying out of the rendered
   // view keeps links, emphasis, lists, and code fences intact.
   const handleCopy = useCallback((event: ReactClipboardEvent<HTMLDivElement>) => {
@@ -872,20 +899,53 @@ function ChatMarkdown({
     };
 
     return {
-      img({ node: _node, src, ...props }) {
-        const fileName = resolveMarkdownBrowserScreenshotFileName(
-          typeof src === "string" ? src : undefined,
-        );
-        const screenshotEnvironmentId = threadRef?.environmentId ?? environmentId;
-        return fileName && screenshotEnvironmentId ? (
-          <MarkdownBrowserScreenshot
-            {...props}
-            environmentId={screenshotEnvironmentId}
-            fileName={fileName}
-          />
-        ) : (
-          <img {...props} src={src} />
-        );
+      ...Object.fromEntries(
+        [1, 2, 3, 4, 5, 6].map((level) => [
+          `h${level}`,
+          ({
+            node: _node,
+            ...props
+          }: React.HTMLAttributes<HTMLHeadingElement> & { node?: unknown }) =>
+            React.createElement(`h${level}`, {
+              ...props,
+              "aria-level":
+                headingLevelOffset > 0 ? Math.min(level + headingLevelOffset, 6) : undefined,
+            }),
+        ]),
+      ),
+      img({ node: _node, src, alt = "", title: _title, ...props }) {
+        const source = typeof src === "string" ? src : "";
+        const context = parseComposerContextHref(source);
+        if (context)
+          return (
+            renderContextReference?.({ ...context, label: alt || context.contextId }) ?? (
+              <span>{alt || context.contextId}</span>
+            )
+          );
+        const fileName = resolveMarkdownBrowserScreenshotFileName(source);
+        const imageEnvironmentId = threadRef?.environmentId ?? environmentId;
+        if (fileName && imageEnvironmentId)
+          return (
+            <MarkdownBrowserScreenshot
+              {...props}
+              alt={alt}
+              environmentId={imageEnvironmentId}
+              fileName={fileName}
+            />
+          );
+        const classified = classifyMarkdownImageSource(source, cwd);
+        if (classified._tag === "WorkspaceFile" && threadRef)
+          return (
+            <ChatMarkdownAssetImage
+              environmentId={threadRef.environmentId}
+              resource={{ _tag: "media-file", threadId: threadRef.threadId, path: classified.path }}
+              alt={alt}
+              imageProps={props}
+              onImageExpand={onImageExpand}
+            />
+          );
+        if (classified._tag === "Blocked") return <span>{alt || "Image unavailable"}</span>;
+        return <img {...props} alt={alt} src={src} loading="lazy" />;
       },
       p({ node: _node, children, ...props }) {
         return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
@@ -929,7 +989,12 @@ function ChatMarkdown({
           />
         );
       },
-      a({ node, href, children, ...props }) {
+      a({ node, href, children, title: _title, ...props }) {
+        const context = href ? parseComposerContextHref(href) : null;
+        if (context) {
+          const label = nodeToPlainText(children) || context.contextId;
+          return renderContextReference?.({ ...context, label }) ?? <span>{label}</span>;
+        }
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
         if (!fileLinkMeta) {
@@ -1034,6 +1099,9 @@ function ChatMarkdown({
       },
     };
   }, [
+    renderContextReference,
+    headingLevelOffset,
+    onImageExpand,
     cwd,
     environmentId,
     fileLinkParentSuffixByPath,
@@ -1060,10 +1128,11 @@ function ChatMarkdown({
       onCopy={handleCopy}
     >
       <ReactMarkdown
-        remarkPlugins={
-          lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS
-        }
-        rehypePlugins={CHAT_MARKDOWN_REHYPE_PLUGINS}
+        remarkPlugins={[
+          ...(lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS),
+          ...(extraRemarkPlugins ?? []),
+        ]}
+        rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

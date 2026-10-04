@@ -14,6 +14,9 @@ import * as Effect from "effect/Effect";
  */
 const WINDOWS_SHIM_EXTENSIONS: ReadonlySet<string> = new Set([".cmd", ".bat", ".ps1"]);
 
+export const isWindowsClaudeLauncherShimPath = (filePath: string): boolean =>
+  WINDOWS_SHIM_EXTENSIONS.has(NodePath.win32.extname(filePath).toLowerCase());
+
 /**
  * Entry points of the npm `@anthropic-ai/claude-code` package relative to the
  * global `node_modules` directory that sits next to the npm launcher shim.

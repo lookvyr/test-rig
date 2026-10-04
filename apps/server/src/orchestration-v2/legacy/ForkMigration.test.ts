@@ -40,7 +40,10 @@ it.layer(NodeServices.layer)("fork V2 migration", (it) => {
         yield* runV2Migrations();
         const rows =
           yield* sql`SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 38 ORDER BY migration_id`;
-        NodeAssert.equal(rows.length, 5);
+        NodeAssert.deepEqual(
+          rows.map((row) => row.migration_id),
+          [38, 39, 40, 41, 42, 43],
+        );
         NodeAssert.equal((yield* runV2Migrations()).length, 0);
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" })));
     }),
@@ -492,7 +495,7 @@ it.layer(NodeServices.layer)("fork V2 migration", (it) => {
       for (let reopen = 0; reopen < 2; reopen++) {
         NodeAssert.equal(
           yield* readSchema.pipe(Effect.provide(makeV2SqlitePersistenceLive(directory))),
-          42,
+          43,
         );
       }
       NodeAssert.equal(

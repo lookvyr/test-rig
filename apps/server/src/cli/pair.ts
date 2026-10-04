@@ -52,7 +52,7 @@ export type PairStateVariant = "userdata" | "dev";
 // dev-vs-userdata state directory; the value itself is not used.
 const DEV_VARIANT_PLACEHOLDER_URL = new URL("http://localhost");
 
-export class NoRunningServerError extends Schema.TaggedErrorClass<NoRunningServerError>()(
+export class NoRunningServerError extends Schema.TaggedError<NoRunningServerError>()(
   "NoRunningServerError",
   {
     checkedStatePaths: Schema.Array(Schema.String),
@@ -135,7 +135,7 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
     if (worktreeHome !== undefined) {
       bases.push(worktreeHome);
     }
-    const envHome = yield* Config.string(HOME_ENVIRONMENT_VARIABLE).pipe(Config.option);
+    const envHome = yield* Config.String(HOME_ENVIRONMENT_VARIABLE).pipe(Config.option);
     bases.push(yield* resolveBaseDir(Option.getOrUndefined(envHome)));
   }
 
@@ -245,7 +245,7 @@ const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
   );
 });
 
-const ttlFlag = Flag.string("ttl").pipe(
+const ttlFlag = Flag.String("ttl").pipe(
   Flag.withSchema(DurationFromString),
   Flag.withDescription(
     "Token TTL, for example `5m`, `1h`, or `15 minutes`. Defaults to 5 minutes.",
@@ -253,7 +253,7 @@ const ttlFlag = Flag.string("ttl").pipe(
   Flag.optional,
 );
 
-const labelFlag = Flag.string("label").pipe(
+const labelFlag = Flag.String("label").pipe(
   Flag.withDescription("Optional label shown in the server's connections list."),
   Flag.optional,
 );

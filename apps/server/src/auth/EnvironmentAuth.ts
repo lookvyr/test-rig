@@ -68,7 +68,7 @@ const serverAuthInternalErrorContext = {
   cause: Schema.Defect(),
 };
 
-export class ServerAuthBootstrapCredentialValidationError extends Schema.TaggedErrorClass<ServerAuthBootstrapCredentialValidationError>()(
+export class ServerAuthBootstrapCredentialValidationError extends Schema.TaggedError<ServerAuthBootstrapCredentialValidationError>()(
   "ServerAuthBootstrapCredentialValidationError",
   {
     ...serverAuthInternalErrorContext,
@@ -79,7 +79,7 @@ export class ServerAuthBootstrapCredentialValidationError extends Schema.TaggedE
   }
 }
 
-export class ServerAuthSessionCredentialValidationError extends Schema.TaggedErrorClass<ServerAuthSessionCredentialValidationError>()(
+export class ServerAuthSessionCredentialValidationError extends Schema.TaggedError<ServerAuthSessionCredentialValidationError>()(
   "ServerAuthSessionCredentialValidationError",
   {
     ...serverAuthInternalErrorContext,
@@ -90,7 +90,7 @@ export class ServerAuthSessionCredentialValidationError extends Schema.TaggedErr
   }
 }
 
-export class ServerAuthAuthenticatedSessionIssueError extends Schema.TaggedErrorClass<ServerAuthAuthenticatedSessionIssueError>()(
+export class ServerAuthAuthenticatedSessionIssueError extends Schema.TaggedError<ServerAuthAuthenticatedSessionIssueError>()(
   "ServerAuthAuthenticatedSessionIssueError",
   {
     ...serverAuthInternalErrorContext,
@@ -101,7 +101,7 @@ export class ServerAuthAuthenticatedSessionIssueError extends Schema.TaggedError
   }
 }
 
-export class ServerAuthAuthenticatedAccessTokenIssueError extends Schema.TaggedErrorClass<ServerAuthAuthenticatedAccessTokenIssueError>()(
+export class ServerAuthAuthenticatedAccessTokenIssueError extends Schema.TaggedError<ServerAuthAuthenticatedAccessTokenIssueError>()(
   "ServerAuthAuthenticatedAccessTokenIssueError",
   {
     ...serverAuthInternalErrorContext,
@@ -112,7 +112,7 @@ export class ServerAuthAuthenticatedAccessTokenIssueError extends Schema.TaggedE
   }
 }
 
-export class ServerAuthPairingLinkCreationError extends Schema.TaggedErrorClass<ServerAuthPairingLinkCreationError>()(
+export class ServerAuthPairingLinkCreationError extends Schema.TaggedError<ServerAuthPairingLinkCreationError>()(
   "ServerAuthPairingLinkCreationError",
   {
     ...serverAuthInternalErrorContext,
@@ -123,7 +123,7 @@ export class ServerAuthPairingLinkCreationError extends Schema.TaggedErrorClass<
   }
 }
 
-export class ServerAuthPairingLinksListError extends Schema.TaggedErrorClass<ServerAuthPairingLinksListError>()(
+export class ServerAuthPairingLinksListError extends Schema.TaggedError<ServerAuthPairingLinksListError>()(
   "ServerAuthPairingLinksListError",
   {
     ...serverAuthInternalErrorContext,
@@ -134,7 +134,7 @@ export class ServerAuthPairingLinksListError extends Schema.TaggedErrorClass<Ser
   }
 }
 
-export class ServerAuthPairingLinkRevocationError extends Schema.TaggedErrorClass<ServerAuthPairingLinkRevocationError>()(
+export class ServerAuthPairingLinkRevocationError extends Schema.TaggedError<ServerAuthPairingLinkRevocationError>()(
   "ServerAuthPairingLinkRevocationError",
   {
     ...serverAuthInternalErrorContext,
@@ -145,7 +145,7 @@ export class ServerAuthPairingLinkRevocationError extends Schema.TaggedErrorClas
   }
 }
 
-export class ServerAuthSessionTokenIssueError extends Schema.TaggedErrorClass<ServerAuthSessionTokenIssueError>()(
+export class ServerAuthSessionTokenIssueError extends Schema.TaggedError<ServerAuthSessionTokenIssueError>()(
   "ServerAuthSessionTokenIssueError",
   {
     ...serverAuthInternalErrorContext,
@@ -156,7 +156,7 @@ export class ServerAuthSessionTokenIssueError extends Schema.TaggedErrorClass<Se
   }
 }
 
-export class ServerAuthSessionsListError extends Schema.TaggedErrorClass<ServerAuthSessionsListError>()(
+export class ServerAuthSessionsListError extends Schema.TaggedError<ServerAuthSessionsListError>()(
   "ServerAuthSessionsListError",
   {
     ...serverAuthInternalErrorContext,
@@ -167,7 +167,7 @@ export class ServerAuthSessionsListError extends Schema.TaggedErrorClass<ServerA
   }
 }
 
-export class ServerAuthSessionRevocationError extends Schema.TaggedErrorClass<ServerAuthSessionRevocationError>()(
+export class ServerAuthSessionRevocationError extends Schema.TaggedError<ServerAuthSessionRevocationError>()(
   "ServerAuthSessionRevocationError",
   {
     ...serverAuthInternalErrorContext,
@@ -178,7 +178,7 @@ export class ServerAuthSessionRevocationError extends Schema.TaggedErrorClass<Se
   }
 }
 
-export class ServerAuthOtherSessionsRevocationError extends Schema.TaggedErrorClass<ServerAuthOtherSessionsRevocationError>()(
+export class ServerAuthOtherSessionsRevocationError extends Schema.TaggedError<ServerAuthOtherSessionsRevocationError>()(
   "ServerAuthOtherSessionsRevocationError",
   {
     ...serverAuthInternalErrorContext,
@@ -189,7 +189,7 @@ export class ServerAuthOtherSessionsRevocationError extends Schema.TaggedErrorCl
   }
 }
 
-export class ServerAuthWebSocketTokenIssueError extends Schema.TaggedErrorClass<ServerAuthWebSocketTokenIssueError>()(
+export class ServerAuthWebSocketTokenIssueError extends Schema.TaggedError<ServerAuthWebSocketTokenIssueError>()(
   "ServerAuthWebSocketTokenIssueError",
   {
     ...serverAuthInternalErrorContext,
@@ -217,7 +217,7 @@ export const ServerAuthInternalError = Schema.Union([
 export type ServerAuthInternalError = typeof ServerAuthInternalError.Type;
 export const isServerAuthInternalError = Schema.is(ServerAuthInternalError);
 
-export class ServerAuthMissingCredentialError extends Schema.TaggedErrorClass<ServerAuthMissingCredentialError>()(
+export class ServerAuthMissingCredentialError extends Schema.TaggedError<ServerAuthMissingCredentialError>()(
   "ServerAuthMissingCredentialError",
   {},
 ) {
@@ -226,7 +226,7 @@ export class ServerAuthMissingCredentialError extends Schema.TaggedErrorClass<Se
   }
 }
 
-export class ServerAuthInvalidCredentialError extends Schema.TaggedErrorClass<ServerAuthInvalidCredentialError>()(
+export class ServerAuthInvalidCredentialError extends Schema.TaggedError<ServerAuthInvalidCredentialError>()(
   "ServerAuthInvalidCredentialError",
   {
     diagnostic: Schema.optional(Schema.String),
@@ -249,7 +249,7 @@ export const serverAuthCredentialReason = (
 ): "missing_credential" | "invalid_credential" =>
   error._tag === "ServerAuthMissingCredentialError" ? "missing_credential" : "invalid_credential";
 
-export class ServerAuthInvalidScopeError extends Schema.TaggedErrorClass<ServerAuthInvalidScopeError>()(
+export class ServerAuthInvalidScopeError extends Schema.TaggedError<ServerAuthInvalidScopeError>()(
   "ServerAuthInvalidScopeError",
   {},
 ) {
@@ -258,7 +258,7 @@ export class ServerAuthInvalidScopeError extends Schema.TaggedErrorClass<ServerA
   }
 }
 
-export class ServerAuthScopeNotGrantedError extends Schema.TaggedErrorClass<ServerAuthScopeNotGrantedError>()(
+export class ServerAuthScopeNotGrantedError extends Schema.TaggedError<ServerAuthScopeNotGrantedError>()(
   "ServerAuthScopeNotGrantedError",
   {},
 ) {
@@ -278,7 +278,7 @@ export const serverAuthInvalidRequestReason = (
 ): "invalid_scope" | "scope_not_granted" =>
   error._tag === "ServerAuthInvalidScopeError" ? "invalid_scope" : "scope_not_granted";
 
-export class ServerAuthForbiddenOperationError extends Schema.TaggedErrorClass<ServerAuthForbiddenOperationError>()(
+export class ServerAuthForbiddenOperationError extends Schema.TaggedError<ServerAuthForbiddenOperationError>()(
   "ServerAuthForbiddenOperationError",
   {},
 ) {
@@ -724,12 +724,10 @@ export const make = Effect.gen(function* () {
   const listClientSessions: EnvironmentAuth["Service"]["listClientSessions"] = (currentSessionId) =>
     listSessions().pipe(
       Effect.map((clientSessions) =>
-        clientSessions.map(
-          (clientSession): AuthClientSession => ({
-            ...clientSession,
-            current: clientSession.sessionId === currentSessionId,
-          }),
-        ),
+        clientSessions.map((clientSession): AuthClientSession => ({
+          ...clientSession,
+          current: clientSession.sessionId === currentSessionId,
+        })),
       ),
       Effect.withSpan("EnvironmentAuth.listClientSessions"),
     );

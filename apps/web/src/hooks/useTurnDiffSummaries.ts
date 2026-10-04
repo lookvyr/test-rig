@@ -1,5 +1,6 @@
+import { deriveThreadCheckpointSummaries } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { useMemo } from "react";
-import { inferCheckpointTurnCountByTurnId } from "../session-logic";
+import { inferCheckpointTurnCountByRunId } from "../session-logic";
 import type { Thread, TurnDiffSummary } from "../types";
 
 export function useTurnDiffSummaries(activeThread: Thread | null | undefined) {
@@ -7,13 +8,13 @@ export function useTurnDiffSummaries(activeThread: Thread | null | undefined) {
     if (!activeThread) {
       return [];
     }
-    return activeThread.checkpoints;
+    return activeThread.projection ? deriveThreadCheckpointSummaries(activeThread.projection) : [];
   }, [activeThread]);
 
-  const inferredCheckpointTurnCountByTurnId = useMemo(
-    () => inferCheckpointTurnCountByTurnId(turnDiffSummaries),
+  const inferredCheckpointTurnCountByRunId = useMemo(
+    () => inferCheckpointTurnCountByRunId(turnDiffSummaries),
     [turnDiffSummaries],
   );
 
-  return { turnDiffSummaries, inferredCheckpointTurnCountByTurnId };
+  return { turnDiffSummaries, inferredCheckpointTurnCountByRunId };
 }

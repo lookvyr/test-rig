@@ -290,16 +290,29 @@ function isLocalProjectedRow(
   return row.visibility === "local" || String(row.sourceThreadId) === String(projection.thread.id);
 }
 
+function isControlDependency(
+  item: OrchestrationV2TurnItem,
+  pendingRequestIds: ReadonlySet<string>,
+): boolean {
+  return (
+    item.type === "run_interrupt_request" ||
+    ((item.type === "user_input_request" || item.type === "approval_request") &&
+      pendingRequestIds.has(item.requestId))
+  );
+}
+
 /**
  * Visibility for superseded `run_interrupt_result` rows depends on a matching
  * `run_interrupt_request` in `turnItems`. Keep every small request item from the
  * full projection even when it sits outside the recent visible window, so a
  * later history page that introduces the matching result still has the request
- * available for live attempt/run reducers.
+ * available for live attempt/run reducers. Pending questions and approvals also
+ * retain their display payload when their original turn leaves the window.
  */
-function retainedInterruptRequestTurnItems(
+function retainedControlTurnItems(
   projection: OrchestrationV2ThreadProjection,
   visible: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+  pendingRequestIds: ReadonlySet<string>,
 ): OrchestrationV2TurnItem[] {
   const visibleLocalIds = new Set<string>();
   for (const row of visible) {
@@ -310,7 +323,7 @@ function retainedInterruptRequestTurnItems(
 
   const retained: OrchestrationV2TurnItem[] = [];
   for (const item of projection.turnItems) {
-    if (item.type !== "run_interrupt_request") {
+    if (!isControlDependency(item, pendingRequestIds)) {
       continue;
     }
     // Already covered by local turnItems for the visible window.
@@ -431,14 +444,20 @@ export function buildBoundedThreadProjection(input: {
   };
   const latestLocalTurnOrdinal = computeLatestLocalTurnOrdinal(input.projection.turnItems);
 
-  // Reserve bytes for small interrupt-request dependencies that may sit outside
+  const pendingRequestIds = new Set(
+    controlProjection.runtimeRequests
+      .filter((request) => request.status === "pending")
+      .map((request) => String(request.id)),
+  );
+
+  // Reserve bytes for control dependencies that may sit outside
   // the recent window but are required for visibility of results inside it.
   const dependencyReserve = (() => {
     // Upper bound: all request items in the full projection. Window selection
     // uses this reserve so the final contribution stays under the cap.
     let reserve = 0;
     for (const item of controlProjection.turnItems) {
-      if (item.type === "run_interrupt_request") {
+      if (isControlDependency(item, pendingRequestIds)) {
         reserve += bytesOfJson(item);
       }
     }
@@ -469,9 +488,10 @@ export function buildBoundedThreadProjection(input: {
   });
   const visibleTurnItems = renumberPositions(window.items);
   const windowTurnItems = localTurnItemsForVisibleWindow(controlProjection, visibleTurnItems);
-  const dependencyTurnItems = retainedInterruptRequestTurnItems(
+  const dependencyTurnItems = retainedControlTurnItems(
     controlProjection,
     visibleTurnItems,
+    pendingRequestIds,
   );
   const turnItemById = new Map<string, OrchestrationV2TurnItem>();
   for (const item of windowTurnItems) {

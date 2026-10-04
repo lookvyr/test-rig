@@ -77,3 +77,11 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
     </span>
   );
 });
+
+export function providerTextColorClassName(driverKind: ProviderDriverKind): string | undefined {
+  return {
+    codex: "text-[#0F0F0F] dark:text-[#F5F5F5]",
+    claudeAgent: "text-[#C15F3C] dark:text-[#D97757]",
+    opencode: "text-[#211E1E] dark:text-[#F1ECEC]",
+  }[driverKind as "codex" | "claudeAgent" | "opencode"];
+}

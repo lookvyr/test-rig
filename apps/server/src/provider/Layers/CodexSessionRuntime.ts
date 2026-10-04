@@ -163,7 +163,7 @@ export type CodexSessionRuntimeError =
   | CodexSessionRuntimeInvalidUserInputAnswersError
   | CodexSessionRuntimeThreadIdMissingError;
 
-export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingApprovalNotFoundError>()(
+export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedError<CodexSessionRuntimePendingApprovalNotFoundError>()(
   "CodexSessionRuntimePendingApprovalNotFoundError",
   {
     requestId: Schema.String,
@@ -174,7 +174,7 @@ export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.Tagg
   }
 }
 
-export class CodexSessionRuntimePendingUserInputNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingUserInputNotFoundError>()(
+export class CodexSessionRuntimePendingUserInputNotFoundError extends Schema.TaggedError<CodexSessionRuntimePendingUserInputNotFoundError>()(
   "CodexSessionRuntimePendingUserInputNotFoundError",
   {
     requestId: Schema.String,
@@ -185,7 +185,7 @@ export class CodexSessionRuntimePendingUserInputNotFoundError extends Schema.Tag
   }
 }
 
-export class CodexSessionRuntimeInvalidUserInputAnswersError extends Schema.TaggedErrorClass<CodexSessionRuntimeInvalidUserInputAnswersError>()(
+export class CodexSessionRuntimeInvalidUserInputAnswersError extends Schema.TaggedError<CodexSessionRuntimeInvalidUserInputAnswersError>()(
   "CodexSessionRuntimeInvalidUserInputAnswersError",
   {
     questionId: Schema.String,
@@ -196,7 +196,7 @@ export class CodexSessionRuntimeInvalidUserInputAnswersError extends Schema.Tagg
   }
 }
 
-export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedErrorClass<CodexSessionRuntimeThreadIdMissingError>()(
+export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedError<CodexSessionRuntimeThreadIdMissingError>()(
   "CodexSessionRuntimeThreadIdMissingError",
   {
     threadId: Schema.String,
@@ -501,7 +501,7 @@ export const openCodexThread = (input: {
         }),
       );
     }
-    return input.client.request("thread/start", { ...startParams, historyMode: "paginated" });
+    return input.client.request("thread/start", startParams);
   }
 
   return input.client
@@ -519,11 +519,7 @@ export const openCodexThread = (input: {
             resumeThreadId,
             recoverable: true,
             cause: error,
-          }).pipe(
-            Effect.andThen(
-              input.client.request("thread/start", { ...startParams, historyMode: "paginated" }),
-            ),
-          ),
+          }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
       ),
     );
 };
@@ -1504,7 +1500,11 @@ export const makeCodexSessionRuntime = (
           ...(turnId ? { turnId } : {}),
           ...(itemId ? { itemId } : {}),
           ...(requestId ? { requestId } : {}),
-          ...(requestKind ? { requestKind } : {}),
+          ...(requestKind === "command" ||
+          requestKind === "file-read" ||
+          requestKind === "file-change"
+            ? { requestKind }
+            : {}),
           ...(notification.method === "item/agentMessage/delta"
             ? { textDelta: notification.params.delta }
             : {}),
@@ -1628,7 +1628,7 @@ export const makeCodexSessionRuntime = (
           ),
         );
         return {
-          decision: resolved,
+          decision: resolved === "acceptAlways" ? "acceptForSession" : resolved,
         } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse;
       }),
     );
@@ -1686,7 +1686,7 @@ export const makeCodexSessionRuntime = (
           ),
         );
         return {
-          decision: resolved,
+          decision: resolved === "acceptAlways" ? "acceptForSession" : resolved,
         } satisfies EffectCodexSchema.FileChangeRequestApprovalResponse;
       }),
     );
@@ -2039,7 +2039,11 @@ export const makeCodexSessionRuntime = (
             threadId: options.threadId,
             method: "item/requestApproval/decision",
             requestId: pending.requestId,
-            requestKind: pending.requestKind,
+            ...(pending.requestKind === "command" ||
+            pending.requestKind === "file-read" ||
+            pending.requestKind === "file-change"
+              ? { requestKind: pending.requestKind }
+              : {}),
             ...(pending.turnId ? { turnId: pending.turnId } : {}),
             ...(pending.itemId ? { itemId: pending.itemId } : {}),
             payload: {

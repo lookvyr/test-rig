@@ -1,3 +1,4 @@
+import { WorktreeCleanup } from "./workspace/WorktreeCleanup.ts";
 import {
   CommandId,
   DEFAULT_MODEL,
@@ -15,7 +16,6 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -25,15 +25,18 @@ import * as Scope from "effect/Scope";
 import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
-import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as OrchestrationReactor from "./orchestration/Services/OrchestrationReactor.ts";
+import * as ProjectService from "./project/ProjectService.ts";
+import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
+import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
+import * as EffectWorker from "./orchestration-v2/EffectWorker.ts";
+import * as LegacyV1ThreadImporter from "./orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
+import * as ProviderRuntimeRecovery from "./orchestration-v2/ProviderRuntimeRecoveryService.ts";
+import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReaper.ts";
 import { forkParked } from "./serverActivation.ts";
 import {
   formatHeadlessServeOutput,
@@ -42,7 +45,7 @@ import {
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
 
-export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRuntimeStartupError>()(
+export class ServerRuntimeStartupError extends Schema.TaggedError<ServerRuntimeStartupError>()(
   "ServerRuntimeStartupError",
   {
     mode: ServerConfig.RuntimeMode,
@@ -133,17 +136,14 @@ export const makeCommandGate = Effect.gen(function* () {
 
 export const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService.AnalyticsService;
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-
-  const { threadCount, projectCount } = yield* projectionSnapshotQuery.getCounts().pipe(
+  const threads = yield* ThreadManagement.ThreadManagementService;
+  const projects = yield* ProjectService.ProjectService;
+  const projectCount = (yield* projects.snapshot).projects.length;
+  const { threadCount } = yield* threads.getShellSnapshot().pipe(
+    Effect.map((shell) => ({ threadCount: shell.threads.length, projectCount })),
     Effect.catch((cause) =>
-      Effect.logWarning("failed to gather startup projection counts for telemetry", {
-        cause,
-      }).pipe(
-        Effect.as({
-          threadCount: 0,
-          projectCount: 0,
-        }),
+      Effect.logWarning("failed to gather startup projection counts for telemetry", { cause }).pipe(
+        Effect.as({ threadCount: 0, projectCount: 0 }),
       ),
     ),
   );
@@ -182,66 +182,47 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const randomUUID = crypto.randomUUIDv4;
   const serverConfig = yield* ServerConfig.ServerConfig;
-  const projectionReadModelQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const projects = yield* ProjectService.ProjectService;
+  const threads = yield* ThreadManagement.ThreadManagementService;
+  const threadLaunch = yield* ThreadLaunch.ThreadLaunchService;
   const path = yield* Path.Path;
 
   let bootstrapProjectId: ProjectId | undefined;
   let bootstrapThreadId: ThreadId | undefined;
 
   if (serverConfig.autoBootstrapProjectFromCwd) {
-    yield* Effect.gen(function* () {
-      const existingProject = yield* projectionReadModelQuery.getActiveProjectByWorkspaceRoot(
-        serverConfig.cwd,
-      );
-      let nextProjectId: ProjectId;
-      let nextProjectDefaultModelSelection: ModelSelection;
-
-      if (Option.isNone(existingProject)) {
-        const createdAt = DateTime.formatIso(yield* DateTime.now);
-        nextProjectId = ProjectId.make(yield* randomUUID);
-        const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
-        nextProjectDefaultModelSelection = getAutoBootstrapDefaultModelSelection();
-        yield* orchestrationEngine.dispatch({
-          type: "project.create",
-          commandId: CommandId.make(yield* randomUUID),
-          projectId: nextProjectId,
-          title: bootstrapProjectTitle,
-          workspaceRoot: serverConfig.cwd,
-          defaultModelSelection: nextProjectDefaultModelSelection,
-          createdAt,
-        });
-      } else {
-        nextProjectId = existingProject.value.id;
-        nextProjectDefaultModelSelection =
-          existingProject.value.defaultModelSelection ?? getAutoBootstrapDefaultModelSelection();
-      }
-
-      const existingThreadId =
-        yield* projectionReadModelQuery.getFirstActiveThreadIdByProjectId(nextProjectId);
-      if (Option.isNone(existingThreadId)) {
-        const createdAt = DateTime.formatIso(yield* DateTime.now);
-        const createdThreadId = ThreadId.make(yield* randomUUID);
-        yield* orchestrationEngine.dispatch({
-          type: "thread.create",
-          commandId: CommandId.make(yield* randomUUID),
-          threadId: createdThreadId,
-          projectId: nextProjectId,
-          title: "New thread",
-          modelSelection: nextProjectDefaultModelSelection,
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access",
-          branch: null,
-          worktreePath: null,
-          createdAt,
-        });
-        bootstrapProjectId = nextProjectId;
-        bootstrapThreadId = createdThreadId;
-      } else {
-        bootstrapProjectId = nextProjectId;
-        bootstrapThreadId = existingThreadId.value;
-      }
+    // Project creation has no user model choice; only the bootstrap thread
+    // gets an automatic selection, and an explicit project default wins.
+    const threadModelSelection = getAutoBootstrapDefaultModelSelection();
+    const { project } = yield* projects.bootstrap({
+      commandId: CommandId.make(yield* randomUUID),
+      projectId: ProjectId.make(yield* randomUUID),
+      title: path.basename(serverConfig.cwd) || "project",
+      workspaceRoot: serverConfig.cwd,
     });
+    const shell = yield* threads.getShellSnapshot();
+    const existingThread = shell.threads.find(
+      (thread) =>
+        thread.projectId === project.id && thread.lineage.relationshipToParent !== "subagent",
+    );
+    if (existingThread === undefined) {
+      const launched = yield* threadLaunch.launch({
+        commandId: CommandId.make(yield* randomUUID),
+        projectId: project.id,
+        title: "New thread",
+        modelSelection: project.defaultModelSelection ?? threadModelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        workspaceStrategy: { type: "root" },
+        createdBy: "system",
+        creationSource: "server",
+      });
+      bootstrapProjectId = project.id;
+      bootstrapThreadId = launched.threadId;
+    } else {
+      bootstrapProjectId = project.id;
+      bootstrapThreadId = existingThread.id;
+    }
   }
 
   return {
@@ -299,18 +280,34 @@ export const make = (options?: StartupOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig.ServerConfig;
     const keybindings = yield* Keybindings.Keybindings;
-    const orchestrationReactor = yield* OrchestrationReactor.OrchestrationReactor;
-    const providerSessionReaper = yield* ProviderSessionReaper.ProviderSessionReaper;
+    const legacyImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
+    const recovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
+    const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
-    const crypto = yield* Crypto.Crypto;
-
     const commandGate = yield* makeCommandGate;
     const httpListening = yield* Deferred.make<void>();
-    const reactorScope = yield* Scope.make("sequential");
-
-    yield* Effect.addFinalizer(() => Scope.close(reactorScope, Exit.void));
+    const workerScope = yield* Scope.make("sequential");
+    yield* Effect.addFinalizer(() =>
+      Effect.gen(function* () {
+        yield* commandGate.failCommandReady(
+          new ServerRuntimeStartupError({
+            mode: serverConfig.mode,
+            host: serverConfig.host ?? null,
+            port: serverConfig.port,
+            cause: "Server runtime is shutting down.",
+          }),
+        );
+        yield* Scope.close(workerScope, Exit.void);
+        yield* recovery.prepareForShutdown.pipe(Effect.ensuring(providerSessions.shutdown));
+        yield* recovery.reconcile("shutdown");
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("V2 shutdown reconciliation failed", { cause }),
+        ),
+      ),
+    );
 
     const startup = Effect.gen(function* () {
       yield* Effect.logDebug("startup phase: starting keybindings runtime");
@@ -343,57 +340,30 @@ export const make = (options?: StartupOptions) =>
         ),
       );
 
-      yield* Effect.logDebug("startup phase: parking orchestration roots at activation");
+      yield* runStartupPhase("orchestration-v2.legacy-shells", legacyImporter.reconcileShells);
       yield* runStartupPhase(
-        "reactors.start",
+        "orchestration-v2.expire-side-chats",
         Effect.gen(function* () {
-          yield* orchestrationReactor.start().pipe(Scope.provide(reactorScope));
-          yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
+          const threads = yield* ThreadManagement.ThreadManagementService;
+          const shell = yield* threads.getShellSnapshot();
+          for (const thread of [...shell.threads, ...shell.archivedThreads]) {
+            if (thread.sideOfThreadId == null) continue;
+            yield* threads.dispatch({
+              type: "thread.delete",
+              commandId: CommandId.make(`expire-side:${thread.id}`),
+              threadId: thread.id,
+              onlyIfSideOfThreadId: thread.sideOfThreadId,
+            });
+          }
         }),
       );
-
+      yield* runStartupPhase("orchestration-v2.recovery", recovery.recover);
+      yield* EffectWorker.runDaemon.pipe(Effect.forkIn(workerScope));
+      yield* (yield* WorktreeCleanup).start().pipe(Effect.provideService(Scope.Scope, workerScope));
+      const bootstrapTargets = yield* resolveAutoBootstrapWelcomeTargets;
+      yield* forkParked(legacyImporter.importPendingTranscripts);
       const welcomeBase = yield* resolveWelcomeBase;
       const environment = yield* serverEnvironment.getDescriptor;
-      yield* Effect.logDebug("startup phase: preparing welcome payload");
-
-      if (serverConfig.autoBootstrapProjectFromCwd) {
-        yield* forkParked(
-          runStartupPhase(
-            "welcome.autobootstrap",
-            Effect.gen(function* () {
-              const bootstrapTargets = yield* resolveAutoBootstrapWelcomeTargets.pipe(
-                Effect.provideService(Crypto.Crypto, crypto),
-              );
-              if (!bootstrapTargets.bootstrapProjectId && !bootstrapTargets.bootstrapThreadId) {
-                return;
-              }
-
-              yield* Effect.logDebug("startup phase: publishing bootstrapped welcome event", {
-                environmentId: environment.environmentId,
-                cwd: welcomeBase.cwd,
-                projectName: welcomeBase.projectName,
-                bootstrapProjectId: bootstrapTargets.bootstrapProjectId,
-                bootstrapThreadId: bootstrapTargets.bootstrapThreadId,
-              });
-              yield* lifecycleEvents.publish({
-                version: 1,
-                type: "welcome",
-                payload: {
-                  environment,
-                  ...welcomeBase,
-                  ...bootstrapTargets,
-                },
-              });
-            }).pipe(
-              Effect.catch((cause) =>
-                Effect.logWarning("startup auto-bootstrap welcome failed", {
-                  cause,
-                }),
-              ),
-            ),
-          ),
-        );
-      }
 
       yield* forkParked(
         Effect.gen(function* () {
@@ -435,7 +405,7 @@ export const make = (options?: StartupOptions) =>
         lifecycleEvents.publish({
           version: 1,
           type: "welcome",
-          payload: { environment, ...welcomeBase },
+          payload: { environment, ...welcomeBase, ...bootstrapTargets },
         }),
       );
       yield* options?.activate ?? Effect.void;

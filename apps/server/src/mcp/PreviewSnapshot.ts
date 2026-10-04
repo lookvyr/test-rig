@@ -89,7 +89,7 @@ export function snapshotMetadata(snapshot: PreviewAutomationSnapshot, screenshot
   return result();
 }
 
-export class PreviewScreenshotSaveError extends Schema.TaggedErrorClass<PreviewScreenshotSaveError>()(
+export class PreviewScreenshotSaveError extends Schema.TaggedError<PreviewScreenshotSaveError>()(
   "PreviewScreenshotSaveError",
   { screenshotPath: Schema.String, cause: Schema.Defect() },
 ) {

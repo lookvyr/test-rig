@@ -4,7 +4,6 @@ import { useEffect } from "react";
 import ChatView from "../components/ChatView";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useRightPanelStore } from "../rightPanelStore";
-import { threadHasStarted } from "../components/ChatView.logic";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
 import { resolveThreadRouteRef, resolveThreadRouteRenderState } from "../threadRoutes";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -56,7 +55,11 @@ function ChatThreadRouteView() {
     shellExists: serverThreadShell !== null,
     status: serverThreadStatus,
   });
-  const serverThreadStarted = threadHasStarted(serverThreadDetail);
+  const serverThreadStarted = Boolean(
+    serverThreadDetail &&
+    (serverThreadDetail.projection.runs.length > 0 ||
+      serverThreadDetail.projection.thread.activeProviderThreadId !== null),
+  );
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
 
   useEffect(() => {

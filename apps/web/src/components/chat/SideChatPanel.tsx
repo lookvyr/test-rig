@@ -6,12 +6,13 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   ProviderDriverKind,
-  type ApprovalRequestId,
+  type RuntimeRequestId,
   type MessageId,
   type ProviderApprovalDecision,
   type ScopedThreadRef,
   type ServerProvider,
-  type TurnId,
+  type RunId,
+  type ThreadId,
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -25,20 +26,17 @@ import { useProject, useThread } from "../../state/entities";
 import { serverEnvironment } from "../../state/server";
 import { threadEnvironment, useEnvironmentThread } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import {
-  requestOlderThreadTurns,
-  threadHasOlderTurns,
-} from "@t3tools/client-runtime/state/threads";
+import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/threadRequests";
+import { deriveThreadCheckpointSummaries } from "@t3tools/client-runtime/state/thread-checkpoints";
+
 import {
   derivePendingApprovals,
   derivePendingUserInputs,
   isBlockingUserInput,
   derivePhase,
-  deriveTimelineEntries,
-  deriveTurnPlans,
-  deriveWorkLogEntries,
+  selectThreadMessages,
   deriveActiveWorkStartedAt,
-  isLatestTurnSettled,
+  isLatestRunSettled,
 } from "../../session-logic";
 import {
   buildThreadTurnInterruptInput,
@@ -58,21 +56,25 @@ import { MessagesTimeline } from "./MessagesTimeline";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { useLocalDispatchState } from "./useLocalDispatchState";
 import { usePersistThreadSettings } from "./usePersistThreadSettings";
+import { useThreadTimeline } from "./useThreadTimeline";
 import { useMessagesWithImages } from "./useMessagesWithImages";
 import { usePendingUserInput, clearPendingUserInputDrafts } from "./usePendingUserInput";
 import { AsyncUserInputPanel } from "./AsyncUserInputPanel";
 import { formatOutgoingPrompt, serializeComposerPrompt } from "./composerMessage";
-import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
-const NO_REVERTS = new Map<MessageId, number>();
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 
 export function SideChatPanel(props: {
   threadRef: ScopedThreadRef;
-  onKeep: () => Promise<void>;
+  focusRequest: number;
   onDiscard: () => Promise<void>;
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onOpenThread: (threadId: ThreadId) => void;
+  onForkFromRun: (input: {
+    readonly sourceThreadId: ThreadId;
+    readonly runId: RunId;
+  }) => Promise<void>;
+  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onExpandImage: (image: ExpandedImagePreview) => void;
 }) {
   const { threadRef } = props;
@@ -97,11 +99,10 @@ export function SideChatPanel(props: {
   const elementContextsRef = useRef<ElementContextDraft[]>([]);
   const listRef = useRef<LegendListRef | null>(null);
   const sending = useRef(false);
-  const focusedOnOpen = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
-  const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
-  const [respondingInputIds, setRespondingInputIds] = useState<ApprovalRequestId[]>([]);
+  const [respondingRequestIds, setRespondingRequestIds] = useState<RuntimeRequestId[]>([]);
+  const [respondingInputIds, setRespondingInputIds] = useState<RuntimeRequestId[]>([]);
   const [liveFollow, setLiveFollow] = useState(true);
   const runtimeModeDraft = useComposerDraftStore(
     (store) => store.getComposerDraft(threadRef)?.runtimeMode,
@@ -122,21 +123,21 @@ export function SideChatPanel(props: {
   const respondInput = useAtomCommand(threadEnvironment.respondToUserInput, {
     reportFailure: false,
   });
-  const phase = derivePhase(thread?.session ?? null);
-  const pendingApprovals = useMemo(
-    () => derivePendingApprovals(thread?.activities ?? []),
-    [thread?.activities],
+  const phase = derivePhase(thread?.runtime ?? null);
+  const projection = thread?.projection;
+  const pendingRequests = useMemo(
+    () =>
+      projection ? derivePendingThreadRequests(projection) : { approvals: [], userInputs: [] },
+    [projection],
   );
-  const allPendingUserInputs = useMemo(
-    () => derivePendingUserInputs(thread?.activities ?? []),
-    [thread?.activities],
-  );
+  const pendingApprovals = derivePendingApprovals(pendingRequests.approvals);
+  const allPendingUserInputs = derivePendingUserInputs(pendingRequests.userInputs);
   const pendingUserInputs = allPendingUserInputs.filter(isBlockingUserInput);
   const nonBlockingUserInputs = allPendingUserInputs.filter(
     (request) => !isBlockingUserInput(request),
   );
   const onRespondToUserInput = async (
-    requestId: ApprovalRequestId,
+    requestId: RuntimeRequestId,
     answers: Record<string, unknown>,
   ) => {
     if (respondingInputIds.includes(requestId)) return;
@@ -159,46 +160,41 @@ export function SideChatPanel(props: {
   });
   const dispatch = useLocalDispatchState({
     activeThread: thread ?? undefined,
-    activeLatestTurn: thread?.latestTurn ?? null,
+    activeLatestRun: thread?.latestRun ?? null,
     phase,
     activePendingApproval: pendingApprovals[0]?.requestId ?? null,
     activePendingUserInput: pendingUserInputs[0]?.requestId ?? null,
-    threadError: error ?? thread?.session?.lastError,
+    threadError: error ?? thread?.runtime?.lastError,
   });
-  const preparing =
-    !thread ||
-    (thread.messages.length === 0 &&
-      (thread.session == null || thread.session.status === "starting"));
-  const failedFork = thread?.session?.status === "error" && thread.messages.length === 0;
+  const providerThread = projection?.providerThreads.find(
+    (provider) => provider.id === thread?.activeProviderThreadId,
+  );
+  const failedFork = providerThread?.status === "error";
+  const preparing = !thread || (!providerThread?.nativeThreadRef && !failedFork);
   const unavailable = environment?.connection.phase !== "connected";
   const isWorking = phase === "running" || dispatch.isSendBusy;
-  const messages = useMessagesWithImages(threadRef.environmentId, thread?.messages);
-  const timelineEntries = useMemo(
-    () =>
-      deriveTimelineEntries(
-        messages,
-        thread?.proposedPlans ?? [],
-        deriveWorkLogEntries(thread?.activities ?? []),
-        deriveTurnPlans(thread?.activities ?? []),
-      ),
-    [messages, thread?.proposedPlans, thread?.activities],
-  );
+  const messages = useMessagesWithImages(threadRef.environmentId, selectThreadMessages(projection));
+  const timelineEntries = useThreadTimeline(projection, messages);
   const diffs = useMemo(
     () =>
       new Map<MessageId, TurnDiffSummary>(
-        (thread?.checkpoints ?? []).flatMap((checkpoint) =>
-          checkpoint.assistantMessageId ? [[checkpoint.assistantMessageId, checkpoint]] : [],
+        (projection ? deriveThreadCheckpointSummaries(projection) : []).flatMap((checkpoint) =>
+          checkpoint.assistantMessageId
+            ? [[checkpoint.assistantMessageId, checkpoint] as const]
+            : [],
         ),
       ),
-    [thread?.checkpoints],
+    [projection],
   );
+  const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory);
   const focus = () => composerRef.current?.focusAtEnd();
   useEffect(() => {
-    if (!preparing && !focusedOnOpen.current) {
-      focusedOnOpen.current = true;
+    if (preparing) return;
+    const frame = window.requestAnimationFrame(() => {
       composerRef.current?.focusAtEnd();
-    }
-  }, [preparing]);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [preparing, props.focusRequest]);
 
   const send = async (event?: { preventDefault: () => void }) => {
     event?.preventDefault();
@@ -233,7 +229,7 @@ export function SideChatPanel(props: {
       context.previewAnnotations.length === 0 &&
       context.reviewComments.length === 0;
     if (hasOnlyText && /^\/side\s*$/i.test(context.prompt.trim())) {
-      setError("Keep this side chat as a thread before opening another side chat.");
+      setError("Open another side chat from the main conversation.");
       return;
     }
     const modeCommand =
@@ -345,7 +341,7 @@ export function SideChatPanel(props: {
       setError(String(squashAtomCommandFailure(result)));
   };
   const onRespondToApproval = async (
-    requestId: ApprovalRequestId,
+    requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,
   ) => {
     setRespondingRequestIds((ids) => [...ids, requestId]);
@@ -383,7 +379,7 @@ export function SideChatPanel(props: {
     useComposerDraftStore.getState().clearComposerContent(threadRef);
   };
   const cwd = thread?.worktreePath ?? project?.workspaceRoot;
-  const shownError = error ?? thread?.session?.lastError;
+  const shownError = error ?? thread?.runtime?.lastError;
   return (
     <section
       className="flex min-h-0 min-w-0 flex-1 flex-col"
@@ -407,19 +403,11 @@ export function SideChatPanel(props: {
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/50 px-3">
         <span
           className="text-xs text-muted-foreground"
-          title="This conversation is temporary until kept. It expires when the backend restarts."
+          title="This conversation is temporary. It expires when the backend restarts."
         >
           Temporary
         </span>
         <div className="flex items-center gap-1">
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={preparing || thread?.session?.status === "error" || actionBusy}
-            onClick={() => void runAction(props.onKeep)}
-          >
-            Keep as thread
-          </Button>
           <Menu>
             <MenuTrigger
               aria-label="Side chat actions"
@@ -456,23 +444,27 @@ export function SideChatPanel(props: {
             <MessagesTimeline
               isWorking={isWorking}
               activeTurnInProgress={
-                isWorking ||
-                !isLatestTurnSettled(thread?.latestTurn ?? null, thread?.session ?? null)
+                isWorking || !isLatestRunSettled(thread?.latestRun ?? null, thread?.runtime ?? null)
               }
               activeTurnStartedAt={deriveActiveWorkStartedAt(
-                thread?.latestTurn ?? null,
-                thread?.session ?? null,
+                thread?.latestRun ?? null,
+                thread?.runtime ?? null,
                 dispatch.localDispatchStartedAt,
               )}
               listRef={listRef}
               timelineEntries={timelineEntries}
-              latestTurn={thread?.latestTurn ?? null}
-              runningTurnId={thread?.session?.activeTurnId ?? null}
-              turnDiffSummaryByAssistantMessageId={diffs}
+              latestRun={thread?.latestRun ?? null}
+              runningRunId={thread?.runtime?.activeRunId ?? null}
+              turnDiffSummaries={[...diffs.values()]}
+              providerStatuses={providers}
+              runs={projection?.runs ?? []}
+              onOpenThread={props.onOpenThread}
+              onForkFromRun={props.onForkFromRun}
+              onRollbackCheckpoint={() => undefined}
+              supportsConversationRollback={false}
+              onRevertToTurnCount={() => undefined}
               routeThreadKey={scopedThreadKey(threadRef)}
               onOpenTurnDiff={props.onOpenTurnDiff}
-              revertTurnCountByUserMessageId={NO_REVERTS}
-              onRevertUserMessage={() => undefined}
               isRevertingCheckpoint={false}
               onImageExpand={props.onExpandImage}
               activeThreadEnvironmentId={threadRef.environmentId}
@@ -482,16 +474,20 @@ export function SideChatPanel(props: {
               workspaceRoot={cwd}
               anchorMessageId={null}
               onAnchorReady={() => undefined}
+              onAnchorSizeChanged={() => undefined}
               contentInsetEndAdjustment={0}
               liveFollowEnabled={liveFollow}
               onIsAtEndChange={setLiveFollow}
               onManualNavigation={() => setLiveFollow(false)}
               loadEarlier={
-                threadHasOlderTurns(page)
+                page.history.hasMoreHistory || page.history.error !== null
                   ? {
-                      loading: page.page._tag === "Some" && page.page.value.loadingOlder,
+                      loading: page.history.loading,
                       onLoadEarlier: () =>
-                        requestOlderThreadTurns(threadRef.environmentId, threadRef.threadId),
+                        void loadEarlierHistory({
+                          environmentId: threadRef.environmentId,
+                          input: { threadId: threadRef.threadId },
+                        }),
                     }
                   : null
               }
@@ -548,14 +544,14 @@ export function SideChatPanel(props: {
                   runtimeMode={runtimeMode}
                   interactionMode={interactionMode}
                   lockedProvider={
-                    thread?.session?.providerName
-                      ? ProviderDriverKind.make(thread.session.providerName)
+                    thread?.runtime?.providerName
+                      ? ProviderDriverKind.make(thread.runtime.providerName)
                       : null
                   }
                   providerStatuses={[...providers]}
                   activeProjectDefaultModelSelection={project?.defaultModelSelection}
                   activeThreadModelSelection={thread?.modelSelection}
-                  activeThreadActivities={thread?.activities}
+                  activeThreadProjection={projection}
                   resolvedTheme={resolvedTheme}
                   settings={settings}
                   keybindings={keybindings}
@@ -577,7 +573,7 @@ export function SideChatPanel(props: {
                         providers,
                         hasStartedSession: true,
                         currentModelSelection: thread.modelSelection,
-                        currentProviderInstanceId: thread.session?.providerInstanceId ?? null,
+                        currentProviderInstanceId: thread.runtime?.providerInstanceId ?? null,
                         nextModelSelection: { instanceId, model },
                       })
                     )
@@ -591,7 +587,7 @@ export function SideChatPanel(props: {
                           providers,
                           hasStartedSession: true,
                           currentModelSelection: thread.modelSelection,
-                          currentProviderInstanceId: thread.session?.providerInstanceId ?? null,
+                          currentProviderInstanceId: thread.runtime?.providerInstanceId ?? null,
                           nextModelSelection: { instanceId, model },
                         })?.description ?? null)
                       : null

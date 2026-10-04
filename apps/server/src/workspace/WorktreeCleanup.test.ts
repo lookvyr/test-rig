@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { CheckpointReactor } from "../orchestration/Services/CheckpointReactor.ts";
+import { EffectOutboxV2 } from "../orchestration-v2/EffectOutbox.ts";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -15,21 +15,21 @@ import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
 import {
   DEFAULT_SERVER_SETTINGS,
-  OrchestrationThreadShell,
+  OrchestrationV2ThreadShell,
+  ProviderSessionId,
+  ThreadId,
   ProjectId,
-  ProviderDriverKind,
   type TerminalSummary,
 } from "@t3tools/contracts";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProviderService } from "../provider/Services/ProviderService.ts";
+import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
+import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
+import { ProviderSessionManagerV2 } from "../orchestration-v2/ProviderSessionManager.ts";
 import { TerminalManager } from "../terminal/Manager.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { GitManager } from "../git/GitManager.ts";
 import * as Cleanup from "./WorktreeCleanup.ts";
-import * as State from "./WorktreeCleanupState.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -43,8 +43,8 @@ const git = (cwd: string, ...args: string[]) =>
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-const decodeThread = Schema.decodeUnknownSync(OrchestrationThreadShell);
-const decodeThreadId = Schema.decodeUnknownSync(OrchestrationThreadShell.fields.id);
+const decodeThread = Schema.decodeUnknownSync(Schema.toCodecIso(OrchestrationV2ThreadShell));
+const decodeThreadId = Schema.decodeUnknownSync(OrchestrationV2ThreadShell.fields.id);
 const fixture = Effect.gen(function* () {
   const root = NodeFS.realpathSync(
     NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "test-rig-cleanup-")),
@@ -71,21 +71,31 @@ const fixture = Effect.gen(function* () {
     id: "thread-1",
     projectId: "project-1",
     title: "Cleanup test",
+    createdBy: "user",
+    creationSource: "web",
     modelSelection: { instanceId: "codex", model: "test" },
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: "task",
     worktreePath: checkout,
-    latestTurn: null,
-    createdAt: now,
-    updatedAt: now,
+    providerInstanceId: "codex",
+    activeProviderThreadId: null,
+    lineage: { rootThreadId: "thread-1", parentThreadId: null, relationshipToParent: null },
+    forkedFrom: null,
+    latestRunId: null,
+    activeRunId: null,
+    status: "idle",
+    pendingRuntimeRequest: null,
+    latestVisibleMessage: null,
+    itemCount: 0,
+    visibleItemCount: 0,
+    createdAt: DateTime.makeUnsafe(now),
+    updatedAt: DateTime.makeUnsafe(now),
     archivedAt: null,
+    deletedAt: null,
     settledOverride: "settled",
-    settledAt: now,
-    session: null,
+    settledAt: DateTime.makeUnsafe(now),
     latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
     hasActionableProposedPlan: false,
   });
   let threads = [thread];
@@ -94,7 +104,8 @@ const fixture = Effect.gen(function* () {
   let afterRemote = () => {};
   let terminals: TerminalSummary[] = [];
   let afterStop = () => {};
-  let sessions: ReturnType<typeof ProviderService.of>["listSessions"] = () => Effect.succeed([]);
+  let sessions: Effect.Success<ProviderSessionManagerV2["Service"]["residencies"]> = [];
+  let pendingWorkspaceEffects = false;
   const project = {
     id: ProjectId.make("project-1"),
     title: "Fixture",
@@ -105,8 +116,11 @@ const fixture = Effect.gen(function* () {
     updatedAt: now,
   };
   const layer = Cleanup.layer.pipe(
-    Layer.provideMerge(State.layer),
-    Layer.provide(Layer.mock(CheckpointReactor, { drain: Effect.void })),
+    Layer.provide(
+      Layer.mock(EffectOutboxV2, {
+        hasPendingWorkspaceEffects: () => Effect.sync(() => pendingWorkspaceEffects),
+      }),
+    ),
     Layer.provide(ServerConfig.layerTest(repo, root)),
     Layer.provide(
       Layer.mock(ServerSettingsService, {
@@ -117,38 +131,43 @@ const fixture = Effect.gen(function* () {
         subscribeChanges: Effect.succeed(Stream.empty),
       }),
     ),
+    Layer.provide(Layer.mock(ProjectStoreV2, { listShells: () => Effect.succeed([project]) })),
     Layer.provide(
-      Layer.mock(ProjectionSnapshotQuery, {
+      Layer.mock(ThreadManagementService, {
         getShellSnapshot: () =>
           Effect.sync(() => ({
+            schemaVersion: 2,
             snapshotSequence: 1,
-            projects: [project],
             threads,
-            updatedAt: now,
+            archivedThreads: [],
           })),
-        getArchivedShellSnapshot: () =>
-          Effect.succeed({ snapshotSequence: 1, projects: [], threads: [], updatedAt: now }),
-      }),
-    ),
-    Layer.provide(
-      Layer.mock(OrchestrationEngineService, {
         streamDomainEvents: Stream.empty,
         dispatch: (command) =>
           Effect.sync(() => {
-            if (command.type === "thread.settle")
+            if (command.type === "thread.auto-settle")
               threads = threads.map((entry) =>
                 entry.id === command.threadId
-                  ? { ...entry, settledOverride: "settled", settledAt: now }
+                  ? { ...entry, settledOverride: "settled", settledAt: DateTime.makeUnsafe(now) }
                   : entry,
               );
-            return { sequence: 1 };
+            if (command.type === "thread.worktree-cleanup.set")
+              threads = threads.map((entry) =>
+                entry.id === command.threadId
+                  ? { ...entry, worktreeCleanup: command.status }
+                  : entry,
+              );
+            return { sequence: 1, storedEvents: [] };
           }),
       }),
     ),
     Layer.provide(
-      Layer.mock(ProviderService, {
-        listSessions: () => sessions(),
-        stopSession: () => Effect.sync(afterStop),
+      Layer.mock(ProviderSessionManagerV2, {
+        residencies: Effect.sync(() => sessions),
+        close: () =>
+          Effect.sync(() => {
+            afterStop();
+            sessions = [];
+          }),
       }),
     ),
     Layer.provide(
@@ -209,7 +228,9 @@ const fixture = Effect.gen(function* () {
   );
   const context = yield* Layer.build(layer);
   const service = Context.get(context, Cleanup.WorktreeCleanup);
-  const state = Context.get(context, State.WorktreeCleanupState);
+  const state = {
+    get: (id: ThreadId) => threads.find((thread) => thread.id === id)?.worktreeCleanup ?? null,
+  };
   return {
     repo,
     checkout,
@@ -217,6 +238,12 @@ const fixture = Effect.gen(function* () {
     state,
     sweep: () => service.sweep.pipe(Effect.provide(context)),
     start: () => service.start().pipe(Effect.provide(context)),
+    pendingEffects: (value: boolean) => {
+      pendingWorkspaceEffects = value;
+    },
+    residencies: (value: typeof sessions) => {
+      sessions = value;
+    },
     enable: (value: boolean) => {
       enabled = value;
     },
@@ -234,24 +261,48 @@ const fixture = Effect.gen(function* () {
     },
     onStop: (callback: () => void) => {
       afterStop = callback;
-      sessions = () =>
-        Effect.succeed([
-          {
-            threadId: thread.id,
-            provider: ProviderDriverKind.make("codex"),
-            status: "ready",
-            cwd: checkout,
-            runtimeMode: "full-access",
-            model: "test",
-            createdAt: now,
-            updatedAt: now,
-          },
-        ]);
+      sessions = [
+        {
+          providerSessionId: ProviderSessionId.make("session1"),
+          threadIds: [thread.id],
+          cwd: checkout,
+          busy: false,
+          closing: false,
+        },
+      ];
     },
   };
 });
 
 describe("settled worktree cleanup", () => {
+  it.effect("waits for pending or delayed checkpoint work and retries after it drains", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.pendingEffects(true);
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+      expect(f.state.get(f.thread.id)?.reason).toContain("checkpoint");
+      f.pendingEffects(false);
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(false);
+    }),
+  );
+  it.effect.each(["closing", "busy", "foreign"])("waits for a %s residency", (kind) =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.residencies([
+        {
+          providerSessionId: ProviderSessionId.make("session1"),
+          cwd: f.checkout,
+          threadIds: [kind === "foreign" ? ThreadId.make("other") : f.thread.id],
+          closing: kind === "closing",
+          busy: kind === "busy",
+        },
+      ]);
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+    }),
+  );
   it.effect.each(["node_modules/cache", ".env", ".husky/_/husky.sh", "dist/app.js"])(
     "removes a clean checkout containing ignored %s, preserving the branch",
     (name) =>
@@ -403,7 +454,7 @@ describe("settled worktree cleanup", () => {
         exitSignal: null,
         hasRunningSubprocess: true,
         label: "job",
-        updatedAt: f.thread.createdAt,
+        updatedAt: DateTime.formatIso(f.thread.createdAt),
       });
       yield* f.start();
       yield* f.sweep();
@@ -426,7 +477,7 @@ describe("settled worktree cleanup", () => {
         {
           ...f.thread,
           settledOverride: null,
-          latestUserMessageAt: DateTime.formatIso(yield* DateTime.now),
+          latestUserMessageAt: yield* DateTime.now,
         },
       ]);
       f.merge();
@@ -449,7 +500,9 @@ describe("settled worktree cleanup", () => {
   it.effect("waits for background agents", () =>
     Effect.gen(function* () {
       const f = yield* fixture;
-      f.setThreads([{ ...f.thread, backgroundLiveness: "working" }]);
+      f.setThreads([
+        { ...f.thread, pendingBackgroundTasks: [{ taskId: "child", kind: "subagent" }] },
+      ]);
       yield* f.sweep();
       expect(NodeFS.existsSync(f.checkout)).toBe(true);
       expect(f.state.get(f.thread.id)?.state).toBe("pending");

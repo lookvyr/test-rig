@@ -5,6 +5,7 @@ import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
+import { makeV2SqlitePersistenceLive } from "./V2Sqlite.ts";
 import { runMigrations } from "../Migrations.ts";
 import { ServerConfig } from "../../config.ts";
 
@@ -65,7 +66,7 @@ export const SqlitePersistenceMemory = Layer.provideMerge(
 
 export const layerConfig = Layer.unwrap(
   Effect.gen(function* () {
-    const { dbPath } = yield* ServerConfig;
-    return makeSqlitePersistenceLive(dbPath);
+    const { stateDir } = yield* ServerConfig;
+    return makeV2SqlitePersistenceLive(stateDir);
   }),
 );

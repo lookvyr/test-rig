@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 
 import {
   ApprovalRequestId,
+  ClientSurface,
   CommandId,
   EventId,
   IsoDateTime,
@@ -10,11 +11,10 @@ import {
   ProviderItemId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { RepositoryIdentity } from "./environment.ts";
-import { ModelSelection } from "./orchestration.ts";
+import { RepositoryIdentity, ThreadEnvMode } from "./environment.ts";
+import { ModelSelection } from "./modelSelection.ts";
 import type { OrchestrationV2StoredEvent } from "./orchestrationV2.ts";
-import { ProjectScript } from "./orchestration.ts";
-const ClientSurface = Schema.Literals(["web", "desktop", "cli"]);
+import { ProjectIconOverride, ProjectScript } from "./project.ts";
 
 /**
  * Which client dispatched the command that produced this event (#7774).
@@ -48,7 +48,10 @@ export const ApplicationProjectCreatedPayload = Schema.Struct({
   defaultModelSelection: Schema.NullOr(ModelSelection),
   // Per-project override for where new threads start; optional so persisted
   // events from older servers still decode.
+  defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
   // Optional so persisted events from older servers still decode.
+  faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.Array(ProjectScript),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -62,6 +65,10 @@ export const ApplicationProjectMetaUpdatedPayload = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   // Absent = leave unchanged; null = clear the override.
+  defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
+  autoPull: Schema.optional(Schema.Boolean),
+  faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  projectIcon: Schema.optional(Schema.NullOr(ProjectIconOverride)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
   updatedAt: IsoDateTime,
 });

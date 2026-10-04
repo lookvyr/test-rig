@@ -1,18 +1,19 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { DEFAULT_MODEL, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_MODEL, ProviderInstanceId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Ref from "effect/Ref";
-import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
-import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as Layer from "effect/Layer";
+import * as ProjectService from "./project/ProjectService.ts";
+import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
+import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
+import { v2Projection, v2Project, v2ThreadShell } from "./orchestration-v2/testkit/fixtures.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 
@@ -76,32 +77,24 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
       const releaseCounts = yield* Deferred.make<void, never>();
 
       yield* ServerRuntimeStartup.launchStartupHeartbeat.pipe(
-        Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-          getCommandReadModel: () => Effect.die("unused"),
-          getSnapshot: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getArchivedShellSnapshot: () => Effect.die("unused"),
-          getSnapshotSequence: () => Effect.die("unused"),
-          getCounts: () =>
-            Deferred.await(releaseCounts).pipe(
-              Effect.as({
-                projectCount: 2,
-                threadCount: 3,
-              }),
-            ),
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-          getProjectShellById: () => Effect.succeed(Option.none()),
-          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-          getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-          getThreadShellById: () => Effect.succeed(Option.none()),
-          getThreadDetailById: () => Effect.succeed(Option.none()),
-          getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-          getThreadSearchContext: () => Effect.succeed({ thread: null }),
-          searchThreadMessages: () =>
-            Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
-          searchThreads: () => Effect.succeed({ matches: [] }),
-        }),
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(ProjectService.ProjectService)({
+              snapshot: Effect.succeed({ projects: [], updatedAt: "2026-01-01T00:00:00.000Z" }),
+            }),
+            Layer.mock(ThreadManagement.ThreadManagementService)({
+              getShellSnapshot: () =>
+                Deferred.await(releaseCounts).pipe(
+                  Effect.as({
+                    schemaVersion: 1,
+                    snapshotSequence: 0,
+                    threads: [],
+                    archivedThreads: [],
+                  }),
+                ),
+            }),
+          ),
+        ),
         Effect.provideService(AnalyticsService.AnalyticsService, {
           record: () => Effect.void,
           flush: Effect.void,
@@ -126,113 +119,72 @@ it.effect("resolveWelcomeBase derives cwd and project name from server config", 
   }),
 );
 
-it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and thread ids", () => {
-  const bootstrapProjectId = ProjectId.make("project-startup-bootstrap");
-  const bootstrapThreadId = ThreadId.make("thread-startup-bootstrap");
+const project = { ...v2Project, deletedAt: null };
+function bootstrapLayer(input: {
+  existing: boolean;
+  launch?: ThreadLaunch.ThreadLaunchService["Service"]["launch"];
+}) {
+  return Layer.mergeAll(
+    Layer.mock(ProjectService.ProjectService)({
+      bootstrap: () => Effect.succeed({ project, created: !input.existing }),
+    }),
+    Layer.mock(ThreadManagement.ThreadManagementService)({
+      getShellSnapshot: () =>
+        Effect.succeed({
+          schemaVersion: 1,
+          snapshotSequence: 0,
+          threads: input.existing ? [v2ThreadShell] : [],
+          archivedThreads: [],
+        }),
+    }),
+    Layer.mock(ThreadLaunch.ThreadLaunchService)({
+      launch: input.launch ?? (() => Effect.die("Unexpected thread launch")),
+    }),
+    Layer.succeed(ServerConfig.ServerConfig, {
+      cwd: "/tmp/startup-project",
+      autoBootstrapProjectFromCwd: true,
+    } as never),
+  );
+}
 
-  return Effect.gen(function* () {
-    const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
-    const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
-      Effect.provideService(ServerConfig.ServerConfig, {
-        cwd: "/tmp/startup-project",
-        autoBootstrapProjectFromCwd: true,
-      } as never),
-      Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-        getCommandReadModel: () => Effect.die("unused"),
-        getSnapshot: () => Effect.die("unused"),
-        getShellSnapshot: () => Effect.die("unused"),
-        getArchivedShellSnapshot: () => Effect.die("unused"),
-        getSnapshotSequence: () => Effect.die("unused"),
-        getCounts: () => Effect.die("unused"),
-        getActiveProjectByWorkspaceRoot: () =>
-          Effect.succeed(
-            Option.some({
-              id: bootstrapProjectId,
-              title: "Startup Project",
-              workspaceRoot: "/tmp/startup-project",
-              defaultModelSelection: ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(),
-              scripts: [],
-              createdAt: "2026-01-01T00:00:00.000Z",
-              updatedAt: "2026-01-01T00:00:00.000Z",
-              deletedAt: null,
-            }),
-          ),
-        getProjectShellById: () => Effect.die("unused"),
-        getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.some(bootstrapThreadId)),
-        getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-        getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-        getThreadShellById: () => Effect.die("unused"),
-        getThreadDetailById: () => Effect.die("unused"),
-        getThreadDetailSnapshot: () => Effect.die("unused"),
-        getThreadSearchContext: () => Effect.succeed({ thread: null }),
-        searchThreadMessages: () =>
-          Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
-        searchThreads: () => Effect.succeed({ matches: [] }),
-      }),
-      Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
-        readEvents: () => Stream.empty,
-        dispatch: (command) =>
-          Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
-            Effect.as({ sequence: 1 }),
-          ),
-        streamDomainEvents: Stream.empty,
-        latestSequence: Effect.succeed(0),
-      } satisfies OrchestrationEngine.OrchestrationEngineService["Service"]),
-      Effect.provide(NodeServices.layer),
-    );
-
-    assert.deepStrictEqual(targets, {
-      bootstrapProjectId,
-      bootstrapThreadId,
-    });
-    assert.deepStrictEqual(yield* Ref.get(dispatchCalls), []);
-  });
-});
-
-it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when missing", () =>
+it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and thread ids", () =>
   Effect.gen(function* () {
-    const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
-    const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
-      Effect.provideService(ServerConfig.ServerConfig, {
-        cwd: "/tmp/startup-project",
-        autoBootstrapProjectFromCwd: true,
-      } as never),
-      Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-        getCommandReadModel: () => Effect.die("unused"),
-        getSnapshot: () => Effect.die("unused"),
-        getShellSnapshot: () => Effect.die("unused"),
-        getArchivedShellSnapshot: () => Effect.die("unused"),
-        getSnapshotSequence: () => Effect.die("unused"),
-        getCounts: () => Effect.die("unused"),
-        getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-        getProjectShellById: () => Effect.die("unused"),
-        getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-        getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-        getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-        getThreadShellById: () => Effect.die("unused"),
-        getThreadDetailById: () => Effect.die("unused"),
-        getThreadDetailSnapshot: () => Effect.die("unused"),
-        getThreadSearchContext: () => Effect.succeed({ thread: null }),
-        searchThreadMessages: () =>
-          Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
-        searchThreads: () => Effect.succeed({ matches: [] }),
-      }),
-      Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
-        readEvents: () => Stream.empty,
-        dispatch: (command) =>
-          Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
-            Effect.as({ sequence: 1 }),
-          ),
-        streamDomainEvents: Stream.empty,
-        latestSequence: Effect.succeed(0),
-      } satisfies OrchestrationEngine.OrchestrationEngineService["Service"]),
-      Effect.provide(NodeServices.layer),
-    );
+    const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets;
+    assert.deepStrictEqual(targets, {
+      bootstrapProjectId: project.id,
+      bootstrapThreadId: v2ThreadShell.id,
+    });
+  }).pipe(Effect.provide(Layer.merge(bootstrapLayer({ existing: true }), NodeServices.layer))),
+);
 
-    assert.equal(typeof targets.bootstrapProjectId, "string");
-    assert.equal(typeof targets.bootstrapThreadId, "string");
-    assert.deepStrictEqual(yield* Ref.get(dispatchCalls), ["project.create", "thread.create"]);
-  }),
+it.effect(
+  "resolveAutoBootstrapWelcomeTargets launches a missing root thread with the canonical default",
+  () => {
+    const launches: ThreadLaunch.ThreadLaunchInput[] = [];
+    return Effect.gen(function* () {
+      const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets;
+      assert.equal(targets.bootstrapProjectId, project.id);
+      assert.equal(targets.bootstrapThreadId, v2ThreadShell.id);
+      assert.equal(launches.length, 1);
+      assert.deepStrictEqual(
+        launches[0]?.modelSelection,
+        ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(),
+      );
+      assert.deepStrictEqual(launches[0]?.workspaceStrategy, { type: "root" });
+      assert.equal(launches[0]?.createdBy, "system");
+    }).pipe(
+      Effect.provide(
+        bootstrapLayer({
+          existing: false,
+          launch: (input) =>
+            Effect.sync(() => {
+              launches.push(input);
+              return { threadId: v2ThreadShell.id, projection: v2Projection, resumed: false };
+            }),
+        }).pipe(Layer.provideMerge(NodeServices.layer)),
+      ),
+    );
+  },
 );
 
 it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation failures", () =>
@@ -244,50 +196,10 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
       method: "randomUUIDv4",
       description: "UUID generation unavailable",
     });
-    const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
-
     const error = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
-      Effect.provideService(ServerConfig.ServerConfig, {
-        cwd: "/tmp/startup-project",
-        autoBootstrapProjectFromCwd: true,
-      } as never),
-      Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-        getCommandReadModel: () => Effect.die("unused"),
-        getSnapshot: () => Effect.die("unused"),
-        getShellSnapshot: () => Effect.die("unused"),
-        getArchivedShellSnapshot: () => Effect.die("unused"),
-        getSnapshotSequence: () => Effect.die("unused"),
-        getCounts: () => Effect.die("unused"),
-        getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-        getProjectShellById: () => Effect.die("unused"),
-        getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-        getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-        getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-        getThreadShellById: () => Effect.die("unused"),
-        getThreadDetailById: () => Effect.die("unused"),
-        getThreadDetailSnapshot: () => Effect.die("unused"),
-        getThreadSearchContext: () => Effect.succeed({ thread: null }),
-        searchThreadMessages: () =>
-          Effect.succeed({ messages: [], truncated: false, nextCursor: null }),
-        searchThreads: () => Effect.succeed({ matches: [] }),
-      }),
-      Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
-        readEvents: () => Stream.empty,
-        dispatch: (command) =>
-          Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
-            Effect.as({ sequence: 1 }),
-          ),
-        streamDomainEvents: Stream.empty,
-        latestSequence: Effect.succeed(0),
-      } satisfies OrchestrationEngine.OrchestrationEngineService["Service"]),
-      Effect.provideService(Crypto.Crypto, {
-        ...crypto,
-        randomUUIDv4: Effect.fail(uuidError),
-      }),
+      Effect.provideService(Crypto.Crypto, { ...crypto, randomUUIDv4: Effect.fail(uuidError) }),
       Effect.flip,
     );
-
     assert.strictEqual(error, uuidError);
-    assert.deepStrictEqual(yield* Ref.get(dispatchCalls), []);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(Layer.merge(bootstrapLayer({ existing: false }), NodeServices.layer))),
 );

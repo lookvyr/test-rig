@@ -39,7 +39,7 @@ const ElectronWindowOperation = Schema.Literals([
   "destroy-window",
 ]);
 
-export class ElectronWindowCreateError extends Schema.TaggedErrorClass<ElectronWindowCreateError>()(
+export class ElectronWindowCreateError extends Schema.TaggedError<ElectronWindowCreateError>()(
   "ElectronWindowCreateError",
   {
     options: ElectronWindowCreateOptions,
@@ -58,7 +58,7 @@ export class ElectronWindowCreateError extends Schema.TaggedErrorClass<ElectronW
 
 export const isElectronWindowCreateError = Schema.is(ElectronWindowCreateError);
 
-export class ElectronWindowOperationError extends Schema.TaggedErrorClass<ElectronWindowOperationError>()(
+export class ElectronWindowOperationError extends Schema.TaggedError<ElectronWindowOperationError>()(
   "ElectronWindowOperationError",
   {
     operation: ElectronWindowOperation,

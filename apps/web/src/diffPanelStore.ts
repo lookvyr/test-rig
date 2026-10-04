@@ -1,5 +1,5 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import type { ScopedThreadRef, RunId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -10,7 +10,7 @@ export type DiffPanelSelection =
   | { kind: "commit"; commitRef: string | null }
   | { kind: "working-tree" | "unstaged" | "staged" }
   | { kind: "latest-turn" }
-  | { kind: "turn"; turnId: TurnId; filePath: string | null; revealRequestId: number };
+  | { kind: "turn"; runId: RunId; filePath: string | null; revealRequestId: number };
 
 export type GitReviewScope = "working-tree" | "unstaged" | "staged" | "branch" | "commit";
 export type DiffRenderMode = "stacked" | "split";
@@ -34,13 +34,13 @@ interface DiffPanelStoreState {
   selectGitScope: (ref: ScopedThreadRef, scope: GitReviewScope) => void;
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
   selectCommit: (ref: ScopedThreadRef, commitRef: string | null) => void;
-  selectLatestTurn: (ref: ScopedThreadRef) => void;
-  selectTurn: (ref: ScopedThreadRef, turnId: TurnId, filePath?: string) => void;
+  selectLatestRun: (ref: ScopedThreadRef) => void;
+  selectTurn: (ref: ScopedThreadRef, runId: RunId, filePath?: string) => void;
   selectFile: (
     ref: ScopedThreadRef,
     selection: Omit<DiffPanelFileSelection, "revealRequestId">,
   ) => void;
-  reconcileTurnSelection: (ref: ScopedThreadRef, availableTurnIds: ReadonlyArray<TurnId>) => void;
+  reconcileTurnSelection: (ref: ScopedThreadRef, availableTurnIds: ReadonlyArray<RunId>) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
 
@@ -106,14 +106,14 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
             [scopedThreadKey(ref)]: { kind: "commit", commitRef: normalizeBaseRef(commitRef) },
           },
         })),
-      selectLatestTurn: (ref) =>
+      selectLatestRun: (ref) =>
         set((state) => ({
           byThreadKey: {
             ...state.byThreadKey,
             [scopedThreadKey(ref)]: { kind: "latest-turn" },
           },
         })),
-      selectTurn: (ref, turnId, filePath) =>
+      selectTurn: (ref, runId, filePath) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
           const previous = state.byThreadKey[threadKey];
@@ -122,7 +122,7 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
               ...state.byThreadKey,
               [threadKey]: {
                 kind: "turn",
-                turnId,
+                runId,
                 filePath: filePath?.trim() || null,
                 revealRequestId:
                   Math.max(
@@ -151,18 +151,18 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
         set((state) => {
           const threadKey = scopedThreadKey(ref);
           const previous = state.byThreadKey[threadKey];
-          const latestTurnId = availableTurnIds[0];
+          const latestRunId = availableTurnIds[0];
           if (
             previous?.kind !== "turn" ||
-            latestTurnId === undefined ||
-            availableTurnIds.includes(previous.turnId)
+            latestRunId === undefined ||
+            availableTurnIds.includes(previous.runId)
           ) {
             return state;
           }
           return {
             byThreadKey: {
               ...state.byThreadKey,
-              [threadKey]: { ...previous, turnId: latestTurnId },
+              [threadKey]: { ...previous, runId: latestRunId },
             },
           };
         }),
@@ -214,12 +214,12 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
 
 export function resolveDiffPanelTurnId(
   selection: DiffPanelSelection,
-  latestTurnId: TurnId | null | undefined,
-): TurnId | null {
+  latestRunId: RunId | null | undefined,
+): RunId | null {
   return selection.kind === "latest-turn"
-    ? (latestTurnId ?? null)
+    ? (latestRunId ?? null)
     : selection.kind === "turn"
-      ? selection.turnId
+      ? selection.runId
       : null;
 }
 

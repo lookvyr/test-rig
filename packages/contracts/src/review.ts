@@ -88,3 +88,11 @@ export type ReviewDiffPreviewResult = typeof ReviewDiffPreviewResult.Type;
 
 export const ReviewDiffPreviewError = Schema.Union([VcsError, GitCommandError]);
 export type ReviewDiffPreviewError = typeof ReviewDiffPreviewError.Type;
+
+export const ReviewDiffFileStat = Schema.Struct({
+  path: Schema.String,
+  previousPath: Schema.NullOr(Schema.String),
+  additions: Schema.Number,
+  deletions: Schema.Number,
+});
+export type ReviewDiffFileStat = typeof ReviewDiffFileStat.Type;
