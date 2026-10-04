@@ -1,3 +1,4 @@
+import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
@@ -210,7 +211,8 @@ export function SideChatPanel(props: {
       failedFork ||
       unavailable ||
       sending.current ||
-      dispatch.isSendBusy
+      dispatch.isSendBusy ||
+      !canSendThreadFollowUp(projection)
     )
       return;
     const snapshot = deriveComposerSendState({

@@ -1,3 +1,4 @@
+import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
 import type {
   RuntimeRequestId,
   EnvironmentId,
@@ -618,7 +619,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase,
     isConnecting,
     isSendBusy,
-    sendDisabledReason,
+    sendDisabledReason: externalSendDisabledReason,
     isPreparingWorktree,
     environmentUnavailable,
     activePendingApproval,
@@ -668,6 +669,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError,
     onExpandImage,
   } = props;
+  const sendDisabledReason =
+    externalSendDisabledReason ??
+    (activePendingProgress === null && !canSendThreadFollowUp(activeThreadProjection)
+      ? "Send message"
+      : null);
   const isSendDisabled = sendDisabledReason !== null;
 
   // ------------------------------------------------------------------
@@ -1218,7 +1224,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [activePendingIsResponding, activePendingProgress, activePendingResolvedAnswers],
   );
   const collapsedComposerPrimaryActionDisabled =
-    phase === "running" ||
     isSendBusy ||
     isSendDisabled ||
     isConnecting ||

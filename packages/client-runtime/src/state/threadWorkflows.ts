@@ -33,6 +33,45 @@ export function resolveActiveThreadRun(projection: Pick<Projection, "runs">): Ru
   return projection.runs.findLast((run) => ACTIVE_RUN_STATUSES.has(run.status)) ?? null;
 }
 
+/** Interactive follow-ups steer a live turn; they never silently enter its queue. */
+export function canSendThreadFollowUp(projection: Projection | null | undefined): boolean {
+  if (projection == null) return true;
+  const run = resolveActiveThreadRun(projection);
+  if (run === null) return true;
+  if (run.status !== "running" || run.activeAttemptId === null || run.rootNodeId === null) {
+    return false;
+  }
+  const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
+  if (
+    message !== undefined &&
+    message.attachments.length === 0 &&
+    ["/compact", "/logout"].includes(message.text.trim().toLowerCase())
+  ) {
+    return false;
+  }
+  const providerThread = projection.providerThreads.find(
+    (candidate) => candidate.id === run.providerThreadId,
+  );
+  if (providerThread?.providerSessionId == null) return false;
+  const session = projection.providerSessions.find(
+    (candidate) => candidate.id === providerThread.providerSessionId,
+  );
+  return (
+    session !== undefined &&
+    session.status !== "starting" &&
+    session.status !== "stopped" &&
+    session.status !== "error" &&
+    session.capabilities.turns.supportsActiveSteering &&
+    projection.providerTurns.some(
+      (turn) =>
+        turn.runAttemptId === run.activeAttemptId &&
+        turn.nodeId === run.rootNodeId &&
+        turn.providerThreadId === providerThread.id &&
+        turn.status === "running",
+    )
+  );
+}
+
 function resolveThreadProviderSession(projection: Projection): ProviderSession | null {
   const activeRun = resolveActiveThreadRun(projection);
   const providerThreadId = activeRun?.providerThreadId ?? projection.thread.activeProviderThreadId;

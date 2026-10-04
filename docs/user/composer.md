@@ -14,6 +14,16 @@ list item to leave the list; in code, use it after two trailing blank lines to
 continue below the block. **Tab** accepts a file, skill, or command suggestion.
 File and skill references inside code remain literal text.
 
+## Follow-up messages
+
+While the agent is working, sending a follow-up steers its current turn. Type
+your message to show Send beside Stop. Enter and the Send button do the same
+thing. Follow-ups are not saved as a queue of future turns.
+
+Send stays disabled while the turn is starting or cannot accept steering. Your
+draft stays in the composer until you send it. Once the agent finishes, sending
+starts a new turn. This also applies to side chats.
+
 ## Threads without a project
 
 Choose **No project** in the new-thread project picker, click **or start without a

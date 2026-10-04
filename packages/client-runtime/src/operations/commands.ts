@@ -681,7 +681,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     });
   }
 
-  const requestedMode = input.dispatchMode ?? "auto";
+  const requestedMode = input.dispatchMode ?? "steer";
   if (requestedMode === "start") {
     return yield* dispatch({
       type: "message.dispatch",

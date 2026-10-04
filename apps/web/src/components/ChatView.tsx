@@ -1,3 +1,4 @@
+import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
 import { useScratchDraftWorkspace } from "../hooks/useScratchDraftWorkspace";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
@@ -4794,6 +4795,10 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
       onAdvanceActivePendingUserInput();
+      return;
+    }
+    if (!canSendThreadFollowUp(threadProjection)) {
+      notifyDirectAnnotationAttached();
       return;
     }
     const sendCtx = composerRef.current?.getSendContext();

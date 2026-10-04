@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { formatPendingPrimaryActionLabel } from "./ComposerPrimaryActions";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import { ComposerPrimaryActions, formatPendingPrimaryActionLabel } from "./ComposerPrimaryActions";
 
 describe("formatPendingPrimaryActionLabel", () => {
   it("returns 'Submitting...' while responding", () => {
@@ -89,5 +92,53 @@ describe("formatPendingPrimaryActionLabel", () => {
         questionIndex: 5,
       }),
     ).toBe("Submit answers");
+  });
+});
+
+describe("follow-up actions", () => {
+  const renderActions = (overrides: Partial<Parameters<typeof ComposerPrimaryActions>[0]> = {}) =>
+    renderToStaticMarkup(
+      createElement(ComposerPrimaryActions, {
+        compact: false,
+        pendingAction: null,
+        isRunning: true,
+        showPlanFollowUpPrompt: false,
+        promptHasText: true,
+        isSendBusy: false,
+        sendDisabledReason: null,
+        isConnecting: false,
+        isEnvironmentUnavailable: false,
+        isPreparingWorktree: false,
+        hasSendableContent: true,
+        onPreviousPendingQuestion: () => {},
+        onInterrupt: () => {},
+        onImplementPlanInNewThread: () => {},
+        ...overrides,
+      }),
+    );
+
+  it("shows Send beside Stop for a follow-up, including attachment-only drafts", () => {
+    for (const promptHasText of [true, false]) {
+      const html = renderActions({ promptHasText });
+      expect(html).toContain('aria-label="Stop generation"');
+      expect(html).toContain('aria-label="Send message"');
+      expect(html).not.toContain('disabled=""');
+    }
+  });
+
+  it("disables Send without hiding Stop while steering is unavailable", () => {
+    const html = renderActions({ sendDisabledReason: "Send message" });
+    expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+    expect(html).toMatch(/<button[^>]*type="button"[^>]*aria-label="Stop generation"/);
+    expect(html).not.toMatch(/<button[^>]*type="button"[^>]*disabled/);
+  });
+
+  it("keeps only Stop for an empty running composer and only Send when idle", () => {
+    const running = renderActions({ hasSendableContent: false, promptHasText: false });
+    expect(running).toContain('aria-label="Stop generation"');
+    expect(running).not.toContain('type="submit"');
+    const idle = renderActions({ isRunning: false });
+    expect(idle).not.toContain('aria-label="Stop generation"');
+    expect(idle).toContain('aria-label="Send message"');
   });
 });
