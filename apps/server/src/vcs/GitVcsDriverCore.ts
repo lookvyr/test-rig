@@ -82,7 +82,6 @@ const STATUS_UPSTREAM_REFRESH_FAILURE_MAX_COOLDOWN = Duration.minutes(15);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const REPOSITORY_PATHS_CACHE_CAPACITY = 2_048;
 const REPOSITORY_PATHS_CACHE_TTL = Duration.minutes(10);
-const REPOSITORY_PATHS_REFRESH_COALESCE_TTL = Duration.seconds(5);
 const NON_REPOSITORY_PATHS_CACHE_TTL = Duration.seconds(1);
 const LIST_REFS_SNAPSHOT_CACHE_CAPACITY = 64;
 const LIST_REFS_SNAPSHOT_CACHE_TTL = Duration.minutes(2);
@@ -149,6 +148,7 @@ class GitRefsSnapshotCacheKey extends Data.Class<{
 class GitRefsRefreshCacheKey extends Data.Class<{
   gitCommonDir: string;
   generation: number;
+  refreshId?: string;
 }> {}
 
 interface GitRepositoryPaths {
@@ -1309,13 +1309,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ),
     {
       capacity: REPOSITORY_PATHS_CACHE_CAPACITY,
-      timeToLive: Exit.match({
-        onSuccess: (repositoryPaths) =>
-          repositoryPaths === null
-            ? NON_REPOSITORY_PATHS_CACHE_TTL
-            : REPOSITORY_PATHS_REFRESH_COALESCE_TTL,
-        onFailure: () => Duration.zero,
-      }),
+      timeToLive: () => Duration.zero,
     },
   );
   const normalizeRepositoryPathsCacheKey = (cwd: string) => path.normalize(path.resolve(cwd));
@@ -2175,8 +2169,48 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
 
     const requestedRemoteName = options?.remoteName?.trim() || null;
+    const hasNoLocalDelta = details.aheadCount === 0 && details.behindCount === 0;
+    if (!requestedRemoteName && hasNoLocalDelta && details.hasUpstream) {
+      return {
+        status: "skipped_up_to_date" as const,
+        branch,
+        ...(details.upstreamRef ? { upstreamBranch: details.upstreamRef } : {}),
+      };
+    }
+
+    const currentUpstream = details.hasUpstream
+      ? yield* resolveCurrentUpstream(cwd).pipe(Effect.orElseSucceed(() => null))
+      : null;
+    // A differently named upstream is the branch's base, except for Git's
+    // mangled tracking aliases (for example upstream/topic tracking
+    // my-org/upstream/topic).
+    const isAliasOfUpstreamHead =
+      currentUpstream !== null &&
+      (branch === currentUpstream.branchName ||
+        (branch.endsWith(`/${currentUpstream.branchName}`) &&
+          currentUpstream.upstreamRef.endsWith(`/${branch}`)));
+    const preserveTrackedBase = Effect.gen(function* () {
+      if (currentUpstream === null || isAliasOfUpstreamHead) return;
+      // Publishing with -u replaces the upstream. Keep its base unless the
+      // user has already selected one explicitly.
+      const configuredMergeBase = yield* runGitStdout(
+        "GitVcsDriver.pushCurrentBranch.readMergeBase",
+        cwd,
+        ["config", "--get", `branch.${branch}.gh-merge-base`],
+        true,
+      ).pipe(Effect.map((stdout) => stdout.trim()));
+      if (configuredMergeBase.length === 0) {
+        yield* runGit("GitVcsDriver.pushCurrentBranch.recordMergeBase", cwd, [
+          "config",
+          `branch.${branch}.gh-merge-base`,
+          currentUpstream.branchName,
+        ]);
+      }
+    });
+
     if (requestedRemoteName) {
       const publishBranch = yield* resolvePublishBranchName(cwd, branch);
+      yield* preserveTrackedBase;
       yield* runGit(
         "GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote",
         cwd,
@@ -2191,16 +2225,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    const hasNoLocalDelta = details.aheadCount === 0 && details.behindCount === 0;
     if (hasNoLocalDelta) {
-      if (details.hasUpstream) {
-        return {
-          status: "skipped_up_to_date" as const,
-          branch,
-          ...(details.upstreamRef ? { upstreamBranch: details.upstreamRef } : {}),
-        };
-      }
-
       const comparableBaseBranch = yield* resolveBaseBranchForNoUpstream(cwd, branch).pipe(
         Effect.orElseSucceed(() => null),
       );
@@ -2256,45 +2281,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    const currentUpstream = yield* resolveCurrentUpstream(cwd).pipe(
-      Effect.orElseSucceed(() => null),
-    );
     if (currentUpstream) {
-      // A branch tracking a differently named ref was cut from it, the way
-      // `git checkout -b feature origin/dev` and our own worktree flow leave
-      // it. That upstream is the branch's base, not its publish target, and
-      // pushing HEAD onto it would write feature commits to a shared branch
-      // (bare `git push` refuses this under push.default=simple). The one
-      // same-repo tracking setup that legitimately differs is a git-mangled
-      // alias such as local `upstream/effect-atom` for my-org/upstream's
-      // `effect-atom`: the branch name ends in the upstream head while the
-      // upstream ref ends in the branch name.
-      const isAliasOfUpstreamHead =
-        branch === currentUpstream.branchName ||
-        (branch.endsWith(`/${currentUpstream.branchName}`) &&
-          currentUpstream.upstreamRef.endsWith(`/${branch}`));
+      // Publish base-tracking branches under their own names so feature
+      // commits cannot be pushed onto a shared base branch.
       if (!isAliasOfUpstreamHead) {
         const publishRemoteName = yield* resolvePushRemoteName(cwd, branch).pipe(
           Effect.orElseSucceed(() => null),
         );
         const remoteName = publishRemoteName ?? currentUpstream.remoteName;
         const publishBranch = yield* resolvePublishBranchName(cwd, branch);
-        // `-u` retargets the upstream to the published branch, so keep the
-        // base recorded first; base resolution reads gh-merge-base before the
-        // upstream ref.
-        const configuredMergeBase = yield* runGitStdout(
-          "GitVcsDriver.pushCurrentBranch.readMergeBase",
-          cwd,
-          ["config", "--get", `branch.${branch}.gh-merge-base`],
-          true,
-        ).pipe(Effect.map((stdout) => stdout.trim()));
-        if (configuredMergeBase.length === 0) {
-          yield* runGit("GitVcsDriver.pushCurrentBranch.recordMergeBase", cwd, [
-            "config",
-            `branch.${branch}.gh-merge-base`,
-            currentUpstream.branchName,
-          ]);
-        }
+        yield* preserveTrackedBase;
         yield* runGit(
           "GitVcsDriver.pushCurrentBranch.pushOwnBranch",
           cwd,
@@ -3385,19 +3381,22 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const resolveListRefsSnapshot = Effect.fn("resolveListRefsSnapshot")(function* (
     gitCommonDir: string,
     refresh: boolean,
+    refreshId?: string,
   ) {
     while (true) {
       const generation = currentListRefsGeneration(gitCommonDir);
       const currentEpoch = listRefsEpochByCommonDir.get(gitCommonDir);
       const snapshot =
         refresh || currentEpoch === undefined
-          ? // The refresh cache owns the complete snapshot read, rather than only the
-            // epoch bump. Slow repositories therefore remain singleflight for the
-            // entire Git scan even when more refresh requests arrive after the
-            // coalescing TTL would otherwise have elapsed.
+          ? // Share an in-flight scan within a refresh batch. A new manual refresh
+            // uses a distinct ID so it cannot join an older background scan.
             yield* Cache.get(
               listRefsRefreshSnapshotCache,
-              new GitRefsRefreshCacheKey({ gitCommonDir, generation }),
+              new GitRefsRefreshCacheKey({
+                gitCommonDir,
+                generation,
+                ...(refreshId !== undefined ? { refreshId } : {}),
+              }),
             )
           : yield* Cache.get(
               listRefsSnapshotCache,
@@ -3449,6 +3448,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const snapshot = yield* resolveListRefsSnapshot(
         repositoryPaths.gitCommonDir,
         input.refresh === true,
+        input.refreshId,
       );
       const hasCurrentWorktreeBranch =
         repositoryPaths.worktreeRoot !== null &&

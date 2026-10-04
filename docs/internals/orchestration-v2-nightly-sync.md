@@ -195,6 +195,56 @@ so its fork coverage is adapter replay and portable-fallback tests rather than
 a live provider acceptance claim. Web and desktop share this renderer; no
 desktop-shell, remote-host, or cross-provider acceptance was added in this slice.
 
+### Git status and manual branch refresh (October 4, 2026)
+
+LOO-41's two reported failures were reproduced. The stable-diagnostics fixture
+needed the existing index-lock path command in its expected command list. Manual
+refresh had lost its batch identity during intake: the server now includes the
+existing `refreshId` in its snapshot key and expires completed repository-path
+refreshes immediately. Snapshot coalescing within a batch and mutation-generation
+protection remain. The open branch list now receives its current branch as
+virtual-list extra data, so its badge updates without closing the menu.
+
+Real-Git tests cover local-only status with and without upstream tracking against
+a configured local bare origin. Local-only reads retain file/branch change totals,
+skip fetches and commit counting, and full status retains ahead/behind counts.
+Refresh coverage includes concurrent pages with and without a batch ID, external
+checkout/branch creation, and the fallback without worktree metadata. The initial
+full driver run exposed three additional failures, each reproduced on unchanged
+`5c30b052` source. LOO-48 resolves them as described below; the full driver file
+now passes all 68 tests.
+
+Branch-toolbar logic tests (56), client-runtime VCS tests (10), server/web
+typechecks, and changed-file lint pass (existing web lint warnings remain). An
+isolated web pass confirmed external branch creation, checkout and reverse
+checkout, the current badge updating in the open selector, preserved search text,
+and dirty working-tree status. A separate correctness/simplification review found
+no remaining issues. The same renderer serves web and desktop; no desktop-shell,
+provider, transport, or contract change was needed. No repository-wide checks ran.
+
+### Git worktree tests and publish-base preservation (October 4, 2026)
+
+LOO-48 separates two outdated test assumptions from one production defect. The
+removal-error fixture now uses an existing non-worktree directory and verifies
+its sentinel survives; missing worktrees remain idempotent, covered by a repeated
+removal. The timeout fixture recognizes `worktree add` after Git's existing
+`-c checkout.workers=0` prefix, so its deferred fake-clock check exercises the
+extended timeout without hanging. Neither fix changes worktree runtime behavior.
+
+Publishing to an explicitly requested remote now records the tracked base before
+`-u` changes the upstream, using the same small effect as automatic publication.
+An explicitly configured merge base remains untouched, and up-to-date branches
+retain their early return. Real-Git coverage verifies inferred and explicit bases,
+the published feature head, and preservation of the remote base branch.
+
+The full Git driver file passes 68 tests; four focused GitManager push tests and
+the server typecheck pass. An isolated web push to a disposable local bare remote
+published the feature under its own name, retained `main` as its merge base,
+and left the remote `main` commit unchanged. The explicit-remote and custom-base
+variants are covered by real-Git tests. Independent correctness/simplification
+review found no remaining issues. Changed-file lint and formatting pass, with
+existing web lint warnings. No repository-wide checks ran.
+
 ## Final acceptance pass (October 3, 2026)
 
 - Migrated a consistent, read-only backup of the real legacy database into a

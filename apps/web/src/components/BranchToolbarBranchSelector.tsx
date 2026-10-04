@@ -888,6 +888,7 @@ export function BranchToolbarBranchSelector({
               <LegendList<string>
                 ref={branchListRef}
                 data={filteredBranchPickerItems}
+                extraData={currentGitBranch}
                 keyExtractor={(item) => item}
                 getItemType={(item) =>
                   item === checkoutPullRequestItemValue

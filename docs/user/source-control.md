@@ -41,6 +41,10 @@ Git status, diffs, branches, worktrees, checkpoints, fetches, pulls, and pushes 
 
 When an agent creates or switches branches in the current checkout, the composer's branch indicator updates after the command finishes, without waiting for the whole turn to end. These local status updates do not fetch from Git remotes.
 
+After creating or switching branches outside Test Rig, open the branch selector and choose **Refresh branches**. The list and **current** badge update while the selector stays open, and your search text is preserved.
+
+When you publish a feature branch that tracks a differently named base branch, Test Rig remembers that base before updating upstream tracking. This also applies when you choose a remote explicitly; an explicitly selected base is preserved.
+
 Test Rig refreshes remote branch status in the background. The default fetch interval is 30 seconds. Change it in **Settings** → **Source Control** → **Git** → **Fetch interval**. Set the interval to `0` if Git should contact remotes only after an explicit action.
 
 The background-activity policy can pause a scheduled fetch while the machine is locked, on battery, or in another restricted state. The fetch interval controls how often a refresh becomes eligible to run.
