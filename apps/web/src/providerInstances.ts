@@ -312,6 +312,54 @@ export function resolveSelectableProviderInstanceEntry(
   );
 }
 
+/** Preserve a saved conversation's provider until the user explicitly selects another. */
+export function resolveComposerProviderInstanceId(input: {
+  entries: ReadonlyArray<ProviderInstanceEntry>;
+  draftInstanceId: ProviderInstanceId | null | undefined;
+  threadInstanceId: ProviderInstanceId | null | undefined;
+  projectInstanceId: ProviderInstanceId | null | undefined;
+  isServerThread: boolean;
+  lockedProvider: ProviderDriverKind | null;
+  lockedContinuationGroupKey: string | null;
+  requestedDriverKind: ProviderDriverKind;
+}): ProviderInstanceId {
+  const compatibleEntries = input.entries.filter(
+    (entry) =>
+      (!input.lockedProvider || entry.driverKind === input.lockedProvider) &&
+      (!input.lockedContinuationGroupKey ||
+        entry.continuationGroupKey === input.lockedContinuationGroupKey),
+  );
+  for (const candidate of [
+    input.draftInstanceId,
+    input.threadInstanceId,
+    input.projectInstanceId,
+  ]) {
+    if (!candidate) continue;
+    // A missing, disabled, or excluded saved provider must block Send instead
+    // of quietly substituting another harness or account.
+    if (input.isServerThread && candidate === input.threadInstanceId) {
+      const stored = input.entries.find((entry) => entry.instanceId === candidate);
+      return stored &&
+        isSelectableProviderInstanceEntry(stored) &&
+        !compatibleEntries.includes(stored)
+        ? NO_PROVIDER_MODEL_SELECTION.instanceId
+        : candidate;
+    }
+    const match = compatibleEntries.find(
+      (entry) => entry.instanceId === candidate && isSelectableProviderInstanceEntry(entry),
+    );
+    if (match) return match.instanceId;
+  }
+  return (
+    resolveSelectableProviderInstanceEntry(
+      compatibleEntries.filter((entry) => entry.driverKind === input.requestedDriverKind),
+      undefined,
+    )?.instanceId ??
+    resolveSelectableProviderInstanceEntry(compatibleEntries, undefined)?.instanceId ??
+    NO_PROVIDER_MODEL_SELECTION.instanceId
+  );
+}
+
 /**
  * Resolve the routing key for a selection that may reference an instance
  * id that no longer exists (e.g. a persisted thread selection after the

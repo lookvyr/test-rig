@@ -36,15 +36,23 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import { createModelSelection } from "@t3tools/shared/model";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
+import * as ProviderAdapterRegistry from "../../orchestration-v2/ProviderAdapterRegistry.ts";
+import { makeTextGenerationFromRegistry } from "../../textGeneration/TextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
+import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
+import * as ProviderMaintenanceRunner from "../providerMaintenanceRunner.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
 import { BUILT_IN_DRIVERS } from "../builtInDrivers.ts";
 import { OpenCodeRuntimeLayer } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
+import { ProviderRegistryLive } from "./ProviderRegistry.ts";
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
@@ -262,6 +270,141 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
     Layer.provideMerge(ProviderContinuationRequests.layer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+  );
+
+  it.live(
+    "rejects excluded configured instances at every execution facade without spawning",
+    () => {
+      const spawned: unknown[] = [];
+      return Effect.gen(function* () {
+        const excluded = [
+          {
+            instanceId: ProviderInstanceId.make("cursor"),
+            driver: ProviderDriverKind.make("cursor"),
+          },
+          {
+            instanceId: ProviderInstanceId.make("cursor_legacy"),
+            driver: ProviderDriverKind.make("cursor"),
+          },
+          { instanceId: ProviderInstanceId.make("grok"), driver: ProviderDriverKind.make("grok") },
+          {
+            instanceId: ProviderInstanceId.make("grok_legacy"),
+            driver: ProviderDriverKind.make("grok"),
+          },
+          // Instance names cannot turn an excluded driver into an executable one.
+          {
+            instanceId: ProviderInstanceId.make("codex"),
+            driver: ProviderDriverKind.make("cursor"),
+          },
+        ];
+        const { registry } = yield* makeProviderInstanceRegistry({
+          drivers: BUILT_IN_DRIVERS,
+          configMap: Object.fromEntries(
+            excluded.map(({ instanceId, driver }) => [
+              instanceId,
+              {
+                driver,
+                enabled: true,
+                config: { binaryPath: "/sentinel/must-not-spawn", enabled: true },
+              },
+            ]),
+          ),
+        });
+        const adapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2.pipe(
+          Effect.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
+          Effect.provideService(ProviderInstanceRegistry, registry),
+        );
+        const providers = yield* ProviderRegistry.pipe(
+          Effect.provide(ProviderRegistryLive),
+          Effect.provideService(ProviderInstanceRegistry, registry),
+        );
+        const maintenance = yield* ProviderMaintenanceRunner.make().pipe(
+          Effect.provideService(ProviderRegistry, providers),
+        );
+        const textGeneration = makeTextGenerationFromRegistry(registry);
+
+        expect(yield* adapters.list()).toEqual([]);
+        const unavailable = yield* providers.getProviders;
+        expect(unavailable).toHaveLength(excluded.length);
+        expect(
+          unavailable.every(
+            (provider) => !provider.enabled && provider.availability === "unavailable",
+          ),
+        ).toBe(true);
+
+        for (const { instanceId, driver } of excluded) {
+          expect((yield* adapters.get(instanceId).pipe(Effect.flip))._tag).toBe(
+            "ProviderAdapterRegistryLookupError",
+          );
+          expect((yield* adapters.getMetadata!(instanceId).pipe(Effect.flip))._tag).toBe(
+            "ProviderAdapterRegistryLookupError",
+          );
+          expect(
+            (yield* maintenance.updateProvider({ provider: driver, instanceId }).pipe(Effect.flip))
+              ._tag,
+          ).toBe("ServerProviderUpdateError");
+          yield* providers.refreshInstance(instanceId);
+          yield* providers.refresh(driver);
+
+          const common = {
+            cwd: process.cwd(),
+            modelSelection: createModelSelection(instanceId, "legacy-model"),
+          };
+          const operations = [
+            [
+              "generateBranchName",
+              textGeneration.generateBranchName({ ...common, message: "test" }).pipe(Effect.asVoid),
+            ],
+            [
+              "generateThreadTitle",
+              textGeneration
+                .generateThreadTitle({ ...common, message: "test" })
+                .pipe(Effect.asVoid),
+            ],
+            [
+              "generateCommitMessage",
+              textGeneration
+                .generateCommitMessage({
+                  ...common,
+                  branch: "test",
+                  stagedSummary: "test",
+                  stagedPatch: "test",
+                })
+                .pipe(Effect.asVoid),
+            ],
+            [
+              "generatePrContent",
+              textGeneration
+                .generatePrContent({
+                  ...common,
+                  baseBranch: "main",
+                  headBranch: "test",
+                  commitSummary: "test",
+                  diffSummary: "test",
+                  diffPatch: "test",
+                })
+                .pipe(Effect.asVoid),
+            ],
+          ] as const;
+          for (const [operation, run] of operations) {
+            const error = yield* run.pipe(Effect.flip);
+            expect(error._tag).toBe("TextGenerationError");
+            expect(error.operation).toBe(operation);
+            expect(error.detail).toContain(instanceId);
+          }
+        }
+        expect(spawned).toEqual([]);
+      }).pipe(
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make((command) => {
+            spawned.push(command);
+            return Effect.die("Excluded provider attempted to spawn");
+          }),
+        ),
+        Effect.provide(testLayer),
+      );
+    },
   );
 
   it.live("boots only approved drivers and shadows excluded provider rows", () =>

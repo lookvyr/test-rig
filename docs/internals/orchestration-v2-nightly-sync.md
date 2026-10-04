@@ -74,11 +74,37 @@ Provider compatibility advisories use the pinned upstream engine baseline (`0.0.
 
 ## Provider verification scope
 
-Claude and Codex received the main live acceptance pass. OpenCode received the
-requested minor sanity check: Homebrew OpenCode 2.0.22 with Fledge Alpha Free
-completed a native turn and recalled its token after a browser reload. The older
-`~/.opencode/bin/opencode` executable remains outside this verification; no
-provider installation or authentication was changed.
+The October 4 LOO-10 acceptance pass covers Codex 0.160.0, Claude Code 2.1.288,
+and Homebrew OpenCode 2.0.22. Each completed a native turn, stopped active or
+background work, and recalled conversation context after browser reload. Native
+title generation also passed for all three. The older `~/.opencode/bin/opencode`
+executable remains outside this verification; no provider installation or
+authentication was changed.
+
+Excluded default and custom Cursor/Grok instances were rejected by authenticated
+direct start and maintenance requests. Production-facade tests additionally prove
+that excluded instances cannot open sessions, prepare MCP sessions, update, refresh,
+or run any text-generation operation, with a child-process spawn sentinel remaining
+untouched. Settings show historical instances disabled and unavailable, while add
+and model pickers offer only Codex, Claude, and OpenCode. ACP remains unregistered.
+
+Live verification found and fixed two defects:
+
+- Saved unavailable provider selections silently fell back to another harness.
+  The composer now retains the saved selection and blocks Send; explicit compatible
+  picker selections still work. New drafts retain their available-provider fallback.
+  Driver and continuation-group locks remain enforced.
+- Effect 4 schema generation left structured-output objects open and defaulted
+  output fields optional. CLI text generation now requests the complete result type
+  with closed objects, while retaining the original decoding defaults.
+
+Validation: 141 focused tests pass across provider registry/session boundaries,
+all three text-generation adapters, prompt/schema conversion, and client provider
+selection. Server and web typechecks pass; targeted lint has no errors (existing
+composer warnings remain). Independent correctness and simplification review has
+no outstanding findings. The integrated web pass used isolated state and disposable
+repositories. Shared renderer behavior applies to desktop; no Electron-shell changes,
+contract changes, or remote-host behavior changes were made or separately retested.
 
 ## Integrated implementation
 

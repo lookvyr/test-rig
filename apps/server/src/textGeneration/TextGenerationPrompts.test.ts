@@ -6,7 +6,12 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
-import { normalizeCliError, sanitizePrBody, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
+import {
+  normalizeCliError,
+  sanitizePrBody,
+  sanitizeThreadTitle,
+  toJsonSchemaObject,
+} from "./TextGenerationUtils.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 
 describe("buildCommitMessagePrompt", () => {
@@ -243,7 +248,7 @@ describe("buildThreadTitlePrompt", () => {
     expect(result.prompt).toContain("Investigate reconnect regressions after session restore");
     expect(result.prompt).not.toContain("Attachment metadata:");
     expect(result.prompt).toContain(
-      "Generate a title that will help the user recognize this T3 Code thread weeks later.",
+      "Generate a title that will help the user recognize this Test Rig thread weeks later.",
     );
     expect(result.prompt).toContain(
       "Title the subject and outcome. Discard incidental instructions.",
@@ -424,5 +429,17 @@ describe("normalizeCliError", () => {
 
     expect(result.detail).toBe("Failed to generate a commit message");
     expect(result.message).not.toContain("secret-token");
+  });
+});
+
+describe("structured output schemas", () => {
+  it("requires the complete title result and rejects extra properties for Codex structured output", () => {
+    const { outputSchema } = buildThreadTitlePrompt({ message: "Verify provider lifecycle" });
+    expect(toJsonSchemaObject(outputSchema)).toEqual({
+      type: "object",
+      properties: { title: { type: "string" }, needsRefinement: { type: "boolean" } },
+      required: ["title", "needsRefinement"],
+      additionalProperties: false,
+    });
   });
 });

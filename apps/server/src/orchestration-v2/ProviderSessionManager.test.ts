@@ -699,6 +699,46 @@ function makePendingRuntimeRequestEvents(input: {
   });
 }
 
+it.effect(
+  "ProviderSessionManagerV2 rejects excluded instance starts without opening a fallback",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const mcpConfigs = yield* Ref.make<
+        ReadonlyArray<McpProviderSession.McpProviderSessionConfig | undefined>
+      >([]);
+      yield* Effect.gen(function* () {
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const ids = yield* IdAllocator.IdAllocatorV2;
+        for (const id of ["cursor", "grok", "cursor_legacy", "grok_legacy"]) {
+          const instanceId = ProviderInstanceId.make(id);
+          const threadId = ThreadId.make(`excluded-provider-${id}`);
+          const providerSessionId = yield* ids.allocate.providerSession({
+            providerInstanceId: instanceId,
+            threadId,
+          });
+          const error = yield* manager
+            .open({
+              threadId,
+              providerSessionId,
+              modelSelection: { instanceId, model: "legacy-model" },
+              runtimePolicy,
+            })
+            .pipe(Effect.flip);
+          assert.strictEqual(error._tag, "ProviderSessionOpenError");
+          if (error._tag === "ProviderSessionOpenError") {
+            assert.instanceOf(
+              error.cause,
+              ProviderAdapterRegistry.ProviderAdapterRegistryLookupError,
+            );
+          }
+        }
+        assert.strictEqual((yield* Ref.get(state)).openCount, 0);
+        assert.deepEqual(yield* Ref.get(mcpConfigs), []);
+      }).pipe(Effect.provide(makeTestLayer({ state, mcpConfigs, idleTimeoutMs: 1_000 })));
+    }),
+);
+
 it.effect("ProviderSessionManagerV2 opens independent sessions concurrently", () =>
   Effect.gen(function* () {
     const state = yield* Ref.make(emptyState);

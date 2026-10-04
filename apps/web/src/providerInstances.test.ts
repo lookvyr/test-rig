@@ -7,6 +7,8 @@ import {
   isProviderInstancePickerReady,
   isProviderInstancePickerVisible,
   resolveDefaultProviderModelSelection,
+  resolveComposerProviderInstanceId,
+  NO_PROVIDER_MODEL_SELECTION,
   resolveSelectableProviderInstance,
   resolveProviderDriverKindForInstanceSelection,
 } from "./providerInstances";
@@ -531,5 +533,86 @@ describe("resolveDefaultProviderModelSelection", () => {
         null,
       ),
     ).toBeNull();
+  });
+});
+
+describe("resolveComposerProviderInstanceId", () => {
+  const codex = ProviderInstanceId.make("codex");
+  const legacy = ProviderInstanceId.make("cursor_legacy");
+  const ready = provider({ provider: ProviderDriverKind.make("codex"), instanceId: codex });
+  const resolve = (
+    providers: ServerProvider[],
+    overrides: Partial<Parameters<typeof resolveComposerProviderInstanceId>[0]> = {},
+  ) =>
+    resolveComposerProviderInstanceId({
+      entries: deriveProviderInstanceEntries(providers),
+      draftInstanceId: undefined,
+      threadInstanceId: legacy,
+      projectInstanceId: codex,
+      isServerThread: true,
+      lockedProvider: null,
+      lockedContinuationGroupKey: null,
+      requestedDriverKind: ProviderDriverKind.make("codex"),
+      ...overrides,
+    });
+
+  it("preserves missing and excluded saved instances despite an available project default", () => {
+    expect(resolve([ready])).toBe(legacy);
+    expect(
+      resolve([
+        ready,
+        provider({
+          provider: ProviderDriverKind.make("cursor"),
+          instanceId: legacy,
+          availability: "unavailable",
+        }),
+      ]),
+    ).toBe(legacy);
+  });
+
+  it("preserves a disabled saved account instead of switching to another account", () => {
+    const personal = ProviderInstanceId.make("codex_personal");
+    expect(
+      resolve(
+        [
+          ready,
+          provider({
+            provider: ProviderDriverKind.make("codex"),
+            instanceId: personal,
+            enabled: false,
+          }),
+        ],
+        { threadInstanceId: personal },
+      ),
+    ).toBe(personal);
+  });
+
+  it("allows an explicit compatible pick but rejects an incompatible locked pick", () => {
+    expect(resolve([ready], { draftInstanceId: codex })).toBe(codex);
+    expect(
+      resolve([ready], {
+        draftInstanceId: codex,
+        lockedProvider: ProviderDriverKind.make("cursor"),
+      }),
+    ).toBe(legacy);
+    expect(
+      resolve([ready], { draftInstanceId: codex, lockedContinuationGroupKey: "another-account" }),
+    ).toBe(legacy);
+  });
+
+  it("blocks a saved instance reconfigured outside its locked driver or continuation group", () => {
+    expect(
+      resolve([ready], {
+        threadInstanceId: codex,
+        lockedProvider: ProviderDriverKind.make("claudeAgent"),
+      }),
+    ).toBe(NO_PROVIDER_MODEL_SELECTION.instanceId);
+    expect(
+      resolve([ready], { threadInstanceId: codex, lockedContinuationGroupKey: "original-home" }),
+    ).toBe(NO_PROVIDER_MODEL_SELECTION.instanceId);
+  });
+
+  it("still chooses an available default for an unsaved draft", () => {
+    expect(resolve([ready], { isServerThread: false })).toBe(codex);
   });
 });

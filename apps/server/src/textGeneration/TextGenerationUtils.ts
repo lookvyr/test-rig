@@ -6,7 +6,11 @@ const decodeUnknownJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.
 
 /** Convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present. */
 export function toJsonSchemaObject(schema: Schema.Top): unknown {
-  const document = Schema.toJsonSchemaDocument(schema);
+  // Structured output describes the complete result, not the permissive input
+  // accepted by decoders with defaults. Provider APIs also require closed objects.
+  const document = Schema.toJsonSchemaDocument(Schema.toType(schema), {
+    onExcessProperty: "error",
+  });
   if (document.definitions && Object.keys(document.definitions).length > 0) {
     return { ...document.schema, $defs: document.definitions };
   }

@@ -168,3 +168,8 @@ Use a totally separate `CODEX_HOME path` only when you want a separate Codex wor
 
 That means separate sessions and less account switching inside old threads. Most dual-account users
 should use the shared-home plus shadow-home setup instead.
+
+If a saved conversation's provider is removed, disabled, or unsupported, its history stays
+readable and Send is disabled. Test Rig does not automatically switch it to another provider
+or account. The model picker shows **Provider unavailable**; choose a compatible provider
+there if one is offered, or start a new thread.
