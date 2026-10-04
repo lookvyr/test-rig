@@ -17,7 +17,7 @@ function productionSourceFiles(root: string): string[] {
   for (const entry of NodeFS.readdirSync(root, { withFileTypes: true })) {
     const path = NodePath.join(root, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name !== "node_modules" && entry.name !== "dist") {
+      if (entry.name !== "node_modules" && entry.name !== "dist" && entry.name !== "testkit") {
         files.push(...productionSourceFiles(path));
       }
       continue;
@@ -25,7 +25,8 @@ function productionSourceFiles(root: string): string[] {
     if (
       sourceExtensions.has(NodePath.extname(entry.name)) &&
       !entry.name.includes(".test.") &&
-      !entry.name.includes(".spec.")
+      !entry.name.includes(".spec.") &&
+      !entry.name.includes(".testkit.")
     ) {
       files.push(path);
     }
@@ -84,9 +85,18 @@ describe("automatic egress boundary", () => {
     ];
     const violations = files.flatMap((file) => {
       const contents = NodeFS.readFileSync(file, "utf8");
-      return forbiddenNeedles
-        .filter((needle) => contents.includes(needle))
-        .map((needle) => `${NodePath.relative(repoRoot, file)}: ${needle}`);
+      const relativePath = NodePath.relative(repoRoot, file);
+      return (
+        forbiddenNeedles
+          // This pure classifier suppresses private-host favicons; it neither
+          // connects to a tailnet nor discovers or starts a Tailscale service.
+          .filter(
+            (needle) =>
+              needle !== ".ts.net" || relativePath !== "packages/shared/src/hostClassification.ts",
+          )
+          .filter((needle) => contents.includes(needle))
+          .map((needle) => `${relativePath}: ${needle}`)
+      );
     });
 
     expect(violations).toEqual([]);

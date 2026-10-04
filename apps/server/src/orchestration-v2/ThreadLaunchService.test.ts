@@ -15,6 +15,7 @@ import {
   type ChatAttachment,
   CommandId,
   DEFAULT_SERVER_SETTINGS,
+  EventId,
   GitCommandError,
   MessageId,
   ProjectId,
@@ -48,9 +49,11 @@ import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistr
 import * as ServerSettings from "../serverSettings.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
+import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
@@ -99,6 +102,7 @@ interface HarnessOptions {
   readonly createWorktree?: GitWorkflow.GitWorkflowService["Service"]["createWorktree"];
   readonly fetchRemote?: GitWorkflow.GitWorkflowService["Service"]["fetchRemote"];
   readonly renameBranch?: GitWorkflow.GitWorkflowService["Service"]["renameBranch"];
+  readonly refreshLocalStatus?: VcsStatusBroadcaster.VcsStatusBroadcaster["Service"]["refreshLocalStatus"];
   readonly runSetup?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"];
   readonly generateTitle?: TextGeneration.TextGeneration["Service"]["generateThreadTitle"];
   readonly generateBranchName?: TextGeneration.TextGeneration["Service"]["generateBranchName"];
@@ -126,6 +130,18 @@ function makeHarness(options: HarnessOptions = {}) {
   );
   const renameBranch = vi.fn(
     options.renameBranch ?? ((input) => Effect.succeed({ branch: input.newBranch })),
+  );
+  const refreshLocalStatus = vi.fn(
+    options.refreshLocalStatus ??
+      (() =>
+        Effect.succeed({
+          isRepo: false,
+          hasPrimaryRemote: false,
+          isDefaultRef: false,
+          refName: null,
+          hasWorkingTreeChanges: false,
+          workingTree: { files: [], insertions: 0, deletions: 0 },
+        })),
   );
   const runSetup = vi.fn(
     options.runSetup ?? (() => Effect.succeed({ status: "no-script" as const })),
@@ -168,6 +184,7 @@ function makeHarness(options: HarnessOptions = {}) {
       resolveRemoteTrackingCommit: () =>
         Effect.succeed({ commitSha: "remote-main-sha", remoteRefName: "origin/main" }),
     }),
+    Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({ refreshLocalStatus }),
     Layer.succeed(ProjectSetupScriptRunner.ProjectSetupScriptRunner, {
       runForThread: runSetup,
     }),
@@ -223,6 +240,7 @@ function makeHarness(options: HarnessOptions = {}) {
   return {
     layer: Layer.mergeAll(
       launch,
+      orchestrator,
       threadManagement,
       titleRegeneration,
       outbox,
@@ -235,6 +253,7 @@ function makeHarness(options: HarnessOptions = {}) {
     ),
     createWorktree,
     renameBranch,
+    refreshLocalStatus,
     generateBranchName,
     generateThreadTitle,
     runSetup,
@@ -1112,10 +1131,100 @@ it.effect("names the worktree itself when the client provides no branch", () =>
       yield* waitUntil(() =>
         threads
           .getThreadProjection(launched.threadId)
-          .pipe(Effect.map((projection) => projection.thread.branch === "generated-branch")),
+          .pipe(
+            Effect.map((projection) => projection.thread.branch === "test-rig/generated-branch"),
+          ),
       );
     }).pipe(Effect.provide(harness.layer));
   }),
+);
+
+it.effect.each([false, true])(
+  "refreshes a late automatic rename after the turn ends, preserving metadata on refresh failure=%s",
+  (refreshFails) =>
+    Effect.gen(function* () {
+      const generationStarted = yield* Deferred.make<void>();
+      const finishGeneration = yield* Deferred.make<void>();
+      const refreshed = yield* Deferred.make<void>();
+      const temporaryBranch = "test-rig/_worktree/abcd1234";
+      let checkedOutBranch = temporaryBranch;
+      let cachedBranch = temporaryBranch;
+      const harness = makeHarness({
+        generateBranchName: () =>
+          Deferred.succeed(generationStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(finishGeneration)),
+            Effect.as({ branch: "late-name" }),
+          ),
+        renameBranch: (input) =>
+          Effect.sync(() => {
+            checkedOutBranch = input.newBranch;
+            return { branch: input.newBranch };
+          }),
+        refreshLocalStatus: () =>
+          Effect.gen(function* () {
+            if (refreshFails) return yield* Effect.die("status unavailable");
+            cachedBranch = checkedOutBranch;
+            return {
+              isRepo: true,
+              hasPrimaryRemote: false,
+              isDefaultRef: false,
+              refName: cachedBranch,
+              hasWorkingTreeChanges: false,
+              workingTree: { files: [], insertions: 0, deletions: 0 },
+            };
+          }).pipe(Effect.ensuring(Deferred.succeed(refreshed, undefined))),
+      });
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+        const sink = yield* EventSink.EventSinkV2;
+        const launched = yield* launches.launch(
+          launchInput({
+            command: `command:launch:late-rename:${refreshFails}`,
+            thread: `thread:launch:late-rename:${refreshFails}`,
+            message: "Finish before naming",
+            workspace: { type: "worktree", baseRef: "main", branch: temporaryBranch },
+          }),
+        );
+        yield* Deferred.await(generationStarted);
+        yield* tracker.stream(launched.threadId).pipe(
+          Stream.filter(
+            (snapshot) =>
+              snapshot?.stages.some((stage) => stage.id === "agent" && stage.status === "done") ===
+              true,
+          ),
+          Stream.runHead,
+        );
+        const projection = yield* threads.getThreadProjection(launched.threadId);
+        const run = projection.runs[0]!;
+        const now = yield* DateTime.now;
+        yield* sink.write({
+          events: [
+            {
+              id: EventId.make(`event:late-rename:completed:${refreshFails}`),
+              type: "run.updated",
+              threadId: launched.threadId,
+              runId: run.id,
+              occurredAt: now,
+              payload: { ...run, status: "completed", completedAt: now },
+            },
+          ],
+        });
+        assert.equal(cachedBranch, temporaryBranch);
+        assert.equal(harness.refreshLocalStatus.mock.calls.length, 0);
+        yield* Deferred.succeed(finishGeneration, undefined);
+        yield* Deferred.await(refreshed);
+        const renamed = yield* threads.getThreadProjection(launched.threadId);
+        assert.equal(renamed.runs[0]?.status, "completed");
+        assert.equal(renamed.thread.branch, "test-rig/late-name");
+        assert.equal(checkedOutBranch, "test-rig/late-name");
+        assert.equal(cachedBranch, refreshFails ? temporaryBranch : "test-rig/late-name");
+        assert.deepEqual(harness.refreshLocalStatus.mock.calls, [
+          ["/repo-worktrees/feature", { onlyIfBranchChanged: true }],
+        ]);
+      }).pipe(Effect.provide(harness.layer));
+    }),
 );
 
 it.effect("renames a temporary t3code/<hash> branch off the provisioning critical path", () =>
@@ -1159,12 +1268,92 @@ it.effect("renames a temporary t3code/<hash> branch off the provisioning critica
       yield* waitUntil(() =>
         threads
           .getThreadProjection(launched.threadId)
-          .pipe(Effect.map((projection) => projection.thread.branch === "generated-branch")),
+          .pipe(Effect.map((projection) => projection.thread.branch === "t3code/generated-branch")),
       );
       assert.deepEqual(harness.renameBranch.mock.calls[0]?.[0], {
         cwd: "/repo-worktrees/temp",
         oldBranch: "t3code/abcd1234",
-        newBranch: "generated-branch",
+        newBranch: "t3code/generated-branch",
+      });
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("preserves the configured worktree prefix when settings change during generation", () =>
+  Effect.gen(function* () {
+    const generationStarted = yield* Deferred.make<void>();
+    const finishGeneration = yield* Deferred.make<void>();
+    const renamed = yield* Deferred.make<void>();
+    const harness = makeHarness({
+      serverSettings: { newWorktreeBranchPrefix: "example/team" },
+      generateBranchName: () =>
+        Deferred.succeed(generationStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(finishGeneration)),
+          Effect.as({ branch: "fix-reconnect" }),
+        ),
+      renameBranch: (input) =>
+        Deferred.succeed(renamed, undefined).pipe(Effect.as({ branch: input.newBranch })),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* launches.launch(
+        launchInput({
+          command: "command:launch:configured-prefix",
+          thread: "thread:launch:configured-prefix",
+          message: "Fix reconnect",
+          workspace: { type: "worktree", baseRef: "main" },
+        }),
+      );
+      yield* Deferred.await(generationStarted);
+      const temporaryBranch = harness.createWorktree.mock.calls[0]?.[0]?.newRefName ?? "";
+      assert.match(temporaryBranch, /^example\/team\/_worktree\/[0-9a-f]{8}$/u);
+      yield* settings.updateSettings({ newWorktreeBranchPrefix: "changed" });
+      yield* Deferred.succeed(finishGeneration, undefined);
+      yield* Deferred.await(renamed);
+      assert.deepEqual(harness.renameBranch.mock.calls[0]?.[0], {
+        cwd: "/repo-worktrees/feature",
+        oldBranch: temporaryBranch,
+        newBranch: "example/team/fix-reconnect",
+      });
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("preserves custom exact branch names without adding the temporary prefix", () =>
+  Effect.gen(function* () {
+    const renamed = yield* Deferred.make<void>();
+    const harness = makeHarness({
+      serverSettings: {
+        newWorktreeBranchPrefix: "example/team",
+        branchNamingMode: "custom",
+        branchNamePrefix: "",
+        branchNameInstructions: "Use the exact issue identifier without a prefix.",
+      },
+      generateBranchName: () => Effect.succeed({ branch: "LOO-22" }),
+      renameBranch: (input) =>
+        Deferred.succeed(renamed, undefined).pipe(Effect.as({ branch: input.newBranch })),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      yield* launches.launch(
+        launchInput({
+          command: "command:launch:custom-exact-branch",
+          thread: "thread:launch:custom-exact-branch",
+          message: "Fix the issue",
+          workspace: {
+            type: "existing_worktree",
+            worktreePath: "/repo-worktrees/feature",
+            branch: "example/team/_worktree/abcd1234",
+          },
+        }),
+      );
+      yield* Deferred.await(renamed);
+      assert.deepEqual(harness.renameBranch.mock.calls[0]?.[0], {
+        cwd: "/repo-worktrees/feature",
+        oldBranch: "example/team/_worktree/abcd1234",
+        newBranch: "LOO-22",
+        exactName: true,
       });
     }).pipe(Effect.provide(harness.layer));
   }),
@@ -1247,12 +1436,12 @@ it.effect("renames a temporary branch on an existing worktree to a generated nam
       yield* waitUntil(() =>
         threads
           .getThreadProjection(launched.threadId)
-          .pipe(Effect.map((projection) => projection.thread.branch === "generated-branch")),
+          .pipe(Effect.map((projection) => projection.thread.branch === "t3code/generated-branch")),
       );
       assert.deepEqual(harness.renameBranch.mock.calls[0]?.[0], {
         cwd: "/repo-worktrees/t3code-abcd1234",
         oldBranch: "t3code/abcd1234",
-        newBranch: "generated-branch",
+        newBranch: "t3code/generated-branch",
       });
     }).pipe(Effect.provide(harness.layer));
   }),

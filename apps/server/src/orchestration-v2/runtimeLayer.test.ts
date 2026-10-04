@@ -1,3 +1,4 @@
+import { runFinalizationDependenciesTestLayer } from "./RunFinalizationService.testkit.ts";
 import { limitRecoveryCommand } from "./UsageLimitRecoveryWorker.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -20,6 +21,7 @@ import {
   type PullRequestDetail,
   ProviderDriverKind,
   ProviderInstanceId,
+  ProviderSessionId,
   ProviderTurnId,
   RunId,
   ThreadId,
@@ -28,8 +30,8 @@ import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
@@ -49,6 +51,10 @@ import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstance
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
+import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
+import * as RunExecutionService from "./RunExecutionService.ts";
+import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -62,13 +68,19 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import * as PullRequestWatchReactor from "./PullRequestWatchReactor.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
-import type { ProviderAdapterV2SessionRuntime, ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
+import type {
+  ProviderAdapterV2Event,
+  ProviderAdapterV2SessionRuntime,
+  ProviderAdapterV2Shape,
+} from "./ProviderAdapter.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import {
   OrchestrationEventInfrastructureLayerLive,
   OrchestrationV2EventSinkLayerLive,
   OrchestrationV2LayerLive,
   ProjectServiceLayerLive,
+  RunExecutionServiceLayerLive,
+  RunFinalizationServiceLayerLive,
 } from "./runtimeLayer.ts";
 import { shellStreamItemFromThreadShell } from "./ShellStream.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -210,26 +222,211 @@ const moveProject = (projectId: ProjectId, workspaceRoot: string, updatedAt: str
     }),
   );
 
-const TestLayer = Layer.mergeAll(
-  OrchestrationV2LayerLive,
-  OrchestrationV2EventSinkLayerLive,
-  ProjectionStore.layer,
-  EffectOutbox.layer,
-  ThreadCommandExecutor.layer,
-).pipe(
-  Layer.provide(McpSessionRegistryTestkit.layer),
-  Layer.provideMerge(ProjectStore.layer),
-  Layer.provide(SqlitePersistenceMemory),
-  Layer.provide(CheckpointStoreTestLayer),
-  Layer.provide(ServerConfigLayer),
-  Layer.provide(ServerSettings.layerTest()),
-  Layer.provide(TestProviderInstanceRegistry),
-  Layer.provide(GitWorkflowTestLayer),
-  Layer.provide(ProjectServiceTestLayer),
-  Layer.provide(PlatformTestLayer),
+const makeTestLayer = (
+  refreshDependencies: typeof runFinalizationDependenciesTestLayer = runFinalizationDependenciesTestLayer,
+) =>
+  Layer.mergeAll(
+    OrchestrationV2LayerLive,
+    OrchestrationV2EventSinkLayerLive,
+    ProjectionStore.layer,
+    EffectOutbox.layer,
+    ThreadCommandExecutor.layer,
+    RunExecutionServiceLayerLive,
+    RunFinalizationServiceLayerLive,
+  ).pipe(
+    Layer.provide(refreshDependencies),
+    Layer.provide(McpSessionRegistryTestkit.layer),
+    Layer.provideMerge(ProjectStore.layer),
+    Layer.provide(SqlitePersistenceMemory),
+    Layer.provide(CheckpointStoreTestLayer),
+    Layer.provide(ServerConfigLayer),
+    Layer.provide(ServerSettings.layerTest()),
+    Layer.provide(TestProviderInstanceRegistry),
+    Layer.provide(GitWorkflowTestLayer),
+    Layer.provide(ProjectServiceTestLayer),
+    Layer.provide(PlatformTestLayer),
+  );
+
+const TestLayer = makeTestLayer();
+
+it.effect(
+  "production run services refresh branches before turn end and workspace after capture",
+  () =>
+    Effect.gen(function* () {
+      const toolRefreshed = yield* Deferred.make<void>();
+      const turnRefreshed = yield* Deferred.make<void>();
+      const ingestionDone = yield* Deferred.make<void>();
+      const events = yield* Queue.unbounded<ProviderAdapterV2Event>();
+      const localRefreshes: Array<{ cwd: string; branchOnly: boolean }> = [];
+      const workspaceRefreshes: string[] = [];
+      const projectRefreshes: ProjectId[] = [];
+      const refreshDependencies = Layer.mergeAll(
+        Layer.mock(WorkspaceEntries.WorkspaceEntries)({
+          refresh: (cwd) =>
+            Effect.sync(() => {
+              workspaceRefreshes.push(cwd);
+            }),
+        }),
+        Layer.mock(PullRequestService.PullRequestService)({
+          refreshAfterTurn: (projectId) =>
+            Effect.sync(() => {
+              projectRefreshes.push(projectId);
+            }).pipe(Effect.andThen(Deferred.succeed(turnRefreshed, undefined))),
+        }),
+        Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
+          refreshLocalStatus: (cwd, options) =>
+            Effect.gen(function* () {
+              localRefreshes.push({ cwd, branchOnly: options?.onlyIfBranchChanged === true });
+              if (options?.onlyIfBranchChanged) yield* Deferred.succeed(toolRefreshed, undefined);
+              return {
+                isRepo: false,
+                hasPrimaryRemote: false,
+                isDefaultRef: false,
+                refName: null,
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+              };
+            }),
+        }),
+      );
+      yield* Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "test-rig-branch-refresh-" });
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const execution = yield* RunExecutionService.RunExecutionServiceV2;
+        const finalization = yield* RunFinalizationService.RunFinalizationService;
+        const threadId = ThreadId.make("runtime-branch-refresh");
+        const projectId = ProjectId.make("runtime-branch-refresh-project");
+        const messageId = MessageId.make("runtime-branch-refresh-message");
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("runtime-branch-refresh-create"),
+          threadId,
+          projectId,
+          title: "Branch refresh",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: cwd,
+        });
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("runtime-branch-refresh-start"),
+          threadId,
+          messageId,
+          text: "Change the branch",
+          attachments: [],
+          dispatchMode: { type: "start_immediately" },
+        });
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        const run = projection.runs[0]!;
+        const attempt = projection.attempts[0]!;
+        const rootNode = projection.nodes.find((node) => node.id === run.rootNodeId)!;
+        const checkpointScope = projection.checkpointScopes[0]!;
+        const providerThread = projection.providerThreads[0]!;
+        const providerTurnId = ProviderTurnId.make("runtime-branch-refresh-provider-turn");
+        yield* execution.startRootRun({
+          commandId: CommandId.make("runtime-branch-refresh-execute"),
+          appThread: projection.thread,
+          providerSessionId: ProviderSessionId.make("runtime-branch-refresh-session"),
+          session: {
+            events: Stream.fromQueue(events),
+            subscribeEvents: Effect.succeed({
+              events: Stream.fromQueue(events),
+              close: Deferred.succeed(ingestionDone, undefined),
+            }),
+            startTurn: () => Effect.void,
+          } as unknown as ProviderAdapterV2SessionRuntime,
+          run,
+          rootNode,
+          checkpointScope,
+          providerThread,
+          attempt: { ...attempt, providerTurnId },
+          attemptId: attempt.id,
+          providerTurnOrdinal: 1,
+          shouldFinalizeRun: () => Effect.succeed(true),
+          message: {
+            messageId,
+            text: "Change the branch",
+            attachments: [],
+            createdBy: "user",
+            creationSource: "web",
+          },
+          modelSelection,
+          runtimePolicy: {
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            cwd,
+            approvalPolicy: "never",
+            sandboxPolicy: {
+              type: "readOnly",
+              access: { type: "fullAccess" },
+              networkAccess: false,
+            },
+          },
+        });
+        const now = yield* DateTime.now;
+        yield* Queue.offer(events, {
+          type: "turn_item.updated",
+          driver,
+          turnItem: {
+            id: TurnItemId.make("runtime-branch-refresh-command"),
+            threadId,
+            runId: run.id,
+            nodeId: rootNode.id,
+            providerThreadId: providerThread.id,
+            providerTurnId,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: 1,
+            status: "completed",
+            title: "Change branch",
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "command_execution",
+            input: "git switch feature",
+          },
+        });
+        yield* Deferred.await(toolRefreshed);
+        assert.deepEqual(localRefreshes, [{ cwd, branchOnly: true }]);
+        assert.deepEqual(projectRefreshes, []);
+        assert.deepEqual(workspaceRefreshes, []);
+
+        yield* Queue.offer(events, {
+          type: "turn.terminal",
+          driver,
+          providerThreadId: providerThread.id,
+          providerTurnId,
+          runOrdinal: run.ordinal,
+          status: "completed",
+          failure: null,
+          threadDisposition: "reusable",
+        });
+        yield* Deferred.await(turnRefreshed);
+        yield* Deferred.await(ingestionDone);
+        yield* finalization.finalize({ threadId, runId: run.id, scopeId: checkpointScope.id });
+        assert.deepEqual(projectRefreshes, [projectId]);
+        assert.deepEqual(workspaceRefreshes, [cwd]);
+        assert.deepEqual(localRefreshes, [
+          { cwd, branchOnly: true },
+          { cwd, branchOnly: false },
+        ]);
+      }).pipe(
+        Effect.provide(
+          makeTestLayer(refreshDependencies).pipe(Layer.provideMerge(NodeServices.layer)),
+        ),
+      );
+    }),
 );
 
 const LegacyImportTestLayer = OrchestrationV2LayerLive.pipe(
+  Layer.provide(runFinalizationDependenciesTestLayer),
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provideMerge(ProjectStore.layer),
   Layer.provideMerge(SqlitePersistenceMemory),
@@ -270,6 +467,7 @@ const ProjectDeletionTestLayer = Layer.mergeAll(
       normalizeWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot),
     }),
   ),
+  Layer.provide(runFinalizationDependenciesTestLayer),
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provideMerge(ProjectStore.layer),
   Layer.provide(SqlitePersistenceMemory),
@@ -415,6 +613,7 @@ const SharedApplicationDataPlaneTestLayer = Layer.mergeAll(
       subscribeChanges: Effect.never,
     }),
   ),
+  Layer.provide(runFinalizationDependenciesTestLayer),
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provideMerge(ProjectStore.layer),
   Layer.provideMerge(SqlitePersistenceMemory),

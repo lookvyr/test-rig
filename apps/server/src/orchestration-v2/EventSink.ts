@@ -700,32 +700,30 @@ const baseLayer: Layer.Layer<
       readonly eventType?: OrchestrationV2DomainEvent["type"];
     }): Stream.Stream<OrchestrationV2StoredEvent, unknown> => {
       const pageSize = 256;
-      const loop = (afterSequence: number): Stream.Stream<OrchestrationV2StoredEvent, unknown> =>
-        Stream.unwrap(
-          eventStore
-            .read({
-              afterSequence,
-              throughSequence: input.throughSequence,
-              ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
-              ...(input.eventType === undefined ? {} : { eventType: input.eventType }),
-              limit: pageSize,
-            })
-            .pipe(
-              Stream.runCollect,
-              Effect.map((chunk) => Array.from(chunk)),
-              Effect.map((events) => {
-                if (events.length === 0) {
-                  return Stream.empty;
-                }
-                const current = Stream.fromIterable(events);
-                const last = events.at(-1)?.sequence ?? input.throughSequence;
-                return events.length < pageSize || last >= input.throughSequence
-                  ? current
-                  : Stream.concat(current, loop(last));
-              }),
-            ),
-        );
-      return loop(input.afterSequence);
+      return Stream.paginate(input.afterSequence, (afterSequence) =>
+        eventStore
+          .read({
+            afterSequence,
+            throughSequence: input.throughSequence,
+            ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
+            ...(input.eventType === undefined ? {} : { eventType: input.eventType }),
+            limit: pageSize,
+          })
+          .pipe(
+            Stream.runCollect,
+            Effect.map((events) => {
+              const last = events.at(-1);
+              return [
+                events,
+                last === undefined ||
+                events.length < pageSize ||
+                last.sequence >= input.throughSequence
+                  ? Option.none()
+                  : Option.some(last.sequence),
+              ] as const;
+            }),
+          ),
+      );
     };
 
     const stream = (input?: Parameters<EventSinkV2Shape["stream"]>[0]) => {

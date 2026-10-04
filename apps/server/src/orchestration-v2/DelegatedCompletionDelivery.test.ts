@@ -1,3 +1,4 @@
+import { runFinalizationDependenciesTestLayer } from "./RunFinalizationService.testkit.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -130,6 +131,7 @@ const TestLayer = Layer.mergeAll(OrchestrationV2LayerLive, OrchestrationV2EventS
       subscribeChanges: Effect.never,
     }),
   ),
+  Layer.provide(runFinalizationDependenciesTestLayer),
   Layer.provide(McpSessionRegistryTestkit.layer),
   Layer.provideMerge(ProjectStore.layer),
   Layer.provide(SqlitePersistenceMemory),

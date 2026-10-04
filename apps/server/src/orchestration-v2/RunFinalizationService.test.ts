@@ -15,6 +15,36 @@ import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as RunFinalization from "./RunFinalizationService.ts";
 
+it.effect("tool completion only checks for a changed local branch", () => {
+  const refreshLocalStatus = vi.fn(() =>
+    Effect.succeed({
+      isRepo: true,
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: "feature",
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 0, deletions: 0 },
+    }),
+  );
+  const layer = RunFinalization.observerLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(WorkspaceEntries.WorkspaceEntries)({}),
+        Layer.mock(PullRequestService.PullRequestService)({}),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+        Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({ refreshLocalStatus }),
+      ),
+    ),
+  );
+  return Effect.gen(function* () {
+    const observer = yield* RunFinalization.RunFinalizationObserver;
+    yield* observer.refreshAfterTool("/active-worktree");
+    assert.deepEqual(refreshLocalStatus.mock.calls, [
+      ["/active-worktree", { onlyIfBranchChanged: true }],
+    ]);
+  }).pipe(Effect.provide(layer));
+});
+
 it.effect("refreshes workspace after checkpoint capture without reading history", () => {
   const threadId = ThreadId.make("thread_finalize");
   const runId = RunId.make("run_finalize");
@@ -37,6 +67,7 @@ it.effect("refreshes workspace after checkpoint capture without reading history"
         }),
         Layer.succeed(RunFinalization.RunFinalizationObserver, {
           refresh,
+          refreshAfterTool: () => Effect.void,
           refreshAfterTurn: () => Effect.void,
         }),
       ),

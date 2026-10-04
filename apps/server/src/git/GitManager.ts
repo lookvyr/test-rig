@@ -701,6 +701,11 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
 
   const sourceControlProvider = (cwd: string) => sourceControlProviders.resolve({ cwd });
+  const canEnrichStatus = (cwd: string) =>
+    sourceControlProviders.resolveHandle({ cwd }).pipe(
+      Effect.map((handle) => handle.enabled),
+      Effect.orElseSucceed(() => false),
+    );
   const serverSettingsService = yield* ServerSettings.ServerSettingsService;
   const threads = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
@@ -1223,6 +1228,10 @@ export const make = Effect.gen(function* () {
     // Keyed by (cwd, branch) only: the upstream ref changing (e.g. a first
     // `push -u`) must not orphan the fallback value for the same branch.
     const branchKey = `${cwd}\u0000${details.branch}`;
+    if (!(yield* canEnrichStatus(cwd))) {
+      lastKnownPrByBranchKey.delete(branchKey);
+      return null;
+    }
     const cacheKey = prLookupCacheKey(cwd, details);
     if (refreshMissingPullRequest) {
       const cached = yield* Cache.getOption(prLookupCache, cacheKey).pipe(
@@ -2144,7 +2153,11 @@ export const make = Effect.gen(function* () {
       if (options?.refreshUpstream === false || options?.refreshMissingPullRequest) {
         return yield* readRemoteStatus(cacheKey, options);
       }
-      return yield* Cache.get(remoteStatusResultCache, cacheKey);
+      const remote = yield* Cache.get(remoteStatusResultCache, cacheKey);
+      if (remote?.pr && !(yield* canEnrichStatus(cacheKey))) {
+        return { ...remote, pr: null };
+      }
+      return remote;
     },
   );
   const status: GitManager["Service"]["status"] = Effect.fn("status")(function* (input) {
@@ -2157,6 +2170,10 @@ export const make = Effect.gen(function* () {
     "branchPullRequest",
   )(function* ({ cwd, branch }, options) {
     const cacheCwd = yield* normalizeStatusCacheKey(cwd);
+    if (!(yield* sourceControlProviders.resolveHandle({ cwd: cacheCwd })).enabled) {
+      lastKnownPrByBranchKey.delete(`${cacheCwd}\u0000${branch}`);
+      return null;
+    }
     const remotes = yield* gitCore.execute({
       operation: "GitManager.branchPullRequest.remotes",
       cwd: cacheCwd,
@@ -2660,15 +2677,25 @@ export const make = Effect.gen(function* () {
         GitRunStackedActionResult,
         GitManagerServiceError
       > {
-        const initialStatus = yield* gitCore.statusDetails(input.cwd);
         const wantsCommit = isCommitAction(input.action);
+        const wantsPr = input.action === "create_pr" || input.action === "commit_push_pr";
+        if (wantsPr) {
+          const providerHandle = yield* sourceControlProviders.resolveHandle({ cwd: input.cwd });
+          if (!providerHandle.enabled) {
+            return yield* new GitManagerError({
+              operation: "runStackedAction",
+              cwd: input.cwd,
+              detail: `Cannot create a change request because the ${providerHandle.provider.kind} source control provider is disabled.`,
+            });
+          }
+        }
+        const initialStatus = yield* gitCore.statusDetails(input.cwd);
         const wantsPush =
           input.action === "push" ||
           input.action === "commit_push" ||
           input.action === "commit_push_pr" ||
           (input.action === "create_pr" &&
             (!initialStatus.hasUpstream || initialStatus.aheadCount > 0));
-        const wantsPr = input.action === "create_pr" || input.action === "commit_push_pr";
 
         if (input.featureBranch && !wantsCommit) {
           return yield* new GitManagerError({

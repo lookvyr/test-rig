@@ -1171,6 +1171,7 @@ export const layer: Layer.Layer<
             return true;
           });
           const filterAssistantEvent = makeAssistantStreamingFilter(responseStreamingMode);
+          const refreshedToolItems = new Set<TurnItemId>();
           const providerEventFiber = yield* eventSubscription.events.pipe(
             Stream.filterEffect((event) =>
               Ref.modify(eventRouting, (state) => routeProviderEvent(event, routeIdentity, state)),
@@ -1247,6 +1248,36 @@ export const layer: Layer.Layer<
                   yield* Ref.update(latestTurnItemOrdinal, (current) =>
                     Math.max(current, event.turnItem.ordinal),
                   );
+                }
+                if (
+                  event.type === "turn_item.updated" &&
+                  input.runtimePolicy.cwd !== null &&
+                  event.turnItem.threadId === input.run.threadId &&
+                  ["command_execution", "file_change", "dynamic_tool", "subagent"].includes(
+                    event.turnItem.type,
+                  )
+                ) {
+                  const item = event.turnItem;
+                  if (!isSettledTurnItemStatus(item.status)) {
+                    refreshedToolItems.delete(item.id);
+                  } else if (!refreshedToolItems.has(item.id)) {
+                    // Completed snapshots can repeat as output arrives. Check the
+                    // branch once per tool completion, not on each output delta.
+                    refreshedToolItems.add(item.id);
+                    yield* finalizationObserver.refreshAfterTool(input.runtimePolicy.cwd).pipe(
+                      Effect.catchCause((cause) =>
+                        Effect.logWarning(
+                          "failed to refresh branch after provider tool completion",
+                          {
+                            threadId: input.run.threadId,
+                            runId: input.run.id,
+                            turnItemId: item.id,
+                            cause,
+                          },
+                        ),
+                      ),
+                    );
+                  }
                 }
                 if (event.type === "turn.terminal") {
                   yield* Ref.set(terminalEvent, event);

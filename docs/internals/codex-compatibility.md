@@ -1,6 +1,9 @@
 # Maintaining Codex compatibility
 
-The minimum supported Codex CLI is **0.156.0**; the last tested CLI is **0.156.1**.
+The minimum supported Codex CLI is **0.156.0**; the last tested CLI is **0.160.0**.
+The October 4 LOO-10 run recorded native turns, Stop, reload/resume and title generation
+with that version; see [the verification scope](orchestration-v2-nightly-sync.md#provider-verification-scope).
+This documentation update does not claim another native run or full question/fork acceptance.
 The minimum reflects the history and provider protocol used by Test Rig. It is not a
 promise that all later versions will work. Newer versions are allowed without a warning merely
 because they are newer. Unknown version strings retain ready status with explanatory guidance;
@@ -40,7 +43,10 @@ node_modules/.bin/vp run --filter effect-codex-app-server probe --run-turns
 ```
 
 The first command checks initialization and model discovery. The second explicitly adds two
-model turns, streamed text/tools, paginated history, revert, and resume. It uses a temporary
+model turns, streamed text/tools, paginated history, a native protocol revert, and resume.
+That revert operates only on the probe's disposable Codex conversation; Test Rig does not
+expose rewind or checkpoint file restoration. Product history acceptance uses independent
+forks from an earlier response, as listed below. The probe uses a temporary
 Codex home and workspace, copying `auth.json` from `CODEX_HOME` (or the default Codex home).
 For keychain-only authentication, supply a source Codex home containing `auth.json`; the probe
 does not read the keychain or copy user configuration and integrations.

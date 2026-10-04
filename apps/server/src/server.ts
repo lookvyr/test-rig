@@ -353,6 +353,7 @@ const RuntimeCoreDependenciesLive = Layer.mergeAll(
 )
   .pipe(
     // Core Services
+    Layer.provideMerge(PullRequestServiceLive),
     Layer.provideMerge(McpSessionRegistry.layer),
     Layer.provideMerge(NativeAppIconResolver.layer),
     Layer.provideMerge(ServerSettingsLayerLive),

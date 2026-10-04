@@ -45,6 +45,8 @@ import {
 import * as ServerConfig from "../config.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+// Allow large pushes while bounding stalled network or credential operations.
+const PUSH_TIMEOUT_MS = 5 * 60_000;
 const gitProcesses = Semaphore.makeUnsafe(8);
 // `git worktree add` checks out the full tree, so on large repositories it can
 // take well beyond the default 30s (e.g. a 375k-file repo takes ~40s on an idle
@@ -2215,7 +2217,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote",
         cwd,
         ["push", "-u", requestedRemoteName, `HEAD:refs/heads/${publishBranch}`],
-        { timeoutMs: null },
+        { timeoutMs: PUSH_TIMEOUT_MS },
       );
       return {
         status: "pushed" as const,
@@ -2271,7 +2273,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "GitVcsDriver.pushCurrentBranch.pushWithUpstream",
         cwd,
         ["push", "-u", publishRemoteName, `HEAD:refs/heads/${publishBranch}`],
-        { timeoutMs: null },
+        { timeoutMs: PUSH_TIMEOUT_MS },
       );
       return {
         status: "pushed" as const,
@@ -2295,7 +2297,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           "GitVcsDriver.pushCurrentBranch.pushOwnBranch",
           cwd,
           ["push", "-u", remoteName, `HEAD:refs/heads/${publishBranch}`],
-          { timeoutMs: null },
+          { timeoutMs: PUSH_TIMEOUT_MS },
         );
         return {
           status: "pushed" as const,
@@ -2309,7 +2311,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "GitVcsDriver.pushCurrentBranch.pushUpstream",
         cwd,
         ["push", currentUpstream.remoteName, `HEAD:refs/heads/${currentUpstream.branchName}`],
-        { timeoutMs: null },
+        { timeoutMs: PUSH_TIMEOUT_MS },
       );
       return {
         status: "pushed" as const,
@@ -2319,7 +2321,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       };
     }
 
-    yield* runGit("GitVcsDriver.pushCurrentBranch.push", cwd, ["push"], { timeoutMs: null });
+    yield* runGit("GitVcsDriver.pushCurrentBranch.push", cwd, ["push"], {
+      timeoutMs: PUSH_TIMEOUT_MS,
+    });
     return {
       status: "pushed" as const,
       branch,

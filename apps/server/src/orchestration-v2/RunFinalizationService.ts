@@ -27,6 +27,7 @@ export class RunFinalizationRefreshError extends Schema.TaggedError<RunFinalizat
 ) {}
 
 export class RunFinalizationObserver extends Context.Reference<{
+  readonly refreshAfterTool: (cwd: string) => Effect.Effect<void, RunFinalizationRefreshError>;
   readonly refreshAfterTurn: (projectId: ProjectId) => Effect.Effect<void>;
   readonly refresh: (input: {
     readonly cwd: string;
@@ -34,7 +35,11 @@ export class RunFinalizationObserver extends Context.Reference<{
     readonly runId: RunId;
   }) => Effect.Effect<void, RunFinalizationRefreshError>;
 }>("t3/orchestration-v2/RunFinalizationObserver", {
-  defaultValue: () => ({ refresh: () => Effect.void, refreshAfterTurn: () => Effect.void }),
+  defaultValue: () => ({
+    refresh: () => Effect.void,
+    refreshAfterTool: () => Effect.void,
+    refreshAfterTurn: () => Effect.void,
+  }),
 }) {}
 
 export class RunFinalizationService extends Context.Service<
@@ -95,6 +100,11 @@ export const observerLive = Layer.effect(
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const pullRequests = yield* PullRequestService.PullRequestService;
     return {
+      refreshAfterTool: (cwd) =>
+        vcsStatus.refreshLocalStatus(cwd, { onlyIfBranchChanged: true }).pipe(
+          Effect.asVoid,
+          Effect.mapError((cause) => new RunFinalizationRefreshError({ cwd, cause })),
+        ),
       refreshAfterTurn: pullRequests.refreshAfterTurn,
       refresh: ({ cwd, threadId, runId }) =>
         Effect.gen(function* () {

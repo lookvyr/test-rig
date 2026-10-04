@@ -1,3 +1,4 @@
+import { runFinalizationDependenciesTestLayer } from "./RunFinalizationService.testkit.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -157,6 +158,7 @@ const makeRuntimeLayer = (dbPath: string) => {
         normalizeWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot),
       }),
     ),
+    Layer.provide(runFinalizationDependenciesTestLayer),
     Layer.provide(McpSessionRegistryTestkit.layer),
     Layer.provideMerge(ProjectStore.layer),
     Layer.provideMerge(makeV2SqlitePersistenceLive(dbPath)),

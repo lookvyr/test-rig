@@ -12,7 +12,7 @@ Common reasons:
 
 ## CLI compatibility
 
-Test Rig requires Codex CLI **0.156.0 or newer**. The last tested version is **0.156.1**.
+Test Rig requires Codex CLI **0.156.0 or newer**. The last tested version is **0.160.0**.
 Newer versions remain available to use, but that does not guarantee compatibility with every
 future release. Settings reports older or unrecognized CLI versions when you refresh provider
 status. Version guidance is bundled with Test Rig; it does not fetch a remote compatibility list.

@@ -2115,11 +2115,12 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       Effect.gen(function* () {
         const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
         const pushStarted = yield* Deferred.make<void>();
+        const releasePush = yield* Deferred.make<void>();
         const delayedPushSpawner = ChildProcessSpawner.make((command) =>
           Effect.gen(function* () {
             if (ChildProcess.isStandardCommand(command) && command.args[0] === "push") {
               yield* Deferred.succeed(pushStarted, undefined);
-              yield* Effect.sleep("31 seconds");
+              yield* Deferred.await(releasePush);
             }
             return yield* delegate.spawn(command);
           }),
@@ -2139,6 +2140,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           .pipe(Effect.forkChild({ startImmediately: true }));
         yield* Deferred.await(pushStarted);
         yield* TestClock.adjust("31 seconds");
+        yield* Deferred.succeed(releasePush, undefined);
         const pushed = yield* Fiber.join(pushing);
 
         assert.deepInclude(pushed, {
@@ -2147,6 +2149,58 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         });
       }),
     );
+
+    for (const requestedRemote of [false, true]) {
+      it.effect(
+        `times out a stalled push after five minutes (requested remote: ${requestedRemote})`,
+        () =>
+          Effect.gen(function* () {
+            const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
+            const pushStarted = yield* Deferred.make<void>();
+            const releasePush = yield* Deferred.make<void>();
+            const pushFinished = yield* Deferred.make<void>();
+            const stalledPushSpawner = ChildProcessSpawner.make((command) =>
+              Effect.gen(function* () {
+                if (ChildProcess.isStandardCommand(command) && command.args[0] === "push") {
+                  yield* Deferred.succeed(pushStarted, undefined);
+                  yield* Deferred.await(releasePush);
+                }
+                return yield* delegate.spawn(command);
+              }),
+            );
+            const driver = yield* makeGitVcsDriverCore().pipe(
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, stalledPushSpawner),
+              Effect.provide(ServerConfigLayer),
+            );
+            const cwd = yield* makeTmpDir();
+            const remote = yield* makeTmpDir("git-remote-");
+            yield* initRepoWithCommit(cwd);
+            yield* git(remote, ["init", "--bare"]);
+            yield* git(cwd, ["remote", "add", "origin", remote]);
+
+            const pushing = yield* driver
+              .pushCurrentBranch(cwd, null, requestedRemote ? { remoteName: "origin" } : undefined)
+              .pipe(
+                Effect.flip,
+                Effect.ensuring(Deferred.succeed(pushFinished, undefined)),
+                Effect.forkChild({ startImmediately: true }),
+              );
+            yield* Deferred.await(pushStarted);
+            yield* TestClock.adjust("299 seconds");
+            assert.isFalse(yield* Deferred.isDone(pushFinished));
+            yield* TestClock.adjust("1 second");
+            const error = yield* Fiber.join(pushing);
+            assert.equal(error._tag, "GitCommandError");
+            assert.equal(error.detail, "Git command timed out.");
+            assert.equal(
+              error.operation,
+              requestedRemote
+                ? "GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote"
+                : "GitVcsDriver.pushCurrentBranch.pushWithUpstream",
+            );
+          }),
+      );
+    }
 
     it.effect("publishes a branch tracking its base under its own name, not the base", () =>
       Effect.gen(function* () {

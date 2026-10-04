@@ -10,11 +10,16 @@ function productionTypeScriptFiles(root: string): string[] {
   return NodeFS.readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const path = NodePath.join(root, entry.name);
     if (entry.isDirectory()) {
-      return entry.name === "dist" || entry.name === "node_modules"
+      return entry.name === "dist" || entry.name === "node_modules" || entry.name === "testkit"
         ? []
         : productionTypeScriptFiles(path);
     }
-    return /\.[cm]?[jt]sx?$/u.test(entry.name) && !entry.name.includes(".test.") ? [path] : [];
+    return /\.[cm]?[jt]sx?$/u.test(entry.name) &&
+      !entry.name.includes(".test.") &&
+      !entry.name.includes(".spec.") &&
+      !entry.name.includes(".testkit.")
+      ? [path]
+      : [];
   });
 }
 

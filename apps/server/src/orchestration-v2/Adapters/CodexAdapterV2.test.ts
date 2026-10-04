@@ -2376,6 +2376,224 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
+  it.effect("cancels a native question by RPC identity before its turn ends", () =>
+    Effect.gen(function* () {
+      const nativeThreadId = "resolved-question-thread";
+      const nativeTurnId = "resolved-question-turn";
+      const itemId = "item-not-the-rpc-id";
+      const requestId = 7701;
+      const prompt = "Ask while continuing.";
+      const questionReady = yield* Deferred.make<void>();
+      const questionCancelled = yield* Deferred.make<void>();
+      const transcript = makeCodexReplayTranscript({
+        scenario: "native-question-resolved",
+        entries: [
+          ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt }),
+          {
+            type: "emit_inbound",
+            frame: {
+              id: requestId,
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId: nativeThreadId,
+                turnId: nativeTurnId,
+                itemId,
+                isBlocking: false,
+                questions: [{ id: "name", header: "Name", question: "What name?", options: null }],
+              },
+            },
+          },
+          {
+            type: "expect_outbound",
+            frame: {
+              id: 4,
+              method: "turn/steer",
+              params: {
+                threadId: nativeThreadId,
+                expectedTurnId: nativeTurnId,
+                input: [{ type: "text", text: "Continue." }],
+              },
+            },
+          },
+          {
+            type: "emit_inbound",
+            frame: {
+              method: "serverRequest/resolved",
+              params: { threadId: nativeThreadId, requestId: itemId },
+            },
+          },
+          { type: "emit_inbound", frame: { id: 4, result: { turnId: nativeTurnId } } },
+          {
+            type: "expect_outbound",
+            frame: {
+              id: 5,
+              method: "turn/steer",
+              params: {
+                threadId: nativeThreadId,
+                expectedTurnId: nativeTurnId,
+                input: [{ type: "text", text: "Continue." }],
+              },
+            },
+          },
+          {
+            type: "emit_inbound",
+            frame: {
+              method: "serverRequest/resolved",
+              params: { threadId: nativeThreadId, requestId },
+            },
+          },
+          {
+            type: "expect_outbound",
+            frame: { id: requestId, result: { answers: {} } },
+          },
+          {
+            type: "emit_inbound",
+            frame: {
+              method: "serverRequest/resolved",
+              params: { threadId: nativeThreadId, requestId },
+            },
+          },
+          { type: "emit_inbound", frame: { id: 5, result: { turnId: nativeTurnId } } },
+        ],
+      });
+      const harness = yield* makeCodexReplayHarness(transcript, (event) => {
+        if (event.type !== "turn_item.updated" || event.turnItem.type !== "user_input_request") {
+          return Effect.void;
+        }
+        return Deferred.succeed(
+          event.turnItem.status === "cancelled" ? questionCancelled : questionReady,
+          undefined,
+        );
+      });
+      const turnInput = makeCodexTestTurnInput({
+        threadId: harness.threadId,
+        providerThread: harness.providerThread,
+        now: yield* DateTime.now,
+        attemptId: RunAttemptId.make("resolved-question-attempt"),
+        text: prompt,
+      });
+      yield* harness.runtime.startTurn(turnInput);
+      yield* Deferred.await(questionReady);
+      const steerInput = {
+        threadId: harness.threadId,
+        runId: turnInput.runId,
+        providerThread: harness.providerThread,
+        providerTurnId: (yield* IdAllocator.IdAllocatorV2).derive.providerTurn({
+          driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+          nativeTurnId,
+        }),
+        message: { ...turnInput.message, text: "Continue." },
+      };
+      yield* harness.runtime.steerTurn(steerInput);
+      assert.deepEqual(
+        harness.events.flatMap((event) =>
+          event.type === "runtime_request.updated" ? [event.runtimeRequest.status] : [],
+        ),
+        ["pending"],
+      );
+      yield* harness.runtime.steerTurn(steerInput);
+      yield* Deferred.await(questionCancelled);
+      const requests = harness.events.flatMap((event) =>
+        event.type === "runtime_request.updated" ? [event.runtimeRequest] : [],
+      );
+      assert.deepEqual(
+        requests.map((request) => request.status),
+        ["pending", "cancelled"],
+      );
+      const cancelled = requests[1]!;
+      assert.isNotNull(cancelled.resolvedAt);
+      assert.isEmpty(harness.terminalEvents());
+      const node = harness.events.findLast(
+        (event) => event.type === "node.updated" && event.node.id === cancelled.nodeId,
+      );
+      assert.equal(node?.type === "node.updated" && node.node.status, "cancelled");
+      const error = yield* harness.runtime
+        .respondToRuntimeRequest({ requestId: cancelled.id, answers: { name: "late" } })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "ProviderAdapterRuntimeRequestResponseError");
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect("does not cancel an answered question when Codex acknowledges its RPC", () =>
+    Effect.gen(function* () {
+      const nativeThreadId = "answered-question-thread";
+      const nativeTurnId = "answered-question-turn";
+      const requestId = "rpc-question-7701";
+      const questionReady = yield* Deferred.make<void>();
+      const transcript = makeCodexReplayTranscript({
+        scenario: "native-question-answered",
+        entries: [
+          ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "Ask a question." }),
+          {
+            type: "emit_inbound",
+            frame: {
+              id: requestId,
+              method: "item/tool/requestUserInput",
+              params: {
+                threadId: nativeThreadId,
+                turnId: nativeTurnId,
+                itemId: "question-item",
+                isBlocking: true,
+                questions: [{ id: "name", header: "Name", question: "What name?", options: null }],
+              },
+            },
+          },
+          {
+            type: "expect_outbound",
+            frame: { id: requestId, result: { answers: { name: { answers: ["Test project"] } } } },
+          },
+          {
+            type: "emit_inbound",
+            frame: {
+              method: "serverRequest/resolved",
+              params: { threadId: nativeThreadId, requestId },
+            },
+          },
+          {
+            type: "emit_inbound",
+            frame: {
+              method: "turn/completed",
+              params: {
+                threadId: nativeThreadId,
+                turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+              },
+            },
+          },
+        ],
+      });
+      const harness = yield* makeCodexReplayHarness(transcript, (event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "user_input_request"
+          ? Deferred.succeed(questionReady, undefined)
+          : Effect.void,
+      );
+      yield* harness.runtime.startTurn(
+        makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("answered-question-attempt"),
+          text: "Ask a question.",
+        }),
+      );
+      yield* Deferred.await(questionReady);
+      const request = harness.events.find((event) => event.type === "runtime_request.updated");
+      assert.isDefined(request);
+      if (request?.type !== "runtime_request.updated") return;
+      yield* harness.runtime.respondToRuntimeRequest({
+        requestId: request.runtimeRequest.id,
+        answers: { name: "Test project" },
+      });
+      yield* harness.firstTerminal;
+      assert.deepEqual(
+        harness.events.flatMap((event) =>
+          event.type === "runtime_request.updated" ? [event.runtimeRequest.status] : [],
+        ),
+        ["pending"],
+      );
+      assert.equal(harness.terminalEvents()[0]?.status, "completed");
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
   it.effect("preserves T3 context on the wire and restores it after compaction", () =>
     Effect.scoped(
       Effect.gen(function* () {

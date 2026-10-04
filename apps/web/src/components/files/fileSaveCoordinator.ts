@@ -18,6 +18,10 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
 
   constructor(private readonly options: FileSaveCoordinatorOptions<A, E>) {}
 
+  activate(): void {
+    this.disposed = false;
+  }
+
   change(contents: string): void {
     if (this.disposed) return;
     this.latestContents = contents;

@@ -28,7 +28,11 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
-import { buildTemporaryWorktreeBranchName, isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import {
+  buildGeneratedWorktreeBranchName,
+  buildTemporaryWorktreeBranchName,
+  parseTemporaryWorktreeBranchPrefix,
+} from "@t3tools/shared/git";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -37,6 +41,7 @@ import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
@@ -148,6 +153,7 @@ const make = Effect.gen(function* () {
   const cloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
   const terminals = yield* TerminalManager.TerminalManager;
   const git = yield* GitWorkflow.GitWorkflowService;
+  const vcsStatus = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
   const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -265,7 +271,7 @@ const make = Effect.gen(function* () {
         });
 
       // The server owns worktree naming: without an explicit branch, provision
-      // under a temporary `t3code/<hash>` name so the worktree never waits on
+      // under a temporary `<prefix>/_worktree/<hash>` name so the worktree never waits on
       // name generation, then rename in the background below.
       const requestedBranch = input.workspaceStrategy.branch;
       let branch: string | null;
@@ -375,11 +381,12 @@ const make = Effect.gen(function* () {
       // that name worktrees themselves) in the background so generation latency
       // never delays provisioning or the provider turn. The temporary name
       // simply sticks if generation or the rename fails.
+      const branchPrefix = branch === null ? null : parseTemporaryWorktreeBranchPrefix(branch);
       if (
         worktreePath !== null &&
         branch !== null &&
         initialMessage !== undefined &&
-        isTemporaryWorktreeBranch(branch)
+        branchPrefix !== null
       ) {
         const oldBranch = branch;
         const worktreeCwd = worktreePath;
@@ -388,7 +395,9 @@ const make = Effect.gen(function* () {
             git.renameBranch({
               cwd: worktreeCwd,
               oldBranch,
-              newBranch,
+              newBranch: exactName
+                ? newBranch
+                : buildGeneratedWorktreeBranchName(newBranch, branchPrefix),
               ...(exactName ? { exactName: true } : {}),
             }),
           ),
@@ -400,6 +409,17 @@ const make = Effect.gen(function* () {
               branch: renamed.branch,
               worktreePath: worktreeCwd,
             }),
+          ),
+          Effect.tap(() =>
+            vcsStatus.refreshLocalStatus(worktreeCwd, { onlyIfBranchChanged: true }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Failed to refresh worktree branch after automatic rename", {
+                  threadId,
+                  cwd: worktreeCwd,
+                  cause,
+                }),
+              ),
+            ),
           ),
           Effect.catchCause((cause) =>
             Effect.logWarning("Thread worktree branch rename failed", {

@@ -84,8 +84,12 @@ the actual ported modules: long transcripts, attachment/context preparation,
 interrupted-import restart, partial/failed copies, committed WAL contents,
 fork metadata, original database preservation, and production-layer reopen.
 The earlier real-data proof remains documented in
-`orchestration-v2-migration-proof.md`; the temporary upstream proof harness is
-retained until the full foundation consumes its handoff.
+[the migration proof](./orchestration-v2-migration-proof.md). LOO-22 retired the six
+temporary upstream-harness files on October 4 after the tests and adaptations
+moved into the foundation. The current six-case migration suite verifies every
+long-fixture message and historical ledger row; the nightly integration records
+the actual copied-data comparison and provider continuation. Historical experiment
+commands remain documented as provenance, not current run instructions.
 
 Seven contract tests cover historical JSON defaults and old/new notification
 round-trips on the existing Effect release. Ten shared-helper tests cover bounded

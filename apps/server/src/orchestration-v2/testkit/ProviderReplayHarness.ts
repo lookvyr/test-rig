@@ -1,5 +1,4 @@
 import type { V2DatabaseImportError } from "../../persistence/initializeV2Database.ts";
-import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { ProviderDriverKind, ProviderReplayTranscript } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -103,10 +102,6 @@ export function makeReplayServerConfig(
       traceBatchWindowMs: 200,
       traceMaxBytes: 10 * 1024 * 1024,
       traceMaxFiles: 10,
-      otelEnvironment: OtelEnvironment.none,
-      otlpTracesUrl: undefined,
-      otlpMetricsUrl: undefined,
-      otlpLogsUrl: undefined,
       mode: "web",
       port: 0,
       host: undefined,
@@ -117,8 +112,6 @@ export function makeReplayServerConfig(
       devAllowedOrigins: [],
       noBrowser: false,
       startupPresentation: "browser",
-      tailscaleServeEnabled: false,
-      tailscaleServePort: 443,
       desktopBootstrapToken: undefined,
       autoBootstrapProjectFromCwd: false,
       logWebSocketEvents: false,

@@ -1140,7 +1140,10 @@ type PendingCodexRuntimeRequest =
   | {
       readonly type: "user_input";
       readonly requestId: RuntimeRequestId;
+      readonly jsonRpcId: string | number;
+      readonly nativeThreadId: string;
       readonly answers: Deferred.Deferred<ProviderUserInputAnswers, never>;
+      readonly resolveExternally: Effect.Effect<void>;
     };
 
 type CodexWebSearchItem = {
@@ -4920,7 +4923,25 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           }).pipe(Effect.orDie),
         );
 
-        yield* client.handleServerRequest("item/tool/requestUserInput", (payload) =>
+        yield* client.handleServerNotification("serverRequest/resolved", (payload) =>
+          Effect.gen(function* () {
+            const pending = yield* Ref.modify(pendingRuntimeRequests, (current) => {
+              const entry = [...current.values()].find(
+                (request) =>
+                  request.type === "user_input" &&
+                  request.jsonRpcId === payload.requestId &&
+                  request.nativeThreadId === payload.threadId,
+              );
+              if (entry?.type !== "user_input") return [undefined, current] as const;
+              const updated = new Map(current);
+              updated.delete(String(entry.requestId));
+              return [entry, updated] as const;
+            });
+            if (pending !== undefined) yield* pending.resolveExternally;
+          }),
+        );
+
+        yield* client.handleServerRequest("item/tool/requestUserInput", (payload, requestContext) =>
           Effect.gen(function* () {
             const context = yield* awaitActiveTurn(payload.turnId);
             if (context === undefined) {
@@ -4946,7 +4967,34 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               updated.set(String(artifacts.request.id), {
                 type: "user_input",
                 requestId: artifacts.request.id,
+                jsonRpcId: requestContext.requestId,
+                nativeThreadId: payload.threadId,
                 answers,
+                resolveExternally: Effect.gen(function* () {
+                  if (!(yield* Deferred.succeed(answers, {}))) return;
+                  const resolvedAt = yield* DateTime.now;
+                  yield* emitProviderEvent({
+                    type: "runtime_request.updated",
+                    driver: CODEX_PROVIDER,
+                    threadId: artifacts.node.threadId,
+                    runtimeRequest: { ...artifacts.request, status: "cancelled", resolvedAt },
+                  });
+                  yield* emitProviderEvent({
+                    type: "node.updated",
+                    driver: CODEX_PROVIDER,
+                    node: { ...artifacts.node, status: "cancelled", completedAt: resolvedAt },
+                  });
+                  yield* emitProviderEvent({
+                    type: "turn_item.updated",
+                    driver: CODEX_PROVIDER,
+                    turnItem: {
+                      ...artifacts.turnItem,
+                      status: "cancelled",
+                      completedAt: resolvedAt,
+                      updatedAt: resolvedAt,
+                    },
+                  });
+                }),
               });
               return updated;
             });

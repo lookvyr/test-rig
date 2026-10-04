@@ -13,6 +13,7 @@ import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as References from "effect/References";
+import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -32,6 +33,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  SourceControlProviderError,
   TextGenerationError,
   ThreadId,
 } from "@t3tools/contracts";
@@ -661,6 +663,7 @@ function preparePullRequestThread(
 function makeManager(input?: {
   ghScenario?: FakeGhScenario;
   sourceControlProvider?: SourceControlProvider["Service"];
+  sourceControlProviderEnabled?: Effect.Effect<boolean, SourceControlProviderError>;
   textGeneration?: Partial<FakeGitTextGeneration>;
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
@@ -713,7 +716,10 @@ function makeManager(input?: {
       Effect.map((provider) =>
         SourceControlProviderRegistry.SourceControlProviderRegistry.of({
           get: () => Effect.succeed(provider),
-          resolveHandle: () => Effect.succeed({ provider, context: null, enabled: true }),
+          resolveHandle: () =>
+            (input?.sourceControlProviderEnabled ?? Effect.succeed(true)).pipe(
+              Effect.map((enabled) => ({ provider, context: null, enabled })),
+            ),
           resolve: () => Effect.succeed(provider),
           discover: Effect.succeed([]),
         }),
@@ -4053,81 +4059,290 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("creates PR when one does not already exist", () =>
+  it.effect("status drops cached PR enrichment when the provider is disabled", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
-      NodeFS.mkdirSync(NodePath.join(repoDir, ".github"));
-      NodeFS.writeFileSync(
-        NodePath.join(repoDir, ".github", "pull_request_template.md"),
-        "## What changed?\n\n## Verification",
-      );
-      yield* runGit(repoDir, ["add", ".github/pull_request_template.md"]);
-      yield* runGit(repoDir, ["commit", "-m", "Add pull request template"]);
-      yield* runGit(repoDir, ["checkout", "-b", "feature-create-pr"]);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/pr-disabled"]);
       const remoteDir = yield* createBareRemote();
       yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-      NodeFS.writeFileSync(NodePath.join(repoDir, "changes.txt"), "change\n");
-      yield* runGit(repoDir, ["add", "changes.txt"]);
-      yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
-      yield* runGit(repoDir, ["push", "-u", "origin", "feature-create-pr"]);
-      yield* runGit(repoDir, ["config", "branch.feature-create-pr.gh-merge-base", "main"]);
-      let generatedPolicy: TextGeneration.PrContentGenerationInput["policy"] = undefined;
-      let generatedChangeRequestTemplate: string | undefined;
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-disabled"]);
 
+      const enabled = yield* Ref.make(true);
       const { manager, ghCalls } = yield* makeManager({
-        serverSettings: {
-          sourceControlWritingStyle: {
-            mode: "custom" as const,
-            changeRequestTitleInstructions: "Lead with user impact.",
-            changeRequestDescriptionInstructions: "Lead with user impact.",
-          },
-        },
-        textGeneration: {
-          generatePrContent: (input) => {
-            generatedPolicy = input.policy;
-            generatedChangeRequestTemplate = input.changeRequestTemplate;
-            return Effect.succeed({
-              title: "Add stacked git actions",
-              body: "## What changed?\nAdded stacked git actions.",
-            });
-          },
-        },
+        sourceControlProviderEnabled: Ref.get(enabled),
         ghScenario: {
           prListSequence: [
-            "[]",
             // @effect-diagnostics-next-line preferSchemaOverJson:off
             JSON.stringify([
               {
-                number: 88,
-                title: "Add stacked git actions",
-                url: "https://github.com/pingdotgg/codething-mvp/pull/88",
+                number: 215,
+                title: "Disabled provider PR",
+                url: "https://github.com/acme/repo/pull/215",
                 baseRefName: "main",
-                headRefName: "feature-create-pr",
+                headRefName: "feature/pr-disabled",
               },
             ]),
           ],
         },
       });
-      const result = yield* runStackedAction(manager, {
-        cwd: repoDir,
-        action: "commit_push_pr",
+
+      const first = yield* manager.status({ cwd: repoDir });
+      expect(first.pr?.number).toBe(215);
+      expect(
+        (yield* manager.branchPullRequest({ cwd: repoDir, branch: "feature/pr-disabled" }))?.number,
+      ).toBe(215);
+      const callsBeforeDisable = ghCalls.length;
+
+      yield* Ref.set(enabled, false);
+      expect((yield* manager.status({ cwd: repoDir })).pr).toBeNull();
+      yield* manager.invalidateRemoteStatus(repoDir);
+      const second = yield* manager.status({ cwd: repoDir });
+
+      expect(second.pr).toBeNull();
+      expect(
+        yield* manager.branchPullRequest({ cwd: repoDir, branch: "feature/pr-disabled" }),
+      ).toBeNull();
+      expect(ghCalls).toHaveLength(callsBeforeDisable);
+    }),
+  );
+
+  it.effect("keeps generic Git status when hosting enablement cannot be resolved", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/pr-disabled"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-disabled"]);
+
+      const enabled = yield* Ref.make(true);
+      const { manager, ghCalls } = yield* makeManager({
+        sourceControlProviderEnabled: Ref.get(enabled).pipe(
+          Effect.flatMap((available) =>
+            available
+              ? Effect.succeed(true)
+              : Effect.fail(
+                  new SourceControlProviderError({
+                    provider: "github",
+                    operation: "detectProvider",
+                    cwd: repoDir,
+                    detail: "Could not inspect remotes.",
+                  }),
+                ),
+          ),
+        ),
+        ghScenario: {
+          prListSequence: [
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                number: 215,
+                title: "Disabled provider PR",
+                url: "https://github.com/acme/repo/pull/215",
+                baseRefName: "main",
+                headRefName: "feature/pr-disabled",
+              },
+            ]),
+          ],
+        },
       });
 
-      expect(result.branch.status).toBe("skipped_not_requested");
-      expect(result.pr.status).toBe("created");
-      expect(result.pr.number).toBe(88);
-      expect(generatedPolicy).toMatchObject({
-        additionalChangeRequestTitleInstructions: "Lead with user impact.",
-        additionalChangeRequestDescriptionInstructions: "Lead with user impact.",
-      });
-      expect(generatedChangeRequestTemplate).toBe("## What changed?\n\n## Verification");
-      expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(2);
+      const first = yield* manager.status({ cwd: repoDir });
+      expect(first.pr?.number).toBe(215);
       expect(
-        ghCalls.some((call) => call.includes("pr create --base main --head feature-create-pr")),
-      ).toBe(true);
-      expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
+        (yield* manager.branchPullRequest({ cwd: repoDir, branch: "feature/pr-disabled" }))?.number,
+      ).toBe(215);
+      const callsBeforeDisable = ghCalls.length;
+
+      yield* Ref.set(enabled, false);
+      expect((yield* manager.status({ cwd: repoDir })).pr).toBeNull();
+      yield* manager.invalidateRemoteStatus(repoDir);
+      const second = yield* manager.status({ cwd: repoDir });
+
+      expect(second.pr).toBeNull();
+      expect(second.isRepo).toBe(true);
+      expect(second.refName).toBe("feature/pr-disabled");
+      expect(second.hasUpstream).toBe(true);
+      expect(ghCalls).toHaveLength(callsBeforeDisable);
     }),
+  );
+
+  it.effect("rejects disabled create-PR actions before pushing", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      const remoteBefore = yield* runGit(remoteDir, ["rev-parse", "main"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "ahead.txt"), "ahead\n");
+      yield* runGit(repoDir, ["add", "ahead.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Local ahead commit"]);
+
+      const { manager, ghCalls } = yield* makeManager({
+        sourceControlProviderEnabled: Effect.succeed(false),
+        textGeneration: {
+          generatePrContent: () => Effect.die(new Error("PR generation must not run")),
+        },
+      });
+      const errorMessage = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "create_pr",
+      }).pipe(
+        Effect.flip,
+        Effect.map((error) => error.message),
+      );
+
+      expect(errorMessage).toContain("source control provider is disabled");
+      expect(yield* runGit(remoteDir, ["rev-parse", "main"])).toStrictEqual(remoteBefore);
+      expect(ghCalls).toEqual([]);
+    }),
+  );
+
+  it.effect("rejects disabled commit-push-PR actions before mutating Git state", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      const headBefore = yield* runGit(repoDir, ["rev-parse", "HEAD"]);
+      const remoteBefore = yield* runGit(remoteDir, ["rev-parse", "main"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "dirty.txt"), "dirty\n");
+
+      const { manager, ghCalls } = yield* makeManager({
+        sourceControlProviderEnabled: Effect.succeed(false),
+        textGeneration: {
+          generateCommitMessage: () => Effect.die(new Error("Commit generation must not run")),
+          generatePrContent: () => Effect.die(new Error("PR generation must not run")),
+        },
+      });
+      const errorMessage = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit_push_pr",
+        featureBranch: true,
+      }).pipe(
+        Effect.flip,
+        Effect.map((error) => error.message),
+      );
+
+      expect(errorMessage).toContain("source control provider is disabled");
+      expect(yield* runGit(repoDir, ["rev-parse", "HEAD"])).toStrictEqual(headBefore);
+      expect((yield* runGit(repoDir, ["branch", "--show-current"])).stdout.trim()).toBe("main");
+      expect(yield* runGit(remoteDir, ["rev-parse", "main"])).toStrictEqual(remoteBefore);
+      expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toContain("dirty.txt");
+      expect(ghCalls).toEqual([]);
+    }),
+  );
+
+  it.effect("allows generic commit and push when the hosting provider is disabled", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "change.txt"), "change\n");
+      const { manager, ghCalls } = yield* makeManager({
+        sourceControlProviderEnabled: Effect.succeed(false),
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit_push",
+        commitMessage: "Record local change",
+      });
+
+      expect(result.commit.status).toBe("created");
+      expect(result.push.status).toBe("pushed");
+      expect((yield* runGit(remoteDir, ["rev-parse", "main"])).stdout).toBe(
+        (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout,
+      );
+      expect(ghCalls).toEqual([]);
+    }),
+  );
+
+  it.effect.each([true, false])(
+    "creates PR with template following %s",
+    (followChangeRequestTemplates) =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        NodeFS.mkdirSync(NodePath.join(repoDir, ".github"));
+        NodeFS.writeFileSync(
+          NodePath.join(repoDir, ".github", "pull_request_template.md"),
+          "## What changed?\n\n## Verification",
+        );
+        yield* runGit(repoDir, ["add", ".github/pull_request_template.md"]);
+        yield* runGit(repoDir, ["commit", "-m", "Add pull request template"]);
+        yield* runGit(repoDir, ["checkout", "-b", "feature-create-pr"]);
+        const remoteDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+        NodeFS.writeFileSync(NodePath.join(repoDir, "changes.txt"), "change\n");
+        yield* runGit(repoDir, ["add", "changes.txt"]);
+        yield* runGit(repoDir, ["commit", "-m", "Feature commit"]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "feature-create-pr"]);
+        yield* runGit(repoDir, ["config", "branch.feature-create-pr.gh-merge-base", "main"]);
+        let generatedPolicy: TextGeneration.PrContentGenerationInput["policy"] = undefined;
+        let generatedChangeRequestTemplate: string | undefined;
+
+        const { manager, ghCalls } = yield* makeManager({
+          serverSettings: {
+            sourceControlWritingStyle: {
+              mode: "custom" as const,
+              followChangeRequestTemplates,
+              changeRequestTitleInstructions: "Use a specific title.",
+              changeRequestDescriptionInstructions: "Lead with user impact.",
+            },
+          },
+          textGeneration: {
+            generatePrContent: (input) => {
+              generatedPolicy = input.policy;
+              generatedChangeRequestTemplate = input.changeRequestTemplate;
+              return Effect.succeed({
+                title: "Add stacked git actions",
+                body: "## What changed?\nAdded stacked git actions.",
+              });
+            },
+          },
+          ghScenario: {
+            prListSequence: [
+              "[]",
+              // @effect-diagnostics-next-line preferSchemaOverJson:off
+              JSON.stringify([
+                {
+                  number: 88,
+                  title: "Add stacked git actions",
+                  url: "https://github.com/pingdotgg/codething-mvp/pull/88",
+                  baseRefName: "main",
+                  headRefName: "feature-create-pr",
+                },
+              ]),
+            ],
+          },
+        });
+        const result = yield* runStackedAction(manager, {
+          cwd: repoDir,
+          action: "commit_push_pr",
+        });
+
+        expect(result.branch.status).toBe("skipped_not_requested");
+        expect(result.pr.status).toBe("created");
+        expect(result.pr.number).toBe(88);
+        expect(generatedPolicy).toMatchObject({
+          additionalChangeRequestTitleInstructions: "Use a specific title.",
+          additionalChangeRequestDescriptionInstructions: "Lead with user impact.",
+        });
+        expect(generatedChangeRequestTemplate).toBe(
+          followChangeRequestTemplates ? "## What changed?\n\n## Verification" : undefined,
+        );
+        expect(ghCalls.filter((call) => call.startsWith("pr list "))).toHaveLength(2);
+        expect(
+          ghCalls.some((call) => call.includes("pr create --base main --head feature-create-pr")),
+        ).toBe(true);
+        expect(ghCalls.some((call) => call.startsWith("pr view "))).toBe(false);
+      }),
   );
 
   it.effect("generates PR content from branch changes when the remote base advances", () =>

@@ -1032,6 +1032,7 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
                 }),
             Layer.succeed(RunFinalizationService.RunFinalizationObserver, {
               refresh: () => Effect.void,
+              refreshAfterTool: () => Effect.void,
               refreshAfterTurn: () => Ref.update(refreshes, (count) => count + 1),
             }),
           ),
@@ -3379,6 +3380,105 @@ it.effect("keeps completed runs completed when pull request refresh fails", () =
   }),
 );
 
+it.effect.each(["command_execution", "file_change", "dynamic_tool", "subagent"] as const)(
+  "checks the branch once after %s completes while the provider turn stays open",
+  (type) =>
+    Effect.gen(function* () {
+      const refreshes = yield* Ref.make<ReadonlyArray<string>>([]);
+      const { observed } = yield* captureRootRunTermination({
+        key: `branch-refresh:${type}`,
+        shouldFinalizeRun: () => Effect.succeed(true),
+        refreshAfterTool: (cwd) => Ref.update(refreshes, (current) => [...current, cwd]),
+        events: (ids) => {
+          const item = (status: "running" | "completed") =>
+            ({
+              type: "turn_item.updated",
+              driver,
+              turnItem: {
+                id: ids.itemId,
+                threadId: ids.threadId,
+                runId: ids.runId,
+                providerTurnId: ids.rootProviderTurnId,
+                ordinal: 1,
+                type,
+                status,
+              },
+            }) as ProviderAdapterV2Event;
+          return Stream.make(item("running"), item("running")).pipe(
+            Stream.concat(
+              Stream.fromEffect(
+                Ref.get(refreshes).pipe(
+                  Effect.tap((calls) => Effect.sync(() => assert.deepEqual(calls, []))),
+                  Effect.as(item("completed")),
+                ),
+              ),
+            ),
+            Stream.concat(Stream.make(item("completed"))),
+            Stream.concat(
+              Stream.fromEffect(
+                Ref.get(refreshes).pipe(
+                  Effect.tap((calls) =>
+                    Effect.sync(() => assert.deepEqual(calls, [process.cwd()])),
+                  ),
+                  Effect.as(rootTerminalEvent(ids, "completed")),
+                ),
+              ),
+            ),
+          );
+        },
+      });
+      assert.deepEqual(yield* Ref.get(refreshes), [process.cwd()]);
+      assert.deepEqual(observed, ["run:waiting", "pull-requests-refreshed"]);
+    }),
+);
+
+it.effect("ignores child tools and non-tool items when checking the active thread's branch", () =>
+  Effect.gen(function* () {
+    const refresh = vi.fn(() => Effect.void);
+    yield* captureRootRunTermination({
+      key: "branch-refresh:unrelated-items",
+      shouldFinalizeRun: () => Effect.succeed(true),
+      refreshAfterTool: refresh,
+      events: (ids) =>
+        Stream.make(
+          childThreadCreatedEvent(ids),
+          childBackgroundTurnItemEvent(ids, "completed", 1),
+          {
+            type: "turn_item.updated",
+            driver,
+            turnItem: {
+              id: ids.itemId,
+              threadId: ids.threadId,
+              runId: ids.runId,
+              providerTurnId: ids.rootProviderTurnId,
+              ordinal: 1,
+              type: "reasoning",
+              status: "completed",
+            },
+          } as ProviderAdapterV2Event,
+          rootTerminalEvent(ids, "completed"),
+        ),
+    });
+    assert.equal(refresh.mock.calls.length, 0);
+  }),
+);
+
+it.effect("keeps the provider turn running when its branch refresh fails", () =>
+  Effect.gen(function* () {
+    const { observed } = yield* captureRootRunTermination({
+      key: "branch-refresh:failure",
+      shouldFinalizeRun: () => Effect.succeed(true),
+      refreshAfterTool: () => Effect.die("branch unavailable"),
+      events: (ids) =>
+        Stream.make(
+          backgroundTurnItemEvent(ids, "command_execution", "completed", 1),
+          rootTerminalEvent(ids, "completed"),
+        ),
+    });
+    assert.deepEqual(observed, ["run:waiting", "pull-requests-refreshed"]);
+  }),
+);
+
 function captureRootRunTermination(input: {
   readonly key: string;
   readonly shouldFinalizeRun: () => Effect.Effect<boolean, ProjectionStore.ProjectionStoreV2Error>;
@@ -3389,6 +3489,7 @@ function captureRootRunTermination(input: {
   ) => Stream.Stream<ProviderAdapterV2Event, ProviderAdapterV2Error>;
   readonly startTurn?: ProviderAdapterV2SessionRuntime["startTurn"];
   readonly refreshAfterTurn?: Effect.Effect<void>;
+  readonly refreshAfterTool?: (cwd: string) => Effect.Effect<void>;
 }) {
   return Effect.gen(function* () {
     const ids = backgroundScenarioIds(input.key);
@@ -3443,6 +3544,7 @@ function captureRootRunTermination(input: {
           ServerSettings.layerTest(),
           Layer.succeed(RunFinalizationService.RunFinalizationObserver, {
             refresh: () => Effect.void,
+            refreshAfterTool: input.refreshAfterTool ?? (() => Effect.void),
             refreshAfterTurn: () =>
               Ref.update(observed, (current) => [...current, "pull-requests-refreshed"]).pipe(
                 Effect.andThen(input.refreshAfterTurn ?? Effect.void),

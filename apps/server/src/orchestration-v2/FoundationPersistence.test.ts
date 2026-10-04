@@ -1,3 +1,5 @@
+import * as NodeV8 from "node:v8";
+
 import * as ServerSettings from "../serverSettings.ts";
 import { assert, it } from "@effect/vitest";
 import {
@@ -672,6 +674,46 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
         replayed.map((stored) => stored.sequence),
         Array.from({ length: eventCount }, (_, index) => index + 1),
       );
+    }),
+  );
+
+  it.effect("releases consumed catch-up pages while preserving ordered replay", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:foundation-replay-retention");
+      const thread = makeThread(threadId, now);
+      const eventCount = 1_025;
+      yield* eventSink.write({
+        events: [
+          threadCreatedEvent({ id: "event:replay-retention:0", thread, now }),
+          ...Array.from({ length: eventCount - 1 }, (_, index) => ({
+            id: EventId.make(`event:replay-retention:${index + 1}`),
+            type: "thread.metadata-updated" as const,
+            threadId,
+            occurredAt: now,
+            payload: { ...thread, title: `Updated ${index + 1}` },
+          })),
+        ],
+      });
+
+      // oxlint-disable-next-line typescript/no-extraneous-class -- Identifies retained replay pages in V8's heap query.
+      class ReplayPage {}
+      let count = 0;
+      yield* eventSink.stream({ afterSequence: 0 }).pipe(
+        Stream.take(eventCount),
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            assert.equal(event.sequence, count + 1);
+            if (count % 256 === 0) {
+              Object.assign(event, { replayPage: new ReplayPage() });
+              assert.isAtMost(NodeV8.queryObjects(ReplayPage, { format: "count" }), 1);
+            }
+            count++;
+          }),
+        ),
+      );
+      assert.equal(count, eventCount);
     }),
   );
 

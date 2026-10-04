@@ -111,6 +111,17 @@ it.layer(NodeServices.layer)("fork V2 migration", (it) => {
       try {
         yield* seed.pipe(Effect.provide(NodeSqliteClient.layer({ filename: source })));
         const original = yield* fs.readFile(source);
+        const sourceDatabase = new NodeSqlite.DatabaseSync(source, { readOnly: true });
+        let originalLedger;
+        try {
+          originalLedger = sourceDatabase
+            .prepare(
+              "SELECT migration_id, name, created_at FROM effect_sql_migrations ORDER BY migration_id",
+            )
+            .all();
+        } finally {
+          sourceDatabase.close();
+        }
         yield* initializeV2Database(destination).pipe(Effect.provide(NodeServices.layer));
         yield* runV2Migrations().pipe(
           Effect.provide(NodeSqliteClient.layer({ filename: destination })),
@@ -118,11 +129,29 @@ it.layer(NodeServices.layer)("fork V2 migration", (it) => {
         yield* Effect.gen(function* () {
           const importer = yield* Importer.LegacyV1ThreadImporter;
           const store = yield* ProjectionStore.ProjectionStoreV2;
+          const sql = yield* SqlClient.SqlClient;
+          const migratedLedger =
+            yield* sql`SELECT migration_id, name, created_at FROM effect_sql_migrations WHERE migration_id <= 39 ORDER BY migration_id`;
+          NodeAssert.deepEqual(
+            migratedLedger.map((row) => ({ ...row })),
+            originalLedger.map((row) => ({ ...row })),
+          );
           NodeAssert.equal((yield* importer.reconcileShells).importedThreadCount, 4);
           NodeAssert.equal((yield* importer.reconcileShells).importedThreadCount, 0);
           yield* importer.ensureTranscript(ThreadId.make("long"));
           const projection = yield* store.getThreadProjection(ThreadId.make("long"));
           NodeAssert.equal(projection.messages.length, 130);
+          for (const [index, message] of projection.messages.entries()) {
+            const date = DateTime.formatIso(
+              DateTime.add(DateTime.makeUnsafe(timestamp), { seconds: index }),
+            );
+            NodeAssert.equal(message.id, `message-${String(index).padStart(3, "0")}`);
+            NodeAssert.equal(message.role, index % 2 ? "assistant" : "user");
+            NodeAssert.equal(message.text, `Message ${index}: ` + "saved history ".repeat(1000));
+            NodeAssert.equal(DateTime.formatIso(message.createdAt), date);
+            NodeAssert.equal(DateTime.formatIso(message.updatedAt), date);
+            NodeAssert.deepEqual(message.attachments, index === 0 ? [attachment] : []);
+          }
           NodeAssert.equal(projection.thread.activeProviderThreadId, null);
           NodeAssert.equal(projection.thread.runtimeMode, "auto");
           NodeAssert.equal(projection.thread.historyOrigin, "v1_import");

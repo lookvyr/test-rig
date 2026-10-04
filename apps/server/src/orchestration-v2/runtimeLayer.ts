@@ -41,7 +41,10 @@ import { layer as providerSwitchServiceLayer } from "./ProviderSwitchService.ts"
 import { layer as providerTurnControlServiceLayer } from "./ProviderTurnControlService.ts";
 import { layer as providerTurnStartServiceLayer } from "./ProviderTurnStartService.ts";
 import { layer as runExecutionServiceLayer } from "./RunExecutionService.ts";
-import { layer as runFinalizationServiceLayer } from "./RunFinalizationService.ts";
+import {
+  layer as runFinalizationServiceLayer,
+  observerLive as runFinalizationObserverLive,
+} from "./RunFinalizationService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import { layer as runtimeRequestServiceLayer } from "./RuntimeRequestService.ts";
 import { layerWithLegacyImporter as threadManagementServiceLayer } from "./ThreadManagementService.ts";
@@ -130,13 +133,18 @@ const providerSessionManagerProvided = providerSessionManagerLayer.pipe(
   ),
 );
 
-const runExecutionServiceProvided = runExecutionServiceLayer.pipe(
+const runFinalizationObserverProvided = runFinalizationObserverLive.pipe(
+  Layer.provide(projectionStoreLayer),
+);
+
+export const RunExecutionServiceLayerLive = runExecutionServiceLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
       checkpointServiceProvided,
       eventSinkProvided,
       idAllocatorLayer,
       providerEventIngestorProvided,
+      runFinalizationObserverProvided,
     ),
   ),
 );
@@ -149,7 +157,7 @@ const providerTurnStartServiceProvided = providerTurnStartServiceLayer.pipe(
       idAllocatorLayer,
       projectionStoreLayer,
       providerSessionManagerProvided,
-      runExecutionServiceProvided,
+      RunExecutionServiceLayerLive,
       runtimePolicyProvided,
     ),
   ),
@@ -171,8 +179,14 @@ const checkpointCaptureServiceProvided = checkpointCaptureServiceLayer.pipe(
     ),
   ),
 );
-const runFinalizationServiceProvided = runFinalizationServiceLayer.pipe(
-  Layer.provide(Layer.merge(checkpointCaptureServiceProvided, projectionStoreLayer)),
+export const RunFinalizationServiceLayerLive = runFinalizationServiceLayer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      checkpointCaptureServiceProvided,
+      projectionStoreLayer,
+      runFinalizationObserverProvided,
+    ),
+  ),
 );
 
 const orchestratorProvided = orchestratorLayer.pipe(
@@ -194,7 +208,7 @@ const orchestratorProvided = orchestratorLayer.pipe(
       runtimePolicyProvided,
       providerSessionManagerProvided,
       providerSwitchServiceProvided,
-      runExecutionServiceProvided,
+      RunExecutionServiceLayerLive,
       threadForkServiceLayer,
     ),
   ),
@@ -257,7 +271,7 @@ const effectExecutorProvided = effectExecutorLayer.pipe(
   Layer.provide(runtimePolicyProvided),
   Layer.provide(
     Layer.mergeAll(
-      runFinalizationServiceProvided,
+      RunFinalizationServiceLayerLive,
       checkpointRollbackServiceLayer,
       providerSessionManagerProvided,
       providerTurnControlServiceProvided,

@@ -17,6 +17,4 @@ Claude must save a complete conversation snapshot before it can open a side chat
 
 Temporary side chats expire when Test Rig’s backend restarts. Closing a browser tab or reconnecting does not discard them.
 
-Checkpoint restoration is unavailable in a temporary side chat and in its parent while the side chat exists. Discard the side chat before restoring the parent.
-
 Side chats support Codex and Claude. OpenCode conversations do not offer them.
