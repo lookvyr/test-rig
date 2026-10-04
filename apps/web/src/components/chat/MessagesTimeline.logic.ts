@@ -21,7 +21,6 @@ export {
   toolGroupAction,
 } from "@t3tools/client-runtime/work-log/presentation";
 import {
-  deriveRevertTurnCountByUserMessageId,
   formatDuration,
   isStreamingMessageTextUpdate,
   isStreamingTurnItemTextUpdate,
@@ -560,7 +559,6 @@ type MessagesTimelineRowContent =
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
-      revertTurnCount?: number | undefined;
     }
   | {
       kind: "assistant-meta";
@@ -1201,7 +1199,6 @@ export function deriveMessagesTimelineRows(input: {
   runlessWorkActive?: boolean;
   activeTurnStartedAt?: string | null;
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
-  supportsConversationRollback: boolean;
   /** Task ids of subagents still working, used by the active tool indicator. */
   liveAgentTaskIds?: ReadonlySet<string> | undefined;
   /** Live bootstrap progress. Renders a stage card under the first user message. */
@@ -1216,12 +1213,6 @@ export function deriveMessagesTimelineRows(input: {
       turnDiffSummaryByAssistantMessageId.set(summary.assistantMessageId, summary);
     }
   }
-  const revertTurnCountByUserMessageId = input.supportsConversationRollback
-    ? deriveRevertTurnCountByUserMessageId({
-        timelineEntries: timelineEntries,
-        checkpoints: input.turnDiffSummaries,
-      })
-    : new Map<MessageId, number>();
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
     timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
@@ -1662,10 +1653,6 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.message.role === "assistant"
           ? turnDiffSummaryByAssistantMessageId.get(timelineEntry.message.id)
           : undefined,
-      revertTurnCount:
-        timelineEntry.message.role === "user"
-          ? revertTurnCountByUserMessageId.get(timelineEntry.message.id)
-          : undefined,
     });
   }
 
@@ -2039,8 +2026,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.showAssistantMeta === bm.showAssistantMeta &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
-        a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
-        a.revertTurnCount === bm.revertTurnCount
+        a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary
       );
     }
   }

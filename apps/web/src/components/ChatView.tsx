@@ -1122,9 +1122,6 @@ function ChatViewContent(props: ChatViewProps) {
   const respondToThreadUserInput = useAtomCommand(threadEnvironment.respondToUserInput, {
     reportFailure: false,
   });
-  const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
-    reportFailure: false,
-  });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const { environments } = useEnvironments();
@@ -1245,7 +1242,6 @@ function ChatViewContent(props: ChatViewProps) {
     Record<string, LocalThreadErrorEntry>
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
-  const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
@@ -2118,8 +2114,7 @@ function ChatViewContent(props: ChatViewProps) {
     phase === "connecting" ||
     runlessWorkStartedAt !== null ||
     isSendBusy ||
-    isConnecting ||
-    isRevertingCheckpoint;
+    isConnecting;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestRun,
     activeRuntime,
@@ -2366,55 +2361,7 @@ function ChatViewContent(props: ChatViewProps) {
     attachDraftHeroComposerAnchorRef,
     captureDraftHeroComposerRect,
   ] = useDraftHeroLayoutTransition(isDraftHeroState);
-  const { turnDiffSummaries, inferredCheckpointTurnCountByRunId } =
-    useTurnDiffSummaries(activeThread);
-  const turnDiffSummaryByAssistantMessageId = useMemo(() => {
-    const byMessageId = new Map<MessageId, TurnDiffSummary>();
-    for (const summary of turnDiffSummaries) {
-      if (!summary.assistantMessageId) continue;
-      byMessageId.set(summary.assistantMessageId, summary);
-    }
-    return byMessageId;
-  }, [turnDiffSummaries]);
-  const revertTurnCountByUserMessageId = useMemo(() => {
-    const byUserMessageId = new Map<MessageId, number>();
-    if (sideThreadShell || activeThread?.sideOfThreadId) return byUserMessageId;
-    for (let index = 0; index < timelineEntries.length; index += 1) {
-      const entry = timelineEntries[index];
-      if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
-        continue;
-      }
-
-      for (let nextIndex = index + 1; nextIndex < timelineEntries.length; nextIndex += 1) {
-        const nextEntry = timelineEntries[nextIndex];
-        if (!nextEntry || nextEntry.kind !== "message") {
-          continue;
-        }
-        if (nextEntry.message.role === "user") {
-          break;
-        }
-        const summary = turnDiffSummaryByAssistantMessageId.get(nextEntry.message.id);
-        if (!summary) {
-          continue;
-        }
-        const turnCount =
-          summary.checkpointTurnCount ?? inferredCheckpointTurnCountByRunId[summary.runId];
-        if (typeof turnCount !== "number") {
-          break;
-        }
-        byUserMessageId.set(entry.message.id, Math.max(0, turnCount - 1));
-        break;
-      }
-    }
-
-    return byUserMessageId;
-  }, [
-    inferredCheckpointTurnCountByRunId,
-    timelineEntries,
-    turnDiffSummaryByAssistantMessageId,
-    sideThreadShell,
-    activeThread?.sideOfThreadId,
-  ]);
+  const { turnDiffSummaries } = useTurnDiffSummaries(activeThread);
 
   const gitCwd = activeProject
     ? projectScriptCwd({
@@ -3787,10 +3734,6 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThread?.id]);
 
   useEffect(() => {
-    setIsRevertingCheckpoint(false);
-  }, [activeThread?.id]);
-
-  useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
@@ -4804,73 +4747,6 @@ function ChatViewContent(props: ChatViewProps) {
       forkThreadFromRun,
       navigate,
       setThreadError,
-    ],
-  );
-
-  const onRevertToTurnCount = useCallback(
-    async (
-      turnCount: number | undefined,
-      checkpoint?: { checkpointId: string; scopeId: string },
-    ) => {
-      const localApi = readLocalApi();
-      if (!localApi || !activeThread || isRevertingCheckpoint) return;
-
-      if (activeEnvironmentUnavailable && activeEnvironmentUnavailableLabel) {
-        setThreadError(
-          activeThread.id,
-          `Reconnect ${activeEnvironmentUnavailableLabel} before reverting checkpoints.`,
-        );
-        return;
-      }
-      if (sideThreadShell || activeThread.sideOfThreadId) {
-        setThreadError(activeThread.id, "Discard the side chat before restoring a checkpoint.");
-        return;
-      }
-      if (phase === "running" || isSendBusy || isConnecting) {
-        setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
-        return;
-      }
-      const confirmed = await localApi.dialogs.confirm(
-        [
-          `Revert this thread to checkpoint ${checkpoint?.checkpointId ?? turnCount}?`,
-          "This will discard newer messages and turn diffs in this thread.",
-          "This action cannot be undone.",
-        ].join("\n"),
-      );
-      if (!confirmed) {
-        return;
-      }
-
-      setIsRevertingCheckpoint(true);
-      setThreadError(activeThread.id, null);
-      const result = await revertThreadCheckpoint({
-        environmentId,
-        input: {
-          threadId: activeThread.id,
-          ...(checkpoint ?? { turnCount: turnCount! }),
-        },
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setThreadError(
-          activeThread.id,
-          error instanceof Error ? error.message : "Failed to revert thread state.",
-        );
-      }
-      setIsRevertingCheckpoint(false);
-    },
-    [
-      activeThread,
-      activeEnvironmentUnavailable,
-      activeEnvironmentUnavailableLabel,
-      environmentId,
-      isConnecting,
-      isRevertingCheckpoint,
-      isSendBusy,
-      phase,
-      revertThreadCheckpoint,
-      setThreadError,
-      sideThreadShell,
     ],
   );
 
@@ -6194,13 +6070,9 @@ function ChatViewContent(props: ChatViewProps) {
                       }
                 }
                 onForkFromRun={onForkFromRun}
-                onRollbackCheckpoint={(input) => void onRevertToTurnCount(undefined, input)}
-                supportsConversationRollback={!sideThreadShell && !activeThread.sideOfThreadId}
-                onRevertToTurnCount={(turnCount) => void onRevertToTurnCount(turnCount)}
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
-                isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}
                 resolvedTheme={resolvedTheme}

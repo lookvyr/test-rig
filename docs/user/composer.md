@@ -90,3 +90,10 @@ conversation view.
 
 Tool details show the input, status, and command exit code when available. Raw
 tool output is omitted from the conversation details.
+
+## Continue from an earlier response
+
+Choose **Fork from this response** to start a separate conversation from an
+earlier response. The original conversation remains available. Test Rig does
+not rewind conversations or edit sent messages; use a fork to try another
+direction. Checkpoint diffs remain available for reviewing file changes.

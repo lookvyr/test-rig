@@ -135,7 +135,6 @@ import {
   SmartphoneIcon,
   SquarePenIcon,
   TerminalIcon,
-  Undo2Icon,
   HammerIcon,
   WrenchIcon,
   XIcon,
@@ -301,7 +300,6 @@ interface TimelineRowSharedState {
   /** Projection runs, for recovering handoff models on legacy items. */
   runs: ReadonlyArray<HandoffTimelineRun>;
   activeThreadEnvironmentId: EnvironmentId;
-  onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onRunShellCommand: ((command: string) => void) | undefined;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -312,10 +310,6 @@ interface TimelineRowSharedState {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
   }) => Promise<void>;
-  onRollbackCheckpoint: (input: {
-    readonly checkpointId: string;
-    readonly scopeId: string;
-  }) => void;
   onToggleTurnFold: (runId: RunId) => void;
   onToggleAttemptFold: (attemptId: RunAttemptId) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
@@ -332,7 +326,6 @@ interface TimelineRowSharedState {
 interface TimelineRowActivityState {
   isWorking: boolean;
   isCompacting: boolean;
-  isRevertingCheckpoint: boolean;
   activeTurnInProgress: boolean;
   isPreparingWorktree: boolean;
   latestRunId: RunId | null;
@@ -441,15 +434,8 @@ interface MessagesTimelineProps {
     readonly sourceThreadId: ThreadId;
     readonly runId: RunId;
   }) => Promise<void>;
-  onRollbackCheckpoint: (input: {
-    readonly checkpointId: string;
-    readonly scopeId: string;
-  }) => void;
-  supportsConversationRollback: boolean;
-  onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
   onRunShellCommand?: (command: string) => void;
-  isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen?: (attachment: ChatFileAttachment) => void;
   onFileDownload?: (attachment: ChatFileAttachment) => void;
@@ -521,12 +507,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenThread,
   parentThreadLink = null,
   onForkFromRun,
-  onRollbackCheckpoint,
-  supportsConversationRollback,
-  onRevertToTurnCount,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
   onRunShellCommand,
-  isRevertingCheckpoint,
   onImageExpand,
   onFileOpen = NOOP_OPEN_ATTACHMENT,
   onFileDownload = NOOP_OPEN_ATTACHMENT,
@@ -764,7 +746,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         runlessWorkActive,
         activeTurnStartedAt,
         turnDiffSummaries,
-        supportsConversationRollback,
         worktreeSetup,
       },
       previous?.threadKey === listIdentityKey && previous.workspaceRoot === workspaceRoot
@@ -787,7 +768,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     runlessWorkActive,
     activeTurnStartedAt,
     turnDiffSummaries,
-    supportsConversationRollback,
     worktreeSetup,
   ]);
   const rows = useStableRows(rawRows, listIdentityKey);
@@ -1172,7 +1152,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       providerStatuses,
       runs,
       activeThreadEnvironmentId,
-      onRevertToTurnCount,
       onRunShellCommand,
       onImageExpand,
       onFileOpen,
@@ -1182,7 +1161,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
-      onRollbackCheckpoint,
       onToggleTurnFold,
       onToggleAttemptFold,
       onToggleWorkGroup,
@@ -1206,7 +1184,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       providerStatuses,
       runs,
       activeThreadEnvironmentId,
-      onRevertToTurnCount,
       onRunShellCommand,
       onImageExpand,
       onFileOpen,
@@ -1216,7 +1193,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenTurnDiff,
       onOpenThread,
       onForkFromRun,
-      onRollbackCheckpoint,
       onToggleTurnFold,
       onToggleAttemptFold,
       onToggleWorkGroup,
@@ -1240,7 +1216,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     () => ({
       isWorking,
       isCompacting: compactionAwaitingRow,
-      isRevertingCheckpoint,
       backgroundWorktreeSetup,
       activeTurnInProgress,
       isPreparingWorktree,
@@ -1251,7 +1226,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       backgroundWorktreeSetup,
       activeTurnInProgress,
       isPreparingWorktree,
-      isRevertingCheckpoint,
       isWorking,
       latestRun?.runId,
     ],
@@ -2004,7 +1978,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     () => userImages.filter((image) => image.name.startsWith("preview-annotation-")),
     [userImages],
   );
-  const revertTurnCount = row.revertTurnCount;
   // A file with a chip in the prose needs no standalone row. Media is the exception: the
   // thumbnail is the only way to actually see it, so it shows whether or not it has a chip.
   const chippedAttachmentIds = new Set(
@@ -2284,9 +2257,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
-            {typeof revertTurnCount === "number" && (
-              <RevertUserMessageButton turnCount={revertTurnCount} messageId={row.message.id} />
-            )}
             {resolvedContext.text && (
               <MessageCopyButton
                 // Structured paste needs the canonical links to retain their positions.
@@ -2377,37 +2347,6 @@ export function resolvePreviewAnnotationImage(input: {
     ) ??
     input.previewImages[input.annotationRecordIds.indexOf(input.record.contextId)] ??
     null
-  );
-}
-
-function RevertUserMessageButton({
-  turnCount,
-  messageId,
-}: {
-  turnCount: number;
-  messageId: MessageId;
-}) {
-  const ctx = use(TimelineRowCtx);
-  const activity = use(TimelineRowActivityCtx);
-
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
-            onClick={() => ctx.onRevertToTurnCount(turnCount, messageId)}
-            aria-label="Edit from here"
-          />
-        }
-      >
-        <Undo2Icon className="size-3" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">Edit from here</TooltipPopup>
-    </Tooltip>
   );
 }
 
@@ -2880,7 +2819,6 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               workspaceRoot={ctx.workspaceRoot}
               onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
-              onRollbackCheckpoint={ctx.onRollbackCheckpoint}
             />
           </div>
         </div>
@@ -2954,7 +2892,6 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               workspaceRoot={ctx.workspaceRoot}
               onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
-              onRollbackCheckpoint={ctx.onRollbackCheckpoint}
             />
           </div>
         </div>
@@ -5291,7 +5228,6 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
               workspaceRoot={workspaceRoot}
               onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
-              onRollbackCheckpoint={ctx.onRollbackCheckpoint}
             />
           ) : expandedBody ? (
             <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>

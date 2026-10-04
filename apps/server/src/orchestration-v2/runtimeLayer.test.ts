@@ -473,10 +473,10 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
   );
 
   /**
-   * A thread with one ready checkpoint and no queued turn start. Every provider
-   * rollback on it fails, so each rollback effect retries until it gives up.
+   * Seeds already-persisted rollback requests to exercise old outbox records.
+   * New rollback commands are rejected before they can create these effects.
    */
-  const seedFailingRollbackThread = (name: string) =>
+  const seedLegacyRollbackThread = (name: string) =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const eventSink = yield* EventSink.EventSinkV2;
@@ -545,54 +545,81 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
       return {
         threadId,
         rollback: (commandId: CommandId) =>
-          orchestrator.dispatch({
-            type: "checkpoint.rollback",
-            commandId,
-            threadId,
-            checkpointId,
-            scopeId: scope.id,
-            restoreFiles: false,
+          Effect.gen(function* () {
+            const projection = yield* orchestrator.getThreadProjection(threadId);
+            const requestedAt = yield* DateTime.now;
+            return yield* eventSink.writeWithEffects({
+              commandId,
+              events: [
+                {
+                  id: EventId.make(`${commandId}-request`),
+                  type: "thread.metadata-updated",
+                  threadId,
+                  occurredAt: requestedAt,
+                  payload: {
+                    ...projection.thread,
+                    rollbackRequestId: commandId,
+                    rollbackFailure: null,
+                    updatedAt: requestedAt,
+                  },
+                },
+              ],
+              effects: [
+                {
+                  id: `effect:${commandId}:provider-thread.rollback`,
+                  commandId,
+                  threadId,
+                  request: {
+                    type: "provider-thread.rollback",
+                    providerThreadId: projection.thread.activeProviderThreadId!,
+                    checkpointId,
+                    scopeId: scope.id,
+                    restoreFiles: false,
+                  },
+                },
+              ],
+            });
           }),
       };
     });
 
-  it.effect("projects a rollback that fails every attempt and clears it on the next one", () =>
-    Effect.gen(function* () {
-      const orchestrator = yield* Orchestrator.OrchestratorV2;
-      const outbox = yield* EffectOutbox.EffectOutboxV2;
-      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
-      const { threadId, rollback } = yield* seedFailingRollbackThread("runtime-rollback-failure");
+  it.effect(
+    "settles historical rollback effects as unsupported and clears superseded failures",
+    () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const outbox = yield* EffectOutbox.EffectOutboxV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const { threadId, rollback } = yield* seedLegacyRollbackThread("runtime-rollback-failure");
 
-      const rollbackCommandId = CommandId.make("runtime-rollback-failure-rollback");
-      yield* rollback(rollbackCommandId);
-      // Retries back off on the clock; advance it until the worker gives up.
-      for (let attempt = 0; attempt < 5; attempt++) {
-        yield* worker.drain();
-        yield* TestClock.adjust("30 seconds");
-      }
+        const rollbackCommandId = CommandId.make("runtime-rollback-failure-rollback");
+        yield* rollback(rollbackCommandId);
+        // Retries back off on the clock; advance it until the worker gives up.
+        for (let attempt = 0; attempt < 5; attempt++) {
+          yield* worker.drain();
+          yield* TestClock.adjust("30 seconds");
+        }
 
-      const [rollbackEffect] = yield* outbox.listByCommandId(rollbackCommandId);
-      assert.equal(rollbackEffect?.status, "failed");
-      const failed = yield* orchestrator.getThreadProjection(threadId);
-      assert.deepEqual(failed.thread.rollbackFailure, {
-        requestId: rollbackCommandId,
-        message: ROLLBACK_FAILED_MESSAGE,
-      });
+        const [rollbackEffect] = yield* outbox.listByCommandId(rollbackCommandId);
+        assert.equal(rollbackEffect?.status, "failed");
+        const failed = yield* orchestrator.getThreadProjection(threadId);
+        assert.deepEqual(failed.thread.rollbackFailure, {
+          requestId: rollbackCommandId,
+          message: ROLLBACK_FAILED_MESSAGE,
+        });
 
-      yield* rollback(CommandId.make("runtime-rollback-failure-retry"));
-      const retried = yield* orchestrator.getThreadProjection(threadId);
-      assert.isNull(retried.thread.rollbackFailure);
-    }),
+        yield* rollback(CommandId.make("runtime-rollback-failure-retry"));
+        const retried = yield* orchestrator.getThreadProjection(threadId);
+        assert.isNull(retried.thread.rollbackFailure);
+      }),
   );
 
-  it.effect("ignores a late failure from a rollback that a newer one superseded", () =>
+  it.effect("ignores a late failure from a superseded historical rollback", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const outbox = yield* EffectOutbox.EffectOutboxV2;
       const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
-      const { threadId, rollback } = yield* seedFailingRollbackThread(
-        "runtime-rollback-superseded",
-      );
+      const { threadId, rollback } = yield* seedLegacyRollbackThread("runtime-rollback-superseded");
 
       const olderCommandId = CommandId.make("runtime-rollback-superseded-older");
       yield* rollback(olderCommandId);
@@ -625,7 +652,7 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
     }),
   );
 
-  it.effect("rejects non-ready rollback targets before persisting events or effects", () =>
+  it.effect("rejects every rollback target before persisting events or effects", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
       const eventSink = yield* EventSink.EventSinkV2;
@@ -697,91 +724,15 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
           scopeId: scope.id,
         });
 
-        if (status === "ready") {
-          const accepted = yield* rollback;
-          assert.deepEqual(
-            accepted.storedEvents.map((stored) => stored.event.type),
-            ["thread.metadata-updated", "checkpoint.rollback-requested"],
-          );
-          assert.deepEqual(
-            (yield* outbox.listByCommandId(commandId)).map((effect) => effect.request.type),
-            ["provider-thread.rollback"],
-          );
-          const path = yield* Path.Path.pipe(Effect.provide(NodeServices.layer));
-          yield* orchestrator.dispatch({
-            type: "thread.create",
-            createdBy: "user",
-            creationSource: "web",
-            commandId: CommandId.make("runtime-rollback-ancestor-create"),
-            threadId: ThreadId.make("runtime-rollback-ancestor"),
-            projectId: ProjectId.make("runtime-rollback-readiness-project"),
-            title: "Ancestor workspace owner",
-            modelSelection,
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            branch: null,
-            worktreePath: path.dirname(process.cwd()),
-          });
-          const overlapCommandId = CommandId.make("runtime-rollback-overlap");
-          const overlapSequence = yield* orchestrator.getThreadEventSequence(threadId);
-          const overlap = yield* orchestrator
-            .dispatch({
-              type: "checkpoint.rollback",
-              commandId: overlapCommandId,
-              threadId,
-              checkpointId,
-              scopeId: scope.id,
-            })
-            .pipe(Effect.flip);
-          assert.match(String(overlap.cause), /isolated worktree/);
-          assert.equal(yield* orchestrator.getThreadEventSequence(threadId), overlapSequence);
-          assert.deepEqual(yield* outbox.listByCommandId(overlapCommandId), []);
-          yield* orchestrator.dispatch({
-            type: "thread.metadata.update",
-            commandId: CommandId.make("runtime-rollback-share"),
-            threadId,
-            worktreePath: null,
-          });
-          const sharedCommandId = CommandId.make("runtime-rollback-shared");
-          const sequence = yield* orchestrator.getThreadEventSequence(threadId);
-          const shared = yield* orchestrator
-            .dispatch({
-              type: "checkpoint.rollback",
-              commandId: sharedCommandId,
-              threadId,
-              checkpointId,
-              scopeId: scope.id,
-            })
-            .pipe(Effect.flip);
-          assert.match(String(shared.cause), /isolated worktree/);
-          assert.equal(yield* orchestrator.getThreadEventSequence(threadId), sequence);
-          assert.deepEqual(yield* outbox.listByCommandId(sharedCommandId), []);
-          const conversationOnly = yield* orchestrator.dispatch({
-            type: "checkpoint.rollback",
-            commandId: CommandId.make("runtime-rollback-conversation"),
-            threadId,
-            checkpointId,
-            scopeId: scope.id,
-            restoreFiles: false,
-          });
-          assert.deepEqual(
-            conversationOnly.storedEvents.map((stored) => stored.event.type),
-            ["thread.metadata-updated", "checkpoint.rollback-requested"],
-          );
-        } else {
-          const error = yield* rollback.pipe(Effect.flip);
-          assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
-          assert.equal(
-            error.cause,
-            `Checkpoint ${checkpointId} is ${status} and cannot be restored.`,
-          );
-          assert.equal(yield* orchestrator.getThreadEventSequence(threadId), previousSequence);
-          assert.deepEqual(
-            yield* eventSink.readByCommandId({ commandId }).pipe(Stream.runCollect),
-            [],
-          );
-          assert.deepEqual(yield* outbox.listByCommandId(commandId), []);
-        }
+        const error = yield* rollback.pipe(Effect.flip);
+        assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
+        assert.equal(error.cause, ROLLBACK_FAILED_MESSAGE);
+        assert.equal(yield* orchestrator.getThreadEventSequence(threadId), previousSequence);
+        assert.deepEqual(
+          yield* eventSink.readByCommandId({ commandId }).pipe(Stream.runCollect),
+          [],
+        );
+        assert.deepEqual(yield* outbox.listByCommandId(commandId), []);
       }
     }).pipe(Effect.provide(Layer.fresh(TestLayer))),
   );

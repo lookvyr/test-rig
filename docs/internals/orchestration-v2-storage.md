@@ -66,8 +66,10 @@ work for the foundation integration.
 
 The imported wire projection currently provides upstream's compact transport
 shape. It is not wired to the client, and does not resolve LOO-13's pending choice
-about on-demand raw tool/command output. Conversation-only rewind and removal of
-all file-restoration execution paths remain LOO-25 requirements.
+about on-demand raw tool/command output. The October 4 product decision replaces
+LOO-25's conversation-only rewind with forking. New rollback commands and old
+queued rollback effects are rejected without changing provider context or files.
+Historical rollback events remain readable; checkpoint capture and diffs remain.
 
 ## Verification
 

@@ -983,30 +983,6 @@ export function inferCheckpointTurnCountByRunId(
   );
 }
 
-export function deriveRevertTurnCountByUserMessageId(input: {
-  readonly timelineEntries: ReadonlyArray<TimelineEntry>;
-  readonly checkpoints: ReadonlyArray<ThreadCheckpointSummary>;
-}): Map<ChatMessage["id"], number> {
-  const readyCheckpointByRunId = new Map<RunId, ThreadCheckpointSummary>();
-  for (const checkpoint of input.checkpoints) {
-    if (checkpoint.status === "ready") {
-      readyCheckpointByRunId.set(checkpoint.runId, checkpoint);
-    }
-  }
-  const byUserMessageId = new Map<ChatMessage["id"], number>();
-  for (const entry of input.timelineEntries) {
-    if (entry.kind !== "message" || entry.message.role !== "user") continue;
-    if (entry.message.inputIntent !== "turn_start" && entry.message.inputIntent !== "queued_turn") {
-      continue;
-    }
-    if (entry.message.runId === null) continue;
-    const checkpoint = readyCheckpointByRunId.get(entry.message.runId);
-    if (checkpoint === undefined) continue;
-    byUserMessageId.set(entry.message.id, Math.max(0, checkpoint.checkpointTurnCount - 1));
-  }
-  return byUserMessageId;
-}
-
 export function derivePhase(runtime: ThreadRuntimeSummary | null): SessionPhase {
   if (runtime === null) return "disconnected";
   if (

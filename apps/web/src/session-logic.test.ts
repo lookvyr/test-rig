@@ -27,7 +27,6 @@ import {
   deriveCanInterruptRunningThread,
   deriveTimelineEntriesFromVisibleTurnItems,
   deriveTimelineEntriesFromVisibleTurnItemsWithState,
-  deriveRevertTurnCountByUserMessageId,
   derivePhase,
   findLatestProposedPlan,
   isLatestRunSettled,
@@ -237,68 +236,6 @@ describe("V2 session presentation", () => {
       runId,
     );
     expect(plan?.planMarkdown).toBe("Plan");
-  });
-
-  it("assigns run rollback to the turn-start message instead of a later steer", () => {
-    const runId = RunId.make("run-steered");
-    const turnStartMessageId = MessageId.make("message-turn-start");
-    const steerMessageId = MessageId.make("message-steer");
-    const assistantMessageId = MessageId.make("message-assistant");
-    const messages: ChatMessage[] = [
-      {
-        id: turnStartMessageId,
-        role: "user",
-        text: "Start",
-        runId,
-        inputIntent: "turn_start",
-        streaming: false,
-        createdAt: "2026-06-20T00:00:00.000Z",
-        updatedAt: "2026-06-20T00:00:00.000Z",
-      },
-      {
-        id: steerMessageId,
-        role: "user",
-        text: "Steer",
-        runId,
-        inputIntent: "steer",
-        streaming: false,
-        createdAt: "2026-06-20T00:00:01.000Z",
-        updatedAt: "2026-06-20T00:00:01.000Z",
-      },
-      {
-        id: assistantMessageId,
-        role: "assistant",
-        text: "Done",
-        runId,
-        streaming: false,
-        createdAt: "2026-06-20T00:00:02.000Z",
-        updatedAt: "2026-06-20T00:00:02.000Z",
-      },
-    ];
-    const timelineEntries: TimelineEntry[] = messages.map((message): TimelineEntry => ({
-      id: message.id,
-      kind: "message",
-      createdAt: message.createdAt,
-      message,
-    }));
-
-    const targets = deriveRevertTurnCountByUserMessageId({
-      timelineEntries,
-      checkpoints: [
-        {
-          runId,
-          checkpointTurnCount: 1,
-          checkpointRef: "checkpoint-run-1" as never,
-          status: "ready",
-          files: [],
-          assistantMessageId,
-          completedAt: "2026-06-20T00:00:03.000Z",
-        },
-      ],
-    });
-
-    expect([...targets]).toEqual([[turnStartMessageId, 0]]);
-    expect(targets.has(steerMessageId)).toBe(false);
   });
 
   it("uses visible turn item order and keeps provider errors in the work log", () => {
@@ -1078,7 +1015,6 @@ describe("native provider presentation in the v2 timeline", () => {
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaries: [],
-      supportsConversationRollback: false,
     });
     expect(rows.map((row) => row.kind)).toEqual(["message"]);
   });

@@ -111,6 +111,9 @@ The following are outside Test Rig's product boundary:
   excluded from the source-only product.
 - Usage/pricing UI and custom-gateway usage integration.
 - Upstream desktop auto-update feeds.
+- Conversation rewind, editing sent messages by truncating history, and restoring
+  workspace files through chat checkpoints. Fork from an earlier response to
+  explore a different direction; checkpoint capture and diffs remain available.
 
 Automatic ancillary requests to PostHog, OTLP collectors, upstream desktop
 update feeds, LiteLLM pricing tables, Google favicon services, and npm-registry
@@ -169,7 +172,8 @@ Use the smallest focused checks appropriate to a changed vertical slice:
 - [ ] The desktop shell starts with the local web renderer and a loopback-bound,
       authenticated server.
 - [ ] A disposable repository can create and resume a thread, run terminal and
-      filesystem operations, use Git, and create and restore a checkpoint/worktree.
+      filesystem operations, use Git and worktrees, capture checkpoint diffs,
+      and fork from an earlier response.
 - [ ] Codex, Claude Code, and OpenCode can each be selected and complete a
       representative local turn with their existing provider-owned authentication.
 - [ ] Cursor and Grok cannot be selected or executed through UI, RPC, persisted

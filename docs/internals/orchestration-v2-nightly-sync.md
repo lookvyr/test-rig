@@ -110,6 +110,28 @@ explicitly disable declaration output, as upstream does with Vite+ 1.0.
 
 ## Verification and surfaces
 
+### Rewind removal (October 4, 2026)
+
+The product decision for LOO-25 is to use forks instead of rewind. The uncommitted
+conversation-only implementation was removed, along with the inherited message
+and checkpoint rewind actions and client commands. The server rejects new
+rollback commands and historical queued rollback effects. File restoration is
+removed from the V2 checkpoint service; capture, diffs, forks, and historical
+rollback projections remain.
+
+The independent RPC type-check fix is retained: dispatch, diff, search, and
+workflow-script RPC definitions use the canonical error classes exported by the
+public contracts instead of duplicate legacy classes.
+
+Removal validation: 335 focused rollback/admission/runtime/checkpoint/timeline
+tests and 24 fork tests pass. Standard web and server typechecks, changed-file
+lint, and independent simplification review pass. The live web client shows no
+message rewind action and creates a fork with the selected history. The initial
+fork navigation landed on an empty draft; selecting the created fork in the
+sidebar opened its retained history. This navigation issue is separate from the
+removal and remains unresolved. No new desktop-shell or remote-host pass was run
+for this shared-client removal.
+
 Focused checks cover native adapters; restart replay and background notices;
 native forks and checkpoint rollback; explicit PR association; workspace cleanup;
 client history/reconnect and subagents; rich drafts, Find, and project settings.

@@ -161,19 +161,6 @@ const providerTurnControlServiceProvided = providerTurnControlServiceLayer.pipe(
 const runtimeRequestServiceProvided = runtimeRequestServiceLayer.pipe(
   Layer.provide(Layer.merge(projectionStoreLayer, providerSessionManagerProvided)),
 );
-const checkpointRollbackServiceProvided = checkpointRollbackServiceLayer.pipe(
-  Layer.provide(
-    Layer.mergeAll(
-      ProjectStore.layer,
-      checkpointServiceProvided,
-      eventSinkProvided,
-      idAllocatorLayer,
-      projectionStoreLayer,
-      providerSessionManagerProvided,
-      runtimePolicyProvided,
-    ),
-  ),
-);
 const checkpointCaptureServiceProvided = checkpointCaptureServiceLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -271,7 +258,7 @@ const effectExecutorProvided = effectExecutorLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
       runFinalizationServiceProvided,
-      checkpointRollbackServiceProvided,
+      checkpointRollbackServiceLayer,
       providerSessionManagerProvided,
       providerTurnControlServiceProvided,
       providerTurnStartServiceProvided,

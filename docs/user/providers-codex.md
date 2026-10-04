@@ -17,10 +17,6 @@ Newer versions remain available to use, but that does not guarantee compatibilit
 future release. Settings reports older or unrecognized CLI versions when you refresh provider
 status. Version guidance is bundled with Test Rig; it does not fetch a remote compatibility list.
 
-Codex may reject **Edit from here** for conversations created with its older history format.
-You can continue the conversation or start a new one; upgrading Codex does not convert that
-older history for editing.
-
 ## Model selection
 
 The model picker gets available models from your installed Codex provider. GPT-6 Astra, Sol,

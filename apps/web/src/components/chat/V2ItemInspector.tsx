@@ -4,7 +4,7 @@ import type {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
-import { ExternalLinkIcon, GitBranchIcon, RotateCcwIcon } from "lucide-react";
+import { ExternalLinkIcon, GitBranchIcon } from "lucide-react";
 import { memo } from "react";
 
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
@@ -20,10 +20,6 @@ interface V2ItemInspectorProps {
   readonly workspaceRoot?: string | undefined;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
-  readonly onRollbackCheckpoint?: (input: {
-    readonly checkpointId: string;
-    readonly scopeId: string;
-  }) => void;
 }
 
 function StructuredValue({ value }: { readonly value: unknown }) {
@@ -182,21 +178,6 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
           <span className="text-muted-foreground">
             {support.checkpoint?.status ?? item.status} · {item.files.length} files
           </span>
-          {props.onRollbackCheckpoint && support.checkpoint?.status === "ready" ? (
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() =>
-                props.onRollbackCheckpoint?.({
-                  checkpointId: item.checkpointId,
-                  scopeId: item.scopeId,
-                })
-              }
-            >
-              <RotateCcwIcon className="size-3" />
-              Roll back
-            </Button>
-          ) : null}
         </div>
       ) : null}
 

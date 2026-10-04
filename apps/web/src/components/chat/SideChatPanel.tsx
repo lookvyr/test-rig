@@ -460,12 +460,8 @@ export function SideChatPanel(props: {
               runs={projection?.runs ?? []}
               onOpenThread={props.onOpenThread}
               onForkFromRun={props.onForkFromRun}
-              onRollbackCheckpoint={() => undefined}
-              supportsConversationRollback={false}
-              onRevertToTurnCount={() => undefined}
               routeThreadKey={scopedThreadKey(threadRef)}
               onOpenTurnDiff={props.onOpenTurnDiff}
-              isRevertingCheckpoint={false}
               onImageExpand={props.onExpandImage}
               activeThreadEnvironmentId={threadRef.environmentId}
               markdownCwd={cwd}
