@@ -114,6 +114,9 @@ The following are outside Test Rig's product boundary:
 - Conversation rewind, editing sent messages by truncating history, and restoring
   workspace files through chat checkpoints. Fork from an earlier response to
   explore a different direction; checkpoint capture and diffs remain available.
+- Merging forked conversation context back into a parent. Historical forks remain
+  independent durable chats with parent navigation; old merge-back records stay
+  readable but cannot initiate or deliver a transfer.
 
 Automatic ancillary requests to PostHog, OTLP collectors, upstream desktop
 update feeds, LiteLLM pricing tables, Google favicon services, and npm-registry

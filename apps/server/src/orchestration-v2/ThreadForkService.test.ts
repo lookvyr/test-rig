@@ -35,6 +35,7 @@ function makeSourceThread(): OrchestrationV2AppThread {
     createdBy: "user",
     creationSource: "web",
     id: sourceThreadId,
+    sideOfThreadId: ThreadId.make("temporary-side-parent"),
     projectId: ProjectId.make("project:fork-snooze"),
     title: "Snoozed source",
     providerInstanceId,
@@ -155,6 +156,7 @@ it.effect("keeps a fork awake when its source thread is snoozed", () =>
     assert.equal(result.targetThread.branch, sourceThread.branch);
     assert.equal(result.targetThread.worktreePath, sourceThread.worktreePath);
     assert.isNull(result.targetThread.activeProviderThreadId);
+    assert.isNull(result.targetThread.sideOfThreadId);
     assert.deepEqual(result.targetThread.lineage, {
       parentThreadId: sourceThreadId,
       relationshipToParent: "fork",

@@ -202,16 +202,6 @@ const ThreadForkTool = Tool.make("t3_thread_fork", {
   }),
   success: transferResult,
 }).annotate(Tool.Destructive, true);
-const ThreadMergeBackTool = Tool.make("t3_thread_merge_back", {
-  ...commandTool,
-  description:
-    "Merge context from this thread back to a related thread in the same project. Existing lineage and transfer rules apply.",
-  parameters: Schema.Struct({
-    targetThreadId: ThreadId,
-    sourcePoint: OrchestrationV2ThreadForkSourcePoint,
-  }),
-  success: transferResult,
-}).annotate(Tool.Destructive, true);
 const ThreadTransfersTool = Tool.make("t3_thread_transfers", {
   ...commandTool,
   description: "Read context transfer status for a thread in the calling project.",
@@ -262,7 +252,6 @@ export const ThreadToolkit = Toolkit.make(
   ScheduledTaskRunTool,
   ThreadSearchTool,
   ThreadForkTool,
-  ThreadMergeBackTool,
   ThreadTransfersTool,
   ThreadConfigurationTool,
   ThreadConfigureTool,

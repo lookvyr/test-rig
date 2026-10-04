@@ -207,12 +207,6 @@ export interface ForkThreadFromRunInput extends CommandMetadata {
   readonly title?: string;
 }
 
-export interface MergeThreadBackInput extends CommandMetadata {
-  readonly sourceThreadId: ThreadId;
-  readonly targetThreadId: ThreadId;
-  readonly runId: RunId;
-}
-
 export interface ReorderQueuedRunInput extends ThreadCommandInput {
   readonly runId: RunId;
   readonly beforeRunId: RunId | null;
@@ -879,20 +873,6 @@ export const forkThreadFromRun = Effect.fn("EnvironmentCommands.forkThreadFromRu
     targetThreadId: input.targetThreadId,
     sourcePoint: { type: "run", runId: input.runId },
     ...(input.title === undefined ? {} : { title: input.title }),
-  });
-});
-
-export const mergeThreadBack = Effect.fn("EnvironmentCommands.mergeThreadBack")(function* (
-  input: MergeThreadBackInput,
-) {
-  return yield* dispatch({
-    type: "thread.merge_back",
-    commandId: yield* allocateCommandId(input),
-    createdBy: "user",
-    creationSource: input.creationSource ?? "web",
-    sourceThreadId: input.sourceThreadId,
-    targetThreadId: input.targetThreadId,
-    sourcePoint: { type: "run", runId: input.runId },
   });
 });
 

@@ -18,6 +18,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import { OpenCode2ProviderCapabilities } from "./Adapters/OpenCode2AdapterV2.ts";
 import { ClaudeProviderCapabilitiesV2 } from "./Adapters/ClaudeAdapterV2.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -25,7 +26,7 @@ import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
 
-const forkCases = (["codex", "claudeAgent"] as const).flatMap((driverName) => {
+const forkCases = (["codex", "claudeAgent", "opencode"] as const).flatMap((driverName) => {
   const driver = ProviderDriverKind.make(driverName);
   const instanceId = ProviderInstanceId.make(driver);
   const modelSelection = { instanceId, model: "test-model" };
@@ -34,7 +35,11 @@ const forkCases = (["codex", "claudeAgent"] as const).flatMap((driverName) => {
     driver,
     getCapabilities: () =>
       Effect.succeed(
-        driver === "codex" ? CodexProviderCapabilitiesV2 : ClaudeProviderCapabilitiesV2,
+        driver === "codex"
+          ? CodexProviderCapabilitiesV2
+          : driver === "claudeAgent"
+            ? ClaudeProviderCapabilitiesV2
+            : OpenCode2ProviderCapabilities,
       ),
     planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
     openSession: () => Effect.die("Execution is paused after dispatch for handoff inspection"),
@@ -45,7 +50,7 @@ const forkCases = (["codex", "claudeAgent"] as const).flatMap((driverName) => {
     { runEffectWorker: false },
   );
 
-  return (["failed", "interrupted", "cancelled"] as const).map((status) => ({
+  return (["completed", "failed", "interrupted", "cancelled"] as const).map((status) => ({
     driver,
     status,
     instanceId,
@@ -97,7 +102,10 @@ it.effect.each(forkCases)(
               providerSessionId: null,
               appThreadId: sourceThreadId,
               ownerNodeId: null,
-              nativeThreadRef: { driver, nativeId: "native-source", strength: "strong" },
+              nativeThreadRef:
+                status === "completed"
+                  ? null
+                  : { driver, nativeId: "native-source", strength: "strong" },
               nativeConversationHeadRef: null,
               status: "idle",
               firstRunOrdinal: 1,
@@ -176,7 +184,7 @@ it.effect.each(forkCases)(
                 userMessageId: messageId,
                 rootNodeId: null,
                 activeAttemptId: ordinal === 1 && status === "interrupted" ? attemptId : null,
-                status: ordinal === 1 ? status : "completed",
+                status: ordinal === 1 ? status : "running",
                 queuePosition: null,
                 requestedAt: now,
                 startedAt: now,

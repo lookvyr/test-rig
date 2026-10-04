@@ -128,8 +128,8 @@ tests and 24 fork tests pass. Standard web and server typechecks, changed-file
 lint, and independent simplification review pass. The live web client shows no
 message rewind action and creates a fork with the selected history. The initial
 fork navigation landed on an empty draft; selecting the created fork in the
-sidebar opened its retained history. This navigation issue is separate from the
-removal and remains unresolved. No new desktop-shell or remote-host pass was run
+sidebar opened its retained history. This navigation issue was separate from the
+removal and was subsequently addressed by LOO-28 (see below). No new desktop-shell or remote-host pass was run
 for this shared-client removal.
 
 Focused checks cover native adapters; restart replay and background notices;
@@ -155,6 +155,45 @@ separate remote-host smoke test was run. No managed provider setup, excluded
 provider, hosted discovery, relay, or telemetry service is added. OpenCode unit,
 protocol, readiness, and session checks pass, plus the limited free-model live
 check described above.
+
+### Historical forks and merge-back removal (October 4, 2026)
+
+LOO-28 now covers independent historical forks. The developer excluded merge-back;
+cross-provider continuation remains in LOO-27 and does not gate this slice.
+
+The web route no longer equates a missing shell with a missing thread before its
+detail request completes. Creation receipts can precede the shell stream; waiting
+for the authoritative detail response avoids redirecting a new fork to a draft.
+Native HTTP 404/deleted state still permits the existing missing-thread redirect.
+The timeline labels forks as "Forked from", and durable forks clear temporary
+side-chat ownership while retaining their historical parent relationship.
+
+Merge-back client commands, actions, MCP tools, preparation, and dispatch consumption
+are removed. Direct `thread.merge_back` commands return an unsupported error. Old
+transfer/event schemas and migrations remain intact; pending merge transfers are
+inert and old `fork_delta_summary` handoffs cannot inject into provider context.
+Already-delivered history is not rewritten. Native fork and portable-context
+handoff support remain.
+
+Focused verification covers route loading, fork lineage and timeline rendering,
+portable fallback across Codex/Claude/OpenCode and terminal source statuses,
+native historical boundary selection, temporary side-chat ownership, rejected
+merge commands, inert historical transfers/handoffs, and retained provider-switch
+handoffs. Server, web, and client-runtime typechecks pass; changed-file lint has
+no errors (existing warnings remain). No repository-wide suite was run.
+
+The isolated web pass reproduced the empty-draft race before the fix. Codex and
+Claude then forked an earlier response while a later parent turn was active,
+opened the selected history immediately, and recalled only the earlier marker.
+Parent navigation preserved each parent's later message, and the Agents panel
+offered navigation without merge-back. Both forks retained their history after
+a full backend restart and browser reload, then recalled the earlier marker in
+a new turn. A separate agent reviewed correctness and
+simplification, found the remaining MCP merge tool, and confirmed its removal;
+no further findings remained. OpenCode's local executable failed during startup,
+so its fork coverage is adapter replay and portable-fallback tests rather than
+a live provider acceptance claim. Web and desktop share this renderer; no
+desktop-shell, remote-host, or cross-provider acceptance was added in this slice.
 
 ## Final acceptance pass (October 3, 2026)
 

@@ -94,6 +94,12 @@ tool output is omitted from the conversation details.
 ## Continue from an earlier response
 
 Choose **Fork from this response** to start a separate conversation from an
-earlier response. The original conversation remains available. Test Rig does
-not rewind conversations or edit sent messages; use a fork to try another
-direction. Checkpoint diffs remain available for reviewing file changes.
+earlier response. The fork opens with history through that response; later turns
+in the original conversation are excluded. Continue in the fork or use **Open
+parent thread** to return to the original. Both chats remain available after
+reloading. Forks do not merge conversation context back into their parent.
+
+A fork is a durable chat, separate from a temporary `/side` conversation.
+Forking a conversation does not create a Git worktree or isolate file changes.
+Test Rig does not rewind conversations or edit sent messages; use a fork to try
+another direction. Checkpoint diffs remain available for reviewing file changes.

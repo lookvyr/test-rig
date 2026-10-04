@@ -6065,6 +6065,10 @@ function ChatViewContent(props: ChatViewProps) {
                   parentThreadId === null
                     ? null
                     : {
+                        relationship:
+                          threadProjection?.thread.lineage.relationshipToParent === "fork"
+                            ? "fork"
+                            : "subagent",
                         threadId: parentThreadId,
                         title: parentThreadShell?.title ?? "Parent thread",
                       }

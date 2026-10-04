@@ -42,7 +42,6 @@ export function resolveKeptSideRoute(input: {
 
 export function resolveThreadRouteRenderState(input: {
   bootstrapComplete: boolean;
-  serverThreadShellExists: boolean;
   serverThreadDetailExists: boolean;
   serverThreadDetailDeleted: boolean;
   draftThreadExists: boolean;
@@ -56,7 +55,9 @@ export function resolveThreadRouteRenderState(input: {
   if (input.serverThreadDetailDeleted) {
     return "missing";
   }
-  return input.serverThreadShellExists ? "loading" : "missing";
+  // Creation receipts can arrive before the shell stream. The detail request
+  // establishes whether the thread exists, including newly created forks.
+  return "loading";
 }
 
 export function buildThreadRouteParams(ref: ScopedThreadRef): {

@@ -427,6 +427,7 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   parentThreadLink?: {
+    readonly relationship: "fork" | "subagent";
     readonly threadId: ThreadId;
     readonly title: string;
   } | null;
@@ -1242,9 +1243,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         <div className="messages-timeline-row-frame">
           <div className="chat-content-lane pt-1 sm:pt-2">
             <TimelineSystemDivider
-              label="Subagent of"
+              label={parentThreadLink.relationship === "fork" ? "Forked from" : "Subagent of"}
               detail={parentThreadLink.title}
-              icon={BotIcon}
+              icon={parentThreadLink.relationship === "fork" ? GitForkIcon : BotIcon}
               actionLabel="Open parent thread"
               onAction={() => onOpenThread(parentThreadLink.threadId)}
             />

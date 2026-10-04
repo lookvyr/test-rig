@@ -132,22 +132,6 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
         .pipe(Effect.mapError(unavailable));
       return { sequence: result.sequence, targetThreadId };
     }),
-  t3_thread_merge_back: (input) =>
-    Effect.gen(function* () {
-      const { threads, caller } = yield* readWritableThread(input.targetThreadId);
-      const result = yield* threads
-        .dispatch({
-          type: "thread.merge_back",
-          commandId: yield* newCommandId(),
-          sourceThreadId: caller.id,
-          targetThreadId: input.targetThreadId,
-          sourcePoint: input.sourcePoint,
-          createdBy: "agent",
-          creationSource: "mcp",
-        })
-        .pipe(Effect.mapError(unavailable));
-      return { sequence: result.sequence, targetThreadId: input.targetThreadId };
-    }),
   t3_thread_transfers: (input) =>
     Effect.gen(function* () {
       const { projection } = yield* readThread(input.threadId, ["contextTransfers"]);

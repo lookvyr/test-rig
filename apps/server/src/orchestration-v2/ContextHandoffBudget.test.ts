@@ -492,6 +492,21 @@ describe("handoff delivery", () => {
     }),
   );
 
+  it.effect("does not deliver historical merge-back handoffs", () =>
+    Effect.gen(function* () {
+      const result = yield* deliverContextHandoffs({
+        handoffs: [{ ...handoff, strategy: "fork_delta_summary" }],
+        providerThread,
+        budget: Effect.die("Excluded context must not request a budget"),
+        alreadyDeliveredItemIds: new Set(),
+        inject: () => Effect.die("Excluded context must not reach the provider"),
+        persist: () => Effect.die("Historical handoffs remain unchanged"),
+      });
+      assert.equal(result.context, "");
+      yield* result.delivered;
+    }),
+  );
+
   it.effect("persists successful injection before turn start and skips it on retry", () =>
     Effect.gen(function* () {
       let durable = handoff;

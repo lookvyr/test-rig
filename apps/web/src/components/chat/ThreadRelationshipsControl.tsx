@@ -3,7 +3,6 @@ import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { CollapsibleSectionHeader, SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
-import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
 import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
@@ -13,14 +12,10 @@ import {
   isParentThreadRelationship,
   threadRelationshipRowStatus,
   orderWebThreadLineageRows,
-  resolveMergeBackTargetThreadId,
   type ThreadRelationshipEdge,
   type ThreadRelationshipWalkRow,
 } from "@t3tools/client-runtime/state/thread-relationships";
-import {
-  canDetachThreadProviderSession,
-  resolveLatestMergeBackRun,
-} from "@t3tools/client-runtime/state/thread-workflows";
+import { canDetachThreadProviderSession } from "@t3tools/client-runtime/state/thread-workflows";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
 import { groupBy } from "effect/Array";
 import { useNavigate } from "@tanstack/react-router";
@@ -29,7 +24,6 @@ import {
   BotIcon,
   CornerLeftUpIcon,
   GitForkIcon,
-  LoaderCircleIcon,
   MoreHorizontalIcon,
   PlusIcon,
   UnplugIcon,
@@ -51,11 +45,7 @@ import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadR
 
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS,
-  THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS,
-  THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
-} from "./threadDetailsPanelStyles";
+import { THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS } from "./threadDetailsPanelStyles";
 
 // Lineage paging: a busy thread can accumulate dozens of forks and subagents,
 // and the panel it lives in already scrolls. Show a workable window, keep the
@@ -203,22 +193,17 @@ export function ThreadRelationshipsPanel(props: {
   const currentThread = projection?.thread ?? graph.nodes.get(props.threadId)?.thread;
   const currentProject = projects.find((project) => project.id === currentThread?.projectId);
   const navigate = useNavigate();
-  const mergeBack = useAtomCommand(threadEnvironment.mergeBack);
   const stopSession = useAtomCommand(threadEnvironment.stopSession);
-  const [busyAction, setBusyAction] = useState<"merge" | "detach" | null>(null);
-  const latestMergeBackRun = projection === null ? null : resolveLatestMergeBackRun(projection);
-  const mergeTargetThreadId = resolveMergeBackTargetThreadId(projection);
+  const [busyAction, setBusyAction] = useState<"detach" | null>(null);
   const relationshipRows = useMemo(
     () =>
       orderWebThreadLineageRows({
         graph,
         rows: immediateThreadRelationships(graph, props.threadId),
         currentThreadId: props.threadId,
-        mergeTargetThreadId,
       }),
-    [graph, mergeTargetThreadId, props.threadId],
+    [graph, props.threadId],
   );
-  const canMerge = mergeTargetThreadId !== null && latestMergeBackRun !== null;
   const canDetach = projection ? canDetachThreadProviderSession(projection) : false;
 
   const {
@@ -254,21 +239,6 @@ export function ThreadRelationshipsPanel(props: {
     });
   };
 
-  const merge = async () => {
-    if (!latestMergeBackRun || mergeTargetThreadId === null || busyAction !== null) return;
-    setBusyAction("merge");
-    const result = await mergeBack({
-      environmentId: props.environmentId,
-      input: {
-        sourceThreadId: props.threadId,
-        targetThreadId: mergeTargetThreadId,
-        runId: latestMergeBackRun.id,
-      },
-    });
-    setBusyAction(null);
-    if (result._tag === "Success") openThread(mergeTargetThreadId);
-  };
-
   const detach = async () => {
     if (!canDetach || busyAction !== null) return;
     setBusyAction("detach");
@@ -278,11 +248,6 @@ export function ThreadRelationshipsPanel(props: {
     });
     setBusyAction(null);
   };
-
-  const parentTitle =
-    mergeTargetThreadId === null
-      ? null
-      : (graph.nodes.get(mergeTargetThreadId)?.thread?.title ?? null);
 
   return (
     <ThreadDetailsSection
@@ -321,7 +286,6 @@ export function ThreadRelationshipsPanel(props: {
             visibleRows.map(({ threadId, edge }) => {
               const node = graph.nodes.get(threadId);
               const isSubagent = edge.kind === "subagent";
-              const isMergeTarget = threadId === mergeTargetThreadId;
               const isParent = isParentThreadRelationship(edge, props.threadId);
               const status = threadRelationshipRowStatus(graph, { threadId, edge });
               const RelationshipIcon = isParent
@@ -386,93 +350,30 @@ export function ThreadRelationshipsPanel(props: {
                   ) : (
                     <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                   )}
-                  {!isMergeTarget ? (
-                    <span className="shrink-0 text-2xs text-muted-foreground">
-                      {threadRelationshipStatusLabel(status)}
-                    </span>
-                  ) : null}
+                  <span className="shrink-0 text-2xs text-muted-foreground">
+                    {threadRelationshipStatusLabel(status)}
+                  </span>
                 </>
               );
               return (
                 <li key={threadId} className="group flex h-9 items-center rounded-lg">
-                  {isMergeTarget ? (
-                    <div className={THREAD_DETAILS_PANEL_LINK_SPLIT_GROUP_CLASS}>
-                      <Tooltip>
-                        <TooltipTrigger
-                          delay={200}
-                          render={
-                            <ThreadDetailsControl
-                              size="sm"
-                              variant="ghost"
-                              part="link-primary"
-                              aria-label={`${threadTitle} ${threadRelationshipStatusLabel(status)}`}
-                              disabled={node?.missing === true}
-                              onClick={() => openThread(threadId)}
-                            />
-                          }
-                        >
-                          {relationshipContent}
-                        </TooltipTrigger>
-                        <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
-                      </Tooltip>
-                      <span
-                        aria-hidden="true"
-                        className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS}
-                      />
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <ThreadDetailsControl
-                              size="sm"
-                              variant="ghost"
-                              part="secondary"
-                              aria-label={
-                                parentTitle
-                                  ? `Merge back to ${parentTitle}`
-                                  : "Merge back to source conversation"
-                              }
-                              disabled={!canMerge || busyAction !== null}
-                              onClick={() => void merge()}
-                            >
-                              {busyAction === "merge" ? (
-                                <LoaderCircleIcon className="size-3 animate-spin" />
-                              ) : (
-                                <PullRequestGlyph.merged className="size-3" />
-                              )}
-                            </ThreadDetailsControl>
-                          }
+                  <Tooltip>
+                    <TooltipTrigger
+                      delay={200}
+                      render={
+                        <ThreadDetailsControl
+                          size="sm"
+                          variant="ghost"
+                          disabled={node?.missing === true}
+                          onClick={() => openThread(threadId)}
+                          part="row"
                         />
-                        <TooltipPopup side="left">
-                          {latestMergeBackRun === null
-                            ? "Complete a run in this fork before merging it back"
-                            : parentTitle
-                              ? `Merge this conversation back into ${parentTitle}`
-                              : "Merge this conversation back into its source"}
-                        </TooltipPopup>
-                      </Tooltip>
-                      <span className="shrink-0 border border-transparent ps-1 pe-2.5 text-2xs font-medium text-muted-foreground">
-                        {threadRelationshipStatusLabel(status)}
-                      </span>
-                    </div>
-                  ) : (
-                    <Tooltip>
-                      <TooltipTrigger
-                        delay={200}
-                        render={
-                          <ThreadDetailsControl
-                            size="sm"
-                            variant="ghost"
-                            disabled={node?.missing === true}
-                            onClick={() => openThread(threadId)}
-                            part="row"
-                          />
-                        }
-                      >
-                        {relationshipContent}
-                      </TooltipTrigger>
-                      <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
-                    </Tooltip>
-                  )}
+                      }
+                    >
+                      {relationshipContent}
+                    </TooltipTrigger>
+                    <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
+                  </Tooltip>
                 </li>
               );
             })

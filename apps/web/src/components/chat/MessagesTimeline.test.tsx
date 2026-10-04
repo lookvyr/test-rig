@@ -1251,6 +1251,7 @@ describe("MessagesTimeline", () => {
         {...buildProps()}
         timelineEntries={[]}
         parentThreadLink={{
+          relationship: "subagent",
           threadId: ThreadId.make("thread-parent"),
           title: "Architecture audit",
         }}
@@ -1261,6 +1262,24 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Subagent of");
     expect(markup).toContain("Architecture audit");
     expect(markup).not.toContain("Send a message to start the conversation");
+  });
+
+  it("labels a historical fork separately from a native subagent", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[]}
+        parentThreadLink={{
+          relationship: "fork",
+          threadId: ThreadId.make("fork-parent"),
+          title: "Original conversation",
+        }}
+      />,
+    );
+    expect(markup).toContain("Forked from");
+    expect(markup).toContain("Original conversation");
+    expect(markup).not.toContain("Subagent of");
+    expect(markup).toContain('aria-label="Open parent thread"');
   });
 
   it("keeps steer intent visible on committed user messages", async () => {

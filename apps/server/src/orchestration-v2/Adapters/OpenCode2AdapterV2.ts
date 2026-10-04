@@ -96,7 +96,7 @@ import { turnScopedSelectionTransition } from "../ProviderSelectionTransition.ts
 import { OPENCODE_PROVIDER, openCodePermissionRequestKind } from "./OpenCodeCommon.ts";
 import { openCodeToolTurnItem } from "./OpenCodeToolItems.ts";
 
-const OpenCode2ProviderCapabilities = {
+export const OpenCode2ProviderCapabilities = {
   sessions: {
     // One server serves every location, so one session runtime owns them all.
     supportsMultipleProviderThreadsPerSession: true,

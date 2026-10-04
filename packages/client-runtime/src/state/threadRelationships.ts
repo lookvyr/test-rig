@@ -32,15 +32,6 @@ export interface ThreadRelationshipWalkRow {
   readonly edge: ThreadRelationshipEdge;
 }
 
-export function resolveMergeBackTargetThreadId(
-  projection: Pick<OrchestrationV2ThreadProjection, "thread"> | null,
-): ThreadId | null {
-  if (projection?.thread.lineage.relationshipToParent !== "fork") return null;
-  return projection.thread.forkedFrom?.type === "run"
-    ? projection.thread.forkedFrom.threadId
-    : projection.thread.lineage.parentThreadId;
-}
-
 function edgeKey(edge: ThreadRelationshipEdge): string {
   return `${edge.sourceThreadId}\u001f${edge.targetThreadId}\u001f${edge.kind}`;
 }
@@ -210,11 +201,7 @@ function threadCreatedAtMillis(node: ThreadRelationshipNode | undefined): number
 /**
  * Orders the web thread-details Lineage rows for display.
  *
- * Web-specific by design: the panel pins the parent row first and a distinct
- * merge-back target second so their actions stay where the user expects, and
- * only then falls back to newest-created-first. Mobile does not share that
- * exception, so this is not the canonical relationship order and should not be
- * reused as one.
+ * The parent row stays first; other related chats appear newest-created-first.
  *
  * Ordering below the pins is `createdAt` descending, which is immutable, so
  * rows never move when messages or status changes arrive on a related thread.
@@ -225,12 +212,10 @@ export function orderWebThreadLineageRows(input: {
   readonly graph: ThreadRelationshipGraph;
   readonly rows: ReadonlyArray<ThreadRelationshipWalkRow>;
   readonly currentThreadId: ThreadId;
-  readonly mergeTargetThreadId: ThreadId | null;
 }): ReadonlyArray<ThreadRelationshipWalkRow> {
   const pinRank = (row: ThreadRelationshipWalkRow): number => {
     if (isParentThreadRelationship(row.edge, input.currentThreadId)) return 0;
-    if (row.threadId === input.mergeTargetThreadId) return 1;
-    return 2;
+    return 1;
   };
 
   return [...input.rows].sort((left, right) => {

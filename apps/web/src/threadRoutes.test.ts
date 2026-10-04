@@ -151,7 +151,6 @@ describe("threadRoutes", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: true,
         serverThreadDetailExists: false,
         serverThreadDetailDeleted: false,
         draftThreadExists: false,
@@ -163,7 +162,6 @@ describe("threadRoutes", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: true,
         serverThreadDetailExists: true,
         serverThreadDetailDeleted: false,
         draftThreadExists: false,
@@ -172,7 +170,6 @@ describe("threadRoutes", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: false,
         serverThreadDetailExists: false,
         serverThreadDetailDeleted: false,
         draftThreadExists: true,
@@ -180,11 +177,10 @@ describe("threadRoutes", () => {
     ).toBe("ready");
   });
 
-  it("distinguishes bootstrap loading from a missing thread", () => {
+  it("waits for detail confirmation even after shell bootstrap completes", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: false,
-        serverThreadShellExists: false,
         serverThreadDetailExists: false,
         serverThreadDetailDeleted: false,
         draftThreadExists: false,
@@ -193,19 +189,17 @@ describe("threadRoutes", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: false,
         serverThreadDetailExists: false,
         serverThreadDetailDeleted: false,
         draftThreadExists: false,
       }),
-    ).toBe("missing");
+    ).toBe("loading");
   });
 
   it("redirects deleted shell-only threads", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: true,
         serverThreadDetailExists: false,
         serverThreadDetailDeleted: true,
         draftThreadExists: false,

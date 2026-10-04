@@ -240,6 +240,7 @@ export const layer: Layer.Layer<
       );
       const handoffs = projection.contextHandoffs.filter(
         (handoff) =>
+          handoff.strategy !== "fork_delta_summary" &&
           handoff.status === "ready" &&
           (handoff.targetRunId === run.id ||
             (handoff.toProviderThreadId === run.providerThreadId &&
@@ -617,6 +618,7 @@ export const layer: Layer.Layer<
         }
         const uncertainDelivery = projection.contextHandoffs.some(
           (handoff) =>
+            handoff.strategy !== "fork_delta_summary" &&
             handoff.toProviderThreadId === providerThread.id &&
             handoff.delivery?.nativeThreadId === providerThread.nativeThreadRef?.nativeId &&
             handoff.delivery?.status === "pending",
