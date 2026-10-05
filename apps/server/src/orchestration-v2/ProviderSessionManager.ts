@@ -897,11 +897,15 @@ export const layerWithOptions = (
       const removeLiveEntry = (input: {
         readonly providerSessionId: ProviderSessionId;
         readonly onlyIfIdleGeneration?: number;
+        readonly expectedRuntime?: ProviderAdapterV2SessionRuntime;
       }): Effect.Effect<readonly [Option.Option<LiveSessionEntry>, DateTime.Utc]> =>
         Effect.gen(function* () {
           const key = sessionKey(input.providerSessionId);
           const candidate = (yield* Ref.get(sessions)).get(key);
-          if (candidate === undefined) {
+          if (
+            candidate === undefined ||
+            (input.expectedRuntime !== undefined && candidate.runtime !== input.expectedRuntime)
+          ) {
             return [Option.none<LiveSessionEntry>(), yield* DateTime.now] as const;
           }
           const removed = yield* Effect.zip(
@@ -939,6 +943,7 @@ export const layerWithOptions = (
         readonly cancelIdleFiber?: boolean;
         readonly onlyIfIdleGeneration?: number;
         readonly gracefulSubscribers?: boolean;
+        readonly expectedRuntime?: ProviderAdapterV2SessionRuntime;
       }) =>
         Effect.acquireUseRelease(
           removeLiveEntry(input),
@@ -1651,9 +1656,7 @@ export const layerWithOptions = (
             }
             return observeActivity(
               entry.runtime.providerSessionId,
-              event.type === "turn.terminal"
-                ? markIdle(entry.runtime.providerSessionId)
-                : touchActivity(entry.runtime.providerSessionId),
+              touchActivity(entry.runtime.providerSessionId),
             ).pipe(
               Effect.andThen(
                 event.type === "provider_session.updated"
@@ -1694,6 +1697,14 @@ export const layerWithOptions = (
                     return;
                   }
                   yield* publishToSubscribers(entry.eventSubscribers, { type: "event", event });
+                  // Idle means the terminal is already queued for every run
+                  // subscriber, so an exclusive detach can safely end them.
+                  if (event.type === "turn.terminal") {
+                    yield* observeActivity(
+                      entry.runtime.providerSessionId,
+                      markIdle(entry.runtime.providerSessionId),
+                    );
+                  }
                 }),
               ),
             );
@@ -2011,51 +2022,79 @@ export const layerWithOptions = (
             const key = sessionKey(input.providerSessionId);
             const currentEntry = (yield* Ref.get(sessions)).get(key);
             let detachedProviderThreads: ReadonlyArray<OrchestrationV2ProviderThread> = [];
-            if (currentEntry?.supportsMultipleProviderThreads === true) {
-              const projection = yield* Effect.option(
-                projectionStore.getThreadRecords(input.threadId, [
+            let interruptedCleanly = false;
+            if (currentEntry !== undefined) {
+              // Subscribe before reading the projection: a turn can become
+              // terminal while that read or its interrupt is in flight.
+              const subscription = currentEntry.supportsMultipleProviderThreads
+                ? undefined
+                : yield* makeEventSubscription(currentEntry.eventSubscribers);
+              interruptedCleanly = yield* Effect.gen(function* () {
+                const projection = yield* projectionStore.getThreadRecords(input.threadId, [
                   "providerThreads",
                   "providerTurns",
-                ]),
-              );
-              if (Option.isSome(projection)) {
+                ]);
                 const providerThreads = new Map(
-                  projection.value.providerThreads
+                  projection.providerThreads
                     .filter((thread) => thread.providerSessionId === input.providerSessionId)
                     .map((thread) => [thread.id, thread] as const),
                 );
                 detachedProviderThreads = [...providerThreads.values()];
-                const activeTurns = projection.value.providerTurns.filter(
+                const activeTurns = projection.providerTurns.filter(
                   (turn) => turn.status === "running" && providerThreads.has(turn.providerThreadId),
                 );
-                yield* Effect.forEach(
-                  activeTurns,
-                  (turn) =>
-                    currentEntry.exposedRuntime
-                      .interruptTurn({
-                        providerThread: providerThreads.get(turn.providerThreadId)!,
-                        providerTurnId: turn.id,
-                      })
-                      .pipe(
-                        Effect.catchCause((cause) =>
-                          Effect.logWarning(
-                            "orchestration-v2.driver-session.detach-interrupt-failed",
-                            {
-                              providerSessionId: input.providerSessionId,
-                              threadId: input.threadId,
-                              providerTurnId: turn.id,
-                              cause,
-                            },
-                          ),
-                        ),
-                      ),
-                  { concurrency: 1, discard: true },
+                const outcomes = yield* Effect.forEach(activeTurns, (turn) =>
+                  currentEntry.exposedRuntime
+                    .interruptTurn({
+                      providerThread: providerThreads.get(turn.providerThreadId)!,
+                      providerTurnId: turn.id,
+                    })
+                    .pipe(Effect.exit),
                 );
-              }
+                const failed = outcomes.find(Exit.isFailure);
+                if (failed !== undefined) return yield* Effect.failCause(failed.cause);
+                const latest = (yield* Ref.get(sessions)).get(key);
+                if (
+                  subscription !== undefined &&
+                  latest?.runtime === currentEntry.runtime &&
+                  latest.busyCount > 0
+                ) {
+                  // A completed provider-turn projection can precede its
+                  // terminal event. Busy stays set until that event is queued.
+                  yield* subscription.events.pipe(
+                    Stream.filter((event) => event.type === "turn.terminal"),
+                    Stream.runHead,
+                    Effect.flatMap(
+                      Option.match({
+                        onNone: () =>
+                          Effect.fail(
+                            new Error("Provider stream ended before the interrupted turn settled."),
+                          ),
+                        onSome: () => Effect.void,
+                      }),
+                    ),
+                    Effect.timeout(UNLOAD_THREAD_TIMEOUT_MS),
+                  );
+                }
+                return true;
+              }).pipe(
+                Effect.ensuring(subscription?.close ?? Effect.void),
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("orchestration-v2.driver-session.detach-interrupt-failed", {
+                    providerSessionId: input.providerSessionId,
+                    threadId: input.threadId,
+                    cause,
+                  }).pipe(Effect.as(false)),
+                ),
+              );
             }
             const detached = yield* Ref.modify(sessions, (current) => {
               const entry = current.get(key);
-              if (entry === undefined || !entry.attachedThreadIds.has(input.threadId)) {
+              if (
+                entry === undefined ||
+                entry.runtime !== currentEntry?.runtime ||
+                !entry.attachedThreadIds.has(input.threadId)
+              ) {
                 return [Option.none<LiveSessionEntry>(), current] as const;
               }
               const attachedThreadIds = new Set(entry.attachedThreadIds);
@@ -2110,6 +2149,8 @@ export const layerWithOptions = (
               yield* releaseEntry({
                 providerSessionId: input.providerSessionId,
                 reason: "manual_shutdown",
+                gracefulSubscribers: interruptedCleanly,
+                expectedRuntime: detached.value.runtime,
                 ...(input.detail === undefined ? {} : { detail: input.detail }),
               });
               return;

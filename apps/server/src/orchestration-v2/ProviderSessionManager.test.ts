@@ -1,6 +1,6 @@
 import * as NetAddress from "effect/unstable/net/NetAddress";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { assert, it, vi } from "@effect/vitest";
 import {
   EnvironmentId,
   type ModelSelection,
@@ -294,6 +294,7 @@ function makeProviderAdapter(
     readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
     readonly hangSessionScopeClose?: boolean;
     readonly beforeUnload?: Effect.Effect<void>;
+    readonly afterInterrupt?: Effect.Effect<void>;
   } = {},
 ): ProviderAdapterV2Shape {
   return {
@@ -370,7 +371,7 @@ function makeProviderAdapter(
             Ref.update(state, (current) => ({
               ...current,
               interruptCount: current.interruptCount + 1,
-            })),
+            })).pipe(Effect.andThen(options.afterInterrupt ?? Effect.void)),
           unloadThread: ({ providerThread }) =>
             (options.beforeUnload ?? Effect.void).pipe(
               Effect.andThen(
@@ -410,6 +411,7 @@ function makeTestLayer(input: {
   readonly hasPendingBackgroundWork?: Effect.Effect<boolean>;
   readonly hangSessionScopeClose?: boolean;
   readonly beforeUnload?: Effect.Effect<void>;
+  readonly afterInterrupt?: Effect.Effect<void>;
   readonly serverSettingsLayer?: ReturnType<typeof ServerSettings.layerTest>;
   readonly projectServiceLayer?: Layer.Layer<ProjectService.ProjectService>;
 }) {
@@ -432,6 +434,7 @@ function makeTestLayer(input: {
         ? {}
         : { hangSessionScopeClose: input.hangSessionScopeClose }),
       ...(input.beforeUnload === undefined ? {} : { beforeUnload: input.beforeUnload }),
+      ...(input.afterInterrupt === undefined ? {} : { afterInterrupt: input.afterInterrupt }),
     }),
   );
   const providerEventIngestorTestLayer = ProviderEventIngestor.layer.pipe(
@@ -3401,6 +3404,161 @@ it.effect(
       yield* effect.pipe(
         Effect.provide(
           makeTestLayer({ state, idleTimeoutMs: 1000, capabilities: ExclusiveCapabilities }),
+        ),
+      );
+    }),
+);
+
+it.effect.each(["terminal", "terminalizing", "replacement"] as const)(
+  "exclusive workspace detach preserves terminal delivery and replacement ownership (%s)",
+  (mode) =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const interruptAcknowledged = yield* Deferred.make<void>();
+      const resumeInterrupt = yield* Deferred.make<void>();
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread-exclusive-worktree-handoff");
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        const providerThread = makeProviderThread({
+          idAllocator,
+          threadId,
+          providerSessionId,
+          now,
+        });
+        const runId = idAllocator.derive.run({ threadId, ordinal: 1 });
+        const providerTurnId = idAllocator.derive.providerTurn({
+          driver: CODEX_DRIVER,
+          nativeTurnId: "exclusive-worktree-turn",
+        });
+        yield* eventSink.write({
+          events: [
+            yield* makeThreadCreatedEvent({ idAllocator, threadId, now }),
+            {
+              id: yield* idAllocator.allocate.event({ threadId }),
+              type: "provider-thread.updated",
+              threadId,
+              driver: CODEX_DRIVER,
+              occurredAt: now,
+              payload: providerThread,
+            },
+            {
+              id: yield* idAllocator.allocate.event({ threadId }),
+              type: "provider-turn.updated",
+              threadId,
+              runId,
+              driver: CODEX_DRIVER,
+              occurredAt: now,
+              payload: {
+                id: providerTurnId,
+                providerThreadId: providerThread.id,
+                nodeId: idAllocator.derive.rootNode({ runId }),
+                runAttemptId: null,
+                nativeTurnRef: null,
+                ordinal: 1,
+                status: mode === "terminalizing" ? "completed" : "running",
+                startedAt: now,
+                completedAt: mode === "terminalizing" ? now : null,
+              },
+            },
+          ],
+        });
+        const runtime = yield* manager.open({
+          threadId,
+          providerSessionId,
+          modelSelection,
+          runtimePolicy,
+        });
+        yield* runtime.startTurn({
+          appThread: (yield* projectionStore.getThreadProjection(threadId)).thread,
+          threadId,
+          runId,
+          runOrdinal: 1,
+          providerTurnOrdinal: 1,
+          attemptId: idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 }),
+          rootNodeId: idAllocator.derive.rootNode({ runId }),
+          providerThread,
+          message: {
+            createdBy: "user",
+            creationSource: "web",
+            messageId: yield* idAllocator.allocate.message({ threadId, ordinal: 1 }),
+            text: "move to a worktree",
+            attachments: [],
+          },
+          modelSelection,
+          runtimePolicy,
+        });
+        const projectionRead = yield* Deferred.make<void>();
+        const originalRead = projectionStore.getThreadRecords;
+        const readSpy = vi
+          .spyOn(projectionStore, "getThreadRecords")
+          .mockImplementation((...args) =>
+            originalRead(...args).pipe(
+              Effect.tap(() => Deferred.succeed(projectionRead, undefined)),
+            ),
+          );
+        const subscription = yield* runtime.subscribeEvents!;
+        const detach = yield* manager
+          .detach({ providerSessionId, threadId })
+          .pipe(Effect.forkChild);
+        if (mode === "terminalizing") {
+          yield* Deferred.await(projectionRead);
+          yield* TestClock.adjust(0);
+        } else {
+          yield* Deferred.await(interruptAcknowledged);
+        }
+        readSpy.mockRestore();
+        assert.equal((yield* Ref.get(state)).closeCount, 0);
+        if (mode === "replacement") {
+          yield* manager.close(providerSessionId);
+          const replacement = yield* manager.open({
+            threadId,
+            providerSessionId,
+            modelSelection,
+            runtimePolicy,
+          });
+          yield* Deferred.succeed(resumeInterrupt, undefined);
+          yield* Fiber.join(detach);
+          assert.strictEqual(Option.getOrThrow(yield* manager.get(providerSessionId)), replacement);
+          assert.equal((yield* Ref.get(state)).closeCount, 1);
+          yield* subscription.close;
+          return;
+        }
+        yield* Deferred.succeed(resumeInterrupt, undefined);
+        const terminal: ProviderAdapterV2Event = {
+          type: "turn.terminal",
+          driver: CODEX_DRIVER,
+          providerThreadId: providerThread.id,
+          providerTurnId,
+          runOrdinal: 1,
+          status: "interrupted",
+          failure: null,
+          threadDisposition: "reusable",
+        };
+        const queue = (yield* Ref.get(state)).eventQueues.get(String(providerSessionId))!;
+        yield* Queue.offer(queue, terminal);
+        yield* Fiber.join(detach);
+        const events = yield* subscription.events.pipe(Stream.runCollect);
+        assert.deepEqual(Array.from(events), [terminal]);
+        assert.equal((yield* Ref.get(state)).interruptCount, mode === "terminalizing" ? 0 : 1);
+        assert.equal((yield* Ref.get(state)).closeCount, 1);
+      }).pipe(
+        Effect.provide(
+          makeTestLayer({
+            state,
+            idleTimeoutMs: 1000,
+            capabilities: ExclusiveCapabilities,
+            afterInterrupt: Deferred.succeed(interruptAcknowledged, undefined).pipe(
+              Effect.andThen(Deferred.await(resumeInterrupt)),
+            ),
+          }),
         ),
       );
     }),

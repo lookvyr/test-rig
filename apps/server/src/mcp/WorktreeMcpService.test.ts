@@ -954,9 +954,16 @@ describe("t3_worktree_handoff", () => {
   it.effect("reports setup script failure without failing the handoff", () => {
     const harness = makeHarness({ setupScript: "fails" });
     return Effect.gen(function* () {
-      const result = yield* runHandoff(harness, { branch: "feature/setup-fails" });
+      const result = yield* runHandoff(harness, {
+        branch: "feature/setup-fails",
+        continuationPrompt: "Continue in the worktree despite the setup launch failure.",
+      });
       expect(result.setupScript.status).toBe("failed");
+      expect(result.continuation).toEqual({ status: "scheduled", delivery: "queued" });
+      expect(result.worktreePath).toBe("/worktrees/project/feature/setup-fails");
       expect(harness.dispatch).toHaveBeenCalled();
+      expect(harness.removeWorktree).not.toHaveBeenCalled();
+      expect(harness.deleteLocalBranch).not.toHaveBeenCalled();
     });
   });
 

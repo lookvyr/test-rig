@@ -58,26 +58,26 @@ Three selected compaction/background replays passed: Claude compact after a resu
 
 ## Remaining feature delivery
 
-| Owner  | Current result                                                                                              | Smallest remaining work                                                                                                                                 |
-| ------ | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| LOO-23 | Approved steering-only main/side composer flow implemented; internal queues retained.                       | Complete for the chosen scope, with live Codex proof. Claude/OpenCode live steering remains unverified in this pass.                                    |
-| LOO-24 | Restart/late-event guards exist; stale Stop behavior above is reproduced.                                   | Define the completion-boundary rule; finish scoped public Stop/stale-session and native lifecycle acceptance.                                           |
-| LOO-26 | Live compact/continue verified for retained providers; stopped/failed labels repaired.                      | Complete for scoped context, watermark and resume/background acceptance; no Codex instruction-loss defect reproduced.                                   |
-| LOO-27 | Context handoff and native-identity coverage are implemented; no additional causal defect established.      | Live cross-provider switch/back, failed injection and long-history retrieval acceptance.                                                                |
-| LOO-29 | Native child send rejection and parent request ownership are present.                                       | Missing/archived parent and large-history edge acceptance; retain previous child/restart proof.                                                         |
-| LOO-30 | Delegation/cohort delivery and repeated acknowledgement/disposal tests pass.                                | Resolve LOO-15 workspace/context defaults, then scoped app-owned provider/restart/nesting acceptance.                                                   |
-| LOO-31 | Scoped reading and same-project messaging exist.                                                            | Explicit side-to-main accepted-delivery/disposal semantics and busy-target/retry acceptance.                                                            |
-| LOO-32 | Rich composer supports files/skills; conversation-reference chips and sidebar drag payloads are absent.     | Wire thread references into rich drafts, scoped retrieval and persistence.                                                                              |
-| LOO-33 | Durable schedules and MCP controls exist; Settings management UI is absent.                                 | Resolve LOO-14 and complete the shared management surface and saved-launch-setting acceptance.                                                          |
-| LOO-34 | Backend recovery guards and independent snooze/auto-resume fields exist, default off.                       | Expose opt-in settings and per-thread recovery controls; preserve manual continuation without a trustworthy reset time.                                 |
-| LOO-35 | Attachment ownership/route repaired; setup failure, repository preservation and integration gates verified. | Complete for scoped project/attachment/settings acceptance, including live Codex project launch/deletion.                                               |
-| LOO-36 | Worktree handoff guards pass 50 focused tests.                                                              | Actual provider continuation across handoff and setup/permission ordering. No new handoff defect established.                                           |
-| LOO-39 | Unchanged bootstrap reads allocate new arrays every two seconds.                                            | Compare successful snapshots before setting React state; preserve empty-result clearing and failure retention. No reconnect/refetch defect established. |
-| LOO-42 | Mounted palette rows obtain VCS/PR queries without visibility bounds.                                       | Visible-row query leases retaining cached display and hosting gates. No live subprocess/request count measured.                                         |
-| LOO-43 | Server naming modes exist; Settings only exposes the retained worktree prefix.                              | Expose naming modes/instructions and prove precedence/collisions. Configured-prefix and delayed-label repairs are already committed.                    |
-| LOO-45 | Native MCP approval cancellation repaired with permanent root/child and normal-response replays.            | Complete for the supported approval lifecycle; no live connector smoke test claimed.                                                                    |
-| LOO-46 | Cross-directory ledger entries are rejected before process signaling; six native ownership tests pass.      | Dedicated copied-state proof showing the original tracked process remains alive. No destructive cleanup defect established.                             |
-| LOO-47 | Imported details components exist alongside retained panel behavior.                                        | Live resize/drag/occlusion/persistence acceptance. No source-only layout defect established.                                                            |
+| Owner  | Current result                                                                                                  | Smallest remaining work                                                                                                                                 |
+| ------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LOO-23 | Approved steering-only main/side composer flow implemented; internal queues retained.                           | Complete for the chosen scope, with live Codex proof. Claude/OpenCode live steering remains unverified in this pass.                                    |
+| LOO-24 | Restart/late-event guards exist; stale Stop behavior above is reproduced.                                       | Define the completion-boundary rule; finish scoped public Stop/stale-session and native lifecycle acceptance.                                           |
+| LOO-26 | Live compact/continue verified for retained providers; stopped/failed labels repaired.                          | Complete for scoped context, watermark and resume/background acceptance; no Codex instruction-loss defect reproduced.                                   |
+| LOO-27 | Context handoff and native-identity coverage are implemented; no additional causal defect established.          | Live cross-provider switch/back, failed injection and long-history retrieval acceptance.                                                                |
+| LOO-29 | Native child send rejection and parent request ownership are present.                                           | Missing/archived parent and large-history edge acceptance; retain previous child/restart proof.                                                         |
+| LOO-30 | Delegation/cohort delivery and repeated acknowledgement/disposal tests pass.                                    | Resolve LOO-15 workspace/context defaults, then scoped app-owned provider/restart/nesting acceptance.                                                   |
+| LOO-31 | Scoped reading and same-project messaging exist.                                                                | Explicit side-to-main accepted-delivery/disposal semantics and busy-target/retry acceptance.                                                            |
+| LOO-32 | Rich composer supports files/skills; conversation-reference chips and sidebar drag payloads are absent.         | Wire thread references into rich drafts, scoped retrieval and persistence.                                                                              |
+| LOO-33 | Durable schedules and MCP controls exist; Settings management UI is absent.                                     | Resolve LOO-14 and complete the shared management surface and saved-launch-setting acceptance.                                                          |
+| LOO-34 | Backend recovery guards and independent snooze/auto-resume fields exist, default off.                           | Expose opt-in settings and per-thread recovery controls; preserve manual continuation without a trustworthy reset time.                                 |
+| LOO-35 | Attachment ownership/route repaired; setup failure, repository preservation and integration gates verified.     | Complete for scoped project/attachment/settings acceptance, including live Codex project launch/deletion.                                               |
+| LOO-36 | Initial handoff guards passed 50 tests; October 5 live acceptance and session-detach repair are recorded below. | Completed for Codex, Claude and OpenCode, with background setup explicitly chosen. OpenCode replay timeout remains a validation limitation.             |
+| LOO-39 | Unchanged bootstrap reads allocate new arrays every two seconds.                                                | Compare successful snapshots before setting React state; preserve empty-result clearing and failure retention. No reconnect/refetch defect established. |
+| LOO-42 | Mounted palette rows obtain VCS/PR queries without visibility bounds.                                           | Visible-row query leases retaining cached display and hosting gates. No live subprocess/request count measured.                                         |
+| LOO-43 | Server naming modes exist; Settings only exposes the retained worktree prefix.                                  | Expose naming modes/instructions and prove precedence/collisions. Configured-prefix and delayed-label repairs are already committed.                    |
+| LOO-45 | Native MCP approval cancellation repaired with permanent root/child and normal-response replays.                | Complete for the supported approval lifecycle; no live connector smoke test claimed.                                                                    |
+| LOO-46 | Cross-directory ledger entries are rejected before process signaling; six native ownership tests pass.          | Dedicated copied-state proof showing the original tracked process remains alive. No destructive cleanup defect established.                             |
+| LOO-47 | Imported details components exist alongside retained panel behavior.                                            | Live resize/drag/occlusion/persistence acceptance. No source-only layout defect established.                                                            |
 
 The naming controls live in [SettingsPanels.tsx](../../apps/web/src/components/settings/SettingsPanels.tsx), with the imported fields in [settings.ts](../../packages/contracts/src/settings.ts) and [ThreadLaunchService.ts](../../apps/server/src/orchestration-v2/ThreadLaunchService.ts). Palette query wiring is in [CommandPalette.tsx](../../apps/web/src/components/CommandPalette.tsx) and [ThreadStatusIndicators.tsx](../../apps/web/src/components/ThreadStatusIndicators.tsx). Bootstrap identity behavior is in [useDesktopLocalBootstraps.ts](../../apps/web/src/connection/useDesktopLocalBootstraps.ts) and [desktopLocal.ts](../../apps/web/src/connection/desktopLocal.ts).
 
@@ -259,3 +259,63 @@ adapters, not forced failures of live external providers. This pass exercised th
 shared web renderer; Electron shell behavior and remote transport were unchanged
 and were not separately smoke-tested. Settings/default-model selection and other
 entry points keep their existing behavior. No commit, push, or PR is implied.
+
+## October 5 — LOO-36 active worktree handoff
+
+Live Claude acceptance exposed an exclusive-session detach defect: releasing the
+old runtime closed its event stream as an error, failed the interrupted run, and
+held the queued continuation. Detach now interrupts the active turn and preserves
+its terminal event before closing subscribers. It subscribes before reading the
+projection, treats a runtime as idle only after publishing its terminal event,
+and checks runtime identity before removing or releasing an entry. A delayed
+detach therefore cannot release a replacement runtime.
+
+The explicit product decision keeps the installed nightly's simpler setup order:
+bind the worktree, queue the requested continuation, then launch project setup in
+the background. Moving does not wait for a synchronous setup result. Setup launch
+failure reports the completed binding without rolling it back. This supersedes
+the original proposal to finish all setup before binding; new-chat setup retains
+its existing synchronous behavior. Saved project-specific script overrides take
+precedence over environment defaults and inline project scripts.
+
+Live browser acceptance used disposable Git repositories and isolated app state:
+
+- Codex, Claude and OpenCode each moved an active conversation to the requested
+  branch and worktree, automatically continued, recalled the original facts, and
+  verified the working directory and project setup marker. The script was saved
+  through the project's action editor with automatic worktree creation enabled.
+- All three retained Auto permissions. An OpenCode shell approval was presented
+  and accepted through the normal UI. No permission bypass was added.
+- Durable state contained one MCP continuation per successful move. Repeating
+  the Codex handoff returned `already_in_worktree`, with no duplicate branch,
+  directory or continuation. OpenCode also consumed its native background wake;
+  that completed without a second assistant response.
+- The final Claude pass ran after both review-driven race repairs and finished
+  with an interrupted original run and completed continuation, without a held
+  queue. Setup markers contained the requested new worktree directory.
+
+Focused verification passed 108 tests: ProviderSessionManager (48),
+WorktreeMcpService (50), ProjectSetupScriptRunner (1), and SelectionRestart (9).
+The new deterministic cases cover delayed terminal delivery, a terminalizing
+projection, and runtime replacement during detach. Existing handoff cases cover
+owned-resource rollback, interrupted binding, concurrent requests, capability
+denial, base/origin selection and post-bind failure. Setup coverage now verifies
+saved project override precedence in the new working directory. Server typecheck,
+targeted lint and diff checks passed; the two setup/handoff test files retain
+pre-existing unused-variable lint warnings. No repository-wide checks ran.
+
+The additional OpenCode worktree replay timed out at 60 seconds. Replacing only
+ProviderSessionManager with the unchanged HEAD source in a temporary test config
+also timed out under a 10-second diagnostic limit. That replay is not claimed as
+passing; the real OpenCode browser move supplies the acceptance evidence here.
+A separate correctness and simplification review approved the final source and
+tests with no remaining findings. The shared renderer and server path were
+exercised; no Electron-shell or remote-transport changes were made or separately
+smoke-tested.
+
+A subsequent recorded Claude demo again retained the original codename, moved to
+the requested branch, and verified setup output. Setup's dedicated terminal is
+available from the thread's terminal drawer; the handoff does not publish a
+separate setup-completion indicator. The expected handoff interruption still
+appears as a failed tool call / "interrupted by user" in the timeline. These
+misleading labels are a remaining presentation follow-up, not a failed move.

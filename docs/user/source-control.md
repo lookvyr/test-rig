@@ -94,6 +94,24 @@ affect synthetic branches for cross-repository pull requests.
 
 When **Start from origin** is enabled for a new worktree, Test Rig fetches origin and uses the selected branch there. If origin or that branch is absent, it uses the selected local branch. A fetch failure is reported instead of silently using stale local state.
 
+## Move a conversation into a worktree
+
+Ask the agent to move the current conversation into a new worktree, specifying
+the new branch and base branch when needed. The conversation stays in the same
+chat. Its current turn ends, and a requested continuation starts in the new
+worktree with the earlier conversation available.
+
+The move starts the project's action marked **Run automatically on worktree
+creation** in the new worktree. Project-specific actions override environment
+defaults. Setup runs in the background; the continuation does not wait for it,
+even if the action is configured to run synchronously for new chats. Check the
+setup terminal before depending on its output. A setup launch failure does not
+undo a completed move.
+
+A conversation already attached to a worktree rejects another move. The new
+worktree starts from the selected Git base; uncommitted files in the original
+checkout are not copied into it.
+
 ## Automatic worktree cleanup
 
 **Settings** → **General** → **Automatic worktree cleanup** is on by default. Test Rig removes unused managed worktrees when their threads settle, including after a pull request is merged or closed. Existing settled threads are eligible too.

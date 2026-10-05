@@ -57,7 +57,7 @@ it.effect("resolves setup scripts through the standalone project service", () =>
     deletedAt: null,
   };
   const layer = ProjectSetupScriptRunner.layer.pipe(
-    Layer.provide(
+    Layer.provideMerge(
       Layer.mergeAll(
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeed(Option.some(project)),
@@ -93,6 +93,28 @@ it.effect("resolves setup scripts through the standalone project service", () =>
       FORCE_COLOR: "0",
     });
     assert.equal(write.mock.calls[0]?.[0].data, "vp install\r");
+
+    // Handoff supplies the project directly; saved project overrides must
+    // still win over that snapshot and the environment defaults.
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({
+      defaultProjectScripts: [{ ...project.scripts[0]!, command: "global-setup" }],
+      projectSettingsOverrides: {
+        [projectId]: {
+          defaultProjectScripts: [{ ...project.scripts[0]!, command: "project-setup" }],
+        },
+      },
+    });
+    const handoffSetup = yield* runner.runForThread({
+      threadId: "thread-handoff",
+      project,
+      projectCwd: "/repo",
+      worktreePath: "/handoff-worktree",
+    });
+    assert.equal(handoffSetup.status, "started");
+    assert.equal(open.mock.calls[1]?.[0].cwd, "/handoff-worktree");
+    assert.equal(open.mock.calls[1]?.[0].env?.T3CODE_WORKTREE_PATH, "/handoff-worktree");
+    assert.equal(write.mock.calls[1]?.[0].data, "project-setup\r");
     const lines: string[] = [];
     const observed = yield* runner.runForThread({
       threadId: "thread-1",
