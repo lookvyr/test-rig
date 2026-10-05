@@ -202,3 +202,60 @@ A separable test-only repair switches ScheduledTaskService.test.ts from legacy
 SQLite to V2 persistence: all three tests previously failed on a missing
 `scheduled_tasks` table, then passed with the production schema. This does not
 complete LOO-33 or choose scheduling behavior.
+
+## October 5 — LOO-27 provider-switch acceptance
+
+Ordinary conversations now allow provider/model selection after the first turn.
+Selection updates the composer only. Send supplies the chosen selection with the
+message; during an active turn, orchestration interrupts and restarts with that
+selection and conversation context. This matches the installed upstream nightly
+`0.0.46-nightly.20261004.2648`, verified against its picker and packaged client/server
+implementation. The fork's steering-readiness rule still applies. Side chats keep
+their provider lock, and native child conversations remain read-only.
+
+Live acceptance uncovered a second legacy behavior: the pre-send settings hook
+persisted model selection separately, releasing the running provider session
+before the steering command arrived. That produced “No running provider turn
+found” and restored the unsent draft. Model selection now belongs solely to the
+message dispatch, including plan follow-ups and side-chat sends. Branch, runtime
+mode, and interaction mode still persist through their existing paths. No server
+guard or provider adapter was relaxed.
+
+Verification in an isolated macOS browser environment:
+
+- Codex → Claude → Codex → OpenCode → Claude → OpenCode retained the original
+  three facts and additional tokens introduced at each handoff.
+- All three providers reused their original native conversation IDs on return.
+  Saved delivery records contained no duplicate item IDs for any target native
+  conversation; idle switch-back handoffs covered only intervening runs.
+- During a real Codex `sleep 90` command, choosing Claude left Codex running.
+  After the pre-send fix, Send restarted the same app run with a second attempt
+  on Claude, which returned all facts and the requested success marker.
+- A graceful stop/restart of the isolated server preserved the conversation.
+  Switching back to OpenCode resumed its original native conversation, delivered
+  the intervening context, and recalled the active-switch success marker.
+- OpenCode live checks used the installed Homebrew CLI 2.0.22. The other installed
+  binary had an invalid signature and exited before startup; only the isolated
+  test environment's provider path was changed.
+
+Focused automated checks passed:
+
+- ContextHandoffBudget, ContextHandoffService, ProviderTurnStartService: 37 tests,
+  covering intact-item budgets, context-limit changes, current-input reservation,
+  injection failure/ambiguous delivery, and fresh-session recovery.
+- ProviderSwitchService and ProviderSwitch integration: 72 tests.
+- A new MCP history test stores 43 real SQLite projection items, omits an oversized
+  multilingual message from a handoff, and recovers it exactly through item and
+  text-offset pagination: 1 test.
+- ChatView logic, provider instance selection, the pre-send settings regression,
+  and SelectionRestart integration: 101 tests.
+- Web and server typechecks passed. Targeted lint reported existing warnings;
+  formatting and diff checks passed. No repository-wide checks ran.
+
+A separate agent reviewed correctness and simplification, identified the pre-send
+ordering defect during live acceptance, and approved the final fix without further
+findings. Failure injection and budget changes were verified with deterministic
+adapters, not forced failures of live external providers. This pass exercised the
+shared web renderer; Electron shell behavior and remote transport were unchanged
+and were not separately smoke-tested. Settings/default-model selection and other
+entry points keep their existing behavior. No commit, push, or PR is implied.

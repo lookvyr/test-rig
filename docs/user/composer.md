@@ -74,6 +74,22 @@ moved into a project.
 
 This option is unavailable if the app's data directory is inside a Git repository.
 
+## Switching providers and models
+
+Use the model picker to continue a conversation with Codex, Claude Code, or
+OpenCode. Choosing a provider or model updates the composer; it takes effect
+when you send your next message. If a turn is running, sending to a different
+provider interrupts it and continues with the selected provider. Send waits
+until the running turn is ready to accept a follow-up.
+
+The new provider receives conversation context. Long histories may omit older
+items from the initial handoff; the agent can retrieve them from the thread's
+history. Switching back reuses the provider's conversation when possible and
+supplies the intervening context.
+
+Side chats keep their original provider, and provider-native child conversations
+remain read-only.
+
 ## Effort and speed
 
 The effort menu closes after you select any option, including effort level or

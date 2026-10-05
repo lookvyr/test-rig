@@ -290,7 +290,6 @@ export function SideChatPanel(props: {
       const settingsResult = await persistSettings({
         threadId: threadRef.threadId,
         createdAt: new Date().toISOString(),
-        modelSelection: context.selectedModelSelection,
         runtimeMode,
         interactionMode,
       });

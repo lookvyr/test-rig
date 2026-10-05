@@ -1,7 +1,6 @@
 import { useCallback } from "react";
 import type {
   EnvironmentId,
-  ModelSelection,
   ProviderInteractionMode,
   RuntimeMode,
   ThreadId,
@@ -16,6 +15,8 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { threadEnvironment } from "../../state/threads";
 import { resolveThreadMetadataUpdateForNextTurn } from "../ChatView.logic";
 
+// Model selection belongs to the message dispatch: pre-saving it would close
+// the running provider session before an active-turn handoff can restart it.
 export function usePersistThreadSettings(
   environmentId: EnvironmentId,
   serverThread: Thread | null,
@@ -33,7 +34,6 @@ export function usePersistThreadSettings(
     async (input: {
       threadId: ThreadId;
       createdAt: string;
-      modelSelection?: ModelSelection;
       branch?: string;
       runtimeMode: RuntimeMode;
       interactionMode: ProviderInteractionMode;
@@ -44,8 +44,6 @@ export function usePersistThreadSettings(
 
       let result: AtomCommandResult<void, unknown> = AsyncResult.success(undefined);
       const metadataUpdate = resolveThreadMetadataUpdateForNextTurn({
-        currentModelSelection: serverThread.modelSelection,
-        ...(input.modelSelection ? { nextModelSelection: input.modelSelection } : {}),
         currentBranch: serverThread.branch,
         ...(input.branch ? { nextBranch: input.branch } : {}),
       });

@@ -600,6 +600,24 @@ describe("resolveComposerProviderInstanceId", () => {
     ).toBe(legacy);
   });
 
+  it.each(["claudeAgent", "opencode"] as const)(
+    "lets an explicit %s draft selection override an existing Codex conversation",
+    (driver) => {
+      const instanceId = ProviderInstanceId.make(`${driver}_personal`);
+      const next = provider({
+        provider: ProviderDriverKind.make(driver),
+        instanceId,
+      });
+      expect(
+        resolve([ready, next], {
+          threadInstanceId: codex,
+          draftInstanceId: instanceId,
+        }),
+      ).toBe(instanceId);
+      expect(resolve([ready, next], { threadInstanceId: codex })).toBe(codex);
+    },
+  );
+
   it("blocks a saved instance reconfigured outside its locked driver or continuation group", () => {
     expect(
       resolve([ready], {
