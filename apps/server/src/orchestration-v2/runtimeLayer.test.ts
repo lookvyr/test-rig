@@ -3418,6 +3418,106 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
       }),
   );
 
+  it.effect("rejects a late Stop without interrupting a newer run or holding its queue", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const threadId = ThreadId.make("runtime-layer-late-stop");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make(`${threadId}:create`),
+        threadId,
+        projectId: ProjectId.make(`${threadId}:project`),
+        title: "Late Stop",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: process.cwd(),
+      });
+      for (const [index, text] of ["A", "B", "C"].entries()) {
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`${threadId}:message:${index}`),
+          threadId,
+          messageId: MessageId.make(`${threadId}:message:${index}`),
+          text,
+          attachments: [],
+          modelSelection,
+          dispatchMode: { type: index === 0 ? "start_immediately" : "queue_after_active" },
+        });
+      }
+      const initial = yield* orchestrator.getThreadProjection(threadId);
+      const [runA, runB, runC] = initial.runs;
+      assert.isDefined(runA);
+      assert.isDefined(runB);
+      assert.isDefined(runC);
+      const promotedRunIds = yield* Queue.unbounded<RunId>();
+      const afterSequence = yield* orchestrator.getThreadEventSequence(threadId);
+      yield* eventSink.stream({ threadId, afterSequence }).pipe(
+        Stream.runForEach((stored) =>
+          stored.event.type === "run.updated" && stored.event.payload.status === "starting"
+            ? Queue.offer(promotedRunIds, stored.event.payload.id)
+            : Effect.void,
+        ),
+        Effect.forkScoped,
+      );
+      yield* Effect.yieldNow;
+      const now = yield* DateTime.now;
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make(`${threadId}:complete-a`),
+            type: "run.updated",
+            threadId,
+            runId: runA.id,
+            providerInstanceId: runA.providerInstanceId,
+            occurredAt: now,
+            payload: { ...runA, status: "completed", completedAt: now },
+          },
+        ],
+      });
+      assert.equal(yield* Queue.take(promotedRunIds), runB.id);
+      const beforeStop = yield* orchestrator.getThreadProjection(threadId);
+      const sequenceBeforeStop = yield* orchestrator.getThreadEventSequence(threadId);
+      const error = yield* orchestrator
+        .dispatch({
+          type: "run.interrupt",
+          commandId: CommandId.make(`${threadId}:late-stop-a`),
+          threadId,
+          runId: runA.id,
+          holdQueue: true,
+        })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "OrchestratorDispatchError");
+      assert.equal(yield* orchestrator.getThreadEventSequence(threadId), sequenceBeforeStop);
+      const afterStop = yield* orchestrator.getThreadProjection(threadId);
+      assert.deepEqual(afterStop, beforeStop);
+      assert.equal(afterStop.runs.find((run) => run.id === runB.id)?.status, "starting");
+      assert.equal(afterStop.runs.find((run) => run.id === runC.id)?.status, "queued");
+      assert.notEqual(afterStop.runs.find((run) => run.id === runC.id)?.queueHeld, true);
+      const activeB = afterStop.runs.find((run) => run.id === runB.id)!;
+      yield* eventSink.write({
+        events: [
+          {
+            id: EventId.make(`${threadId}:complete-b`),
+            type: "run.updated",
+            threadId,
+            runId: activeB.id,
+            providerInstanceId: activeB.providerInstanceId,
+            occurredAt: now,
+            payload: { ...activeB, status: "completed", completedAt: now },
+          },
+        ],
+      });
+      assert.equal(yield* Queue.take(promotedRunIds), runC.id);
+    }),
+  );
+
   it.effect("keeps the queue after a user interrupts the active run", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;

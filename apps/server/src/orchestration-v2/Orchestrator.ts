@@ -3105,7 +3105,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const projection = yield* loadProjectionForCommand(
         command,
         ["runs", "attempts", "nodes", "subagents", "messages", "turnItems"],
-        { turnItemTypes: ["command_execution"], messageRoles: ["user"] },
+        {
+          turnItemTypes: ["command_execution"],
+          turnItemStatuses: ["pending", "running", "waiting"],
+          messageRoles: ["user"],
+        },
       );
       const emitEvent = emit(events, command);
       const activeRunIds = new Set(

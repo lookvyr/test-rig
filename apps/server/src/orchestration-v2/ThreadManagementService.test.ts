@@ -430,3 +430,70 @@ it.effect.each([
     }
   }),
 );
+
+it.effect.each(["idle", "completed-target", "missing-target", "wrong-project"] as const)(
+  "public Stop does not dispatch unrelated work for %s",
+  (scenario) =>
+    Effect.gen(function* () {
+      const projectId = ProjectId.make("project:public-stop");
+      const threadId = ThreadId.make("thread:public-stop");
+      const completedRunId = RunId.make("run:completed");
+      const newerRunId = RunId.make("run:newer");
+      const projection = {
+        thread: { id: threadId, projectId, deletedAt: null },
+        runs: [
+          { id: completedRunId, status: "completed", ordinal: 1 },
+          ...(scenario === "idle" ? [] : [{ id: newerRunId, status: "running", ordinal: 2 }]),
+        ],
+        providerTurns: [],
+      } as unknown as OrchestrationV2ThreadProjection;
+      let dispatches = 0;
+      const service = yield* ThreadManagementService.ThreadManagementService.pipe(
+        Effect.provide(
+          ThreadManagementService.layer.pipe(
+            Layer.provide(workspaceTestLayer),
+            Layer.provide(
+              Layer.mock(Orchestrator.OrchestratorV2)({
+                getThreadRecords: () => Effect.succeed(projection),
+                dispatch: () =>
+                  Effect.sync(() => {
+                    dispatches++;
+                  }).pipe(Effect.andThen(Effect.die("Unexpected Stop dispatch"))),
+              }),
+            ),
+          ),
+        ),
+      );
+      const result = yield* service
+        .interruptThread({
+          projectId: scenario === "wrong-project" ? ProjectId.make("project:unrelated") : projectId,
+          threadId,
+          commandId: CommandId.make(`stop:${scenario}`),
+          ...(scenario === "idle"
+            ? {}
+            : {
+                runId: scenario === "missing-target" ? RunId.make("run:missing") : completedRunId,
+              }),
+        })
+        .pipe(Effect.result);
+      expect(dispatches).toBe(0);
+      if (scenario === "idle") {
+        expect(result).toMatchObject({ _tag: "Success", success: { type: "no_active_run" } });
+      } else if (scenario === "completed-target") {
+        expect(result).toMatchObject({
+          _tag: "Success",
+          success: { type: "already_terminal", run: { id: completedRunId } },
+        });
+      } else {
+        expect(result).toMatchObject({
+          _tag: "Failure",
+          failure: {
+            _tag:
+              scenario === "missing-target"
+                ? "ThreadManagementRunNotFoundError"
+                : "ThreadManagementThreadNotFoundError",
+          },
+        });
+      }
+    }),
+);

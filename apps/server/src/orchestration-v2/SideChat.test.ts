@@ -13,6 +13,7 @@ import {
   ProviderTurnId,
   RunId,
   ThreadId,
+  TurnItemId,
   type OrchestrationV2ProviderThread,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -431,12 +432,49 @@ it.effect("archive cancels held and not-yet-started runs before late release", (
         },
       });
     }
+    for (const [index, status] of (
+      ["pending", "running", "waiting", "completed"] as const
+    ).entries()) {
+      yield* store.apply({
+        id: EventId.make(`preparation-${status}`),
+        type: "turn-item.updated",
+        threadId: parentId,
+        occurredAt: now,
+        payload: {
+          id: TurnItemId.make(`preparation-${status}`),
+          threadId: parentId,
+          runId: RunId.make(status === "completed" ? "starting" : "preparing"),
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: index + 1,
+          status,
+          title: "Preparing workspace",
+          startedAt: now,
+          completedAt: status === "completed" ? now : null,
+          updatedAt: now,
+          type: "command_execution",
+          input: "Preparing workspace",
+        },
+      });
+    }
     const commandId = CommandId.make("archive-preparation");
     yield* orchestrator.dispatch({ type: "thread.archive", commandId, threadId: parentId });
-    const projection = yield* store.getThreadRecords(parentId, ["runs"]);
+    const projection = yield* store.getThreadRecords(parentId, ["runs", "turnItems"]);
     assert.isNotNull(projection.thread.archivedAt);
     assert.isTrue(
       projection.runs.every((run) => run.status === "cancelled" && run.completedAt !== null),
+    );
+    assert.sameDeepMembers(
+      projection.turnItems.map((item) => [item.id, item.status]),
+      [
+        ["preparation-pending", "interrupted"],
+        ["preparation-running", "interrupted"],
+        ["preparation-waiting", "interrupted"],
+        ["preparation-completed", "completed"],
+      ],
     );
     const effects = yield* (yield* EffectOutbox.EffectOutboxV2).listByCommandId(commandId);
     assert.isTrue(effects.some((effect) => effect.request.type === "terminal.cleanup"));
