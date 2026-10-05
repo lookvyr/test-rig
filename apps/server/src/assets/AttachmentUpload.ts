@@ -4,6 +4,7 @@ import {
   ATTACHMENT_UPLOAD_URL_TTL_MS,
   type AttachmentCreateUploadUrlInput,
   AttachmentUploadSigningKeyError,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
@@ -40,6 +41,41 @@ const SIGNING_SECRET_NAME = "asset-access-signing-key";
 const PENDING_ATTACHMENT_SWEEP_INTERVAL_MS = 15 * 60_000;
 const lastPendingSweepByDirectory = new Map<string, number>();
 
+const PendingAttachmentOwner = Schema.fromJsonString(Schema.Struct({ threadId: ThreadId }));
+const encodePendingAttachmentOwner = Schema.encodeSync(PendingAttachmentOwner);
+const decodePendingAttachmentOwner = Schema.decodeUnknownOption(PendingAttachmentOwner);
+
+export class PendingAttachmentOwnershipError extends Schema.TaggedError<PendingAttachmentOwnershipError>()(
+  "PendingAttachmentOwnershipError",
+  { message: Schema.String },
+) {}
+
+const pendingOwnerPath = (attachmentsDir: string, attachmentId: string) =>
+  parseThreadSegmentFromAttachmentId(attachmentId) === PENDING_ATTACHMENT_THREAD_SEGMENT
+    ? resolveAttachmentRelativePath({ attachmentsDir, relativePath: `${attachmentId}.owner.json` })
+    : null;
+
+/** MCP uploads belong to their originating application thread, including across provider restarts. */
+export const assertPendingAttachmentOwner = Effect.fn("AttachmentUpload.assertPendingOwner")(
+  function* (attachmentId: string, threadId: ThreadId) {
+    const config = yield* ServerConfig.ServerConfig;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const ownerPath = pendingOwnerPath(config.attachmentsDir, attachmentId);
+    const owner =
+      ownerPath === null
+        ? null
+        : yield* fileSystem.readFileString(ownerPath).pipe(
+            Effect.map((text) => Option.getOrNull(decodePendingAttachmentOwner(text))),
+            Effect.orElseSucceed(() => null),
+          );
+    if (owner?.threadId !== threadId) {
+      return yield* new PendingAttachmentOwnershipError({
+        message: "Pending attachments must have been prepared by the calling thread.",
+      });
+    }
+  },
+);
+
 const AttachmentUploadClaims = Schema.Struct({
   version: Schema.Literal(1),
   kind: Schema.Literal("attachment-upload"),
@@ -73,6 +109,7 @@ const loadSigningSecret = Effect.gen(function* () {
 
 export const issueAttachmentUploadUrl = Effect.fn("AttachmentUpload.issueUrl")(function* (
   input: AttachmentCreateUploadUrlInput,
+  ownerThreadId: ThreadId,
 ) {
   const secret = yield* loadSigningSecret.pipe(
     Effect.mapError((cause) => new AttachmentUploadSigningKeyError({ cause })),
@@ -99,6 +136,13 @@ export const issueAttachmentUploadUrl = Effect.fn("AttachmentUpload.issueUrl")(f
     attachmentType === "file" ? attachmentFileExtension(input.name) : undefined,
   );
   const expiresAt = nowMs + ATTACHMENT_UPLOAD_URL_TTL_MS;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const ownerPath = pendingOwnerPath(config.attachmentsDir, attachmentId)!;
+  yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true });
+  yield* fileSystem.writeFileString(
+    ownerPath,
+    encodePendingAttachmentOwner({ threadId: ownerThreadId }),
+  );
   const encodedPayload = base64UrlEncode(
     encodeAttachmentUploadClaims({
       version: 1,
@@ -223,10 +267,16 @@ export const storeAttachmentUpload = Effect.fn("AttachmentUpload.store")(functio
 
 export const deletePendingAttachment = Effect.fn("AttachmentUpload.deletePending")(function* (
   attachmentId: string,
+  ownerThreadId: ThreadId,
 ) {
   if (parseThreadSegmentFromAttachmentId(attachmentId) !== PENDING_ATTACHMENT_THREAD_SEGMENT) {
     return;
   }
+
+  yield* assertPendingAttachmentOwner(attachmentId, ownerThreadId);
+
+  // Keep the owner record until the pending sweep so repeated owner cleanup is
+  // harmless, including when the upload has not arrived yet.
 
   const config = yield* ServerConfig.ServerConfig;
   const attachmentPath = resolveAttachmentPathById({

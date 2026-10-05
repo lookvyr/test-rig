@@ -8,6 +8,7 @@ import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.t
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
 import { newCommandId, readCaller, readMutationCaller, unavailable } from "../../threadAccess.ts";
 import { ProjectToolkit } from "./tools.ts";
+import { assertPendingUploadOwnership } from "../attachment/handlers.ts";
 
 function projectFailure(error: Project.ProjectServiceError) {
   if (error._tag === "ProjectOperationError") return unavailable();
@@ -55,6 +56,7 @@ export const ProjectHandlersLive = ProjectToolkit.toLayer({
           code: "invalid_request",
           message: "A new thread accepts only pending attachment uploads.",
         });
+      yield* assertPendingUploadOwnership(attachments, scope.threadId);
       if (
         input.scratch === true &&
         (input.projectId !== undefined || input.workspaceStrategy !== undefined)

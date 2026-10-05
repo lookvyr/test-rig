@@ -27,6 +27,7 @@ import { OtlpTracer } from "effect/unstable/observability";
 
 import * as ServerConfig from "./config.ts";
 import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
+import * as AttachmentUpload from "./assets/AttachmentUpload.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import {
@@ -364,6 +365,25 @@ export const assetRouteLayer = HttpRouter.add(
     ).pipe(
       Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
     );
+  }),
+);
+
+export const attachmentUploadRouteLayer = HttpRouter.add(
+  "POST",
+  `${AttachmentUpload.ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`,
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) return HttpServerResponse.text("Bad Request", { status: 400 });
+    const token = url.value.pathname.slice(
+      `${AttachmentUpload.ATTACHMENT_UPLOAD_ROUTE_PREFIX}/`.length,
+    );
+    const claims = yield* AttachmentUpload.validateAttachmentUploadToken(token);
+    if (!claims) return HttpServerResponse.text("Not Found", { status: 404 });
+    const result = yield* AttachmentUpload.storeAttachmentUpload(claims, request.stream);
+    return result.ok
+      ? HttpServerResponse.empty({ status: 204 })
+      : HttpServerResponse.text(result.detail, { status: result.status });
   }),
 );
 

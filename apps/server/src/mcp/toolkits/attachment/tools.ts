@@ -40,14 +40,14 @@ const AttachmentUploadTool = Tool.make("t3_attachment_prepare_upload", {
 const AttachmentDiscardTool = Tool.make("t3_attachment_discard", {
   ...shared,
   description:
-    "Discard a pending upload. Already-delivered thread attachments are never deleted by this operation.",
+    "Discard a pending upload prepared by this calling thread. Already-delivered thread attachments are never deleted by this operation.",
   parameters: AttachmentDeleteInput,
   success: Schema.Struct({}),
 }).annotate(Tool.Destructive, true);
 const AttachmentSendTool = Tool.make("t3_thread_send_attachments", {
   ...shared,
   description:
-    "Send uploaded attachments to this thread or another thread in the calling project. Each call is a new message, without a retry key. Acceptance does not mean the provider can consume the attachment or has finished the turn. The target cannot have broader permission modes than the caller; failures retain claimed files when dispatch outcome is uncertain.",
+    "Send uploads prepared by this calling thread to this thread or another thread in the calling project, or reuse attachments already delivered to the target. Each call is a new message, without a retry key. Acceptance does not mean the provider can consume the attachment or has finished the turn. The target cannot have broader permission modes than the caller; failures retain claimed files when dispatch outcome is uncertain.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     message: Schema.optional(Schema.String.check(Schema.isMaxLength(120000))),

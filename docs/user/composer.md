@@ -24,6 +24,15 @@ Send stays disabled while the turn is starting or cannot accept steering. Your
 draft stays in the composer until you send it. Once the agent finishes, sending
 starts a new turn. This also applies to side chats.
 
+## Agent-prepared attachments
+
+An upload prepared by an agent belongs to the conversation that prepared it.
+That conversation can send it to an allowed target or discard the pending copy;
+another conversation cannot claim or discard it by its upload ID. Discarding a
+pending upload keeps any copies already delivered to messages. Older pending
+uploads without ownership information must be prepared again before an agent
+can send or discard them.
+
 ## Threads without a project
 
 Choose **No project** in the new-thread project picker, click **or start without a

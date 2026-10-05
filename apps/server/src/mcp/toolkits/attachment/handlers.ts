@@ -1,4 +1,9 @@
-import { type ChatAttachment, MessageId, OrchestratorMcpFailure } from "@t3tools/contracts";
+import {
+  type ChatAttachment,
+  type ThreadId,
+  MessageId,
+  OrchestratorMcpFailure,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Upload from "../../../assets/AttachmentUpload.ts";
 import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
@@ -10,6 +15,20 @@ import {
   unavailable,
 } from "../../threadAccess.ts";
 import { AttachmentToolkit } from "./tools.ts";
+
+export const assertPendingUploadOwnership = (
+  attachments: ReadonlyArray<ChatAttachment>,
+  threadId: ThreadId,
+) =>
+  Effect.forEach(
+    attachments.filter(Claims.attachmentIsPendingUpload),
+    (attachment) => Upload.assertPendingAttachmentOwner(attachment.id, threadId),
+    { discard: true },
+  ).pipe(
+    Effect.mapError(
+      (error) => new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+    ),
+  );
 
 export function resolveAttachmentReferences(
   requested: ReadonlyArray<ChatAttachment>,
@@ -34,15 +53,20 @@ export function resolveAttachmentReferences(
 export const AttachmentHandlersLive = AttachmentToolkit.toLayer({
   t3_attachment_prepare_upload: (input) =>
     Effect.gen(function* () {
-      yield* readMutationCaller();
-      return yield* Upload.issueAttachmentUploadUrl(input.upload).pipe(
+      const { scope } = yield* readMutationCaller();
+      return yield* Upload.issueAttachmentUploadUrl(input.upload, scope.threadId).pipe(
         Effect.mapError(unavailable),
       );
     }),
   t3_attachment_discard: (input) =>
     Effect.gen(function* () {
-      yield* readMutationCaller();
-      yield* Upload.deletePendingAttachment(input.attachmentId);
+      const { scope } = yield* readMutationCaller();
+      yield* Upload.deletePendingAttachment(input.attachmentId, scope.threadId).pipe(
+        Effect.mapError(
+          (error) =>
+            new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+        ),
+      );
       return {};
     }),
   t3_thread_send_attachments: (input) =>
@@ -57,6 +81,7 @@ export const AttachmentHandlersLive = AttachmentToolkit.toLayer({
         input.attachments,
         projection.messages.flatMap((message) => message.attachments),
       );
+      yield* assertPendingUploadOwnership(attachments, scope.threadId);
       const commandId = yield* newCommandId();
       const messageId = MessageId.make(commandId);
       const result = yield* ThreadMessageIntake.sendToThread({

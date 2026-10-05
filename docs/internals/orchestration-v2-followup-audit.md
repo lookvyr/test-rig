@@ -26,11 +26,17 @@ The MCP elicitation handler in [CodexAdapterV2.ts](../../apps/server/src/orchest
 
 A disposable replay issued a supported MCP elicitation, emitted its matching native resolution, then attempted a late answer after a protocol response barrier. The approval statuses remained `[pending]` and the late accept returned success; the expected cancellation assertion failed. This confirms the adapter lifecycle defect without claiming a live connector test. Capture native request/thread identity for elicitation and apply the existing cancellation lifecycle while preserving native-child ownership.
 
-### Pending attachment discard has no caller ownership check — LOO-35
+### Pending attachment ownership repaired — LOO-35
 
-[attachment/handlers.ts](../../apps/server/src/mcp/toolkits/attachment/handlers.ts) checks that the caller is active, then passes its supplied attachment ID to `deletePendingAttachment`. [AttachmentUpload.ts](../../apps/server/src/assets/AttachmentUpload.ts) validates the global pending segment and deletes the matching file; issuance records no caller/thread ownership.
+The original MCP discard handler checked an active caller but deleted by global pending attachment ID without ownership. An authenticated caller possessing another pending ID could discard it; the audit did not establish arbitrary ID discovery, delivered-asset deletion, unauthenticated access or observed data loss.
 
-An authenticated caller possessing another draft's pending ID can therefore discard it. The pending-segment guard protects already-delivered assets, and this audit did not demonstrate a way to discover arbitrary pending IDs. This is a source-confirmed cleanup-ownership gap, not a claim of observed data loss or an unauthenticated exploit. Define ownership for MCP-created pending uploads and enforce it during discard/claim while retaining legitimate composer uploads and intentional transfers.
+The authorized repair records the issuing application thread in a durable sidecar before returning the upload URL. MCP discard, attachment send and prepared thread launch check that source ownership before deleting or claiming files. Owners can transfer to permitted targets; ordinary composer uploads retain their separate thread-owned path. Immutable ownership survives provider/server restarts and stays with the pending retry source. Repeated owner discard stays harmless; the existing 24-hour sweep removes abandoned owner records. Missing or malformed owner records fail closed for MCP consumers.
+
+Browser verification additionally reproduced a 404 when posting to the signed URL: the existing upload handler was never registered as an HTTP route. The registered POST route now verifies the signed token and streams through the existing size-checked persistence path. An HTTP regression test covers invalid tokens, short/oversized payloads, successful upload and partial-file cleanup.
+
+Verification: 46 focused tests passed across upload HTTP, attachment storage/claims/intake, MCP attachment/project handlers and HTTP routing; server typecheck passed; targeted lint passed with two pre-existing unused-import warnings. Independent GPT-6.1 Sol review found no actionable defect or worthwhile simplification in either ownership or route registration. In the browser, a pasted image reached Codex, signed upload returned 204 after a server restart, another chat's discard returned invalid_request without deleting the bytes, and the source chat successfully sent the attachment then discarded the original. The recipient read TEST from its delivered copy; filesystem inspection confirmed the original was absent and delivered bytes remained.
+
+The remaining project/launch/integration acceptance in LOO-35 is separate from this repair.
 
 ## Remaining feature delivery
 
@@ -46,7 +52,7 @@ An authenticated caller possessing another draft's pending ID can therefore disc
 | LOO-32 | Rich composer supports files/skills; conversation-reference chips and sidebar drag payloads are absent. | Wire thread references into rich drafts, scoped retrieval and persistence.                                                                              |
 | LOO-33 | Durable schedules and MCP controls exist; Settings management UI is absent.                             | Resolve LOO-14 and complete the shared management surface and saved-launch-setting acceptance.                                                          |
 | LOO-34 | Backend recovery guards and independent snooze/auto-resume fields exist, default off.                   | Expose opt-in settings and per-thread recovery controls; preserve manual continuation without a trustworthy reset time.                                 |
-| LOO-35 | Project/attachment/preferences tools exist; pending discard ownership gap above is established.         | Narrow ownership repair plus repository-preservation and launch-failure acceptance.                                                                     |
+| LOO-35 | Pending upload ownership repaired across MCP discard/send/launch; signed upload route registered.       | Repository-preservation and launch-failure acceptance remain.                                                                                           |
 | LOO-36 | Worktree handoff guards pass 50 focused tests.                                                          | Actual provider continuation across handoff and setup/permission ordering. No new handoff defect established.                                           |
 | LOO-39 | Unchanged bootstrap reads allocate new arrays every two seconds.                                        | Compare successful snapshots before setting React state; preserve empty-result clearing and failure retention. No reconnect/refetch defect established. |
 | LOO-42 | Mounted palette rows obtain VCS/PR queries without visibility bounds.                                   | Visible-row query leases retaining cached display and hosting gates. No live subprocess/request count measured.                                         |
@@ -85,7 +91,7 @@ Counts include selected and disposable runs and should not be presented as one c
 1. Repair native MCP elicitation cancellation (LOO-45) and add the focused replay permanently.
 2. Define and verify the stale-Stop rule for internal deferred work (LOO-24). The approved steering-only composer flow (LOO-23) is implemented; do not add a user-facing queue editor.
 3. Probe reopened compaction and cross-provider continuation before expanding collaboration features (LOO-26/27).
-4. Complete pending-asset ownership and expose the remaining controls, with policy decisions for scheduling/delegation made before accepting those flows.
+4. Finish project/launch acceptance and expose the remaining controls, with policy decisions for scheduling/delegation made before accepting those flows.
 
 Rewind, merge-back, OpenCode 1 and excluded cloud/provider services remain outside scope. The earlier preservation acceptance stands with its recorded limits; this audit identifies unfinished broader V2 work.
 

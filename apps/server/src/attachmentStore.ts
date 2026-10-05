@@ -243,7 +243,9 @@ export function sweepStalePendingAttachments(input: {
   for (const entry of entries) {
     const isPartial = entry.endsWith(".part");
     if (!isPartial) {
-      const attachmentId = parseAttachmentIdFromRelativePath(entry);
+      const attachmentId = entry.endsWith(".owner.json")
+        ? entry.slice(0, -".owner.json".length)
+        : parseAttachmentIdFromRelativePath(entry);
       if (
         !attachmentId ||
         parseThreadSegmentFromAttachmentId(attachmentId) !== PENDING_ATTACHMENT_THREAD_SEGMENT
