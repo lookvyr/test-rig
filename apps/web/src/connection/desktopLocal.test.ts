@@ -2,7 +2,11 @@ import {
   BearerConnectionTarget,
   PrimaryConnectionTarget,
 } from "@t3tools/client-runtime/connection";
-import { EnvironmentId, PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  PRIMARY_LOCAL_ENVIRONMENT_ID,
+  type DesktopEnvironmentBootstrap,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -38,6 +42,79 @@ describe("desktop local connection identity", () => {
 });
 
 describe("desktop local topology reads", () => {
+  const secondary: DesktopEnvironmentBootstrap = {
+    id: "wsl:default",
+    label: "WSL",
+    runningDistro: "Ubuntu",
+    httpBaseUrl: "http://127.0.0.1:4000",
+    wsBaseUrl: "ws://127.0.0.1:4000",
+    bootstrapToken: "initial-token",
+  };
+
+  it("reuses the snapshot when IPC returns new objects with unchanged data", () => {
+    const reader = createDesktopSecondaryBootstrapsReader(() => ({
+      getLocalEnvironmentBootstraps: () => [{ ...secondary }],
+    }));
+    const initial = reader.readSnapshot();
+    expect(reader.readSnapshot()).toBe(initial);
+    expect(reader.readResult()).toEqual({ _tag: "Success", bootstraps: initial });
+  });
+
+  it.each([
+    { id: "wsl:Debian" },
+    { label: "Renamed WSL" },
+    { runningDistro: "Debian" },
+    { httpBaseUrl: "http://127.0.0.1:4001" },
+    { wsBaseUrl: "ws://127.0.0.1:4001" },
+    { bootstrapToken: "rotated-token" },
+    { httpBaseUrl: null, wsBaseUrl: null, runningDistro: null },
+  ])("publishes a changed connection snapshot: %j", (change) => {
+    let current = secondary;
+    const reader = createDesktopSecondaryBootstrapsReader(() => ({
+      getLocalEnvironmentBootstraps: () => [{ ...current }],
+    }));
+    const initial = reader.readSnapshot();
+    current = { ...secondary, ...change };
+    const changed = reader.readSnapshot();
+    expect(changed).not.toBe(initial);
+    expect(changed).toEqual([current]);
+    expect(reader.readSnapshot()).toBe(changed);
+  });
+
+  it("publishes additions, reordered backends and removals", () => {
+    let current = [secondary];
+    const reader = createDesktopSecondaryBootstrapsReader(() => ({
+      getLocalEnvironmentBootstraps: () => current.map((entry) => ({ ...entry })),
+    }));
+    const initial = reader.readSnapshot();
+    const other = { ...secondary, id: "wsl:Debian" };
+    current = [secondary, other];
+    const added = reader.readSnapshot();
+    expect(added).not.toBe(initial);
+    expect(added).toEqual(current);
+    current = [other, secondary];
+    const reordered = reader.readSnapshot();
+    expect(reordered).not.toBe(added);
+    expect(reordered).toEqual(current);
+    current = [];
+    const removed = reader.readSnapshot();
+    expect(removed).toEqual([]);
+    expect(reader.readSnapshot()).toBe(removed);
+  });
+
+  it("clears a disconnected desktop bridge once and keeps the empty snapshot stable", () => {
+    const bridge = { getLocalEnvironmentBootstraps: () => [secondary] };
+    let current: typeof bridge | undefined = bridge;
+    const reader = createDesktopSecondaryBootstrapsReader(() => current);
+    expect(reader.readSnapshot()).toEqual([secondary]);
+    current = undefined;
+    const disconnected = reader.readSnapshot();
+    expect(disconnected).toEqual([]);
+    expect(reader.readSnapshot()).toBe(disconnected);
+    current = bridge;
+    expect(reader.readSnapshot()).toEqual([secondary]);
+  });
+
   it("distinguishes a successful empty topology from a read failure", () => {
     let readBootstraps = () => [];
     const reader = createDesktopSecondaryBootstrapsReader(() => ({
