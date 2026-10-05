@@ -24,6 +24,13 @@ Send stays disabled while the turn is starting or cannot accept steering. Your
 draft stays in the composer until you send it. Once the agent finishes, sending
 starts a new turn. This also applies to side chats.
 
+## Context compaction
+
+The work log distinguishes compaction in progress, completed compaction, a
+stopped compaction and a failed compaction. Stopping or interrupting compaction
+does not count as successful completion. The context-window indicator shows
+the current context usage, which is separate from cumulative token usage.
+
 ## Agent-prepared attachments
 
 An upload prepared by an agent belongs to the conversation that prepared it.
@@ -32,6 +39,18 @@ another conversation cannot claim or discard it by its upload ID. Discarding a
 pending upload keeps any copies already delivered to messages. Older pending
 uploads without ownership information must be prepared again before an agent
 can send or discard them.
+
+## Agent-prepared project launches
+
+When an agent starts a project conversation, Test Rig prepares its selected
+checkout before starting the new agent. A synchronous setup script must succeed
+first, including when using the project root or an existing worktree. Setup
+failure leaves the conversation with its original message and an error; it
+does not start the agent in another checkout. Scripts explicitly configured
+to run asynchronously may continue after the agent starts.
+
+Deleting a project removes its conversations from the app and keeps the
+repository files.
 
 ## Threads without a project
 

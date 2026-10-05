@@ -209,6 +209,7 @@ export function codexProviderTurnTokenUsage(
   };
 }
 const DEFAULT_CODEX_SETTINGS = Schema.decodeSync(CodexSettings)({});
+const encodeMcpRequestIdentity = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const CODEX_ASSISTANT_DELTA_FLUSH_INTERVAL_MS = 50;
 const CodexBackgroundTerminalTerminateResponse = Schema.Struct({
   terminated: Schema.Boolean,
@@ -1136,6 +1137,15 @@ type PendingCodexRuntimeRequest =
       readonly requestId: RuntimeRequestId;
       readonly requestKind: ProviderRequestKind;
       readonly decision: Deferred.Deferred<ProviderApprovalDecision, never>;
+    }
+  | {
+      readonly type: "mcp_approval";
+      readonly requestId: RuntimeRequestId;
+      readonly requestKind: "mcp-elicitation";
+      readonly jsonRpcId: string | number;
+      readonly nativeThreadId: string;
+      readonly decision: Deferred.Deferred<ProviderApprovalDecision, never>;
+      readonly resolveExternally: Effect.Effect<void>;
     }
   | {
       readonly type: "user_input";
@@ -4720,86 +4730,120 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           }).pipe(Effect.orDie),
         );
 
-        yield* client.handleServerRequest("mcpServer/elicitation/request", (payload) =>
-          Effect.gen(function* () {
-            // Unsupported elicitation shapes cannot express an approval, so
-            // decline instead of presenting a request the user cannot answer.
-            if (toMcpElicitationResponse(payload, "accept").action !== "accept") {
-              yield* Effect.logWarning("Declined an unsupported MCP elicitation.", {
-                serverName: payload.serverName,
-                mode: payload.mode,
-              });
-              return {
-                action: "decline",
-              } satisfies CodexSchema.McpServerElicitationRequestResponse;
-            }
-            const context =
-              payload.turnId === undefined || payload.turnId === null
-                ? undefined
-                : yield* awaitActiveTurn(payload.turnId);
-            if (context === undefined) {
-              yield* Effect.logWarning(
-                "Declined an MCP elicitation without an active Codex turn context.",
-                { serverName: payload.serverName },
-              );
-              return {
-                action: "decline",
-              } satisfies CodexSchema.McpServerElicitationRequestResponse;
-            }
+        yield* client.handleServerRequest(
+          "mcpServer/elicitation/request",
+          (payload, requestContext) =>
+            Effect.gen(function* () {
+              // Unsupported elicitation shapes cannot express an approval, so
+              // decline instead of presenting a request the user cannot answer.
+              if (toMcpElicitationResponse(payload, "accept").action !== "accept") {
+                yield* Effect.logWarning("Declined an unsupported MCP elicitation.", {
+                  serverName: payload.serverName,
+                  mode: payload.mode,
+                });
+                return {
+                  action: "decline",
+                } satisfies CodexSchema.McpServerElicitationRequestResponse;
+              }
+              const context =
+                payload.turnId === undefined || payload.turnId === null
+                  ? undefined
+                  : yield* awaitActiveTurn(payload.turnId);
+              if (context === undefined) {
+                yield* Effect.logWarning(
+                  "Declined an MCP elicitation without an active Codex turn context.",
+                  { serverName: payload.serverName },
+                );
+                return {
+                  action: "decline",
+                } satisfies CodexSchema.McpServerElicitationRequestResponse;
+              }
 
-            const nativeRequestId =
-              payload.mode === "url"
-                ? payload.elicitationId
-                : `mcp-elicitation:${payload.serverName}`;
-            const described = describeMcpElicitation(payload);
-            const artifacts = yield* buildApprovalRequestArtifacts({
-              context,
-              nativeItemId: nativeRequestId,
-              nativeRequestId,
-              requestKind: "mcp-elicitation",
-              prompt: payload.message,
-              appName: described.appName,
-              options: described.options,
-            });
-            const decision = yield* Deferred.make<ProviderApprovalDecision, never>();
-            yield* Ref.update(pendingRuntimeRequests, (current) => {
-              const updated = new Map(current);
-              updated.set(String(artifacts.request.id), {
-                type: "approval",
-                requestId: artifacts.request.id,
+              const nativeRequestId = `mcp-elicitation:${encodeMcpRequestIdentity([
+                payload.threadId,
+                requestContext.requestId,
+              ])}`;
+              const described = describeMcpElicitation(payload);
+              const artifacts = yield* buildApprovalRequestArtifacts({
+                context,
+                nativeItemId: nativeRequestId,
+                nativeRequestId,
                 requestKind: "mcp-elicitation",
-                decision,
+                prompt: payload.message,
+                appName: described.appName,
+                options: described.options,
               });
-              return updated;
-            });
-            yield* emitProviderEvent({
-              type: "node.updated",
-              driver: CODEX_PROVIDER,
-              node: artifacts.node,
-            });
-            yield* emitProviderEvent({
-              type: "runtime_request.updated",
-              driver: CODEX_PROVIDER,
-              threadId: artifacts.node.threadId,
-              runtimeRequest: artifacts.request,
-            });
-            yield* emitProviderEvent({
-              type: "turn_item.updated",
-              driver: CODEX_PROVIDER,
-              turnItem: artifacts.turnItem,
-            });
+              const decision = yield* Deferred.make<ProviderApprovalDecision, never>();
+              const published = yield* Deferred.make<void>();
+              yield* Ref.update(pendingRuntimeRequests, (current) => {
+                const updated = new Map(current);
+                updated.set(String(artifacts.request.id), {
+                  type: "mcp_approval",
+                  requestId: artifacts.request.id,
+                  requestKind: "mcp-elicitation",
+                  jsonRpcId: requestContext.requestId,
+                  nativeThreadId: payload.threadId,
+                  decision,
+                  resolveExternally: Effect.gen(function* () {
+                    // Publish the pending artifacts before their cancellation, even
+                    // when native resolution arrives while this handler is emitting.
+                    yield* Deferred.await(published);
+                    if (!(yield* Deferred.succeed(decision, "cancel"))) return;
+                    const resolvedAt = yield* DateTime.now;
+                    yield* emitProviderEvent({
+                      type: "runtime_request.updated",
+                      driver: CODEX_PROVIDER,
+                      threadId: artifacts.node.threadId,
+                      runtimeRequest: { ...artifacts.request, status: "cancelled", resolvedAt },
+                    });
+                    yield* emitProviderEvent({
+                      type: "node.updated",
+                      driver: CODEX_PROVIDER,
+                      node: { ...artifacts.node, status: "cancelled", completedAt: resolvedAt },
+                    });
+                    yield* emitProviderEvent({
+                      type: "turn_item.updated",
+                      driver: CODEX_PROVIDER,
+                      turnItem: {
+                        ...artifacts.turnItem,
+                        status: "cancelled",
+                        completedAt: resolvedAt,
+                        updatedAt: resolvedAt,
+                      },
+                    });
+                  }),
+                });
+                return updated;
+              });
+              yield* emitProviderEvent({
+                type: "node.updated",
+                driver: CODEX_PROVIDER,
+                node: artifacts.node,
+              });
+              yield* emitProviderEvent({
+                type: "runtime_request.updated",
+                driver: CODEX_PROVIDER,
+                threadId: artifacts.node.threadId,
+                runtimeRequest: artifacts.request,
+              });
+              yield* emitProviderEvent({
+                type: "turn_item.updated",
+                driver: CODEX_PROVIDER,
+                turnItem: artifacts.turnItem,
+              });
 
-            const resolved = yield* Deferred.await(decision).pipe(
-              Effect.ensuring(
-                Ref.update(pendingRuntimeRequests, (current) => {
-                  const updated = new Map(current);
-                  updated.delete(String(artifacts.request.id));
-                  return updated;
-                }),
-              ),
-            );
-            return toMcpElicitationResponse(payload, resolved);
-          }).pipe(Effect.orDie),
+              yield* Deferred.succeed(published, undefined);
+              const resolved = yield* Deferred.await(decision).pipe(
+                Effect.ensuring(
+                  Ref.update(pendingRuntimeRequests, (current) => {
+                    const updated = new Map(current);
+                    updated.delete(String(artifacts.request.id));
+                    return updated;
+                  }),
+                ),
+              );
+              return toMcpElicitationResponse(payload, resolved);
+            }).pipe(Effect.orDie),
         );
 
         yield* client.handleServerRequest("execCommandApproval", (payload) =>
@@ -4928,11 +4972,13 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
             const pending = yield* Ref.modify(pendingRuntimeRequests, (current) => {
               const entry = [...current.values()].find(
                 (request) =>
-                  request.type === "user_input" &&
+                  request.type !== "approval" &&
                   request.jsonRpcId === payload.requestId &&
                   request.nativeThreadId === payload.threadId,
               );
-              if (entry?.type !== "user_input") return [undefined, current] as const;
+              if (entry === undefined || entry.type === "approval") {
+                return [undefined, current] as const;
+              }
               const updated = new Map(current);
               updated.delete(String(entry.requestId));
               return [entry, updated] as const;
@@ -6201,7 +6247,15 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   ),
                 });
               }
-              yield* Deferred.succeed(pending.decision, requestInput.decision);
+              if (!(yield* Deferred.succeed(pending.decision, requestInput.decision))) {
+                return yield* new ProviderAdapterRuntimeRequestResponseError({
+                  driver: CODEX_PROVIDER,
+                  requestId: requestInput.requestId,
+                  cause: toProtocolError(
+                    `Codex approval request ${requestInput.requestId} has already resolved.`,
+                  ),
+                });
+              }
             }).pipe(
               Effect.mapError((cause) =>
                 isProviderAdapterRuntimeRequestResponseError(cause)

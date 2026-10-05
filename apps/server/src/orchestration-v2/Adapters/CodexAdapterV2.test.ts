@@ -2514,6 +2514,325 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
   );
 
+  it.effect.each([false, true] as const)(
+    "cancels an MCP elicitation by native RPC identity and rejects late decisions (child: %s)",
+    (child) =>
+      Effect.gen(function* () {
+        const nativeThreadId = "resolved-mcp-thread";
+        const nativeTurnId = "resolved-mcp-turn";
+        const requestId = 7702;
+        const requestThreadId = child ? "resolved-mcp-child-thread" : nativeThreadId;
+        const requestTurnId = child ? "resolved-mcp-child-turn" : nativeTurnId;
+        const prompt = "Ask connector approval.";
+        const ready = yield* Deferred.make<void>();
+        const cancelledReady = yield* Deferred.make<void>();
+        const transcript = makeCodexReplayTranscript({
+          scenario: `mcp-elicitation-resolved-${child}`,
+          entries: [
+            ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt }),
+            ...(child
+              ? [
+                  {
+                    type: "emit_inbound" as const,
+                    frame: {
+                      method: "item/completed",
+                      params: {
+                        item: {
+                          type: "subAgentActivity",
+                          id: "resolved-mcp-spawn",
+                          kind: "started",
+                          agentThreadId: requestThreadId,
+                          agentPath: "/root/approval_child",
+                        },
+                        threadId: nativeThreadId,
+                        turnId: nativeTurnId,
+                        completedAtMs: 1782622441000,
+                      },
+                    },
+                  },
+                  {
+                    type: "emit_inbound" as const,
+                    frame: {
+                      method: "turn/started",
+                      params: {
+                        threadId: requestThreadId,
+                        turn: makeCodexReplayTurn({ id: requestTurnId, status: "inProgress" }),
+                      },
+                    },
+                  },
+                ]
+              : []),
+            {
+              type: "emit_inbound",
+              frame: {
+                id: requestId,
+                method: "mcpServer/elicitation/request",
+                params: {
+                  mode: "form",
+                  threadId: requestThreadId,
+                  turnId: requestTurnId,
+                  serverName: "test-connector",
+                  message: "Allow connector access?",
+                  requestedSchema: {
+                    type: "object",
+                    properties: { approval: { type: "string", enum: ["once", "always"] } },
+                    required: ["approval"],
+                  },
+                },
+              },
+            },
+            {
+              type: "expect_outbound",
+              frame: {
+                id: 4,
+                method: "turn/steer",
+                params: {
+                  threadId: nativeThreadId,
+                  expectedTurnId: nativeTurnId,
+                  input: [{ type: "text", text: "Continue." }],
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "serverRequest/resolved",
+                params: { threadId: child ? nativeThreadId : "unrelated-thread", requestId },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "serverRequest/resolved",
+                params: { threadId: requestThreadId, requestId: String(requestId) },
+              },
+            },
+            { type: "emit_inbound", frame: { id: 4, result: { turnId: nativeTurnId } } },
+            {
+              type: "expect_outbound",
+              frame: {
+                id: 5,
+                method: "turn/steer",
+                params: {
+                  threadId: nativeThreadId,
+                  expectedTurnId: nativeTurnId,
+                  input: [{ type: "text", text: "Continue." }],
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "serverRequest/resolved",
+                params: { threadId: requestThreadId, requestId },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "serverRequest/resolved",
+                params: { threadId: requestThreadId, requestId },
+              },
+            },
+            { type: "emit_inbound", frame: { id: 5, result: { turnId: nativeTurnId } } },
+            { type: "expect_outbound", frame: { id: requestId, result: { action: "cancel" } } },
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(transcript, (event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "approval_request"
+            ? Deferred.succeed(
+                event.turnItem.status === "cancelled" ? cancelledReady : ready,
+                undefined,
+              )
+            : Effect.void,
+        );
+        const turnInput = makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("resolved-mcp-attempt"),
+          text: prompt,
+        });
+        yield* harness.runtime.startTurn(turnInput);
+        yield* Deferred.await(ready);
+        const steerInput = {
+          threadId: harness.threadId,
+          runId: turnInput.runId,
+          providerThread: harness.providerThread,
+          providerTurnId: (yield* IdAllocator.IdAllocatorV2).derive.providerTurn({
+            driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+            nativeTurnId,
+          }),
+          message: { ...turnInput.message, text: "Continue." },
+        };
+        yield* harness.runtime.steerTurn(steerInput);
+        assert.deepEqual(
+          harness.events.flatMap((event) =>
+            event.type === "runtime_request.updated" ? [event.runtimeRequest.status] : [],
+          ),
+          ["pending"],
+        );
+        yield* harness.runtime.steerTurn(steerInput);
+        yield* Deferred.await(cancelledReady);
+        const requests = harness.events.flatMap((event) =>
+          event.type === "runtime_request.updated" ? [event.runtimeRequest] : [],
+        );
+        assert.deepEqual(
+          requests.map((request) => request.status),
+          ["pending", "cancelled"],
+        );
+        const cancelled = requests[1]!;
+        assert.isNotNull(cancelled.resolvedAt);
+        assert.equal(
+          requests[0]!.nativeRequestRef?.nativeId,
+          `mcp-elicitation:${encodeUnknownJson([requestThreadId, requestId])}`,
+        );
+        assert.isTrue(
+          harness.events
+            .filter((event) => event.type === "runtime_request.updated")
+            .every((event) => event.threadId === harness.threadId),
+        );
+        const node = harness.events.findLast(
+          (event) => event.type === "node.updated" && event.node.id === cancelled.nodeId,
+        );
+        assert.equal(node?.type === "node.updated" && node.node.status, "cancelled");
+        assert.equal(node?.type === "node.updated" && node.node.threadId, harness.threadId);
+        const item = harness.events.findLast(
+          (event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.type === "approval_request" &&
+            event.turnItem.requestId === cancelled.id,
+        );
+        assert.equal(item?.type === "turn_item.updated" && item.turnItem.status, "cancelled");
+        assert.equal(
+          item?.type === "turn_item.updated" && item.turnItem.threadId,
+          harness.threadId,
+        );
+        assert.isEmpty(harness.terminalEvents());
+        const error = yield* harness.runtime
+          .respondToRuntimeRequest({ requestId: cancelled.id, decision: "accept" })
+          .pipe(Effect.flip);
+        assert.equal(error._tag, "ProviderAdapterRuntimeRequestResponseError");
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect.each(["accept", "acceptAlways"] as const)(
+    "does not cancel an answered MCP elicitation after native resolution (%s)",
+    (decision) =>
+      Effect.gen(function* () {
+        const nativeThreadId = "answered-mcp-thread";
+        const nativeTurnId = "answered-mcp-turn";
+        const requestId = "answered-mcp-rpc";
+        const ready = yield* Deferred.make<void>();
+        const transcript = makeCodexReplayTranscript({
+          scenario: `mcp-elicitation-answered-${decision}`,
+          entries: [
+            ...codexReplayPreamble({
+              nativeThreadId,
+              nativeTurnId,
+              prompt: "Ask connector approval.",
+            }),
+            {
+              type: "emit_inbound",
+              frame: {
+                id: requestId,
+                method: "mcpServer/elicitation/request",
+                params: {
+                  mode: "form",
+                  threadId: nativeThreadId,
+                  turnId: nativeTurnId,
+                  serverName: "test-connector",
+                  message: "Allow connector access?",
+                  requestedSchema: {
+                    type: "object",
+                    properties: { approval: { type: "string", enum: ["once", "always"] } },
+                    required: ["approval"],
+                  },
+                },
+              },
+            },
+            {
+              type: "expect_outbound",
+              frame: {
+                id: requestId,
+                result: {
+                  action: "accept",
+                  content: { approval: decision === "accept" ? "once" : "always" },
+                  ...(decision === "acceptAlways" ? { _meta: { persist: "always" } } : {}),
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "serverRequest/resolved",
+                params: { threadId: nativeThreadId, requestId },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "serverRequest/resolved",
+                params: { threadId: nativeThreadId, requestId },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                },
+              },
+            },
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(transcript, (event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "approval_request"
+            ? Deferred.succeed(ready, undefined)
+            : Effect.void,
+        );
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("answered-mcp-attempt"),
+            text: "Ask connector approval.",
+          }),
+        );
+        yield* Deferred.await(ready);
+        const request = harness.events.find((event) => event.type === "runtime_request.updated");
+        assert.equal(request?.type, "runtime_request.updated");
+        if (request?.type !== "runtime_request.updated") return;
+        yield* harness.runtime.respondToRuntimeRequest({
+          requestId: request.runtimeRequest.id,
+          decision,
+        });
+        yield* harness.firstTerminal;
+        assert.deepEqual(
+          harness.events.flatMap((event) =>
+            event.type === "runtime_request.updated" ? [event.runtimeRequest.status] : [],
+          ),
+          ["pending"],
+        );
+        assert.isFalse(
+          harness.events.some(
+            (event) =>
+              (event.type === "node.updated" &&
+                event.node.id === request.runtimeRequest.nodeId &&
+                event.node.status === "cancelled") ||
+              (event.type === "turn_item.updated" &&
+                event.turnItem.type === "approval_request" &&
+                event.turnItem.requestId === request.runtimeRequest.id &&
+                event.turnItem.status === "cancelled"),
+          ),
+        );
+        assert.equal(harness.terminalEvents()[0]?.status, "completed");
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
   it.effect("does not cancel an answered question when Codex acknowledges its RPC", () =>
     Effect.gen(function* () {
       const nativeThreadId = "answered-question-thread";
@@ -2765,6 +3084,173 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         assert.equal(harness.terminalEvents()[0]?.status, "completed");
       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     ),
+  );
+
+  it.effect(
+    "sends complete app context on the first ordinary turn after reopened native compaction",
+    () =>
+      Effect.gen(function* () {
+        const scenario = "reopened-compact-continue";
+        const nativeThreadId = "reopened-compact-thread";
+        const compactTurnId = "reopened-compact-turn";
+        const continueTurnId = "reopened-continue-turn";
+        const prompt = "Continue after compaction.";
+        const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+          nativeThreadId,
+          codexInput: [{ type: "text", text: prompt }],
+          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          hasT3Mcp: true,
+        });
+        assert.deepEqual(Object.keys(params.additionalContext ?? {}).sort(), [
+          "test_rig_orchestration",
+          "test_rig_runtime",
+          "test_rig_tools",
+        ]);
+        const item = { type: "contextCompaction", id: "reopened-compact-item" };
+        const transcript = makeCodexReplayTranscript({
+          scenario,
+          entries: [
+            ...codexReplayPreamble({
+              nativeThreadId,
+              nativeTurnId: compactTurnId,
+              prompt: "unused",
+            }).slice(0, 5),
+            {
+              type: "expect_outbound",
+              frame: {
+                id: 3,
+                method: "thread/resume",
+                params: {
+                  threadId: nativeThreadId,
+                  excludeTurns: true,
+                  config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: { id: 3, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
+            },
+            {
+              type: "expect_outbound",
+              frame: {
+                id: 4,
+                method: "thread/compact/start",
+                params: { threadId: nativeThreadId },
+              },
+            },
+            { type: "emit_inbound", frame: { id: 4, result: {} } },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/started",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: compactTurnId, status: "inProgress" }),
+                },
+              },
+            },
+            ...(["item/started", "item/completed"] as const).map((method) => ({
+              type: "emit_inbound" as const,
+              frame: { method, params: { threadId: nativeThreadId, turnId: compactTurnId, item } },
+            })),
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: compactTurnId, status: "completed" }),
+                },
+              },
+            },
+            { type: "expect_outbound", frame: { id: 5, method: "turn/start", params } },
+            {
+              type: "emit_inbound",
+              frame: {
+                id: 5,
+                result: { turn: makeCodexReplayTurn({ id: continueTurnId, status: "inProgress" }) },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/started",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: continueTurnId, status: "inProgress" }),
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: continueTurnId, status: "completed" }),
+                },
+              },
+            },
+          ],
+        });
+        const continued = yield* Deferred.make<void>();
+        const injected: Array<unknown> = [];
+        let terminalCount = 0;
+        const harness = yield* makeCodexReplayHarness(
+          transcript,
+          (event) =>
+            event.type === "turn.terminal" && ++terminalCount === 2
+              ? Deferred.succeed(continued, undefined)
+              : Effect.void,
+          (method, requestParams) =>
+            Effect.sync(() => {
+              if (method === "thread/inject_items") injected.push(requestParams);
+            }),
+        );
+        const resumed = yield* harness.runtime.resumeThread({
+          providerThread: harness.providerThread,
+          modelSelection: CODEX_TEST_MODEL_SELECTION,
+          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+        });
+        McpProviderSession.setMcpProviderSession({
+          environmentId: EnvironmentId.make("test"),
+          threadId: harness.threadId,
+          providerSessionId: "reopened-context-session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader: "Bearer test",
+          browserToolsAvailable: true,
+        });
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => McpProviderSession.clearMcpProviderSession(harness.threadId)),
+        );
+        yield* harness.runtime.compactThread!(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: resumed,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("reopened-compact-attempt"),
+            text: "/compact",
+          }),
+        );
+        yield* harness.firstTerminal;
+        // A newly opened adapter has no cached context to inject. The next
+        // ordinary turn still sends the full entries, as the native probe confirmed.
+        assert.isEmpty(injected);
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: resumed,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("reopened-continue-attempt"),
+            text: prompt,
+          }),
+        );
+        yield* Deferred.await(continued);
+        assert.equal(harness.terminalEvents().length, 2);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
   );
 
   it.effect("resumes a provider thread without requesting or decoding its history", () =>

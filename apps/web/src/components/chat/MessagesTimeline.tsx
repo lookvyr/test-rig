@@ -43,6 +43,7 @@ import {
   resolveWorkEntryToolPresentation,
   resolveViewedImageAsset,
   workEntryViewedImagePath,
+  contextCompactionLabel,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
@@ -2701,7 +2702,7 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
           ? null
           : `${item.beforeTokenCount ?? "?"} → ${item.afterTokenCount ?? "?"} tokens`;
       return {
-        label: "Context compacted",
+        label: contextCompactionLabel({ status: item.status }),
         detail: item.summary ?? tokenSummary,
         tone: item.status === "failed" ? "danger" : "muted",
         icon: MinusIcon,

@@ -452,14 +452,12 @@ const make = Effect.gen(function* () {
           projectId: input.projectId,
           projectCwd: project.workspaceRoot,
           worktreePath: cwd,
-          ...(tracked
+          observeCompletion: tracked
             ? {
-                observeCompletion: {
-                  onOutputLine: (line: string) =>
-                    setupTracker.appendTail(threadId, "setup-script", line),
-                },
+                onOutputLine: (line: string) =>
+                  setupTracker.appendTail(threadId, "setup-script", line),
               }
-            : {}),
+            : {},
           project: {
             id: project.id,
             workspaceRoot: project.workspaceRoot,

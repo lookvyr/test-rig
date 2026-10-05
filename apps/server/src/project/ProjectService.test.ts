@@ -1,9 +1,21 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { CommandId, type Project, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  CommandId,
+  EventId,
+  type Project,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -21,7 +33,7 @@ import {
   ProjectServiceLayerLive,
 } from "../orchestration-v2/runtimeLayer.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { V2SqlitePersistenceMemory as SqlitePersistenceMemory } from "../persistence/Layers/V2Sqlite.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as ProjectEnrichmentService from "./ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "./ProjectFaviconResolver.ts";
@@ -803,3 +815,140 @@ it.effect("rejects an update that waited on the lock while its project was delet
     );
   }).pipe(Effect.provide(ProjectServiceDependenciesLayer)),
 );
+
+for (const withThread of [false, true]) {
+  it.effect(
+    `preserves repository files when deleting a ${withThread ? "nonempty forced" : "empty"} project`,
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const root = yield* fileSystem.makeTempDirectoryScoped({
+          directory: "/private/tmp",
+          prefix: "project-delete-preservation-",
+        });
+        assert.equal(
+          Number(
+            yield* spawner.exitCode(
+              ChildProcess.make("git", ["init", "--quiet", "--initial-branch=main", root]),
+            ),
+          ),
+          0,
+        );
+        const files = {
+          ".git/HEAD": "ref: refs/heads/main\n",
+          ".git/config": "[core]\n\trepositoryformatversion = 0\n\tbare = false\n",
+          "src/tracked.ts": "export const retained = true;\n",
+          "untracked.txt": "Unsaved repository work\n",
+          ".gitignore": "ignored/\n",
+          "ignored/private.txt": "Ignored work must survive too\n",
+        };
+        for (const [relative, contents] of Object.entries(files)) {
+          yield* fileSystem.makeDirectory(path.dirname(path.join(root, relative)), {
+            recursive: true,
+          });
+          yield* fileSystem.writeFileString(path.join(root, relative), contents);
+        }
+        assert.equal(
+          Number(
+            yield* spawner.exitCode(
+              ChildProcess.make("git", ["-C", root, "add", "src/tracked.ts", ".gitignore"]),
+            ),
+          ),
+          0,
+        );
+        const gitIndex = yield* fileSystem.readFile(path.join(root, ".git/index"));
+        const service = yield* ProjectService.make;
+        const sink = yield* EventSink.EventSinkV2;
+        const sql = yield* SqlClient.SqlClient;
+        const projectId = ProjectId.make(`project:repository-preservation:${withThread}`);
+        const threadId = ThreadId.make(`thread:repository-preservation:${withThread}`);
+        const createdAt = yield* DateTime.now;
+        yield* service.create({
+          commandId: CommandId.make(`command:repository-preservation:create:${withThread}`),
+          projectId,
+          title: "Repository preservation",
+          workspaceRoot: root,
+        });
+        if (withThread) {
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("event:repository-preservation:thread-created"),
+                type: "thread.created",
+                threadId,
+                occurredAt: createdAt,
+                payload: {
+                  id: threadId,
+                  projectId,
+                  title: "Existing chat",
+                  createdBy: "user",
+                  creationSource: "web",
+                  providerInstanceId: ProviderInstanceId.make("codex"),
+                  modelSelection: {
+                    instanceId: ProviderInstanceId.make("codex"),
+                    model: "gpt-5.4",
+                  },
+                  runtimeMode: "full-access",
+                  interactionMode: "default",
+                  branch: "main",
+                  worktreePath: null,
+                  activeProviderThreadId: null,
+                  lineage: {
+                    parentThreadId: null,
+                    relationshipToParent: null,
+                    rootThreadId: threadId,
+                  },
+                  forkedFrom: null,
+                  createdAt,
+                  updatedAt: createdAt,
+                  archivedAt: null,
+                  settledOverride: null,
+                  settledAt: null,
+                  lastVisitedAt: null,
+                  deletedAt: null,
+                },
+              },
+            ],
+          });
+          const rejected = yield* service
+            .delete({
+              commandId: CommandId.make("command:repository-preservation:reject"),
+              projectId,
+            })
+            .pipe(Effect.flip);
+          assert.instanceOf(rejected, ProjectService.ProjectNotEmptyError);
+          assert.isTrue(Option.isSome(yield* service.getById(projectId)));
+        }
+        const commandId = CommandId.make(`command:repository-preservation:delete:${withThread}`);
+        const deleted = yield* service.delete({ commandId, projectId, force: withThread });
+        assert.isNotNull(deleted.deletedAt);
+        assert.deepEqual(
+          yield* service.delete({ commandId, projectId, force: withThread }),
+          deleted,
+        );
+        assert.isTrue(Option.isNone(yield* service.getById(projectId)));
+        const effects = yield* sql<{ readonly effect_type: string }>`
+        SELECT effect_type FROM orchestration_v2_effect_outbox
+        WHERE command_id = ${CommandId.make(`${commandId}:delete-thread:${threadId}`)}
+      `;
+        assert.deepEqual(
+          effects.map((row) => row.effect_type),
+          withThread ? ["terminal.cleanup"] : [],
+        );
+        if (withThread) {
+          const projection = yield* ProjectionStore.ProjectionStoreV2;
+          assert.isNotNull((yield* projection.getThreadRecords(threadId, [])).thread.deletedAt);
+        }
+        assert.deepEqual(yield* fileSystem.readFile(path.join(root, ".git/index")), gitIndex);
+        for (const [relative, contents] of Object.entries(files)) {
+          assert.equal(yield* fileSystem.readFileString(path.join(root, relative)), contents);
+        }
+      }).pipe(
+        Effect.provide(ProjectServiceDependenciesLayer),
+        Effect.scoped,
+        Effect.provide(NodeServices.layer),
+      ),
+  );
+}

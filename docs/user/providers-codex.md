@@ -39,6 +39,14 @@ custom answer. Questions work in both main and side chats. Some questions stay a
 Codex finishes the original turn; others expire when the Codex session ends. Async questions
 require a Codex version and model that expose the tool.
 
+## Connector approvals
+
+Supported connector approval requests appear in the existing approval controls.
+If Codex resolves a request before you answer, its controls stop being actionable;
+a late response cannot approve it. Requests from a native child agent appear in
+the parent chat, and resolving one request does not dismiss another. Permanent
+approval is offered only when the connector can encode that choice.
+
 ## I Only Use One Codex Account
 
 Use the default provider.

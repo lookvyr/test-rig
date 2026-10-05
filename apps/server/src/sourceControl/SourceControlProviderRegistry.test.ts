@@ -163,49 +163,68 @@ it.effect("includes the request cwd when an unregistered provider is used", () =
   }),
 );
 
-it.effect("fails provider operations closed when the provider is disabled", () =>
-  Effect.gen(function* () {
-    const registry = yield* makeRegistry({
-      remotes: [{ name: "origin", url: "git@bitbucket.org:acme/repo.git" }],
-      sourceControlProviders: { bitbucket: false },
-    });
+it.effect.each(["gitlab", "azure-devops", "bitbucket"] as const)(
+  "fails %s provider operations closed when disabled",
+  (kind) =>
+    Effect.gen(function* () {
+      const registry = yield* makeRegistry({
+        remotes: [
+          {
+            name: "origin",
+            url:
+              kind === "gitlab"
+                ? "git@gitlab.com:acme/repo.git"
+                : kind === "azure-devops"
+                  ? "https://dev.azure.com/acme/project/_git/repo"
+                  : "git@bitbucket.org:acme/repo.git",
+          },
+        ],
+        sourceControlProviders: { [kind]: false },
+      });
 
-    const provider = yield* registry.resolve({ cwd: "/repo" });
-    const error = yield* provider
-      .listChangeRequests({ cwd: "/repo", headSelector: "feature", state: "all" })
-      .pipe(Effect.flip);
+      const provider = yield* registry.resolve({ cwd: "/repo" });
+      const error = yield* provider
+        .listChangeRequests({ cwd: "/repo", headSelector: "feature", state: "all" })
+        .pipe(Effect.flip);
 
-    assert.strictEqual(provider.kind, "bitbucket");
-    assert.strictEqual(error.provider, "bitbucket");
-    assert.strictEqual(error.operation, "listChangeRequests");
-    assert.strictEqual(error.detail, "The bitbucket source control provider is disabled.");
-  }),
+      assert.strictEqual(provider.kind, kind);
+      assert.strictEqual(error.provider, kind);
+      assert.strictEqual(error.operation, "listChangeRequests");
+      assert.strictEqual(error.detail, `The ${kind} source control provider is disabled.`);
+      const cloneError = yield* provider
+        .getRepositoryCloneUrls({ cwd: "/repo", repository: "acme/repo" })
+        .pipe(Effect.flip);
+      assert.strictEqual(cloneError.operation, "getRepositoryCloneUrls");
+      assert.strictEqual(cloneError.detail, `The ${kind} source control provider is disabled.`);
+    }),
 );
 
-it.effect("rechecks enablement when an acquired provider operation runs", () =>
-  Effect.gen(function* () {
-    const bitbucketEnabled = yield* Ref.make(true);
-    const registry = yield* makeRegistry({
-      remotes: [],
-      getSettings: Ref.get(bitbucketEnabled).pipe(
-        Effect.map((enabled) => ({
-          ...DEFAULT_SERVER_SETTINGS,
-          sourceControlProviders: {
-            ...DEFAULT_SERVER_SETTINGS.sourceControlProviders,
-            bitbucket: enabled,
-          },
-        })),
-      ),
-    });
-    const provider = yield* registry.get("bitbucket");
+it.effect.each(["gitlab", "azure-devops", "bitbucket"] as const)(
+  "rechecks %s enablement when an acquired provider operation runs",
+  (kind) =>
+    Effect.gen(function* () {
+      const providerEnabled = yield* Ref.make(true);
+      const registry = yield* makeRegistry({
+        remotes: [],
+        getSettings: Ref.get(providerEnabled).pipe(
+          Effect.map((enabled) => ({
+            ...DEFAULT_SERVER_SETTINGS,
+            sourceControlProviders: {
+              ...DEFAULT_SERVER_SETTINGS.sourceControlProviders,
+              [kind]: enabled,
+            },
+          })),
+        ),
+      });
+      const provider = yield* registry.get(kind);
 
-    yield* Ref.set(bitbucketEnabled, false);
-    const error = yield* provider
-      .listChangeRequests({ cwd: "/repo", headSelector: "feature", state: "all" })
-      .pipe(Effect.flip);
+      yield* Ref.set(providerEnabled, false);
+      const error = yield* provider
+        .listChangeRequests({ cwd: "/repo", headSelector: "feature", state: "all" })
+        .pipe(Effect.flip);
 
-    assert.strictEqual(error.detail, "The bitbucket source control provider is disabled.");
-  }),
+      assert.strictEqual(error.detail, `The ${kind} source control provider is disabled.`);
+    }),
 );
 
 it.effect("retains VCS detection failures with structured cwd context", () =>

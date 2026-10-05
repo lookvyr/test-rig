@@ -1516,10 +1516,12 @@ it.effect.each(["worktree", "setup"] as const)(
           workspace: { type: "worktree", baseRef: "main" },
         });
         const launched = yield* launches.launch(input);
-        yield* waitUntil(() =>
-          threads
-            .getThreadProjection(launched.threadId)
-            .pipe(Effect.map((projection) => projection.runs[0]?.status === "failed")),
+        yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "run.updated" && stored.event.payload.status === "failed",
+          ),
+          Stream.runHead,
         );
         const projection = yield* threads.getThreadProjection(launched.threadId);
         assert.equal(projection.messages[0]?.text, `Fail during ${failurePoint}`);
@@ -1532,6 +1534,30 @@ it.effect.each(["worktree", "setup"] as const)(
           projection.turnItems.find((item) => item.type === "error")?.failure.message ?? "",
           new RegExp(`${failurePoint} failed`, "u"),
         );
+        const outbox = yield* EffectOutbox.EffectOutboxV2;
+        assert.isEmpty(
+          yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:initial-message`)),
+        );
+        assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
+        assert.isEmpty(projection.providerSessions);
+        assert.isEmpty(projection.providerTurns);
+        const staleRelease = yield* threads
+          .dispatch({
+            type: "prepared-run.release",
+            commandId: CommandId.make(`${input.commandId}:stale-release`),
+            threadId: launched.threadId,
+            runId: projection.runs[0]!.id,
+          })
+          .pipe(Effect.exit);
+        assert.isTrue(Exit.isFailure(staleRelease));
+        assert.isEmpty(
+          yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:stale-release`)),
+        );
+        assert.equal(
+          projection.thread.worktreePath,
+          failurePoint === "worktree" ? null : "/repo-worktrees/feature",
+        );
+        if (failurePoint === "worktree") assert.equal(harness.runSetup.mock.calls.length, 0);
       }).pipe(Effect.provide(harness.layer));
     }),
 );
@@ -2245,4 +2271,91 @@ it.effect.each([0, 1])("releases an async setup before its completion with exit 
       );
     }).pipe(Effect.provide(harness.layer));
   }),
+);
+
+it.effect.each(["worktree", "existing_worktree", "root"] as const)(
+  "a synchronous setup failure in %s never releases provider execution",
+  (workspaceType) =>
+    Effect.gen(function* () {
+      const setupEntered = yield* Deferred.make<void>();
+      const completeSetup = yield* Deferred.make<{ exitCode: number | null; durationMs: number }>();
+      const harness = makeHarness({
+        runSetup: (input) =>
+          Deferred.succeed(setupEntered, undefined).pipe(
+            Effect.as({
+              status: "started" as const,
+              async: false,
+              scriptId: "setup",
+              scriptName: "Setup",
+              scriptCommand: "prepare-project",
+              terminalId: "setup",
+              cwd: input.worktreePath,
+              // Match the real runner: callers must request completion to see failures.
+              ...(input.observeCompletion ? { completion: Deferred.await(completeSetup) } : {}),
+            }),
+          ),
+      });
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        const outbox = yield* EffectOutbox.EffectOutboxV2;
+        const input = launchInput({
+          command: `command:launch:sync-setup-failure:${workspaceType}`,
+          thread: `thread:launch:sync-setup-failure:${workspaceType}`,
+          message: "Start only after setup succeeds",
+          workspace:
+            workspaceType === "worktree"
+              ? { type: "worktree", baseRef: "main", branch: "explicit-name" }
+              : workspaceType === "existing_worktree"
+                ? {
+                    type: "existing_worktree",
+                    worktreePath: "/existing-worktree",
+                    branch: "existing",
+                  }
+                : { type: "root" },
+        });
+        const launched = yield* launches.launch(input);
+        yield* Deferred.await(setupEntered);
+        const setupInput = harness.runSetup.mock.calls[0]?.[0];
+        assert.isDefined(setupInput?.observeCompletion);
+        assert.equal(
+          setupInput?.worktreePath,
+          workspaceType === "worktree"
+            ? "/repo-worktrees/feature"
+            : workspaceType === "existing_worktree"
+              ? "/existing-worktree"
+              : "/repo",
+        );
+        assert.equal(
+          (yield* threads.getThreadProjection(launched.threadId)).runs[0]?.status,
+          "preparing",
+        );
+        assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
+        yield* Deferred.succeed(completeSetup, { exitCode: 17, durationMs: 1 });
+        yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "run.updated" && stored.event.payload.status === "failed",
+          ),
+          Stream.runHead,
+        );
+        const failed = yield* threads.getThreadProjection(launched.threadId);
+        assert.equal(failed.runs[0]?.status, "failed");
+        assert.equal(failed.messages[0]?.text, input.initialMessage?.text);
+        assert.include(
+          failed.turnItems.find((item) => item.type === "error")?.failure.message ?? "",
+          "Setup script exited with 17",
+        );
+        assert.isEmpty(
+          yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:initial-message`)),
+        );
+        assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
+        assert.isEmpty(failed.providerSessions);
+        assert.isEmpty(failed.providerTurns);
+        assert.equal(
+          failed.thread.worktreePath,
+          workspaceType === "root" ? null : setupInput?.worktreePath,
+        );
+      }).pipe(Effect.provide(harness.layer));
+    }),
 );
