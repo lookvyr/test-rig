@@ -6,6 +6,7 @@ import {
   MessageId,
   ProviderDriverKind,
   type ProviderReplayTranscript,
+  type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
@@ -163,29 +164,43 @@ describe("Claude Agent SDK replay fixtures", () => {
         assert.isDefined(child);
         const before = yield* orchestrator.getThreadEventSequence(child.thread.id);
 
-        const refused = yield* orchestrator
-          .dispatch({
-            type: "message.dispatch",
-            createdBy: "user",
-            creationSource: "web",
-            commandId: CommandId.make("command:subagent:message-native-child"),
-            threadId: child.thread.id,
-            messageId: MessageId.make("message:subagent:message-native-child"),
-            text: "Also check the tests.",
-            attachments: [],
-            dispatchMode: { type: "start_immediately" },
-          })
-          .pipe(Effect.flip);
-        assert.equal(refused._tag, "OrchestratorSubagentThreadReadOnlyError");
-        // The wire error carries this text to the web toast and mobile outbox.
-        assert.equal(
-          userFacingDispatchErrorMessage(refused),
-          "This subagent is run by its provider and cannot take messages. Message the parent thread instead.",
-        );
-        assert.equal(yield* orchestrator.getThreadEventSequence(child.thread.id), before);
-        const after = yield* orchestrator.getThreadProjection(child.thread.id);
-        assert.lengthOf(after.runs, 0);
-        assert.deepEqual(after.messages, child.messages);
+        for (const parentState of ["active", "archived", "deleted"] as const) {
+          const parentThreadId: ThreadId | null = child.thread.lineage.parentThreadId;
+          assert.isNotNull(parentThreadId);
+          if (parentState !== "active") {
+            yield* orchestrator.dispatch({
+              type: parentState === "archived" ? "thread.archive" : "thread.delete",
+              commandId: CommandId.make(`command:subagent:parent-${parentState}`),
+              threadId: parentThreadId,
+            });
+          }
+          const refused = yield* orchestrator
+            .dispatch({
+              type: "message.dispatch",
+              createdBy: "user",
+              creationSource: "web",
+              commandId: CommandId.make(`command:subagent:message-native-child:${parentState}`),
+              threadId: child.thread.id,
+              messageId: MessageId.make(`message:subagent:message-native-child:${parentState}`),
+              text: "Also check the tests.",
+              attachments: [],
+              dispatchMode: { type: "start_immediately" },
+            })
+            .pipe(Effect.flip);
+          assert.equal(refused._tag, "OrchestratorSubagentThreadReadOnlyError");
+          // The wire error carries this text to the web toast and mobile outbox.
+          assert.equal(
+            userFacingDispatchErrorMessage(refused),
+            "This subagent is run by its provider and cannot take messages. Message the parent thread instead.",
+          );
+          assert.equal(yield* orchestrator.getThreadEventSequence(child.thread.id), before);
+          const after = yield* orchestrator.getThreadProjection(child.thread.id);
+          assert.lengthOf(after.runs, 0);
+          assert.deepEqual(after.messages, child.messages);
+          assert.deepEqual(after.thread.lineage, child.thread.lineage);
+          assert.isNull(after.thread.archivedAt);
+          assert.isNull(after.thread.deletedAt);
+        }
       }).pipe(
         Effect.provide(
           makeOrchestratorV2ProviderReplayLayer(scenario, ClaudeOrchestratorReplayHarness),
