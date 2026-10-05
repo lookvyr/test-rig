@@ -319,3 +319,82 @@ available from the thread's terminal drawer; the handoff does not publish a
 separate setup-completion indicator. The expected handoff interruption still
 appears as a failed tool call / "interrupted by user" in the timeline. These
 misleading labels are a remaining presentation follow-up, not a failed move.
+
+## October 5 — LOO-31 requested chat coordination
+
+Temporary Codex and Claude side chats can send requested findings to their parent
+or another chat in the same project without being kept or promoted. Provider and
+tool instructions require explicit user intent; reading a reference or receiving
+another agent's request does not grant messaging authority. OpenCode's managed
+runtime exposes ordinary orchestration MCP tools, but native `/side` remains
+limited to Codex and Claude. This change does not add OpenCode side chats.
+
+The existing MCP delivery policy is retained: `auto` starts idle work, steers a
+fully active turn, and queues behind work that is not yet steerable. Explicit
+queue, steer and restart modes remain available. Interactive composer follow-ups
+remain steering-only. The send result acknowledges durable acceptance through
+message ID, run ID and delivery; the run status can advance between retries.
+
+Accepted steer/restart retries previously failed once the target stopped being
+steerable. Thread management now reads the existing command result before those
+transient checks, using the same receipt validation as normal dispatch. Reusing
+a key for another target still fails. New sends still require a suitable target.
+Send and interrupt share active-caller/provider ownership checks and permission
+ceilings. Deleted side callers cannot start new mutations. User-attached
+cross-project references remain readable without gaining send/interrupt access.
+
+Idempotency keys are scoped to the issuing provider credential. Retry an identical
+request with its original key while that credential remains valid. Batches can
+partially succeed: retrying the same ordered batch with the same key recovers
+accepted entries without starting another continuation. After changing sessions,
+inspect existing threads before creating replacements. Tool descriptions now
+state these limits.
+
+Verification passed 60 focused tests across SideChat, ThreadManagementService,
+OrchestratorMcpService, paged MCP history, tool guidance, orchestration control
+reads and receipt migration checks. Real SQLite/event/receipt tests cover:
+
+- Side-to-idle-parent, busy-parent and peer sends; duplicate acknowledgement;
+  accepted messages surviving discard; stale callers rejected afterward.
+- Auto/steer/restart into active work; identical retries after completion; fresh
+  idle steer/restart rejection; cross-target key conflicts.
+- Capability, caller provider, inactive/archive, permission, project and native
+  child boundaries. A user-attached cross-project thread is readable but cannot
+  receive sends or interrupts.
+- Partial batch failure and retry with no repeated first task/continuation.
+- Existing history paging reconstructs a long multilingual item across offsets.
+
+Live browser acceptance used the retained isolated environment at
+`/tmp/test-rig-loo27.VFXMTW`, with a fresh parent and native side chat for each of
+Claude Sonnet 5 and Codex GPT-6.1-Sol. Each side sent through MCP, retried the same
+key, and returned matching message/run IDs. The Claude retry observed the target
+advance from starting to completed. Both parent replies remained after their side
+chats were discarded. Read-only database checks found exactly one sent message
+and one accepted send receipt per parent, with both side threads deleted.
+Screenshots are retained in that environment as `loo31-side-receipt.png`,
+`loo31-parent-after-discard.png`, `loo31-codex-side-receipt.png`, and
+`loo31-codex-parent-after-discard.png`.
+
+A separate correctness/simplification pass consolidated send/interrupt guards
+and retained shared receipt handling. Targeted lint and diff checks passed, with
+three existing unused-variable warnings in Orchestrator. Server typecheck has no
+errors in changed files, but remains blocked by the existing untagged `Error` in
+ProviderSessionManager.ts:2071. That line is unchanged from HEAD. No repository-wide
+checks ran. The shared web/desktop renderer and server path were exercised; no
+Electron shell, remote transport, Settings, command-palette or keybinding changes
+were required. The `/side` entry point and reverse Discard action were tested.
+
+### Follow-up: natural-language target discovery
+
+A fresh Codex GPT-6.1-Sol sender received: “Can you send this to the thread doing
+performance work?” followed by a database batching finding and tracking marker
+`PERF_SOFT_MATCH_31`. The target was titled “Backend performance optimizations.”
+The sender was given no target ID, exact title, or tool instructions.
+
+Without code changes, it called `t3_thread_list` with
+`{"titleContains":"performance","limit":50}`, selected the matching target,
+and called `t3_thread_send`. The target received the finding with the correct
+sender attribution. This verifies agent-driven title discovery for a clear match;
+it is not a dedicated semantic-search index or proof of ambiguous-title handling.
+The sender and target screenshots are retained as `loo31-soft-match-sender.png`
+and `loo31-soft-match-target.png` in the same isolated test directory.

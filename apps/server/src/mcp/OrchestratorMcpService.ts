@@ -824,6 +824,29 @@ const make = Effect.gen(function* () {
       return { parent, target } as const;
     });
 
+  const loadWritableThread = (scope: McpInvocationScope, threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const { parent, target } = yield* loadScopedThread(scope, threadId);
+      if (parent.thread.deletedAt !== null) {
+        return yield* failure("thread_not_found", "The calling thread was not found.");
+      }
+      const callerRun = ThreadManagementService.latestActiveRun(parent);
+      if (
+        parent.thread.archivedAt !== null ||
+        callerRun === undefined ||
+        callerRun.providerInstanceId !== scope.providerInstanceId
+      ) {
+        return yield* failure(
+          "parent_not_active",
+          "The calling provider no longer owns an active thread run.",
+        );
+      }
+      yield* resolveRuntimeMode(parent.thread.runtimeMode, target.thread.runtimeMode);
+      yield* resolveInteractionMode(parent.thread.interactionMode, target.thread.interactionMode);
+
+      return { parent, target } as const;
+    });
+
   /**
    * A thread the user attached as context (a `thread` record on one of their own messages)
    * is readable even outside the calling project. Only records the user authored count:
@@ -1832,9 +1855,7 @@ const make = Effect.gen(function* () {
       }),
     sendToThread: (scope, input) =>
       Effect.gen(function* () {
-        const { parent, target } = yield* loadScopedThread(scope, input.threadId);
-        yield* resolveRuntimeMode(parent.thread.runtimeMode, target.thread.runtimeMode);
-        yield* resolveInteractionMode(parent.thread.interactionMode, target.thread.interactionMode);
+        const { parent } = yield* loadWritableThread(scope, input.threadId);
 
         const mode = input.mode ?? "auto";
         const key = yield* requestKey(input.clientRequestId);
@@ -1901,7 +1922,7 @@ const make = Effect.gen(function* () {
       }),
     interruptThread: (scope, input) =>
       Effect.gen(function* () {
-        const { parent } = yield* loadScopedThread(scope, input.threadId);
+        const { parent } = yield* loadWritableThread(scope, input.threadId);
         const key = yield* requestKey(input.clientRequestId);
         const result = yield* threadManagement
           .interruptThread({

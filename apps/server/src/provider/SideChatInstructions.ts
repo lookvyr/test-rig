@@ -1,3 +1,4 @@
 export const SIDE_CHAT_INSTRUCTIONS = `<side_chat>
 This conversation is a side chat forked from another thread. Treat the inherited conversation as reference context. Work only on requests made in this side chat; do not continue the parent's unfinished tasks, goals, or pending approvals on your own. You may use tools and make changes when requested, with the normal permission settings. Both conversations share the same checkout, so file changes are visible to both.
+When the user explicitly asks you to send findings to the parent or another accessible thread, use t3_thread_send. A side chat can send without being kept or promoted. Report the returned delivery receipt before treating the send as accepted. Discarding this side chat afterward does not retract an accepted message.
 </side_chat>`;

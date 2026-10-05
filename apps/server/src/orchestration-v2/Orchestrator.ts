@@ -243,6 +243,10 @@ export interface OrchestratorV2Shape {
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<OrchestratorV2DispatchResult, OrchestratorV2Error>;
+  /** Read a durable receipt without attempting a new command. */
+  readonly getCommandResult: (
+    command: OrchestrationV2ServerCommand,
+  ) => Effect.Effect<Option.Option<OrchestratorV2DispatchResult>, OrchestratorV2Error>;
   readonly getTimelinePage: (
     threadId: ThreadId,
     options: ProjectionTimelinePageOptions,
@@ -9230,50 +9234,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     };
   });
 
-  const dispatchWithReceiptEffect = Effect.fn("orchestrationV2.dispatch.withReceipt")(function* (
-    command: OrchestrationV2ServerCommand,
-  ): Effect.fn.Return<OrchestratorV2DispatchResult, OrchestratorV2Error> {
-    yield* Effect.annotateCurrentSpan({
-      "orchestration_v2.command_id": command.commandId,
-      "orchestration_v2.command_type": command.type,
-      "orchestration_v2.thread_id": commandThreadId(command),
-    });
-
-    const existingReceipt = yield* commandReceipts.getByCommandId(command.commandId).pipe(
-      Effect.mapError(
-        (cause) =>
-          new OrchestratorDispatchError({
-            commandId: command.commandId,
-            commandType: command.type,
-            cause,
-          }),
-      ),
-    );
-
-    if (Option.isSome(existingReceipt)) {
-      const receipt = existingReceipt.value;
-      if (receipt.status === "rejected") {
-        return yield* new OrchestratorCommandPreviouslyRejectedError({
-          commandId: command.commandId,
-          commandType: command.type,
-          detail: receipt.error ?? "Previously rejected.",
-        });
-      }
-      // A receipt only proves this exact command was handled for its own
-      // thread. Replaying it for a command aimed at another thread would
-      // report success for work that never happened.
-      const dispatchThreadId = commandThreadId(command);
-      if (!canReplayCommandReceipt(receipt.threadId, dispatchThreadId)) {
-        return yield* new OrchestratorCommandIdConflictError({
-          commandId: command.commandId,
-          commandType: command.type,
-          receiptThreadId: receipt.threadId,
-          commandThreadId: dispatchThreadId,
-        });
-      }
-      const storedEvents = yield* eventSink.readByCommandId({ commandId: command.commandId }).pipe(
-        Stream.runCollect,
-        Effect.map((events): ReadonlyArray<OrchestrationV2StoredEvent> => Array.from(events)),
+  const getCommandResult: OrchestratorV2Shape["getCommandResult"] = (command) =>
+    Effect.gen(function* () {
+      const existingReceipt = yield* commandReceipts.getByCommandId(command.commandId).pipe(
         Effect.mapError(
           (cause) =>
             new OrchestratorDispatchError({
@@ -9283,13 +9246,63 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             }),
         ),
       );
+
+      if (Option.isSome(existingReceipt)) {
+        const receipt = existingReceipt.value;
+        if (receipt.status === "rejected") {
+          return yield* new OrchestratorCommandPreviouslyRejectedError({
+            commandId: command.commandId,
+            commandType: command.type,
+            detail: receipt.error ?? "Previously rejected.",
+          });
+        }
+        // A receipt only proves this exact command was handled for its own
+        // thread. Replaying it for a command aimed at another thread would
+        // report success for work that never happened.
+        const dispatchThreadId = commandThreadId(command);
+        if (!canReplayCommandReceipt(receipt.threadId, dispatchThreadId)) {
+          return yield* new OrchestratorCommandIdConflictError({
+            commandId: command.commandId,
+            commandType: command.type,
+            receiptThreadId: receipt.threadId,
+            commandThreadId: dispatchThreadId,
+          });
+        }
+        const storedEvents = yield* eventSink
+          .readByCommandId({ commandId: command.commandId })
+          .pipe(
+            Stream.runCollect,
+            Effect.map((events): ReadonlyArray<OrchestrationV2StoredEvent> => Array.from(events)),
+            Effect.mapError(
+              (cause) =>
+                new OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  cause,
+                }),
+            ),
+          );
+        return Option.some({ sequence: receipt.resultSequence, storedEvents });
+      }
+
+      return Option.none();
+    });
+
+  const dispatchWithReceiptEffect = Effect.fn("orchestrationV2.dispatch.withReceipt")(function* (
+    command: OrchestrationV2ServerCommand,
+  ): Effect.fn.Return<OrchestratorV2DispatchResult, OrchestratorV2Error> {
+    yield* Effect.annotateCurrentSpan({
+      "orchestration_v2.command_id": command.commandId,
+      "orchestration_v2.command_type": command.type,
+      "orchestration_v2.thread_id": commandThreadId(command),
+    });
+
+    const existingResult = yield* getCommandResult(command);
+    if (Option.isSome(existingResult)) {
       if (command.type === "queue.resume") {
         yield* mapDispatchError(command)(startNextQueuedRun(command.threadId));
       }
-      return {
-        sequence: receipt.resultSequence,
-        storedEvents,
-      } satisfies OrchestratorV2DispatchResult;
+      return existingResult.value;
     }
 
     const plan = yield* dispatchOnce(command).pipe(
@@ -9575,6 +9588,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   return OrchestratorV2.of({
     resumeQueuedRuns,
     dispatch: dispatchWithReceipt,
+    getCommandResult,
     getTimelinePage: (threadId, options) =>
       projectionStore
         .getTimelinePage(threadId, options)
@@ -9691,6 +9705,14 @@ const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
       }),
     ),
     dispatch: (command) =>
+      Effect.fail(
+        new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Orchestration V2 live runtime is not configured.",
+        }),
+      ),
+    getCommandResult: (command) =>
       Effect.fail(
         new OrchestratorDispatchError({
           commandId: command.commandId,

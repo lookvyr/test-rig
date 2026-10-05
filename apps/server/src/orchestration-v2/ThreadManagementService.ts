@@ -559,37 +559,7 @@ const make = Effect.gen(function* () {
   const sendToThread: ThreadManagementServiceShape["sendToThread"] = (input) =>
     Effect.gen(function* () {
       const target = yield* getProjectThreadRecords(input, ["runs", "providerTurns"]);
-      if (target.thread.archivedAt !== null) {
-        return yield* new ThreadManagementThreadArchivedError({
-          threadId: input.threadId,
-        });
-      }
-
-      const steerableRun = latestSteerableRun(target);
-      let dispatchMode: Extract<
-        OrchestrationV2Command,
-        { readonly type: "message.dispatch" }
-      >["dispatchMode"];
-      if (input.mode === "steer" || input.mode === "restart") {
-        if (steerableRun === undefined) {
-          return yield* new ThreadManagementNoSteerableRunError({
-            threadId: input.threadId,
-            mode: input.mode,
-          });
-        }
-        dispatchMode = {
-          type: input.mode === "steer" ? "steer_active" : "restart_active",
-          targetRunId: steerableRun.id,
-        };
-      } else if (input.mode === "auto" && steerableRun !== undefined) {
-        dispatchMode = { type: "steer_active", targetRunId: steerableRun.id };
-      } else {
-        dispatchMode = {
-          type: input.mode === "queue" ? "queue_after_active" : "start_immediately",
-        };
-      }
-
-      const dispatch = yield* orchestrator.dispatch({
+      const command = {
         type: "message.dispatch",
         commandId: input.commandId,
         threadId: input.threadId,
@@ -599,10 +569,48 @@ const make = Effect.gen(function* () {
         text: input.text,
         attachments: input.attachments,
         ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
-        dispatchMode,
+        dispatchMode: { type: "start_immediately" },
         createdBy: input.createdBy,
         creationSource: input.creationSource,
-      });
+      } satisfies Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>;
+      // Retry accepted sends before checking transient target state. The receipt
+      // also rejects a key previously used for a different target or rejected command.
+      const replay = yield* orchestrator.getCommandResult(command);
+      const dispatch = yield* Option.isSome(replay)
+        ? Effect.succeed(replay.value)
+        : Effect.gen(function* () {
+            if (target.thread.archivedAt !== null) {
+              return yield* new ThreadManagementThreadArchivedError({
+                threadId: input.threadId,
+              });
+            }
+
+            const steerableRun = latestSteerableRun(target);
+            let dispatchMode: Extract<
+              OrchestrationV2Command,
+              { readonly type: "message.dispatch" }
+            >["dispatchMode"];
+            if (input.mode === "steer" || input.mode === "restart") {
+              if (steerableRun === undefined) {
+                return yield* new ThreadManagementNoSteerableRunError({
+                  threadId: input.threadId,
+                  mode: input.mode,
+                });
+              }
+              dispatchMode = {
+                type: input.mode === "steer" ? "steer_active" : "restart_active",
+                targetRunId: steerableRun.id,
+              };
+            } else if (input.mode === "auto" && steerableRun !== undefined) {
+              dispatchMode = { type: "steer_active", targetRunId: steerableRun.id };
+            } else {
+              dispatchMode = {
+                type: input.mode === "queue" ? "queue_after_active" : "start_immediately",
+              };
+            }
+
+            return yield* orchestrator.dispatch({ ...command, dispatchMode });
+          });
       const projection = yield* getProjectThreadRecords(input, ["runs", "messages", "turnItems"], {
         messageIds: [input.messageId],
         turnItemTypes: ["user_message"],

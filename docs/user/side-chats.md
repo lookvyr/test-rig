@@ -18,3 +18,5 @@ Claude must save a complete conversation snapshot before it can open a side chat
 Temporary side chats expire when Test Rig’s backend restarts. Closing a browser tab or reconnecting does not discard them.
 
 Side chats support Codex and Claude. OpenCode conversations do not offer them.
+
+Ask the side-chat agent to send findings to the parent or another chat in the same project. You do not need to keep the side chat first. The agent reports whether the message started a turn, steered active work, or was queued until delivery is possible. An accepted message remains in the receiving chat if you discard the side chat afterward. Sending does not mean the receiving agent has finished responding.
