@@ -136,3 +136,69 @@ source, without claiming live steering tests for those providers in this pass.
 There are no wire-schema or desktop-shell changes. Completion-boundary policy
 continues to resolve a steer intent as a new turn when no active run remains.
 Existing selection-change restart behavior remains in place.
+
+## Internal reliability follow-up — October 5, 2026 (UTC)
+
+The user approved LOO-39, LOO-46, LOO-29, LOO-42 and the scoped LOO-24
+Stop/recovery work. Changes were independently reviewed, corrected where needed,
+and committed on `codex/orchestration-v2`. The user subsequently authorized
+pushing the reviewed branch. Commit email metadata uses the GitHub no-reply address.
+
+- **LOO-39 — `66fbeced`:** unchanged desktop bootstrap results retain their array
+  identity. Real changes, clearing and failed-read retention remain covered.
+  Desktop/platform tests: 24 passed; web typecheck passed. No native desktop
+  session was available in this cloud environment.
+- **LOO-46 — `a8e7619e`:** a copied ledger is reaped twice without signaling the
+  original process group or changing its original ledger. The original owner
+  then cleans up that group. Ledger/owner tests: 19 passed. A child-subreaper
+  wrapper was necessary because cloud PID 1 does not reap orphaned test children.
+  Darwin observation flags were exercised on Linux; this is not native macOS proof.
+- **LOO-29 — `b893533e`:** missing/archived parent history windows page through
+  251 child artifacts without loss or duplication; replayed native children reject
+  direct messages after parent archive/deletion. Six history/projection tests and
+  the selected Claude replay test passed. A real Codex child opened read-only in
+  the browser, and Open parent restored the parent composer. The full Claude
+  replay file still has an unrelated missing `thread_fork_native_continue`
+  transcript; only the relevant selected replay is claimed here.
+- **LOO-42 — `b5b76529`:** nearby rows lease VCS/explicit-PR queries and retain
+  cached badges offscreen, keyed to query identity. Integration opt-outs remain
+  enforced. Review caught the VCS atom's five-minute idle lifetime; status streams
+  now close when their last subscriber leaves, while shared active consumers keep
+  them alive. Component/registry/VCS tests: 32 passed; web and client-runtime
+  typechecks passed. Browser palette rows rendered correctly. Thirty-row visibility
+  and subscription counts were tested automatically, not measured as production
+  subprocess savings or a large browser scrolling benchmark.
+- **LOO-24 — `94bb0441`:** archive reads only unfinished command items, avoiding
+  irrelevant completed-output decoding. Active preparation is interrupted and
+  completed preparation is preserved. The existing malformed-history control
+  regression now passes. New tests lock run ownership for stale Stop and public
+  service scope; existing recovery/continuation/provider tests were exercised.
+
+The approved Stop rule follows upstream run ownership: once A completes and B
+starts, browser Stop(A, holdQueue=true) rejects without touching B or holding C.
+C can still start after B completes. The MCP `interruptThread` service separately
+returns `already_terminal` for an explicit completed run. These are distinct
+entry-point responses; no new silent-success or retroactive-hold UX was added.
+
+LOO-24 focused verification: runtime Stop/queue selection 4 passed; public Stop
+and control reads 21; archive 6; recovery/restart continuation/replay 29;
+provider-event ingestion/restart notes/delegated delivery 21; selected Codex/Claude
+interrupt and stale-event cases 35; selected execution ownership cases 17.
+Server typecheck passed. Focused lint had only existing unused declarations in
+Orchestrator.ts. No repository-wide checks were run.
+
+Live Codex 0.159.0-alpha.3 browser checks exercised a real command interrupted by
+Stop, a successful follow-up (`STOP_RECOVERY_OK`), and persistence across reload.
+A separate accepted turn was interrupted by a controlled watched-backend restart;
+the browser reconnected without a stuck running state and another prompt answered
+`RESTART_RECOVERY_OK`. This is graceful server replacement, not crash injection.
+Claude/OpenCode native live recovery and native desktop parity were not re-run.
+Test Rig and upstream nightly `v0.0.46-nightly.20261004.2657` remain in separate
+isolated development state directories. No user's live application data was used.
+
+The Linear recheck found no additional complete issue in the same decision-free
+bucket. Scheduling/delegation policy and user-facing controls remain deferred.
+A separable test-only repair switches ScheduledTaskService.test.ts from legacy
+SQLite to V2 persistence: all three tests previously failed on a missing
+`scheduled_tasks` table, then passed with the production schema. This does not
+complete LOO-33 or choose scheduling behavior.
