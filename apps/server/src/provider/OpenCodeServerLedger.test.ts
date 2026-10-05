@@ -141,6 +141,45 @@ describe.each(observedPlatforms)("OpenCodeServerLedger observing as %s", (platfo
     }).pipe(provideHost),
   );
 
+  it.live("discarding a copied ledger leaves the original orphan and ledger intact", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "test-rig-original-ledger-" });
+      const copiedStateDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "test-rig-copied-ledger-",
+      });
+      const orphan = yield* spawnGroup(SERVE_ARGS);
+      // A dead owner makes this a real cleanup candidate: only the state-directory
+      // ownership guard can protect the original process from the copied ledger.
+      yield* recordFromDeadServer(stateDir, orphan);
+      const entryName = `${orphan.pid}.json`;
+      const originalEntryPath = path.join(stateDir, "opencode-servers", entryName);
+      const originalEntry = yield* fs.readFileString(originalEntryPath);
+      yield* fs.copy(
+        path.join(stateDir, "opencode-servers"),
+        path.join(copiedStateDir, "opencode-servers"),
+      );
+      const copiedEntryPath = path.join(copiedStateDir, "opencode-servers", entryName);
+      expect(yield* fs.readFileString(copiedEntryPath)).toBe(originalEntry);
+
+      const copied = yield* OpenCodeServerLedger.make({ stateDir: copiedStateDir });
+      yield* copied.reapOrphans;
+      yield* copied.reapOrphans;
+
+      expect(groupExists(orphan.pid)).toBe(true);
+      expect(yield* fs.exists(copiedEntryPath)).toBe(false);
+      expect(yield* fs.readFileString(originalEntryPath)).toBe(originalEntry);
+
+      // The original directory still owns and can clean up that same process.
+      const original = yield* OpenCodeServerLedger.make({ stateDir });
+      yield* original.reapOrphans;
+      expect(yield* orphan.exited).toBe("SIGTERM");
+      expect(groupExists(orphan.pid)).toBe(false);
+      expect(yield* fs.exists(originalEntryPath)).toBe(false);
+    }).pipe(provideHost),
+  );
+
   it.live("leaves a serve process on another port alone", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
