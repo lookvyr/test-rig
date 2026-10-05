@@ -4,7 +4,7 @@ import type {
   ThreadPullRequestAssociation,
   VcsStatusResult,
 } from "@t3tools/contracts";
-import { useEnvironmentQuery } from "../state/query";
+import { useLeasedEnvironmentQuery } from "../state/query";
 import { gitEnvironment } from "../state/git";
 import { resolveEnabledThreadPr } from "../lib/threadPullRequest";
 import { isSourceControlProviderEnabled } from "../sourceControlPresentation";
@@ -17,9 +17,10 @@ export function useThreadPullRequest(input: {
   threadBranch: string | null;
   gitStatus: VcsStatusResult | null;
   providerSettings: SourceControlProviderSettings;
+  enabled?: boolean;
 }) {
   const association = input.association;
-  const query = useEnvironmentQuery(
+  const query = useLeasedEnvironmentQuery(
     association?.mode === "linked" &&
       input.projectCwd !== null &&
       isSourceControlProviderEnabled(input.providerSettings, association.provider)
@@ -28,6 +29,7 @@ export function useThreadPullRequest(input: {
           input: { cwd: input.projectCwd, reference: association.reference },
         })
       : null,
+    input.enabled ?? true,
   );
   const linked = query.data?.pullRequest;
   return resolveEnabledThreadPr({

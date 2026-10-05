@@ -7,11 +7,12 @@ import {
 } from "@t3tools/client-runtime/environment";
 import type { VcsStatusResult } from "@t3tools/contracts";
 import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import { useRowQueryLease } from "../hooks/useRowQueryLease";
 import { useEnvironmentSettings } from "../hooks/useSettings";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { useProject } from "../state/entities";
-import { useEnvironmentQuery } from "../state/query";
+import { useLeasedEnvironmentQuery } from "../state/query";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { vcsEnvironment } from "../state/vcs";
 import { useUiStateStore } from "../uiStateStore";
@@ -217,6 +218,12 @@ export function ThreadStatusLabel({
  * thread status dot, matching the sidebar's leading indicators.
  */
 export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummary }) {
+  const { rowRef, enabled } = useRowQueryLease();
+  // The containing title has a measurable box even before this row has a badge.
+  const statusRef = useCallback(
+    (node: HTMLSpanElement | null) => rowRef(node?.parentElement ?? null),
+    [rowRef],
+  );
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const lastVisitedAt = useUiStateStore(
     (state) => state.threadLastVisitedAtById[scopedThreadKey(threadRef)],
@@ -229,13 +236,14 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   );
   const threadProjectCwd = threadProject?.workspaceRoot ?? null;
   const gitCwd = thread.worktreePath ?? threadProjectCwd;
-  const gitStatus = useEnvironmentQuery(
+  const gitStatus = useLeasedEnvironmentQuery(
     (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
         })
       : null,
+    enabled,
   );
   const providerSettings = useEnvironmentSettings(
     thread.environmentId,
@@ -248,6 +256,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
     providerSettings,
+    enabled,
   });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const threadStatus = resolveThreadStatusPill({
@@ -257,12 +266,13 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
     },
   });
 
-  if (!prStatus && !threadStatus) {
-    return null;
-  }
-
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5">
+    <span
+      ref={statusRef}
+      className={
+        prStatus || threadStatus ? "inline-flex shrink-0 items-center gap-1.5" : "contents"
+      }
+    >
       {prStatus ? (
         <Tooltip>
           <TooltipTrigger

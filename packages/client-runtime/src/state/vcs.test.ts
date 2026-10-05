@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -81,6 +82,73 @@ const LIVE_REFS: VcsListRefsResult = {
     },
   ],
 };
+
+it.effect("releases the VCS stream when its last consumer leaves, without an idle delay", () =>
+  Effect.gen(function* () {
+    const stopped = yield* Deferred.make<void>();
+    let subscriptions = 0;
+    const client = {
+      [WS_METHODS.subscribeVcsStatus]: () =>
+        Stream.concat(
+          Stream.fromEffect(
+            Effect.sync(() => {
+              subscriptions++;
+              return {
+                _tag: "snapshot" as const,
+                local: {
+                  isRepo: true,
+                  hasPrimaryRemote: false,
+                  isDefaultRef: true,
+                  refName: "main",
+                  hasWorkingTreeChanges: false,
+                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                },
+                remote: null,
+              };
+            }),
+          ),
+          Stream.never,
+        ).pipe(Stream.ensuring(Deferred.succeed(stopped, undefined))),
+    } as unknown as WsRpcProtocolClient;
+    const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+      target: TARGET,
+      state: yield* SubscriptionRef.make(CONNECTED_CONNECTION_STATE),
+      session: yield* SubscriptionRef.make(Option.some(session(client))),
+      prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+      connect: Effect.void,
+      disconnect: Effect.void,
+      retryNow: Effect.void,
+    });
+    const followStream: EnvironmentRegistry.EnvironmentRegistry["Service"]["followStream"] = (
+      _environmentId,
+      stream,
+    ) => Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor);
+    const runtime = Atom.runtime(
+      Layer.merge(
+        Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, {
+          followStream,
+        } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]),
+        Layer.succeed(Persistence.EnvironmentCacheStore, cacheWithRefs(Option.none())),
+      ),
+    );
+    const atoms = createVcsEnvironmentAtoms(runtime);
+    const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+      Effect.sync(() => registry.dispose()),
+    );
+    const target = { environmentId: TARGET.environmentId, input: { cwd: "/repo" } };
+    const query = atoms.status(target);
+    const releasePalette = registry.mount(query);
+    expect((yield* AtomRegistry.getResult(registry, query)).refName).toBe("main");
+    const releaseChat = registry.mount(atoms.status(target));
+    expect(subscriptions).toBe(1);
+    releasePalette();
+    expect(yield* Deferred.isDone(stopped)).toBe(false);
+    releaseChat();
+    // The real subscription finalizer must run without a five-minute clock advance.
+    yield* Deferred.await(stopped);
+    expect(subscriptions).toBe(1);
+  }).pipe(Effect.scoped),
+);
 
 function session(client: WsRpcProtocolClient): RpcSession {
   return {

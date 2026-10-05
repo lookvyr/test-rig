@@ -1,5 +1,5 @@
 import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react";
-import { useContext, useMemo } from "react";
+import { useContext, useMemo, useState } from "react";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
@@ -42,6 +42,25 @@ function environmentQueryView<A, E>(
     isPending: enabled && result.waiting,
     refresh,
   };
+}
+
+/** Release an offscreen query while retaining its last result for the same identity. */
+export function useLeasedEnvironmentQuery<A, E>(
+  atom: Atom.Atom<AsyncResult.AsyncResult<A, E>> | null,
+  enabled: boolean,
+): EnvironmentQueryView<A> {
+  const query = useEnvironmentQuery(enabled ? atom : null);
+  const [retained, setRetained] = useState<{ readonly atom: typeof atom; readonly data: A } | null>(
+    null,
+  );
+  if (atom !== null && query.data !== null) {
+    if (retained?.atom !== atom || retained.data !== query.data) {
+      setRetained({ atom, data: query.data });
+    }
+  } else if (retained !== null && retained.atom !== atom) {
+    setRetained(null);
+  }
+  return { ...query, data: query.data ?? (retained?.atom === atom ? retained.data : null) };
 }
 
 /** Subscribe to a variable number of queries while preserving their display order. */
