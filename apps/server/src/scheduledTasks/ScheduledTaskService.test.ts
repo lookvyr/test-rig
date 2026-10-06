@@ -3,7 +3,7 @@ import * as NodeUtil from "node:util";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
-import { ScheduledTaskError } from "@t3tools/contracts";
+import { ScheduledTaskError, ScheduledTaskId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -56,6 +56,62 @@ const insertRow = (
     last_run_error: null,
     run_count: 0,
   })}`;
+
+it.effect(
+  "queues bound-thread runs and records dispatch acceptance without waiting for completion",
+  () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-10-06T12:00:00.000Z";
+      yield* TestClock.setTime(Date.parse(now));
+      yield* insertRow(sql, { id: "bound", next: null, enabled: 0, status: "never" }, now);
+      yield* sql`UPDATE scheduled_tasks SET thread_id = 'thread:bound' WHERE task_id = 'bound'`;
+      const sends: Array<
+        Parameters<ThreadManagementService.ThreadManagementService["Service"]["sendToThread"]>[0]
+      > = [];
+      yield* Effect.gen(function* () {
+        const service = yield* ScheduledTaskService.ScheduledTaskService;
+        // A paused schedule can be run explicitly. Acceptance ends the scheduler's
+        // reservation; subsequent runs can be queued while earlier agent work lives on.
+        for (const count of [1, 2]) {
+          const { task } = yield* service.runNow({ id: ScheduledTaskId.make("bound") });
+          assert.equal(task.lastRunStatus, "succeeded");
+          assert.equal(task.runCount, count);
+          assert.isFalse(task.enabled);
+          assert.isNull(task.nextRunAt);
+          yield* TestClock.adjust("1 second");
+        }
+        assert.equal(sends.length, 2);
+        for (const send of sends) {
+          assert.equal(send.mode, "queue");
+          assert.equal(send.threadId, "thread:bound");
+          assert.equal(send.scheduledTaskId, "bound");
+          assert.equal(send.text, "Run task");
+        }
+        assert.notEqual(sends[0]!.commandId, sends[1]!.commandId);
+      }).pipe(
+        Effect.provide(
+          ScheduledTaskService.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+                Layer.mock(ThreadManagementService.ThreadManagementService)({
+                  sendToThread: (input) =>
+                    Effect.sync(() => {
+                      sends.push(input);
+                      return {} as never;
+                    }),
+                }),
+                NodeCrypto.layer,
+                Scheduler.layer,
+              ),
+            ),
+          ),
+        ),
+        Effect.scoped,
+      );
+    }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);
 
 it.effect("loads only due tasks and skips corrupt due rows without decoding settled tasks", () =>
   Effect.gen(function* () {
