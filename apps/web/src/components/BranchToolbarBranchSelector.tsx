@@ -1,3 +1,4 @@
+import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
 import { useUnlinkPullRequest } from "../hooks/useUnlinkPullRequest";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -70,6 +71,7 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 interface BranchToolbarBranchSelectorProps {
+  displayMode?: "toolbar" | "panel";
   className?: string;
   environmentId: EnvironmentId;
   threadId: ThreadId;
@@ -89,6 +91,7 @@ function toBranchActionErrorMessage(error: unknown): string {
 }
 
 export function BranchToolbarBranchSelector({
+  displayMode = "toolbar",
   className,
   environmentId,
   threadId,
@@ -811,18 +814,28 @@ export function BranchToolbarBranchSelector({
             pointer-events-none, so the trigger itself never sees right-clicks
             while refs are loading or a branch action is pending. */}
         <span
-          className="flex min-w-0"
+          className={displayMode === "panel" ? "flex min-w-0 flex-1" : "flex min-w-0"}
           onContextMenu={(event) => handleBranchContextMenu(event, resolvedActiveBranch)}
         >
           <ComboboxTrigger
-            render={<Button variant="ghost" size="xs" />}
-            className="min-w-0 max-w-full text-muted-foreground/70 hover:text-foreground/80"
+            render={
+              <ThreadDetailsControl panel={displayMode === "panel"} variant="ghost" size="xs" />
+            }
+            className={
+              displayMode === "panel"
+                ? undefined
+                : "min-w-0 max-w-full text-muted-foreground/70 hover:text-foreground/80"
+            }
             disabled={isInitialBranchesLoadPending || isBranchActionPending}
           >
             <GitBranchIcon className="size-3 shrink-0 opacity-70" />
             <span
               data-composer-label
-              className="min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+              className={
+                displayMode === "panel"
+                  ? "min-w-0 flex-1 truncate"
+                  : "min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+              }
             >
               {triggerLabel}
             </span>

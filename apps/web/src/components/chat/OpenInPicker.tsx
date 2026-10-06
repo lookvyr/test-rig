@@ -1,9 +1,13 @@
+import { ThreadDetailsControl } from "./ThreadDetailsControl";
+import {
+  THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
+  THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
+} from "./threadDetailsPanelStyles";
 import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useMemo } from "react";
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
 import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
-import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
 import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
 import {
@@ -191,6 +195,7 @@ export const OpenInPicker = memo(function OpenInPicker({
   keybindings,
   availableEditors,
   openInCwd,
+  displayMode = "toolbar",
   compact = false,
   enableShortcut = true,
 }: {
@@ -198,9 +203,11 @@ export const OpenInPicker = memo(function OpenInPicker({
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   openInCwd: string | null;
+  displayMode?: "toolbar" | "panel";
   compact?: boolean;
   enableShortcut?: boolean;
 }) {
+  const panel = displayMode === "panel";
   const openInEditorMutation = useAtomCommand(shellEnvironment.openInEditor, "open in editor");
   const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
   const options = useMemo(
@@ -260,10 +267,17 @@ export const OpenInPicker = memo(function OpenInPicker({
   ]);
 
   return (
-    <Group aria-label="Open in editor">
-      <Button
-        aria-label={compact ? "Open file in preferred editor" : undefined}
-        className="ps-[8.5px]"
+    <Group
+      aria-label="Open in editor"
+      className={panel ? THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS : ""}
+    >
+      <ThreadDetailsControl
+        panel={panel}
+        part="primary"
+        aria-label={
+          panel ? "Open in editor" : compact ? "Open file in preferred editor" : undefined
+        }
+        className={panel ? "" : "ps-[8.5px]"}
         size="xs"
         variant="outline"
         disabled={!preferredEditor || !openInCwd}
@@ -277,20 +291,32 @@ export const OpenInPicker = memo(function OpenInPicker({
         )}
         <span
           className={
-            compact
-              ? "sr-only"
-              : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
+            panel
+              ? "min-w-0 truncate"
+              : compact
+                ? "sr-only"
+                : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
           }
         >
-          Open
+          {panel ? "Open in editor" : "Open"}
         </span>
-      </Button>
-      <GroupSeparator {...(!compact ? { className: "hidden @3xl/header-actions:block" } : {})} />
+      </ThreadDetailsControl>
+      <GroupSeparator
+        className={
+          panel
+            ? THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS
+            : compact
+              ? ""
+              : "hidden @3xl/header-actions:block"
+        }
+      />
       <Menu>
         <MenuTrigger
           render={
-            <Button
-              aria-label={compact ? "Choose editor" : "Copy options"}
+            <ThreadDetailsControl
+              panel={panel}
+              part="secondary"
+              aria-label={panel || compact ? "Choose editor" : "Copy options"}
               size="icon-xs"
               variant="outline"
             />

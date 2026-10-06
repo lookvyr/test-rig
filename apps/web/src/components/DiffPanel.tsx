@@ -36,7 +36,7 @@ import {
   SearchIcon,
   TextWrapIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { type DraftId } from "../composerDraftStore";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
@@ -773,6 +773,23 @@ export default function DiffPanel({
   useOnTurnCompleted(routeThreadRef, () => {
     if (canRefreshReview) refreshBranchDiffPreview();
   });
+  // A query can be unresolved before its waiting flag flips. Only reveal known
+  // data (or an error), never an intermediate "0 files" or missing stage actions.
+  const initialReviewQueries = isTurnScope
+    ? [activeCheckpointDiff]
+    : [
+        branchDiffPreview,
+        ...(singleFileMode ? [fileDiffPreview] : []),
+        stagedFilesPreview,
+        ...(selectedGitScope === "working-tree" ? [unstagedFilesPreview] : []),
+      ];
+  const isPreparingReview = Boolean(
+    activeThread &&
+    isGitRepo &&
+    (!isTurnScope || selectedTurn) &&
+    !selectedPatchError &&
+    initialReviewQueries.some((query) => query.data == null && !query.error),
+  );
   const hasResolvedPatch = typeof selectedPatch === "string";
   const hasNoNetChanges = hasResolvedPatch && selectedPatch.trim().length === 0;
   const renderablePatch = useMemo(
@@ -870,7 +887,7 @@ export default function DiffPanel({
     },
     [navigationScope, routeThreadRef, selectedFileRevealRequestId],
   );
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = reviewBodyRef.current;
     if (!element) return;
     const update = () => setReviewWidth(element.clientWidth);
@@ -1403,7 +1420,7 @@ export default function DiffPanel({
   );
 
   return (
-    <DiffPanelShell mode={mode} header={headerRow}>
+    <DiffPanelShell mode={mode} header={headerRow} pending={isPreparingReview}>
       {!activeThread ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           Select a thread to inspect turn diffs.

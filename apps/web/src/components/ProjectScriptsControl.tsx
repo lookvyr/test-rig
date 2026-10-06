@@ -1,3 +1,8 @@
+import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
+import {
+  THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
+  THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
+} from "./chat/threadDetailsPanelStyles";
 import type {
   ProjectScript,
   ProjectScriptIcon,
@@ -112,6 +117,7 @@ export type ProjectScriptActionResult = AtomCommandResult<void, unknown>;
 const NO_FILE_SCRIPTS: ReadonlyArray<T3ProjectFileScript> = [];
 
 interface ProjectScriptsControlProps {
+  displayMode?: "toolbar" | "panel";
   scripts: ReadonlyArray<ProjectScript>;
   /** Scripts declared in the project's checked-in t3.json, offered for import. */
   fileScripts?: ReadonlyArray<T3ProjectFileScript>;
@@ -127,6 +133,7 @@ interface ProjectScriptsControlProps {
 }
 
 export default function ProjectScriptsControl({
+  displayMode = "toolbar",
   scripts,
   fileScripts = NO_FILE_SCRIPTS,
   keybindings,
@@ -136,6 +143,7 @@ export default function ProjectScriptsControl({
   onUpdateScript,
   onDeleteScript,
 }: ProjectScriptsControlProps) {
+  const panel = displayMode === "panel";
   const addScriptFormId = React.useId();
   const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
   const [actionsMenuOpen, setActionsMenuOpen] = useState({
@@ -334,14 +342,23 @@ export default function ProjectScriptsControl({
   return (
     <>
       {primaryScript ? (
-        <Group aria-label="Project scripts">
+        <Group
+          aria-label="Project scripts"
+          className={panel ? THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS : ""}
+        >
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
+                <ThreadDetailsControl
+                  panel={panel}
+                  part="primary"
                   size="xs"
                   variant="outline"
-                  className="w-7 px-0 sm:w-6 @3xl/header-actions:w-auto! @3xl/header-actions:px-[calc(--spacing(2)-1px)]"
+                  className={
+                    panel
+                      ? ""
+                      : "w-7 px-0 sm:w-6 @3xl/header-actions:w-auto! @3xl/header-actions:px-[calc(--spacing(2)-1px)]"
+                  }
                   aria-label={`Run ${primaryScript.name}`}
                   // The tooltip wrapper replaces data-slot="button", so themed
                   // toolbar styling needs its own hook.
@@ -351,20 +368,40 @@ export default function ProjectScriptsControl({
               }
             >
               <ScriptIcon icon={primaryScript.icon} />
-              <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+              <span
+                className={
+                  panel
+                    ? "min-w-0 truncate"
+                    : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
+                }
+              >
                 {primaryScript.name}
               </span>
             </TooltipTrigger>
             <TooltipPopup side="top">Run {primaryScript.name}</TooltipPopup>
           </Tooltip>
-          <GroupSeparator className="hidden @3xl/header-actions:block" />
+          <GroupSeparator
+            className={
+              panel
+                ? THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS
+                : "hidden @3xl/header-actions:block"
+            }
+          />
           <Menu
             highlightItemOnHover={false}
             open={actionsMenuOpen.scripts}
             onOpenChange={(open) => setActionsMenuOpen({ scripts: open, imports: false })}
           >
             <MenuTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
+              render={
+                <ThreadDetailsControl
+                  panel={panel}
+                  part="secondary"
+                  size="icon-xs"
+                  variant="outline"
+                  aria-label="Script actions"
+                />
+              }
             >
               <ChevronDownIcon className="size-4" />
             </MenuTrigger>
@@ -426,9 +463,24 @@ export default function ProjectScriptsControl({
           open={actionsMenuOpen.imports}
           onOpenChange={(open) => setActionsMenuOpen({ scripts: false, imports: open })}
         >
-          <MenuTrigger render={<Button size="xs" variant="outline" aria-label="Project actions" />}>
+          <MenuTrigger
+            render={
+              <ThreadDetailsControl
+                panel={panel}
+                size="xs"
+                variant="outline"
+                aria-label="Project actions"
+              />
+            }
+          >
             <PlusIcon className="size-3.5" />
-            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+            <span
+              className={
+                panel
+                  ? "min-w-0 truncate"
+                  : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
+              }
+            >
               Add action
             </span>
             <ChevronDownIcon className="size-3.5" />
@@ -445,10 +497,15 @@ export default function ProjectScriptsControl({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button
+              <ThreadDetailsControl
+                panel={panel}
                 size="xs"
                 variant="outline"
-                className="w-7 px-0 sm:w-6 @3xl/header-actions:w-auto! @3xl/header-actions:px-[calc(--spacing(2)-1px)]"
+                className={
+                  panel
+                    ? ""
+                    : "w-7 px-0 sm:w-6 @3xl/header-actions:w-auto! @3xl/header-actions:px-[calc(--spacing(2)-1px)]"
+                }
                 aria-label="Add action"
                 // The tooltip wrapper replaces data-slot="button", so themed
                 // toolbar styling needs its own hook.
@@ -458,7 +515,13 @@ export default function ProjectScriptsControl({
             }
           >
             <PlusIcon className="size-3.5" />
-            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+            <span
+              className={
+                panel
+                  ? "min-w-0 truncate"
+                  : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
+              }
+            >
               Add action
             </span>
           </TooltipTrigger>
@@ -491,7 +554,7 @@ export default function ProjectScriptsControl({
           <DialogHeader>
             <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
             <DialogDescription>
-              Actions are project-scoped commands you can run from the top bar or keybindings.
+              Actions are project-scoped commands you can run from thread details or keybindings.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>

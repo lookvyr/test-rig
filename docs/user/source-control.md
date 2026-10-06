@@ -1,5 +1,17 @@
 # Source control
 
+Use **Thread details** in the chat header for workspace and branch selection,
+editor access, project actions, and Git commands. On wide windows, details sit
+beside the conversation. On narrower windows, the same controls open in a
+popover. Hiding the wide details card is remembered for that conversation.
+
+**Changes** opens the review panel, where the existing stacked/split diffs,
+changed-file tree, and comparison controls remain available. Details and review
+can be opened independently. Changes fade in together once the initial review
+data is available; reduced-motion settings disable the fade. Resizing the right
+panel leaves room to type;
+extra composer controls move into **More composer controls** when space is tight.
+
 Test Rig uses Git for local repository work and can connect to a hosting provider for pull requests, repository lookup, cloning, and publishing.
 
 Git and hosting providers are separate. Disabling a GitHub, GitLab, Azure DevOps, or Bitbucket integration stops Test Rig from checking credentials or making requests to that provider. It does not disable Git commands against remotes already configured in a repository.

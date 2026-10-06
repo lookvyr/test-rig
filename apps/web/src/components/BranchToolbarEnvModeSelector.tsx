@@ -1,3 +1,5 @@
+import { ThreadDetailsSelectControl } from "./chat/ThreadDetailsControl";
+import { THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS } from "./chat/threadDetailsPanelStyles";
 import { FolderGit2Icon, FolderGitIcon, FolderIcon, HistoryIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
@@ -13,13 +15,13 @@ import {
   SelectGroupLabel,
   SelectItem,
   SelectPopup,
-  SelectTrigger,
   SelectValue,
 } from "./ui/select";
 
 export const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
 interface BranchToolbarEnvModeSelectorProps {
+  displayMode?: "toolbar" | "panel";
   envLocked: boolean;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
@@ -29,6 +31,7 @@ interface BranchToolbarEnvModeSelectorProps {
 }
 
 export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
+  displayMode = "toolbar",
   envLocked,
   effectiveEnvMode,
   activeWorktreePath,
@@ -36,6 +39,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
   previousWorktreeLabel,
   onUsePreviousWorktree,
 }: BranchToolbarEnvModeSelectorProps) {
+  const panel = displayMode === "panel";
   const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
   const envModeItems = useMemo(
     () => [
@@ -50,7 +54,13 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
 
   if (envLocked) {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs">
+      <span
+        className={
+          panel
+            ? `inline-flex ${THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS}`
+            : "inline-flex shrink-0 items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs"
+        }
+      >
         {activeWorktreePath ? (
           <>
             <FolderGitIcon className="size-3" />
@@ -79,10 +89,9 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       }}
       items={envModeItems}
     >
-      <SelectTrigger
-        variant="ghost"
-        size="xs"
-        className="min-w-0 shrink font-medium"
+      <ThreadDetailsSelectControl
+        panel={panel}
+        className={panel ? "" : "min-w-0 shrink font-medium"}
         aria-label="Workspace"
       >
         {effectiveEnvMode === "worktree" ? (
@@ -94,11 +103,15 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
         )}
         <span
           data-composer-label
-          className="min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+          className={
+            panel
+              ? "min-w-0 flex-1 truncate"
+              : "min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+          }
         >
           <SelectValue />
         </span>
-      </SelectTrigger>
+      </ThreadDetailsSelectControl>
       <SelectPopup>
         <SelectGroup>
           <SelectGroupLabel>Workspace</SelectGroupLabel>

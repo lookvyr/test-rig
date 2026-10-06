@@ -1,3 +1,7 @@
+import { loadDiffPanel } from "./diffPanelLoader";
+import { DiffPanelPlaceholder } from "./DiffPanelShell";
+import { ChatCanvas } from "./chat/ChatCanvas";
+import { ThreadDetailsPanel } from "./chat/ThreadDetailsPanel";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type { OrchestrationMessageContext } from "@t3tools/contracts";
@@ -157,7 +161,7 @@ import {
 } from "@t3tools/client-runtime/state/threadExecution";
 
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
-import { BranchToolbar } from "./BranchToolbar";
+import { BranchToolbar, type BranchToolbarProps } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
@@ -409,7 +413,7 @@ function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
 const PreviewPanel = lazy(() =>
   import("./preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
 );
-const DiffPanel = lazy(() => import("./DiffPanel"));
+const DiffPanel = lazy(loadDiffPanel);
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
@@ -1291,6 +1295,8 @@ function ChatViewContent(props: ChatViewProps) {
   const closeThreadFind = useCallback(() => {
     composerRef.current?.focusAtEnd();
   }, [composerRef]);
+  const [threadDetailsToggleContainer, setThreadDetailsToggleContainer] =
+    useState<HTMLDivElement | null>(null);
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
   const [composerOverlayHeight, setComposerOverlayHeight] = useState(0);
   const isAtEndRef = useRef(true);
@@ -5797,6 +5803,30 @@ function ChatViewContent(props: ChatViewProps) {
     return <NoActiveThreadState />;
   }
 
+  const branchToolbarProps: BranchToolbarProps = {
+    environmentId: activeThread.environmentId,
+    threadId: activeThread.id,
+    showGitControls: isGitRepo,
+    ...(routeKind === "draft" && draftId ? { draftId } : {}),
+    onEnvModeChange,
+    startFromOrigin,
+    onStartFromOriginChange,
+    ...(canOverrideServerThreadEnvMode
+      ? {
+          effectiveEnvModeOverride: envMode,
+          activeThreadBranchOverride: activeThreadBranch,
+          onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+        }
+      : {}),
+    envLocked,
+    onComposerFocusRequest: scheduleComposerFocus,
+    ...(canCheckoutPullRequestIntoThread
+      ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+      : {}),
+    ...(hasMultipleEnvironments ? { onEnvironmentChange } : {}),
+    availableEnvironments: logicalProjectEnvironments,
+  };
+
   const panelToggleControls = (
     <PanelLayoutControls
       terminalAvailable={activeProject !== null}
@@ -5907,7 +5937,7 @@ function ChatViewContent(props: ChatViewProps) {
         closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
       />
     ) : activeRightPanelSurface?.kind === "diff" ? (
-      <Suspense fallback={null}>
+      <Suspense fallback={<DiffPanelPlaceholder />}>
         <DiffPanel
           key={`${sideDiffThreadRef ? scopedThreadKey(sideDiffThreadRef) : activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
           threadRef={sideDiffThreadRef ?? undefined}
@@ -6009,7 +6039,7 @@ function ChatViewContent(props: ChatViewProps) {
         <header
           data-chat-header
           className={cn(
-            "bg-background transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none",
+            "relative bg-background transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none",
             isElectron
               ? cn(
                   "workspace-topbar drag-region relative px-3 sm:px-5",
@@ -6022,34 +6052,20 @@ function ChatViewContent(props: ChatViewProps) {
           )}
         >
           {!rightPanelOpen ? panelLayoutControls : null}
+          <div
+            ref={setThreadDetailsToggleContainer}
+            className="absolute right-20 z-40 flex h-full items-center [-webkit-app-region:no-drag]"
+            data-thread-details-toggle
+          />
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
-            {...(routeKind === "draft" && draftId ? { draftId } : {})}
             activeThreadTitle={activeThread.title}
             isServerThread={isServerThread}
             changeRequestState={activeThreadPr?.state ?? null}
             activeProjectName={activeProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
-            openInCwd={gitCwd}
-            activeProjectScripts={activeProject?.scripts}
-            preferredScriptId={
-              activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-            }
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            rightPanelOpen={rightPanelOpen}
-            gitCwd={isScratch ? null : gitCwd}
-            onShowPullRequest={
-              pullRequestSelection && activeThreadRef
-                ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
-                : undefined
-            }
             onNewThreadInProject={handleNewThreadInActiveProject}
-            onRunProjectScript={runProjectScript}
-            onAddProjectScript={saveProjectScript}
-            onUpdateProjectScript={updateProjectScript}
-            onDeleteProjectScript={deleteProjectScript}
           />
         </header>
 
@@ -6060,7 +6076,7 @@ function ChatViewContent(props: ChatViewProps) {
         {/* Main content area with optional plan sidebar */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <ChatCanvas composerOverlayElement={composerOverlayElement}>
             {/* Provider status overlays the timeline without changing its content height. */}
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <ProviderStatusBanner
@@ -6170,7 +6186,7 @@ function ChatViewContent(props: ChatViewProps) {
             >
               <div
                 ref={attachDraftHeroTransitionGroupRef}
-                className="chat-composer-horizontal-inset w-full"
+                className="chat-composer-horizontal-inset chat-composer-lane w-full"
               >
                 <div className="pointer-events-auto relative z-10">
                   {isProviderSubagent ? (
@@ -6335,32 +6351,7 @@ function ChatViewContent(props: ChatViewProps) {
                             >
                               {showComposerContextStrip && (
                                 <div className="pointer-events-auto">
-                                  <BranchToolbar
-                                    environmentId={activeThread.environmentId}
-                                    threadId={activeThread.id}
-                                    showGitControls={isGitRepo}
-                                    {...(routeKind === "draft" && draftId ? { draftId } : {})}
-                                    onEnvModeChange={onEnvModeChange}
-                                    startFromOrigin={startFromOrigin}
-                                    onStartFromOriginChange={onStartFromOriginChange}
-                                    {...(canOverrideServerThreadEnvMode
-                                      ? { effectiveEnvModeOverride: envMode }
-                                      : {})}
-                                    {...(canOverrideServerThreadEnvMode
-                                      ? {
-                                          activeThreadBranchOverride: activeThreadBranch,
-                                          onActiveThreadBranchOverrideChange:
-                                            setPendingServerThreadBranch,
-                                        }
-                                      : {})}
-                                    envLocked={envLocked}
-                                    onComposerFocusRequest={scheduleComposerFocus}
-                                    {...(canCheckoutPullRequestIntoThread
-                                      ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                                      : {})}
-                                    {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
-                                    availableEnvironments={logicalProjectEnvironments}
-                                  />
+                                  <BranchToolbar {...branchToolbarProps} />
                                 </div>
                               )}
                             </div>
@@ -6377,12 +6368,40 @@ function ChatViewContent(props: ChatViewProps) {
               </div>
             </div>
 
+            {activeThreadRef && activeProject ? (
+              <ThreadDetailsPanel
+                key={activeThreadKey}
+                threadRef={activeThreadRef}
+                toggleContainer={threadDetailsToggleContainer}
+                projectName={activeProject.title}
+                scripts={activeProject.scripts}
+                preferredScriptId={lastInvokedScriptByProjectId[activeProject.id] ?? null}
+                openInCwd={gitCwd}
+                gitCwd={isScratch ? null : gitCwd}
+                keybindings={keybindings}
+                availableEditors={availableEditors}
+                branchToolbar={showComposerContextStrip ? branchToolbarProps : null}
+                onOpenChanges={() => {
+                  useRightPanelStore.getState().open(activeThreadRef, "diff");
+                  onDiffPanelOpen?.();
+                }}
+                onShowPullRequest={
+                  pullRequestSelection
+                    ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
+                    : undefined
+                }
+                onRunScript={runProjectScript}
+                onAddScript={saveProjectScript}
+                onUpdateScript={updateProjectScript}
+                onDeleteScript={deleteProjectScript}
+              />
+            ) : null}
+
             {activeThreadRef && activePreviewMiniPlayer ? (
               <ThreadPreviewMiniPlayer
                 key={`${activeThreadKey}:${activePreviewMiniPlayer.tabId}`}
                 threadRef={activeThreadRef}
                 tabId={activePreviewMiniPlayer.tabId}
-                bottomInset={isDraftHeroState ? 0 : composerOverlayHeight}
               />
             ) : null}
 
@@ -6432,7 +6451,7 @@ function ChatViewContent(props: ChatViewProps) {
                 onPrepared={handlePreparedPullRequestThread}
               />
             ) : null}
-          </div>
+          </ChatCanvas>
           {/* end chat column */}
         </div>
         {/* end horizontal flex container */}

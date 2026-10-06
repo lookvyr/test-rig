@@ -1,3 +1,4 @@
+import { useChatCanvas } from "./ChatCanvasContext";
 import { ThreadFind } from "./ThreadFind";
 import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import { ComputerUseAppIcon } from "~/components/Icons";
@@ -1262,11 +1263,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     );
   }, [historyControls, onOpenThread, parentThreadLink, topFadeEnabled]);
 
+  const registerTimeline = useChatCanvas()?.registerTimeline;
   const setTimelineList = useCallback(
     (list: LegendListRef | null) => {
       listRef.current = list;
+      registerTimeline?.(list?.getScrollableNode() ?? null);
     },
-    [listRef],
+    [listRef, registerTimeline],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state

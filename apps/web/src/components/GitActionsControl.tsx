@@ -1,3 +1,8 @@
+import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
+import {
+  THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
+  THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
+} from "./chat/threadDetailsPanelStyles";
 import { useAtomValue } from "@effect/atom-react";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { type ScopedThreadRef } from "@t3tools/contracts";
@@ -99,6 +104,7 @@ import {
 import { openPullRequestLink } from "~/lib/openPullRequestLink";
 
 interface GitActionsControlProps {
+  displayMode?: "toolbar" | "panel";
   gitCwd: string | null;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
@@ -996,6 +1002,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
 }
 
 export default function GitActionsControl({
+  displayMode = "toolbar",
   gitCwd,
   activeThreadRef,
   draftId,
@@ -1758,6 +1765,7 @@ export default function GitActionsControl({
     [gitCwd, openInPreferredEditor, threadToastData],
   );
 
+  const panel = displayMode === "panel";
   const canPublishRepository =
     isRepo && gitStatusForActions !== null && !hasPrimaryRemote && hasEnabledSourceControlProvider;
 
@@ -1766,7 +1774,8 @@ export default function GitActionsControl({
   return (
     <>
       {!isRepo ? (
-        <Button
+        <ThreadDetailsControl
+          panel={panel}
           variant="outline"
           size="xs"
           disabled={initAction.isPending}
@@ -1792,17 +1801,26 @@ export default function GitActionsControl({
           <span className="ml-0.5">
             {initAction.isPending ? "Initializing..." : "Initialize Git"}
           </span>
-        </Button>
+        </ThreadDetailsControl>
       ) : (
-        <Group aria-label="Git actions" className="shrink-0">
+        <Group
+          aria-label="Git actions"
+          className={panel ? THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS : "shrink-0"}
+        >
           {quickActionDisabledReason ? (
             <Popover>
               <PopoverTrigger
                 openOnHover
                 render={
-                  <Button
+                  <ThreadDetailsControl
+                    panel={panel}
                     aria-disabled="true"
-                    className="cursor-not-allowed rounded-e-none border-e-0 ps-[8.5px] opacity-64 before:rounded-e-none"
+                    part="primary"
+                    className={
+                      panel
+                        ? "cursor-not-allowed opacity-64"
+                        : "cursor-not-allowed rounded-e-none border-e-0 ps-[8.5px] opacity-64 before:rounded-e-none"
+                    }
                     size="xs"
                     variant="outline"
                   />
@@ -1814,7 +1832,7 @@ export default function GitActionsControl({
                 />
                 <span
                   className={
-                    stagedOnly
+                    stagedOnly || panel
                       ? "ml-0.5"
                       : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
                   }
@@ -1827,26 +1845,34 @@ export default function GitActionsControl({
               </PopoverPopup>
             </Popover>
           ) : (
-            <Button
+            <ThreadDetailsControl
+              panel={panel}
               variant="outline"
               size="xs"
-              className="ps-[8.5px]"
+              part="primary"
+              className={panel ? undefined : "ps-[8.5px]"}
               disabled={isGitActionRunning || quickAction.disabled}
               onClick={runQuickAction}
             >
               <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
               <span
                 className={
-                  stagedOnly
+                  stagedOnly || panel
                     ? "ml-0.5"
                     : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
                 }
               >
                 {quickAction.label}
               </span>
-            </Button>
+            </ThreadDetailsControl>
           )}
-          <GroupSeparator className="hidden @3xl/header-actions:block" />
+          <GroupSeparator
+            className={
+              panel
+                ? THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS
+                : "hidden @3xl/header-actions:block"
+            }
+          />
           <Menu
             onOpenChange={(open) => {
               if (open) {
@@ -1855,7 +1881,15 @@ export default function GitActionsControl({
             }}
           >
             <MenuTrigger
-              render={<Button aria-label="Git action options" size="icon-xs" variant="outline" />}
+              render={
+                <ThreadDetailsControl
+                  panel={panel}
+                  part="secondary"
+                  aria-label="Git action options"
+                  size="icon-xs"
+                  variant="outline"
+                />
+              }
               disabled={isGitActionRunning}
             >
               <ChevronDownIcon aria-hidden="true" className="size-4" />

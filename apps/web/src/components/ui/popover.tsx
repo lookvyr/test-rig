@@ -38,6 +38,7 @@ function PopoverPopup({
   children,
   className,
   viewportClassName,
+  positionerClassName,
   padding = "default",
   variant = "default",
   width = "auto",
@@ -52,6 +53,7 @@ function PopoverPopup({
   ...props
 }: PopoverPrimitive.Popup.Props & {
   viewportClassName?: string;
+  positionerClassName?: string;
   padding?: keyof typeof popoverViewportPaddingClassName;
   variant?: "default" | "panel";
   side?: PopoverPrimitive.Positioner.Props["side"];
@@ -78,6 +80,7 @@ function PopoverPopup({
           "z-[130] h-(--positioner-height) w-(--positioner-width) max-w-(--available-width) transition-transform data-instant:transition-none",
           variant === "panel" &&
             "w-[min(var(--thread-details-panel-width),var(--anchor-width))] transition-none",
+          positionerClassName,
         )}
         data-slot="popover-positioner"
         side={side}

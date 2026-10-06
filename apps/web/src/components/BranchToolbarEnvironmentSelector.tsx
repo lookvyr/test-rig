@@ -1,3 +1,5 @@
+import { ThreadDetailsSelectControl } from "./chat/ThreadDetailsControl";
+import { THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS } from "./chat/threadDetailsPanelStyles";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { CloudIcon, MonitorIcon } from "lucide-react";
 import { memo, useMemo } from "react";
@@ -9,11 +11,11 @@ import {
   SelectGroupLabel,
   SelectItem,
   SelectPopup,
-  SelectTrigger,
   SelectValue,
 } from "./ui/select";
 
 interface BranchToolbarEnvironmentSelectorProps {
+  displayMode?: "toolbar" | "panel";
   envLocked: boolean;
   environmentId: EnvironmentId;
   availableEnvironments: readonly EnvironmentOption[];
@@ -23,11 +25,13 @@ interface BranchToolbarEnvironmentSelectorProps {
 }
 
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
+  displayMode = "toolbar",
   envLocked,
   environmentId,
   availableEnvironments,
   onEnvironmentChange,
 }: BranchToolbarEnvironmentSelectorProps) {
+  const panel = displayMode === "panel";
   const activeEnvironment = useMemo(() => {
     return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
   }, [availableEnvironments, environmentId]);
@@ -43,7 +47,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
 
   if (envLocked || onEnvironmentChange === undefined) {
     return (
-      <span className="inline-flex min-w-0 max-w-full items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs">
+      <span
+        className={
+          panel
+            ? `inline-flex ${THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS}`
+            : "inline-flex min-w-0 max-w-full items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs"
+        }
+      >
         {activeEnvironment?.isPrimary ? (
           <MonitorIcon className="size-3 shrink-0" />
         ) : (
@@ -51,7 +61,11 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         )}
         <span
           data-composer-label
-          className="min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+          className={
+            panel
+              ? "min-w-0 flex-1 truncate"
+              : "min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+          }
         >
           {activeEnvironment?.label ?? "Run on"}
         </span>
@@ -66,10 +80,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       onValueChange={(value) => onEnvironmentChange(value as EnvironmentId)}
       items={environmentItems}
     >
-      <SelectTrigger
-        variant="ghost"
-        size="xs"
-        className="min-w-0 max-w-full font-medium"
+      <ThreadDetailsSelectControl
+        panel={panel}
+        className={panel ? "" : "min-w-0 max-w-full font-medium"}
         aria-label="Run on"
       >
         {activeEnvironment?.isPrimary ? (
@@ -79,11 +92,15 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         )}
         <span
           data-composer-label
-          className="min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+          className={
+            panel
+              ? "min-w-0 flex-1 truncate"
+              : "min-w-0 max-w-[240px] truncate transition-[max-width,opacity] duration-300 ease-out group-data-[compact]/composer-context:max-w-0 group-data-[compact]/composer-context:opacity-0"
+          }
         >
           <SelectValue />
         </span>
-      </SelectTrigger>
+      </ThreadDetailsSelectControl>
       <SelectPopup>
         <SelectGroup>
           <SelectGroupLabel>Run on</SelectGroupLabel>

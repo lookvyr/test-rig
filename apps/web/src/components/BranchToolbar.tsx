@@ -41,7 +41,9 @@ import {
 } from "./ui/menu";
 import { Separator } from "./ui/separator";
 
-interface BranchToolbarProps {
+export interface BranchToolbarProps {
+  layout?: "strip" | "panel";
+  panelSection?: "workspace" | "branch";
   environmentId: EnvironmentId;
   threadId: ThreadId;
   showGitControls: boolean;
@@ -308,6 +310,8 @@ function useLabelsOverflow(element: HTMLDivElement | null): boolean {
 }
 
 export const BranchToolbar = memo(function BranchToolbar({
+  layout = "strip",
+  panelSection,
   environmentId,
   threadId,
   showGitControls,
@@ -401,56 +405,72 @@ export const BranchToolbar = memo(function BranchToolbar({
 
   return (
     <div
-      ref={setStripElement}
-      data-compact={labelsOverflow ? "" : undefined}
-      className="chat-composer-context-strip group/composer-context -mt-4 mx-auto flex w-[calc(100%-2.75rem)] max-w-[calc(48rem-2.75rem)] items-center gap-2 ps-1 pe-2 pt-5 pb-1"
+      ref={layout === "strip" ? setStripElement : undefined}
+      data-compact={layout === "strip" && labelsOverflow ? "" : undefined}
+      className={
+        layout === "panel"
+          ? "flex min-w-0 flex-col"
+          : "chat-composer-context-strip group/composer-context -mt-4 mx-auto flex w-[calc(100%-2.75rem)] max-w-[calc(48rem-2.75rem)] items-center gap-2 ps-1 pe-2 pt-5 pb-1"
+      }
     >
-      {isMobile && showGitControls ? (
-        <MobileRunContextSelector
-          envLocked={envLocked}
-          envModeLocked={envModeLocked}
-          environmentId={environmentId}
-          availableEnvironments={availableEnvironments}
-          showEnvironmentPicker={showEnvironmentPicker}
-          showEnvironmentIndicator={showEnvironmentIndicator}
-          onEnvironmentChange={onEnvironmentChange}
-          effectiveEnvMode={effectiveEnvMode}
-          activeWorktreePath={activeWorktreePath}
-          onEnvModeChange={onEnvModeChange}
-          previousWorktreeLabel={previousWorktreeLabel}
-          onUsePreviousWorktree={onUsePreviousWorktree}
-        />
-      ) : (
-        <div className="flex min-w-0 flex-1 items-center gap-1">
-          {showEnvironmentIndicator && availableEnvironments && (
-            <>
-              <BranchToolbarEnvironmentSelector
-                envLocked={envLocked}
-                environmentId={environmentId}
-                availableEnvironments={availableEnvironments}
-                {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
+      {panelSection !== "branch" &&
+        (isMobile && layout === "strip" && showGitControls ? (
+          <MobileRunContextSelector
+            envLocked={envLocked}
+            envModeLocked={envModeLocked}
+            environmentId={environmentId}
+            availableEnvironments={availableEnvironments}
+            showEnvironmentPicker={showEnvironmentPicker}
+            showEnvironmentIndicator={showEnvironmentIndicator}
+            onEnvironmentChange={onEnvironmentChange}
+            effectiveEnvMode={effectiveEnvMode}
+            activeWorktreePath={activeWorktreePath}
+            onEnvModeChange={onEnvModeChange}
+            previousWorktreeLabel={previousWorktreeLabel}
+            onUsePreviousWorktree={onUsePreviousWorktree}
+          />
+        ) : (
+          <div
+            className={
+              layout === "panel"
+                ? "flex min-w-0 flex-col"
+                : "flex min-w-0 flex-1 items-center gap-1"
+            }
+          >
+            {showEnvironmentIndicator && availableEnvironments && (
+              <>
+                <BranchToolbarEnvironmentSelector
+                  displayMode={layout === "panel" ? "panel" : "toolbar"}
+                  envLocked={envLocked}
+                  environmentId={environmentId}
+                  availableEnvironments={availableEnvironments}
+                  {...(showEnvironmentPicker && onEnvironmentChange ? { onEnvironmentChange } : {})}
+                />
+                {showGitControls && layout === "strip" ? (
+                  <Separator orientation="vertical" className="mx-0.5 h-3.5!" />
+                ) : null}
+              </>
+            )}
+            {showGitControls ? (
+              <BranchToolbarEnvModeSelector
+                displayMode={layout === "panel" ? "panel" : "toolbar"}
+                envLocked={envModeLocked}
+                effectiveEnvMode={effectiveEnvMode}
+                activeWorktreePath={activeWorktreePath}
+                onEnvModeChange={onEnvModeChange}
+                previousWorktreeLabel={previousWorktreeLabel}
+                onUsePreviousWorktree={onUsePreviousWorktree}
               />
-              {showGitControls ? (
-                <Separator orientation="vertical" className="mx-0.5 h-3.5!" />
-              ) : null}
-            </>
-          )}
-          {showGitControls ? (
-            <BranchToolbarEnvModeSelector
-              envLocked={envModeLocked}
-              effectiveEnvMode={effectiveEnvMode}
-              activeWorktreePath={activeWorktreePath}
-              onEnvModeChange={onEnvModeChange}
-              previousWorktreeLabel={previousWorktreeLabel}
-              onUsePreviousWorktree={onUsePreviousWorktree}
-            />
-          ) : null}
-        </div>
-      )}
+            ) : null}
+          </div>
+        ))}
 
-      {showGitControls ? (
+      {showGitControls && panelSection !== "workspace" ? (
         <BranchToolbarBranchSelector
-          className="min-w-0 flex-1 justify-end md:ml-auto md:flex-none"
+          displayMode={layout === "panel" ? "panel" : "toolbar"}
+          className={
+            layout === "panel" ? "w-full" : "min-w-0 flex-1 justify-end md:ml-auto md:flex-none"
+          }
           environmentId={environmentId}
           threadId={threadId}
           {...(draftId ? { draftId } : {})}

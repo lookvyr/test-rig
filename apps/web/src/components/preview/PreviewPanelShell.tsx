@@ -1,22 +1,13 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useRef } from "react";
 
 import { isElectron } from "~/env";
-import { useResizableWidth } from "~/hooks/useResizableWidth";
+import { usePreviewPanelInlineSize } from "~/hooks/usePreviewPanelInlineSize";
+export { getPreviewPanelMaxWidth } from "~/hooks/usePreviewPanelInlineSize";
 import { cn } from "~/lib/utils";
 
 import { RightPanelResizeHandle } from "./RightPanelResizeHandle";
 
 export type PreviewPanelMode = "inline" | "sheet" | "sidebar" | "embedded";
-
-const PREVIEW_PANEL_WIDTH_STORAGE_KEY = "t3code:preview-panel-width";
-const PREVIEW_PANEL_MIN_WIDTH = 360;
-/** Fraction of the viewport allowed, preserving the remaining space for chat. */
-const PREVIEW_PANEL_MAX_WIDTH_FRACTION = 0.7;
-const PREVIEW_PANEL_DEFAULT_WIDTH = 540;
-
-export function getPreviewPanelMaxWidth(viewportWidth: number): number {
-  return Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION);
-}
 
 /**
  * Shell for the preview panel. In inline mode the panel is user-resizable
@@ -30,17 +21,14 @@ export function PreviewPanelShell(props: {
 }) {
   const useDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
   const isInline = props.mode === "inline";
-  const maxWidth = useViewportClampedMaxWidth();
-  const { width, handlers } = useResizableWidth({
-    storageKey: PREVIEW_PANEL_WIDTH_STORAGE_KEY,
-    defaultWidth: PREVIEW_PANEL_DEFAULT_WIDTH,
-    minWidth: PREVIEW_PANEL_MIN_WIDTH,
-    maxWidth,
-    edge: "left",
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const { width, handlers } = usePreviewPanelInlineSize(hostRef, {
+    enabled: isInline && !props.maximized,
   });
 
   return (
     <div
+      ref={hostRef}
       className={cn(
         "relative flex h-full min-h-0 min-w-0 flex-col self-stretch bg-background",
         isInline
@@ -58,31 +46,4 @@ export function PreviewPanelShell(props: {
       {props.children}
     </div>
   );
-}
-
-/**
- * Track viewport width to derive a sensible upper bound for the panel.
- * Resize-aware so dragging the OS window narrower re-clamps the stored
- * width on the next render (the hook's clamp picks this up automatically).
- */
-function useViewportClampedMaxWidth(): number {
-  const [vw, setVw] = useState(() => (typeof window === "undefined" ? 1280 : window.innerWidth));
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let frame = 0;
-    const onResize = () => {
-      // Coalesce rapid resize events into one rAF tick.
-      if (frame !== 0) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        setVw(window.innerWidth);
-      });
-    };
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      if (frame !== 0) window.cancelAnimationFrame(frame);
-    };
-  }, []);
-  return getPreviewPanelMaxWidth(vw);
 }
