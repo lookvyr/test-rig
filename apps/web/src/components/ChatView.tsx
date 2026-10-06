@@ -6610,6 +6610,7 @@ function ChatViewContent(props: ChatViewProps) {
                 availableEditors={availableEditors}
                 branchToolbar={showComposerContextStrip ? branchToolbarProps : null}
                 onOpenChanges={() => {
+                  setSideDiffThreadRef(null);
                   useRightPanelStore.getState().open(activeThreadRef, "diff");
                   onDiffPanelOpen?.();
                 }}

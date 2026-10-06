@@ -331,3 +331,24 @@ are retained under `/workspace/v2-ux-fixes`. The original paired evidence remain
 under `/workspace/v2-ux-audit`. These are local verification artifacts, not shipped
 product files. Claude, Electron shell, remote connections, actual usage-limit
 recovery, and every lifecycle permutation were not re-run in this batch.
+
+
+### Post-push comparison
+
+Repeated source comparison with the same current nightly and paired browser
+checks after the batch push. Conversation controls, plans and attachment routing,
+Agents, Changes, schedules, narrow layouts, and preserved fork surfaces showed
+no additional regression from the batch.
+
+This pass also reproduced one pre-existing Test Rig-specific Review bug: after
+opening a side-chat turn diff, the parent's Details → Changes retained the side
+chat's turn selection and annotation target. Clearing that temporary target when
+opening the parent's Changes restores its saved Review scope. A real side-chat
+file change reproduced the issue; the corrected browser route used the parent
+thread and composer target and restored its Uncommitted scope. Independent review
+confirmed that the change preserves saved selections.
+
+Multi-account identity badges remain a minor upstream presentation difference
+outside this batch. No multi-account live case was exercised. All earlier
+verification limits still apply. Post-push evidence is under
+`/workspace/v2-ux-fixes/post-push`.
