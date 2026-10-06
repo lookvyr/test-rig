@@ -225,6 +225,7 @@ export function V2LifecycleRow(props: {
       <SubagentTimelineLink
         parentRef={scopeThreadRef(props.environmentId, item.threadId)}
         subagentId={item.subagentId}
+        providers={props.providerStatuses}
         status={item.status}
         driver={item.driver}
         provider={props.providerStatuses.find(
@@ -344,6 +345,7 @@ function SubagentTimelineLink(props: {
   readonly subagentId: NodeId;
   readonly driver: ProviderDriverKind;
   readonly provider: ServerProvider | undefined;
+  readonly providers: ReadonlyArray<ServerProvider>;
   readonly title: string;
   readonly result: string | null;
   readonly progress: string | undefined;
@@ -476,6 +478,7 @@ function SubagentTimelineTooltip(
       title={formatSubagentDisplayTitle(child?.title ?? props.title)}
       model={props.model}
       provider={props.provider}
+      providers={props.providers}
       driver={props.driver}
       elapsed={props.elapsed}
       status={props.status}

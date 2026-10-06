@@ -18,6 +18,7 @@ import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 export function ProviderSubagentBar(props: {
   /** The provider running the subagent; no icon while its catalog loads. */
   readonly provider: ProviderInstanceEntry | null;
+  readonly showInstanceBadge: boolean;
   readonly modelLabel: string;
   /** Reasoning effort as the composer names it, when the subagent has one. */
   readonly effortLabel: string | null;
@@ -58,6 +59,8 @@ export function ProviderSubagentBar(props: {
             driverKind={props.provider.driverKind}
             displayName={props.provider.displayName}
             accentColor={props.provider.accentColor}
+            showBadge={props.showInstanceBadge}
+            badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
             className="size-4 shrink-0"
             iconClassName="size-4"
           />

@@ -151,7 +151,7 @@ import { RightPanelTabs } from "./RightPanelTabs";
 import { SideChatPanel } from "./chat/SideChatPanel";
 import { ThreadRelationshipsPanel } from "./chat/ThreadRelationshipsControl";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
-import { deriveProviderInstanceEntries } from "../providerInstances";
+import { deriveProviderInstanceEntries, shouldShowInstanceBadge } from "../providerInstances";
 import { isProviderNativeSubagentThread } from "@t3tools/contracts";
 import { derivePendingThreadRequests } from "@t3tools/client-runtime/state/threadRequests";
 import {
@@ -2468,7 +2468,8 @@ function ChatViewContent(props: ChatViewProps) {
     searchHistory ? searchHistoryMessages : timelineMessages,
   );
 
-  const providerSubagentEntry = deriveProviderInstanceEntries(providerStatuses).find(
+  const providerInstanceEntries = deriveProviderInstanceEntries(providerStatuses);
+  const providerSubagentEntry = providerInstanceEntries.find(
     (entry) => entry.instanceId === activeThread?.providerInstanceId,
   );
   const providerSubagentModels = providerSubagentEntry?.models ?? [];
@@ -6413,6 +6414,10 @@ function ChatViewContent(props: ChatViewProps) {
                   {isProviderSubagent ? (
                     <ProviderSubagentBar
                       provider={providerSubagentEntry ?? null}
+                      showInstanceBadge={
+                        providerSubagentEntry !== undefined &&
+                        shouldShowInstanceBadge(providerSubagentEntry, providerInstanceEntries)
+                      }
                       modelLabel={providerSubagentModelLabel}
                       effortLabel={providerSubagentEffortLabel}
                       status={providerSubagentStatus}

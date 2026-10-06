@@ -52,6 +52,10 @@ running. Ask the parent to inspect or cancel that task instead of launching a
 duplicate. For another app-owned review round, ask the parent to delegate again
 with the original brief, prior findings, and any unresolved questions.
 
+When you configure multiple accounts for the same provider, agent hover cards
+name the account, and provider-managed subagent status bars show its badge.
+Configured account colors also appear in these indicators.
+
 ## Stopping delegated work
 
 Stopping the parent prevents its current delegation round from automatically

@@ -352,3 +352,19 @@ Multi-account identity badges remain a minor upstream presentation difference
 outside this batch. No multi-account live case was exercised. All earlier
 verification limits still apply. Post-push evidence is under
 `/workspace/v2-ux-fixes/post-push`.
+
+
+### Account indicators follow-up
+
+The minor account-identification gap is now addressed using nightly's display
+rules for supported providers. Agent hover cards in both the timeline and Agents
+panel name the account and show its configured accent dot; native subagent bars
+show an initials badge. A single unaccented account keeps the existing display.
+
+Verified the Agents hover card with temporary provider-instance display settings,
+then restored the original settings. Browser component fixtures covered native
+bars and hover cards with one account, multiple accounts, and optional accents,
+at wide and narrower widths. This tests presentation without claiming a second
+authenticated account was exercised. Forty-five existing focused tests, the web
+typecheck, targeted lint, and independent review passed. Temporary preview code
+was removed; screenshots remain under `/workspace/account-badges`.

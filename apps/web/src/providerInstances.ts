@@ -182,6 +182,17 @@ export function deriveProviderInstanceEntries(
   });
 }
 
+/** Name an account when its provider glyph is ambiguous or explicitly accented. */
+export function shouldShowInstanceBadge(
+  entry: Pick<ProviderInstanceEntry, "driverKind" | "accentColor">,
+  entries: ReadonlyArray<Pick<ProviderInstanceEntry, "driverKind">>,
+): boolean {
+  return (
+    Boolean(entry.accentColor) ||
+    entries.filter((candidate) => candidate.driverKind === entry.driverKind).length > 1
+  );
+}
+
 /**
  * Overlay the current settings configuration onto streamed provider snapshots.
  * Provider probes can briefly retain their previous `enabled` value after a
