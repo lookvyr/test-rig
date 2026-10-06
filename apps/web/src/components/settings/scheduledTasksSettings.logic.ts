@@ -152,3 +152,15 @@ export function workspaceFromDraft(
       };
   }
 }
+
+/** Saved tasks and explicitly chosen permissions keep their launch intent. */
+export function scheduledTaskRuntimeMode(
+  settings: ServerSettings,
+  project: (LegacyProjectSettingsFields & { readonly id: ProjectId }) | null,
+  draft: Pick<DraftState, "editingId" | "runtimeMode">,
+  explicitlyChosen: boolean,
+): RuntimeMode {
+  return draft.editingId !== null || explicitlyChosen
+    ? draft.runtimeMode
+    : resolveProjectSettings(settings, project?.id ?? null, project).settings.defaultRuntimeMode;
+}

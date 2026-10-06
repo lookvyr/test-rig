@@ -6,6 +6,11 @@ the prompt to repeat. Choose **No project** to run without a repository; each ru
 gets its own folder on the selected environment. Pick a time and weekdays or an interval of at least one
 minute. The form shows the server timezone. No tasks are created automatically.
 
+New tasks start with the selected project's permission default, or the environment
+default when the project has no override. Once you choose permissions explicitly,
+changing projects keeps that choice. Editing a saved task preserves its saved
+permissions.
+
 Each task has an Enabled toggle and an actions menu with **Edit**, **Run now**, and
 **Delete**. Tasks created here start a new conversation for each run. You can also
 ask an agent to create or manage tasks, including tasks that send into an existing

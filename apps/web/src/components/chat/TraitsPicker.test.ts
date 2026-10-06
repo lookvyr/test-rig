@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderDriverKind, type ProviderOptionDescriptor } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ProviderOptionDescriptor,
+} from "@t3tools/contracts";
 import { buildTraitsTriggerDisplay } from "./TraitsPicker";
 
 function selectDescriptor(
@@ -129,4 +133,25 @@ describe("buildTraitsTriggerDisplay", () => {
       }),
     ).toEqual({ label: "Ultrathink", showFastModeIcon: true });
   });
+});
+
+it("shows the native default variant without persisting it as an explicit choice", () => {
+  const selection = { instanceId: ProviderInstanceId.make("opencode"), model: "openai/gpt-6-sol" };
+  expect(
+    buildTraitsTriggerDisplay({
+      provider: ProviderDriverKind.make("opencode"),
+      descriptors: [
+        {
+          id: "variant",
+          label: "Reasoning",
+          type: "select",
+          options: [{ id: "high", label: "High" }],
+        },
+      ],
+      primarySelectDescriptorId: "variant",
+      ultrathinkPromptControlled: false,
+      modelSelection: selection,
+      reportedModelSelection: { ...selection, options: [{ id: "variant", value: "default" }] },
+    }).label,
+  ).toBe("Default");
 });

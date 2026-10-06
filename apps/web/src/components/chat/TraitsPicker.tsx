@@ -1,6 +1,7 @@
 import {
+  type ModelSelection,
+  ProviderInstanceId,
   type ProviderDriverKind,
-  type ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type ScopedThreadRef,
@@ -81,11 +82,13 @@ function replaceDescriptorCurrentValue(
 
 function getDescriptorStringValue(
   descriptor: Extract<ProviderOptionDescriptor, { type: "select" }> | null,
+  modelSelection?: ModelSelection | null,
+  reportedModelSelection?: ModelSelection | null,
 ): string | null {
   if (!descriptor) {
     return null;
   }
-  const value = getProviderOptionCurrentValue(descriptor);
+  const value = getProviderOptionCurrentValue(descriptor, modelSelection, reportedModelSelection);
   return typeof value === "string" ? value : null;
 }
 
@@ -213,6 +216,7 @@ export interface TraitsMenuContentProps {
   prompt: string;
   onPromptChange: (prompt: string) => void;
   modelOptions?: ProviderOptions | null | undefined;
+  reportedModelSelection?: ModelSelection | null | undefined;
   allowPromptInjectedEffort?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
@@ -226,6 +230,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   prompt,
   onPromptChange,
   modelOptions,
+  reportedModelSelection,
   allowPromptInjectedEffort = true,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
@@ -299,7 +304,17 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         const selectedValue =
           ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
             ? "ultrathink"
-            : (getDescriptorStringValue(descriptor) ?? "");
+            : (getDescriptorStringValue(
+                descriptor,
+                model
+                  ? {
+                      instanceId: instanceId ?? ProviderInstanceId.make(provider),
+                      model,
+                      ...(modelOptions ? { options: modelOptions } : {}),
+                    }
+                  : null,
+                reportedModelSelection,
+              ) ?? "");
 
         return (
           <div key={descriptor.id}>
@@ -390,6 +405,8 @@ export function buildTraitsTriggerDisplay(input: {
   descriptors: ReadonlyArray<ProviderOptionDescriptor>;
   primarySelectDescriptorId: string | null;
   ultrathinkPromptControlled: boolean;
+  modelSelection?: ModelSelection | null;
+  reportedModelSelection?: ModelSelection | null | undefined;
 }): { label: string; showFastModeIcon: boolean } {
   let hasFastMode = false;
   let fastModeEnabled = false;
@@ -418,7 +435,11 @@ export function buildTraitsTriggerDisplay(input: {
         ? "Ultrathink"
         : descriptor.type === "boolean"
           ? `${descriptor.label} ${descriptor.currentValue === true ? "On" : "Off"}`
-          : getProviderOptionCurrentLabel(descriptor);
+          : getProviderOptionCurrentLabel(
+              descriptor,
+              input.modelSelection,
+              input.reportedModelSelection,
+            );
     if (typeof label === "string" && label.length > 0) {
       labels.push(label);
     }
@@ -441,6 +462,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   prompt,
   onPromptChange,
   modelOptions,
+  reportedModelSelection,
   allowPromptInjectedEffort = true,
   triggerVariant,
   triggerClassName,
@@ -474,6 +496,14 @@ export const TraitsPicker = memo(function TraitsPicker({
     descriptors,
     primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
     ultrathinkPromptControlled,
+    modelSelection: model
+      ? {
+          instanceId: instanceId ?? ProviderInstanceId.make(provider),
+          model,
+          ...(modelOptions ? { options: modelOptions } : {}),
+        }
+      : null,
+    reportedModelSelection,
   });
   const fastModeIcon = showFastModeIcon ? (
     <>
@@ -533,6 +563,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           prompt={prompt}
           onPromptChange={onPromptChange}
           modelOptions={modelOptions}
+          reportedModelSelection={reportedModelSelection}
           allowPromptInjectedEffort={allowPromptInjectedEffort}
           {...persistence}
         />

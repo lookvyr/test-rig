@@ -35,6 +35,7 @@ import {
   derivePendingUserInputs,
   isBlockingUserInput,
   derivePhase,
+  deriveCanInterruptRunningThread,
   selectThreadMessages,
   deriveActiveWorkStartedAt,
   isLatestRunSettled,
@@ -560,6 +561,10 @@ export function SideChatPanel(props: {
                   activeProjectDefaultModelSelection={project?.defaultModelSelection}
                   activeThreadModelSelection={thread?.modelSelection}
                   activeThreadProjection={projection}
+                  canInterrupt={deriveCanInterruptRunningThread(
+                    thread !== null,
+                    thread?.runtime ?? null,
+                  )}
                   resolvedTheme={resolvedTheme}
                   settings={settings}
                   keybindings={keybindings}

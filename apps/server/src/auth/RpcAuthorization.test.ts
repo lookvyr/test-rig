@@ -42,6 +42,15 @@ describe("RPC authorization scopes", () => {
     }
   });
 
+  it("requires mutation authority to cancel setup while allowing read-only observation", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.subscribeWorktreeSetup)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.worktreeSetupCancel)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("rejects unknown RPC method names", () => {
     for (const method of ["server.notRegistered", "toString", "constructor"]) {
       expect(() => requiredScopeForRpcMethod(method)).toThrow(

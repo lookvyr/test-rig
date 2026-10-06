@@ -101,7 +101,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
         ? FolderGitIcon
         : FolderIcon;
   const workspaceLabel = envModeLocked
-    ? resolveLockedWorkspaceLabel(activeWorktreePath)
+    ? resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)
     : effectiveEnvMode === "worktree"
       ? resolveEnvModeLabel("worktree")
       : resolveCurrentWorkspaceLabel(activeWorktreePath);
@@ -457,6 +457,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 envLocked={envModeLocked}
                 effectiveEnvMode={effectiveEnvMode}
                 activeWorktreePath={activeWorktreePath}
+                workspaceRoot={activeProject?.workspaceRoot ?? null}
                 onEnvModeChange={onEnvModeChange}
                 previousWorktreeLabel={previousWorktreeLabel}
                 onUsePreviousWorktree={onUsePreviousWorktree}

@@ -13,6 +13,7 @@ import {
   resolveBranchToolbarPrBranch,
   resolveBranchToolbarValue,
   resolveLockedWorkspaceLabel,
+  resolveWorkspaceDisplayName,
   resolveLocalCheckoutBranchMismatch,
   resolvePreviousWorktreeLabel,
   resolvePreviousWorktreeSeed,
@@ -728,5 +729,25 @@ describe("shouldIncludeBranchPickerItem", () => {
         checkoutPullRequestItemValue: "__checkout_pull_request__:1359",
       }),
     ).toBe(false);
+  });
+});
+
+describe("workspace identity and preparation", () => {
+  it("keeps a preparing worktree distinct from the local checkout before a path arrives", () => {
+    expect(
+      resolveEffectiveEnvMode({
+        activeWorktreePath: null,
+        hasServerThread: true,
+        draftThreadEnvMode: undefined,
+        preparingWorktree: true,
+      }),
+    ).toBe("worktree");
+    expect(resolveLockedWorkspaceLabel(null, "worktree")).toBe("New worktree");
+  });
+  it("names POSIX and Windows workspaces without trailing separators", () => {
+    expect(resolveWorkspaceDisplayName("/projects/team/repo/")).toBe("repo");
+    expect(resolveWorkspaceDisplayName("C:\\projects\\repo\\")).toBe("repo");
+    expect(resolveWorkspaceDisplayName("/")).toBe("/");
+    expect(resolveWorkspaceDisplayName(null)).toBeNull();
   });
 });

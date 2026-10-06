@@ -13,7 +13,7 @@ interface PendingUserInputPanelProps {
   respondingRequestIds: RuntimeRequestId[];
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
-  onToggleOption: (questionId: string, optionLabel: string) => void;
+  onToggleOption: (questionId: string, optionValue: string) => void;
   onAdvance: () => void;
   autoAdvance?: boolean;
   globalShortcuts?: boolean;
@@ -62,7 +62,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   isResponding: boolean;
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
-  onToggleOption: (questionId: string, optionLabel: string) => void;
+  onToggleOption: (questionId: string, optionValue: string) => void;
   onAdvance: () => void;
   autoAdvance: boolean;
   globalShortcuts: boolean;
@@ -73,7 +73,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const onAdvanceRef = useRef(onAdvance);
   const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
     questionId: string;
-    optionLabel: string;
+    optionValue: string;
   } | null>(null);
 
   useEffect(() => {
@@ -90,7 +90,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     }
     if (
       progress.customAnswer.trim().length === 0 &&
-      progress.selectedOptionLabels.includes(optimisticSingleSelect.optionLabel)
+      progress.selectedOptionValues.includes(optimisticSingleSelect.optionValue)
     ) {
       setOptimisticSingleSelect(null);
     }
@@ -98,7 +98,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     activeQuestion,
     optimisticSingleSelect,
     progress.customAnswer,
-    progress.selectedOptionLabels,
+    progress.selectedOptionValues,
   ]);
 
   // Clear auto-advance timer on unmount
@@ -110,13 +110,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
   }, []);
 
-  const handleOptionSelection = useEffectEvent((questionId: string, optionLabel: string) => {
+  const handleOptionSelection = useEffectEvent((questionId: string, optionValue: string) => {
     if (activeQuestion?.multiSelect || !autoAdvance) {
-      onToggleOption(questionId, optionLabel);
+      onToggleOption(questionId, optionValue);
       return;
     }
-    setOptimisticSingleSelect({ questionId, optionLabel });
-    onToggleOption(questionId, optionLabel);
+    setOptimisticSingleSelect({ questionId, optionValue });
+    onToggleOption(questionId, optionValue);
     if (autoAdvanceTimerRef.current !== null) {
       window.clearTimeout(autoAdvanceTimerRef.current);
     }
@@ -150,7 +150,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       const option = activeQuestion.options[optionIndex];
       if (!option) return;
       event.preventDefault();
-      handleOptionSelection(activeQuestion.id, option.label);
+      handleOptionSelection(activeQuestion.id, option.value ?? option.label);
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
@@ -182,10 +182,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         {activeQuestion.options.map((option, index) => {
           const isOptimisticallySelected =
             optimisticSingleSelect?.questionId === activeQuestion.id &&
-            optimisticSingleSelect.optionLabel === option.label;
+            optimisticSingleSelect.optionValue === (option.value ?? option.label);
           const isSelected =
             isOptimisticallySelected ||
-            (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
+            (!customAnswerActive &&
+              progress.selectedOptionValues.includes(option.value ?? option.label));
           const shortcutKey = globalShortcuts && index < 9 ? index + 1 : null;
           const className = cn(
             "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
@@ -219,11 +220,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           );
           return (
             <button
-              key={`${activeQuestion.id}:${option.label}`}
+              key={`${activeQuestion.id}:${option.value ?? option.label}`}
               type="button"
               disabled={isResponding}
               onClick={() => {
-                handleOptionSelection(activeQuestion.id, option.label);
+                handleOptionSelection(activeQuestion.id, option.value ?? option.label);
               }}
               className={className}
             >

@@ -29,8 +29,11 @@ Supervised.
 **Full access**: allow commands and edits without prompts. The agent runs
 unattended until it finishes or asks a question of its own.
 
-Approvals appear inline in the conversation. Approve or reject one and the agent continues from
-there.
+Approvals appear above the composer. Approve or decline one to continue. The
+additional-options menu shows the choices supported by that request, such as
+cancelling the turn or remembering permission for the session. Some providers
+also support persistent approval; that choice appears only when offered by the
+provider.
 
 ## Choosing a Mode
 

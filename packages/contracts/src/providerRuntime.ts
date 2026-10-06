@@ -443,6 +443,7 @@ const RequestResolvedPayload = Schema.Struct({
 export type RequestResolvedPayload = typeof RequestResolvedPayload.Type;
 
 const UserInputQuestionOption = Schema.Struct({
+  value: Schema.optional(Schema.String),
   label: TrimmedNonEmptyStringSchema,
   description: TrimmedNonEmptyStringSchema,
 });

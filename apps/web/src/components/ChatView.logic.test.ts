@@ -31,6 +31,7 @@ import {
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   resolveComposerRuntimeMode,
+  resolveWorktreeSetupProgress,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   startNewThreadForProject,
@@ -833,5 +834,116 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingApproval: true })).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingUserInput: true })).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, threadError: "failed" })).toBe(true);
+  });
+});
+
+describe("worktree setup progress", () => {
+  const snapshot = {
+    threadId,
+    sequence: 4,
+    phase: "running" as const,
+    branch: "feature/setup",
+    baseRef: "main",
+    worktreePath: "/repo-worktrees/setup",
+    setupScript: null,
+    startedAt: now,
+    endedAt: null,
+    stages: [
+      {
+        id: "agent" as const,
+        status: "pending" as const,
+        startedAt: null,
+        endedAt: null,
+        percent: null,
+        detail: null,
+        tail: [],
+      },
+    ],
+    error: null,
+  };
+  it("holds a newer outcome across late or empty subscription values", () => {
+    const held = { ...snapshot, phase: "cancelled" as const, sequence: 5 };
+    expect(
+      resolveWorktreeSetupProgress({
+        threadId,
+        localPreparing: false,
+        runStatus: "failed",
+        latest: snapshot,
+        held,
+      }).snapshot,
+    ).toEqual(held);
+    expect(
+      resolveWorktreeSetupProgress({
+        threadId,
+        localPreparing: false,
+        runStatus: "failed",
+        latest: null,
+        held,
+      }).snapshot,
+    ).toEqual(held);
+  });
+  it("releases stale running progress when a reconnected stream authoritatively has no setup", () => {
+    expect(
+      resolveWorktreeSetupProgress({
+        threadId,
+        localPreparing: false,
+        runStatus: "failed",
+        latest: null,
+        latestKnown: true,
+        held: snapshot,
+      }).snapshot,
+    ).toBeNull();
+    expect(
+      resolveWorktreeSetupProgress({
+        threadId,
+        localPreparing: false,
+        runStatus: "failed",
+        latest: null,
+        latestKnown: true,
+        held: snapshot,
+      }).isPreparingWorktree,
+    ).toBe(false);
+    const settled = { ...snapshot, phase: "cancelled" as const };
+    expect(
+      resolveWorktreeSetupProgress({
+        threadId,
+        localPreparing: false,
+        runStatus: "failed",
+        latest: null,
+        latestKnown: true,
+        held: settled,
+      }).snapshot,
+    ).toEqual(settled);
+  });
+  it("rejects held progress from another thread", () => {
+    expect(
+      resolveWorktreeSetupProgress({
+        threadId: ThreadId.make("other"),
+        localPreparing: false,
+        runStatus: undefined,
+        latest: snapshot,
+        held: snapshot,
+      }).snapshot,
+    ).toBeNull();
+  });
+  it("blocks until the agent handoff, then permits follow-ups during async setup", () => {
+    expect(
+      resolveWorktreeSetupProgress({
+        threadId,
+        localPreparing: false,
+        runStatus: "preparing",
+        latest: snapshot,
+        held: null,
+      }).isPreparingWorktree,
+    ).toBe(true);
+    expect(
+      resolveWorktreeSetupProgress({
+        threadId,
+        localPreparing: false,
+        runStatus: "running",
+        latest: { ...snapshot, stages: [{ ...snapshot.stages[0]!, status: "done" }] },
+        held: null,
+      }).isPreparingWorktree,
+    ).toBe(false);
   });
 });

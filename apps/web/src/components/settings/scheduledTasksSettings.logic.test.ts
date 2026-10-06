@@ -11,6 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import {
   scheduledTaskDefaultModel,
+  scheduledTaskRuntimeMode,
   taskToDraft,
   workspaceFromDraft,
 } from "./scheduledTasksSettings.logic";
@@ -171,4 +172,26 @@ describe("editing agent-created tasks", () => {
       expect(draft.interactionMode).toBe("plan");
     },
   );
+});
+
+describe("scheduled task permission defaults", () => {
+  const project = { id: ProjectId.make("supervised-project") };
+  const settings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    defaultRuntimeMode: "full-access" as const,
+    projectSettingsOverrides: {
+      [project.id]: { defaultRuntimeMode: "approval-required" as const },
+    },
+  };
+  const draft = { editingId: null, runtimeMode: "full-access" as const };
+  it("follows selected project defaults until permissions are explicitly chosen", () => {
+    expect(scheduledTaskRuntimeMode(settings, null, draft, false)).toBe("full-access");
+    expect(scheduledTaskRuntimeMode(settings, project, draft, false)).toBe("approval-required");
+    expect(scheduledTaskRuntimeMode(settings, project, draft, true)).toBe("full-access");
+  });
+  it("keeps saved task permissions when project defaults differ", () => {
+    expect(
+      scheduledTaskRuntimeMode(settings, project, { ...draft, editingId: "saved-task" }, false),
+    ).toBe("full-access");
+  });
 });

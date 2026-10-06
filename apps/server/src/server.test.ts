@@ -1,3 +1,4 @@
+import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as OrchestratorV2 from "./orchestration-v2/Orchestrator.ts";
 import * as ProviderAdapterRegistryV2 from "./orchestration-v2/ProviderAdapterRegistry.ts";
@@ -738,6 +739,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(Layer.mock(EventSink.EventSinkV2)({})),
       Layer.provide(Layer.mock(ProviderAdapterRegistryV2.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
+      Layer.provide(WorktreeSetupTracker.layer),
       Layer.provide(resourceTelemetryLayer),
       Layer.provide(
         Layer.mock(BrowserTraceCollector.BrowserTraceCollector)({
@@ -3835,6 +3837,21 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.vcsPull]({ cwd: "/tmp/repo" })),
       );
       assert.equal(pull.status, "pulled");
+
+      const setupSnapshot = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeWorktreeSetup]({ threadId: defaultThreadId }).pipe(
+            Stream.runHead,
+          ),
+        ),
+      );
+      assert.deepEqual(setupSnapshot, Option.some(null));
+      const cancelSetup = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.worktreeSetupCancel]({ threadId: defaultThreadId }),
+        ),
+      );
+      assert.deepEqual(cancelSetup, { cancelled: false });
 
       const refreshedStatus = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>

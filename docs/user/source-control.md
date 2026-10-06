@@ -5,6 +5,10 @@ editor access, project actions, and Git commands. On wide windows, details sit
 beside the conversation. On narrower windows, the same controls open in a
 popover. Hiding the wide details card is remembered for that conversation.
 
+The workspace control names the current directory. Hover to see its full path,
+or open its context menu to copy the path. **Changes** includes the available
+addition and deletion totals.
+
 **Changes** opens the review panel, where the existing stacked/split diffs,
 changed-file tree, and comparison controls remain available. Details and review
 can be opened independently. Changes fade in together once the initial review
@@ -124,6 +128,21 @@ Names you explicitly choose are preserved. Changing these settings does not rena
 branches or folders or affect synthetic branches for cross-repository pull requests.
 
 When **Start from origin** is enabled for a new worktree, Test Rig fetches origin and uses the selected branch there. If origin or that branch is absent, it uses the selected local branch. A fetch failure is reported instead of silently using stale local state.
+
+## Worktree setup progress
+
+When a new worktree is prepared, the conversation shows its setup progress.
+Expand **Details** to inspect the stages and output. If a setup action fails,
+the failed outcome remains visible; **Open terminal** opens its terminal when
+one is available. An asynchronous setup action can continue while the agent
+works.
+
+Setup can be cancelled while it is still cancellable. **Work locally** is offered
+when the conversation can continue in the project checkout instead. The cancelled
+attempt stays in the history, and the original message runs again in that checkout.
+
+Imported setup scripts retain their configured choice to wait for completion or
+run alongside the agent. Editing a script preserves that choice.
 
 ## Move a conversation into a worktree
 

@@ -44,7 +44,7 @@ describe("resolvePendingUserInputAnswer", () => {
   it("prefers a custom answer over selected options", () => {
     expect(
       resolvePendingUserInputAnswer(singleSelectQuestion, {
-        selectedOptionLabels: ["Orchestration-first"],
+        selectedOptionValues: ["Orchestration-first"],
         customAnswer: "Keep the existing envelope for one release",
       }),
     ).toBe("Keep the existing envelope for one release");
@@ -53,7 +53,7 @@ describe("resolvePendingUserInputAnswer", () => {
   it("falls back to the selected option for single-select questions", () => {
     expect(
       resolvePendingUserInputAnswer(singleSelectQuestion, {
-        selectedOptionLabels: ["Orchestration-first"],
+        selectedOptionValues: ["Orchestration-first"],
       }),
     ).toBe("Orchestration-first");
   });
@@ -61,7 +61,7 @@ describe("resolvePendingUserInputAnswer", () => {
   it("returns all selected labels for multi-select questions", () => {
     expect(
       resolvePendingUserInputAnswer(multiSelectQuestion, {
-        selectedOptionLabels: ["Server", "Web"],
+        selectedOptionValues: ["Server", "Web"],
       }),
     ).toEqual(["Server", "Web"]);
   });
@@ -70,7 +70,7 @@ describe("resolvePendingUserInputAnswer", () => {
     expect(
       setPendingUserInputCustomAnswer(
         {
-          selectedOptionLabels: ["Server", "Web"],
+          selectedOptionValues: ["Server", "Web"],
         },
         "doesn't matter",
       ),
@@ -85,7 +85,7 @@ describe("togglePendingUserInputOptionSelection", () => {
     expect(togglePendingUserInputOptionSelection(multiSelectQuestion, undefined, "Server")).toEqual(
       {
         customAnswer: "",
-        selectedOptionLabels: ["Server"],
+        selectedOptionValues: ["Server"],
       },
     );
 
@@ -93,13 +93,13 @@ describe("togglePendingUserInputOptionSelection", () => {
       togglePendingUserInputOptionSelection(
         multiSelectQuestion,
         {
-          selectedOptionLabels: ["Server", "Web"],
+          selectedOptionValues: ["Server", "Web"],
         },
         "Server",
       ),
     ).toEqual({
       customAnswer: "",
-      selectedOptionLabels: ["Web"],
+      selectedOptionValues: ["Web"],
     });
   });
 });
@@ -125,7 +125,7 @@ describe("buildPendingUserInputAnswers", () => {
         ],
         {
           scope: {
-            selectedOptionLabels: ["Orchestration-first"],
+            selectedOptionValues: ["Orchestration-first"],
           },
           compat: {
             customAnswer: "Keep the current envelope for one release window",
@@ -142,7 +142,7 @@ describe("buildPendingUserInputAnswers", () => {
     expect(
       buildPendingUserInputAnswers([multiSelectQuestion], {
         areas: {
-          selectedOptionLabels: ["Server", "Web"],
+          selectedOptionValues: ["Server", "Web"],
         },
       }),
     ).toEqual({
@@ -176,7 +176,7 @@ describe("pending user input question progress", () => {
     expect(
       countAnsweredPendingUserInputQuestions(questions, {
         scope: {
-          selectedOptionLabels: ["Orchestration-first"],
+          selectedOptionValues: ["Orchestration-first"],
         },
       }),
     ).toBe(1);
@@ -186,7 +186,7 @@ describe("pending user input question progress", () => {
     expect(
       findFirstUnansweredPendingUserInputQuestionIndex(questions, {
         scope: {
-          selectedOptionLabels: ["Orchestration-first"],
+          selectedOptionValues: ["Orchestration-first"],
         },
       }),
     ).toBe(1);
@@ -196,7 +196,7 @@ describe("pending user input question progress", () => {
     expect(
       findFirstUnansweredPendingUserInputQuestionIndex(questions, {
         scope: {
-          selectedOptionLabels: ["Orchestration-first"],
+          selectedOptionValues: ["Orchestration-first"],
         },
         compat: {
           customAnswer: "Keep it for one release window",
@@ -211,7 +211,7 @@ describe("pending user input question progress", () => {
         questions,
         {
           scope: {
-            selectedOptionLabels: ["Orchestration-first"],
+            selectedOptionValues: ["Orchestration-first"],
           },
         },
         0,
@@ -219,7 +219,7 @@ describe("pending user input question progress", () => {
     ).toMatchObject({
       questionIndex: 0,
       activeQuestion: questions[0],
-      selectedOptionLabels: ["Orchestration-first"],
+      selectedOptionValues: ["Orchestration-first"],
       customAnswer: "",
       resolvedAnswer: "Orchestration-first",
       answeredQuestionCount: 1,
@@ -235,16 +235,35 @@ describe("pending user input question progress", () => {
         [multiSelectQuestion],
         {
           areas: {
-            selectedOptionLabels: ["Server", "Web"],
+            selectedOptionValues: ["Server", "Web"],
           },
         },
         0,
       ),
     ).toMatchObject({
-      selectedOptionLabels: ["Server", "Web"],
+      selectedOptionValues: ["Server", "Web"],
       resolvedAnswer: ["Server", "Web"],
       canAdvance: true,
       isComplete: true,
     });
+  });
+});
+
+describe("native option values", () => {
+  it.each(["prod", " first\t", ""])("preserves exact native value %j", (value) => {
+    const question = {
+      ...singleSelectQuestion,
+      options: [{ label: "Production", description: "Deploy", value }],
+    };
+    const draft = togglePendingUserInputOptionSelection(question, undefined, value);
+    expect(buildPendingUserInputAnswers([question], { [question.id]: draft })).toEqual({
+      scope: value,
+    });
+    expect(derivePendingUserInputProgress([question], { scope: draft }, 0).canAdvance).toBe(true);
+  });
+  it("does not submit a stale choice missing from the current question", () => {
+    expect(
+      resolvePendingUserInputAnswer(singleSelectQuestion, { selectedOptionValues: ["removed"] }),
+    ).toBeNull();
   });
 });

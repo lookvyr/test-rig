@@ -87,7 +87,7 @@ export function deriveThreadRelationshipGraph(input: {
         sourceThreadId: ownerThreadId,
         targetThreadId: subagent.childThreadId,
         kind: "subagent",
-        status: subagent.status,
+        status: threadsById.get(subagent.childThreadId)?.activityRunStatus ?? subagent.status,
       });
     }
     for (const transfer of input.projection.contextTransfers) {

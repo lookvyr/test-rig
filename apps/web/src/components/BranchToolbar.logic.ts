@@ -70,8 +70,23 @@ export function resolveCurrentWorkspaceLabel(activeWorktreePath: string | null):
   return activeWorktreePath ? "Current worktree" : resolveEnvModeLabel("local");
 }
 
-export function resolveLockedWorkspaceLabel(activeWorktreePath: string | null): string {
-  return activeWorktreePath ? "Worktree" : "Local checkout";
+export function resolveLockedWorkspaceLabel(
+  activeWorktreePath: string | null,
+  effectiveEnvMode: EnvMode = "local",
+): string {
+  return activeWorktreePath
+    ? "Worktree"
+    : effectiveEnvMode === "worktree"
+      ? resolveEnvModeLabel("worktree")
+      : "Local checkout";
+}
+
+export function resolveWorkspaceDisplayName(path: string | null): string | null {
+  if (!path) return null;
+  const normalizedPath = path.replace(/[\\/]+$/, "");
+  return normalizedPath.length === 0
+    ? path
+    : (normalizedPath.split(/[\\/]/).at(-1) ?? normalizedPath);
 }
 
 export interface PreviousWorktreeSeed {
@@ -125,7 +140,9 @@ export function resolveEffectiveEnvMode(input: {
   activeWorktreePath: string | null;
   hasServerThread: boolean;
   draftThreadEnvMode: EnvMode | undefined;
+  preparingWorktree?: boolean;
 }): EnvMode {
+  if (input.preparingWorktree) return "worktree";
   const { activeWorktreePath, hasServerThread, draftThreadEnvMode } = input;
   if (!hasServerThread) {
     if (activeWorktreePath) {

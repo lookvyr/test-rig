@@ -1,3 +1,4 @@
+import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import * as DateTime from "effect/DateTime";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import { threadRuntimeHasInterruptibleRun } from "@t3tools/client-runtime/state/threadExecution";
@@ -13,6 +14,7 @@ import {
   type ScopedThreadRef,
   type ThreadId,
   type RunId,
+  type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
@@ -559,4 +561,31 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.sessionStatus !== (session?.status ?? null) ||
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
   );
+}
+
+export { resolveVisibleWorktreeSetup } from "@t3tools/client-runtime/worktree-setup";
+
+export function resolveWorktreeSetupProgress(input: {
+  threadId: ThreadId;
+  localPreparing: boolean;
+  runStatus: NonNullable<Thread["latestRun"]>["status"] | undefined;
+  latest: WorktreeSetupSnapshot | null | undefined;
+  held: WorktreeSetupSnapshot | null;
+  latestKnown?: boolean;
+}) {
+  const latest = input.latest?.threadId === input.threadId ? input.latest : null;
+  const held = input.held?.threadId === input.threadId ? input.held : null;
+  const snapshot =
+    input.latestKnown && input.latest === null && held?.phase === "running"
+      ? null
+      : latest && (!held || latest.sequence >= held.sequence)
+        ? latest
+        : held;
+  return {
+    snapshot,
+    isPreparingWorktree:
+      input.localPreparing ||
+      input.runStatus === "preparing" ||
+      (snapshot?.phase === "running" && !worktreeSetupAgentStarted(snapshot)),
+  };
 }

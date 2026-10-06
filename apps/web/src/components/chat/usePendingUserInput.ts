@@ -62,7 +62,16 @@ export function usePendingUserInput(input: {
             answers: Object.fromEntries(
               request.questions.flatMap((question) =>
                 question.options[0]
-                  ? [[question.id, { selectedOptionLabels: [question.options[0].label] }]]
+                  ? [
+                      [
+                        question.id,
+                        {
+                          selectedOptionValues: [
+                            question.options[0].value ?? question.options[0].label,
+                          ],
+                        },
+                      ],
+                    ]
                   : [],
               ),
             ),

@@ -2206,7 +2206,36 @@ it.effect("cancels tracked setup before provider work is released", () =>
         message: "Start",
         workspace: { type: "worktree", baseRef: "main" },
       });
-      const launched = yield* launches.launch(input);
+      const attachment: ChatAttachment = {
+        type: "image",
+        id: ChatAttachmentId.make("cancel-setup-image"),
+        name: "context.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+      };
+      const withContext = {
+        ...input,
+        initialMessage: {
+          ...input.initialMessage!,
+          attachments: [attachment],
+          context: {
+            version: 1 as const,
+            records: [
+              {
+                version: 1 as const,
+                contextId: ComposerContextId.make("cancel-setup-file"),
+                kind: "file" as const,
+                label: attachment.name,
+                attachmentId: attachment.id,
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                sizeBytes: attachment.sizeBytes,
+              },
+            ],
+          },
+        },
+      };
+      const launched = yield* launches.launch(withContext);
       yield* Deferred.await(entered);
       assert.equal((yield* tracker.get(launched.threadId))?.phase, "running");
       assert.isTrue(yield* tracker.cancel(launched.threadId));
@@ -2215,6 +2244,29 @@ it.effect("cancels tracked setup before provider work is released", () =>
       assert.equal(projection.runs[0]?.status, "failed");
       assert.isNull(projection.thread.worktreePath);
       assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
+      const original = projection.messages.find((message) => message.role === "user")!;
+      yield* threads.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("cancel-tracked:continue-locally"),
+        threadId: launched.threadId,
+        messageId: MessageId.make("cancel-tracked:local-message"),
+        text: original.text,
+        attachments: original.attachments,
+        ...(original.context ? { context: original.context } : {}),
+        modelSelection,
+        runtimeMode: input.runtimeMode,
+        interactionMode: input.interactionMode,
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const continued = yield* threads.getThreadProjection(launched.threadId);
+      assert.isNull(continued.thread.worktreePath);
+      assert.equal(continued.runs[0]?.status, "failed");
+      assert.equal(continued.runs[1]?.status, "starting");
+      assert.equal(continued.messages.at(-1)?.text, original.text);
+      assert.deepEqual(continued.messages.at(-1)?.attachments, original.attachments);
+      assert.deepEqual(continued.messages.at(-1)?.context, original.context);
     }).pipe(Effect.provide(harness.layer));
   }),
 );

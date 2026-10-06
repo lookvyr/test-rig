@@ -1,7 +1,7 @@
 import type { UserInputQuestion } from "@t3tools/contracts";
 
 export interface PendingUserInputDraftAnswer {
-  selectedOptionLabels?: string[];
+  selectedOptionValues?: string[];
   customAnswer?: string;
 }
 
@@ -9,7 +9,7 @@ export interface PendingUserInputProgress {
   questionIndex: number;
   activeQuestion: UserInputQuestion | null;
   activeDraft: PendingUserInputDraftAnswer | undefined;
-  selectedOptionLabels: string[];
+  selectedOptionValues: string[];
   customAnswer: string;
   resolvedAnswer: string | string[] | null;
   usingCustomAnswer: boolean;
@@ -28,21 +28,12 @@ function normalizeDraftAnswer(value: string | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeSelectedOptionLabels(value: string[] | undefined): string[] {
+function normalizeSelectedOptionValues(value: string[] | undefined): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  const normalized: string[] = [];
-  for (const entry of value) {
-    if (typeof entry !== "string") continue;
-    const trimmed = entry.trim();
-    if (trimmed.length > 0) {
-      normalized.push(trimmed);
-    }
-  }
-
-  return Array.from(new Set(normalized));
+  return Array.from(new Set(value.filter((entry) => typeof entry === "string")));
 }
 
 export function resolvePendingUserInputAnswer(
@@ -54,51 +45,53 @@ export function resolvePendingUserInputAnswer(
     return customAnswer;
   }
 
-  const selectedOptionLabels = normalizeSelectedOptionLabels(draft?.selectedOptionLabels);
+  const selectedOptionValues = normalizeSelectedOptionValues(draft?.selectedOptionValues).filter(
+    (value) => question.options.some((option) => (option.value ?? option.label) === value),
+  );
   if (question.multiSelect) {
-    return selectedOptionLabels.length > 0 ? selectedOptionLabels : null;
+    return selectedOptionValues.length > 0 ? selectedOptionValues : null;
   }
 
-  return selectedOptionLabels[0] ?? null;
+  return selectedOptionValues[0] ?? null;
 }
 
 export function setPendingUserInputCustomAnswer(
   draft: PendingUserInputDraftAnswer | undefined,
   customAnswer: string,
 ): PendingUserInputDraftAnswer {
-  const selectedOptionLabels =
+  const selectedOptionValues =
     customAnswer.trim().length > 0
       ? undefined
-      : normalizeSelectedOptionLabels(draft?.selectedOptionLabels);
+      : normalizeSelectedOptionValues(draft?.selectedOptionValues);
 
   return {
     customAnswer,
-    ...(selectedOptionLabels && selectedOptionLabels.length > 0 ? { selectedOptionLabels } : {}),
+    ...(selectedOptionValues && selectedOptionValues.length > 0 ? { selectedOptionValues } : {}),
   };
 }
 
 export function togglePendingUserInputOptionSelection(
   question: UserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
-  optionLabel: string,
+  optionValue: string,
 ): PendingUserInputDraftAnswer {
   if (question.multiSelect) {
-    const selectedOptionLabels = normalizeSelectedOptionLabels(draft?.selectedOptionLabels);
-    const nextSelectedOptionLabels = selectedOptionLabels.includes(optionLabel)
-      ? selectedOptionLabels.filter((label) => label !== optionLabel)
-      : [...selectedOptionLabels, optionLabel];
+    const selectedOptionValues = normalizeSelectedOptionValues(draft?.selectedOptionValues);
+    const nextSelectedOptionLabels = selectedOptionValues.includes(optionValue)
+      ? selectedOptionValues.filter((label) => label !== optionValue)
+      : [...selectedOptionValues, optionValue];
 
     return {
       customAnswer: "",
       ...(nextSelectedOptionLabels.length > 0
-        ? { selectedOptionLabels: nextSelectedOptionLabels }
+        ? { selectedOptionValues: nextSelectedOptionLabels }
         : {}),
     };
   }
 
   return {
     customAnswer: "",
-    selectedOptionLabels: [optionLabel],
+    selectedOptionValues: [optionValue],
   };
 }
 
@@ -110,7 +103,7 @@ export function buildPendingUserInputAnswers(
 
   for (const question of questions) {
     const answer = resolvePendingUserInputAnswer(question, draftAnswers[question.id]);
-    if (!answer) {
+    if (answer === null) {
       return null;
     }
     answers[question.id] = answer;
@@ -124,7 +117,9 @@ export function countAnsweredPendingUserInputQuestions(
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
 ): number {
   return questions.reduce((count, question) => {
-    return resolvePendingUserInputAnswer(question, draftAnswers[question.id]) ? count + 1 : count;
+    return resolvePendingUserInputAnswer(question, draftAnswers[question.id]) !== null
+      ? count + 1
+      : count;
   }, 0);
 }
 
@@ -133,7 +128,7 @@ export function findFirstUnansweredPendingUserInputQuestionIndex(
   draftAnswers: Record<string, PendingUserInputDraftAnswer>,
 ): number {
   const unansweredIndex = questions.findIndex(
-    (question) => !resolvePendingUserInputAnswer(question, draftAnswers[question.id]),
+    (question) => resolvePendingUserInputAnswer(question, draftAnswers[question.id]) === null,
   );
 
   return unansweredIndex === -1 ? Math.max(questions.length - 1, 0) : unansweredIndex;
@@ -160,13 +155,13 @@ export function derivePendingUserInputProgress(
     questionIndex: normalizedQuestionIndex,
     activeQuestion,
     activeDraft,
-    selectedOptionLabels: normalizeSelectedOptionLabels(activeDraft?.selectedOptionLabels),
+    selectedOptionValues: normalizeSelectedOptionValues(activeDraft?.selectedOptionValues),
     customAnswer,
     resolvedAnswer,
     usingCustomAnswer: customAnswer.trim().length > 0,
     answeredQuestionCount,
     isLastQuestion,
     isComplete: buildPendingUserInputAnswers(questions, draftAnswers) !== null,
-    canAdvance: Boolean(resolvedAnswer),
+    canAdvance: resolvedAnswer !== null,
   };
 }

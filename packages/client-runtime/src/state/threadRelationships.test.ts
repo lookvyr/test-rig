@@ -46,6 +46,31 @@ describe("thread relationships", () => {
     ).toBe(childStatus);
   });
 
+  it.each(["running", "waiting", "pending", null] as const)(
+    "uses child follow-up activity %s over the settled delegation",
+    (activityRunStatus) => {
+      const parent = ThreadId.make("parent");
+      const child = ThreadId.make("child");
+      const graph = deriveThreadRelationshipGraph({
+        threads: [
+          {
+            id: child,
+            activityRunStatus,
+            lineage: { parentThreadId: parent, relationshipToParent: "subagent" },
+          },
+        ] as never,
+        projection: {
+          thread: { id: parent },
+          subagents: [{ childThreadId: child, status: "completed" }],
+          contextTransfers: [],
+        } as never,
+      });
+      expect(immediateThreadRelationships(graph, parent)[0]?.edge.status).toBe(
+        activityRunStatus ?? "completed",
+      );
+    },
+  );
+
   it("does not label a missing parent with its child's running status", () => {
     const parent = ThreadId.make("missing-parent");
     const child = ThreadId.make("child");

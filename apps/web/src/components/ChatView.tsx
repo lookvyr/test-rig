@@ -1,3 +1,6 @@
+import { resolveVisibleWorktreeSetup, resolveWorktreeSetupProgress } from "./ChatView.logic";
+import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
+import type { WorktreeSetupSnapshot, OrchestrationV2ConversationMessage } from "@t3tools/contracts";
 import { loadDiffPanel } from "./diffPanelLoader";
 import { DiffPanelPlaceholder } from "./DiffPanelShell";
 import { ChatCanvas } from "./chat/ChatCanvas";
@@ -2097,7 +2100,11 @@ function ChatViewContent(props: ChatViewProps) {
     () => deriveActivePlanState(threadProjection, activeLatestRun?.runId ?? undefined),
     [activeLatestRun?.runId, threadProjection],
   );
+  const composerHasAttachments = useComposerDraftStore(
+    (store) => (store.getComposerDraft(composerDraftTarget)?.images.length ?? 0) > 0,
+  );
   const showPlanFollowUpPrompt =
+    !composerHasAttachments &&
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
     latestRunSettled &&
@@ -2107,7 +2114,7 @@ function ChatViewContent(props: ChatViewProps) {
     beginLocalDispatch,
     resetLocalDispatch,
     localDispatchStartedAt,
-    isPreparingWorktree,
+    isPreparingWorktree: isLocallyPreparingWorktree,
     isSendBusy,
   } = useLocalDispatchState({
     activeThread,
@@ -2117,6 +2124,133 @@ function ChatViewContent(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
   });
+  const [worktreeSetupOwner, setWorktreeSetupOwner] = useState<{
+    ownerKey: string;
+    environmentId: EnvironmentId;
+    threadId: ThreadId;
+  } | null>(null);
+  const [heldWorktreeSetup, setHeldWorktreeSetup] = useState<WorktreeSetupSnapshot | null>(null);
+  const worktreeSetupOwnerKey = draftId ?? routeThreadKey;
+  const setupTarget =
+    worktreeSetupOwner?.ownerKey === worktreeSetupOwnerKey ? worktreeSetupOwner : routeThreadRef;
+  const worktreeSetupQuery = useEnvironmentQuery(
+    worktreeSetupOwner?.ownerKey === worktreeSetupOwnerKey ||
+      isLocallyPreparingWorktree ||
+      activeLatestRun?.status === "preparing" ||
+      activeThread?.worktreePath != null
+      ? vcsEnvironment.worktreeSetup({
+          environmentId: setupTarget.environmentId,
+          input: { threadId: setupTarget.threadId },
+        })
+      : null,
+  );
+  useEffect(() => {
+    const latest = worktreeSetupQuery.data;
+    if (!latest) return;
+    setHeldWorktreeSetup((current) =>
+      current?.threadId === latest.threadId && current.sequence > latest.sequence
+        ? current
+        : latest,
+    );
+  }, [worktreeSetupQuery.data]);
+  useEffect(() => {
+    setHeldWorktreeSetup(null);
+  }, [routeThreadKey]);
+  const { snapshot: liveWorktreeSetup, isPreparingWorktree } = resolveWorktreeSetupProgress({
+    threadId: setupTarget.threadId,
+    localPreparing: isLocallyPreparingWorktree,
+    runStatus: activeLatestRun?.status,
+    latest: worktreeSetupQuery.data,
+    latestKnown: worktreeSetupQuery.hasValue,
+    held: heldWorktreeSetup,
+  });
+  const worktreeSetup = resolveVisibleWorktreeSetup({
+    live: liveWorktreeSetup,
+    recorded: null,
+    turnStarted: activeLatestRun?.startedAt != null,
+    followUpSent: activeThreadMessages.filter((message) => message.role === "user").length > 1,
+  });
+  const worktreeSetupBlocksSend =
+    worktreeSetup !== null
+      ? worktreeSetup.phase === "running" && !worktreeSetupAgentStarted(worktreeSetup)
+      : isPreparingWorktree;
+  const cancelWorktreeSetup = useAtomCommand(vcsEnvironment.cancelWorktreeSetup, {
+    reportFailure: false,
+  });
+  const cancellingWorktreeKeysRef = useRef(new Set<string>());
+  const [workLocallyResend, setWorkLocallyResend] = useState<{
+    threadRef: ScopedThreadRef;
+    message: OrchestrationV2ConversationMessage;
+    runId: RunId;
+    modelSelection: ModelSelection;
+    runtimeMode: RuntimeMode;
+    interactionMode: ProviderInteractionMode;
+  } | null>(null);
+  const onCancelWorktreeSetup = useCallback(() => {
+    if (!worktreeSetup || worktreeSetup.phase !== "running") return;
+    const target = {
+      environmentId: setupTarget.environmentId,
+      input: { threadId: worktreeSetup.threadId },
+    };
+    const key = scopedThreadKey(scopeThreadRef(target.environmentId, target.input.threadId));
+    if (cancellingWorktreeKeysRef.current.has(key)) return;
+    cancellingWorktreeKeysRef.current.add(key);
+    void cancelWorktreeSetup(target).finally(() => cancellingWorktreeKeysRef.current.delete(key));
+  }, [cancelWorktreeSetup, setupTarget.environmentId, worktreeSetup]);
+  // Launch receipts arrive before preparation ends. Cancellation retains the
+  // original failed run, so a local attempt reuses its persisted content in
+  // this chat after the cleared workspace reaches the projection.
+  const onWorktreeSetupWorkLocally = useCallback(() => {
+    const message = threadProjection?.messages.findLast((message) => message.role === "user");
+    if (
+      !worktreeSetup ||
+      worktreeSetup.phase !== "running" ||
+      !activeThreadRef ||
+      !activeThread ||
+      !message ||
+      !message.runId ||
+      scopedThreadKey(activeThreadRef) !==
+        scopedThreadKey(scopeThreadRef(setupTarget.environmentId, worktreeSetup.threadId))
+    )
+      return;
+    const targetRef = scopeThreadRef(setupTarget.environmentId, worktreeSetup.threadId);
+    const key = scopedThreadKey(targetRef);
+    if (cancellingWorktreeKeysRef.current.has(key)) return;
+    cancellingWorktreeKeysRef.current.add(key);
+    const resend = {
+      threadRef: targetRef,
+      message,
+      runId: message.runId,
+      modelSelection: activeThread.modelSelection,
+      runtimeMode: activeThread.runtimeMode,
+      interactionMode: activeThread.interactionMode,
+    };
+    void (async () => {
+      try {
+        const result = await cancelWorktreeSetup({
+          environmentId: targetRef.environmentId,
+          input: { threadId: targetRef.threadId },
+        });
+        if (result._tag === "Success" && result.value.cancelled) setWorkLocallyResend(resend);
+      } finally {
+        cancellingWorktreeKeysRef.current.delete(key);
+      }
+    })();
+  }, [
+    activeThread,
+    activeThreadRef,
+    cancelWorktreeSetup,
+    setupTarget.environmentId,
+    threadProjection?.messages,
+    worktreeSetup,
+  ]);
+  const onOpenWorktreeSetupTerminal = useMemo(() => {
+    if (!worktreeSetup || !activeThreadRef || worktreeSetup.threadId !== activeThreadRef.threadId)
+      return null;
+    const setupThreadRef = activeThreadRef;
+    return (terminalId: string) =>
+      storeEnsureTerminal(setupThreadRef, terminalId, { open: true, active: true });
+  }, [activeThreadRef, storeEnsureTerminal, worktreeSetup]);
   const isWorking =
     phase === "running" ||
     phase === "connecting" ||
@@ -2551,10 +2685,79 @@ function ChatViewContent(props: ChatViewProps) {
     [activeServerThread, draftId, routeThreadKey, routeThreadRef],
   );
 
-  const interruptContextRef = useRef({ activeThread, setThreadError });
-  interruptContextRef.current = { activeThread, setThreadError };
+  useEffect(() => {
+    if (
+      !workLocallyResend ||
+      !activeThreadRef ||
+      scopedThreadKey(activeThreadRef) !== scopedThreadKey(workLocallyResend.threadRef) ||
+      activeThread?.worktreePath !== null ||
+      activeLatestRun?.runId !== workLocallyResend.runId ||
+      activeLatestRun?.status !== "failed" ||
+      isSendBusy ||
+      isConnecting ||
+      threadDetailLoading ||
+      activeEnvironmentUnavailable ||
+      sendInFlightRef.current
+    )
+      return;
+    setWorkLocallyResend(null);
+    sendInFlightRef.current = true;
+    void (async () => {
+      try {
+        const result = await startThreadTurn({
+          environmentId: workLocallyResend.threadRef.environmentId,
+          input: {
+            threadId: workLocallyResend.threadRef.threadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: workLocallyResend.message.text,
+              attachments: workLocallyResend.message.attachments,
+              ...(workLocallyResend.message.context
+                ? { context: workLocallyResend.message.context }
+                : {}),
+            },
+            modelSelection: workLocallyResend.modelSelection,
+            runtimeMode: workLocallyResend.runtimeMode,
+            interactionMode: workLocallyResend.interactionMode,
+            dispatchMode: "start",
+          },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            workLocallyResend.threadRef.threadId,
+            error instanceof Error ? error.message : "Could not continue in the local checkout.",
+          );
+        }
+      } finally {
+        sendInFlightRef.current = false;
+      }
+    })();
+  }, [
+    workLocallyResend,
+    activeThreadRef,
+    activeThread?.worktreePath,
+    activeLatestRun?.status,
+    activeLatestRun?.runId,
+    isSendBusy,
+    isConnecting,
+    threadDetailLoading,
+    activeEnvironmentUnavailable,
+    startThreadTurn,
+    setThreadError,
+  ]);
+  const interruptContextRef = useRef({ activeThread, setThreadError, worktreeSetupBlocksSend });
+  interruptContextRef.current = { activeThread, setThreadError, worktreeSetupBlocksSend };
   const onInterrupt = useCallback(async () => {
-    const { activeThread, setThreadError } = interruptContextRef.current;
+    const { activeThread, setThreadError, worktreeSetupBlocksSend } = interruptContextRef.current;
+    if (activeThread && worktreeSetupBlocksSend) {
+      const cancelled = await cancelWorktreeSetup({
+        environmentId: activeThread.environmentId,
+        input: { threadId: activeThread.id },
+      });
+      if (cancelled._tag === "Success" && cancelled.value.cancelled) return;
+    }
     const input = buildRunningThreadTurnInterruptInput(activeThread);
     if (!input || !activeThread) return;
     const result = await interruptThreadTurn({
@@ -2568,7 +2771,7 @@ function ChatViewContent(props: ChatViewProps) {
         error instanceof Error ? error.message : "Failed to interrupt the current turn.",
       );
     }
-  }, [interruptThreadTurn]);
+  }, [cancelWorktreeSetup, interruptThreadTurn]);
   const canInterruptRunningThread = buildRunningThreadTurnInterruptInput(activeThread) !== null;
 
   const focusComposer = useCallback(() => {
@@ -2951,7 +3154,7 @@ function ChatViewContent(props: ChatViewProps) {
         return AsyncResult.failure(Cause.fail(new Error("Script not found.")));
       }
 
-      const updatedScript = buildProjectScript(existingScript.id, input);
+      const updatedScript = buildProjectScript(existingScript.id, input, existingScript);
       const nextScripts = activeProject.scripts.map((script) =>
         script.id === scriptId
           ? updatedScript
@@ -3799,6 +4002,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeWorktreePath,
     hasServerThread: isServerThread,
     draftThreadEnvMode: isLocalDraftThread ? draftThread?.envMode : undefined,
+    preparingWorktree: isPreparingWorktree,
   });
   const canOverrideServerThreadEnvMode = Boolean(
     isServerThread &&
@@ -4804,6 +5008,7 @@ function ChatViewContent(props: ChatViewProps) {
     if (
       !activeThread ||
       isSendBusy ||
+      worktreeSetupBlocksSend ||
       isConnecting ||
       threadDetailLoading ||
       sendInFlightRef.current
@@ -4903,7 +5108,12 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     const messageContext = preparedMessage.context;
-    if (!directAnnotation && showPlanFollowUpPrompt && activeProposedPlan) {
+    if (
+      !directAnnotation &&
+      showPlanFollowUpPrompt &&
+      activeProposedPlan &&
+      composerImages.length === 0
+    ) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: preparedMessage.text.trim(),
         planMarkdown: activeProposedPlan.planMarkdown,
@@ -5205,7 +5415,13 @@ function ChatViewContent(props: ChatViewProps) {
                 : {}),
             }
           : undefined;
-      beginLocalDispatch({ preparingWorktree: false });
+      if (shouldCreateWorktree)
+        setWorktreeSetupOwner({
+          ownerKey: worktreeSetupOwnerKey,
+          environmentId,
+          threadId: threadIdForSend,
+        });
+      beginLocalDispatch({ preparingWorktree: shouldCreateWorktree });
       const startResult = await startThreadTurn({
         environmentId,
         input: {
@@ -6095,6 +6311,11 @@ function ChatViewContent(props: ChatViewProps) {
                 onSearchHistory={setThreadSearchHistory}
                 showingSearchHistory={searchHistory !== null}
                 key={activeThread.id}
+                worktreeSetup={searchHistory ? null : worktreeSetup}
+                onCancelWorktreeSetup={onCancelWorktreeSetup}
+                onWorktreeSetupWorkLocally={onWorktreeSetupWorkLocally}
+                {...(onOpenWorktreeSetupTerminal ? { onOpenWorktreeSetupTerminal } : {})}
+                isPreparingWorktree={isPreparingWorktree && searchHistory === null}
                 isWorking={isWorking && searchHistory === null}
                 runlessWorkActive={runlessWorkStartedAt !== null}
                 activeTurnInProgress={isWorking || !latestRunSettled}
@@ -6283,7 +6504,13 @@ function ChatViewContent(props: ChatViewProps) {
                                 phase={phase}
                                 isConnecting={isConnecting}
                                 isSendBusy={isSendBusy}
-                                sendDisabledReason={threadDetailLoading ? "Messages loading" : null}
+                                sendDisabledReason={
+                                  threadDetailLoading
+                                    ? "Messages loading"
+                                    : worktreeSetupBlocksSend
+                                      ? "Preparing workspace"
+                                      : null
+                                }
                                 isPreparingWorktree={isPreparingWorktree}
                                 environmentUnavailable={activeEnvironmentUnavailableState}
                                 activePendingApproval={activePendingApproval}
@@ -6306,6 +6533,7 @@ function ChatViewContent(props: ChatViewProps) {
                                 }
                                 activeThreadModelSelection={activeThread?.modelSelection}
                                 activeThreadProjection={threadProjection}
+                                canInterrupt={canInterruptRunningThread}
                                 resolvedTheme={resolvedTheme}
                                 settings={settings}
                                 keybindings={keybindings}

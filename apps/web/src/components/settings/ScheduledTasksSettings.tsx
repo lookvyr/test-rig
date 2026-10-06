@@ -47,6 +47,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { WorktreeBaseBranchPicker } from "../WorktreeBaseBranchPicker";
 import {
   scheduledTaskDefaultModel,
+  scheduledTaskRuntimeMode,
   taskToDraft,
   workspaceFromDraft,
   type DraftState,
@@ -542,6 +543,7 @@ function ScheduledTaskEditorDialog({
               : "worktree",
         },
   );
+  const [runtimeModeExplicit, setRuntimeModeExplicit] = useState(false);
   const [saving, setSaving] = useState(false);
   const submissionPending = useRef(false);
   const editingTaskMissing =
@@ -554,6 +556,12 @@ function ScheduledTaskEditorDialog({
     selectedProjectId === "no-project"
       ? isScratchProject(project, scratchWorkspaceRoot)
       : project.id === selectedProjectId,
+  );
+  const runtimeMode = scheduledTaskRuntimeMode(
+    settings,
+    selectedProject ?? null,
+    draft,
+    runtimeModeExplicit,
   );
   const noProject =
     (selectedProjectId === "no-project" && scratchWorkspaceRoot !== undefined) ||
@@ -655,7 +663,7 @@ function ScheduledTaskEditorDialog({
       threadId: draft.threadId ? (draft.threadId as ThreadId) : null,
       workspaceStrategy: workspaceFromDraft(draft),
       modelSelection,
-      runtimeMode: draft.runtimeMode,
+      runtimeMode,
       interactionMode: draft.interactionMode,
       creationSource: "web",
     };
@@ -709,8 +717,9 @@ function ScheduledTaskEditorDialog({
                     workspaceMode: "root",
                     modelKey: "",
                     baseModelSelection: null,
-                    runtimeMode:
-                      next.serverConfig?.settings.defaultRuntimeMode ?? "approval-required",
+                    runtimeMode: runtimeModeExplicit
+                      ? current.runtimeMode
+                      : (next.serverConfig?.settings.defaultRuntimeMode ?? "approval-required"),
                     baseRef: "main",
                     branch: "",
                     startFromOrigin: true,
@@ -889,7 +898,7 @@ function ScheduledTaskEditorDialog({
 
             <Field label="Permissions" htmlFor="scheduled-task-permissions">
               <Select
-                value={draft.runtimeMode}
+                value={runtimeMode}
                 disabled={!!draft.threadId}
                 onValueChange={(value) => {
                   if (
@@ -897,15 +906,15 @@ function ScheduledTaskEditorDialog({
                     value === "approval-required" ||
                     value === "auto" ||
                     value === "auto-accept-edits"
-                  )
+                  ) {
+                    setRuntimeModeExplicit(true);
                     setDraft((current) => ({ ...current, runtimeMode: value }));
+                  }
                 }}
               >
                 <SelectTrigger id="scheduled-task-permissions" size="sm">
                   <SelectValue>
-                    {draft.threadId
-                      ? "Use thread permissions"
-                      : PERMISSION_LABELS[draft.runtimeMode]}
+                    {draft.threadId ? "Use thread permissions" : PERMISSION_LABELS[runtimeMode]}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup>

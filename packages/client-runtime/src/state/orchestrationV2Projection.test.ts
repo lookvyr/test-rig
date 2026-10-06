@@ -7,6 +7,7 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  ProviderDriverKind,
   NodeId,
   ProviderThreadId,
   ProviderTurnId,
@@ -15,6 +16,8 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+
+import { deriveReportedModelSelection } from "./threadExecution.ts";
 
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
 
@@ -348,4 +351,72 @@ it("does not scan every row against every run for a streaming item update", () =
   expect(next?.visibleTurnItems.at(-1)?.item).toBe(payload);
   expect(next?.visibleTurnItems[0]).toBe(projection.visibleTurnItems[0]);
   expect(runReads).toBeLessThanOrEqual(100);
+});
+
+describe("provider thread activation", () => {
+  const nativeThread = {
+    id: ProviderThreadId.make("native-opencode"),
+    driver: ProviderDriverKind.make("opencode"),
+    providerInstanceId: ProviderInstanceId.make("opencode"),
+    providerSessionId: null,
+    appThreadId: threadId,
+    ownerNodeId: null,
+    nativeThreadRef: null,
+    nativeConversationHeadRef: null,
+    status: "idle" as const,
+    firstRunOrdinal: 3,
+    lastRunOrdinal: 5,
+    handoffIds: [],
+    forkedFrom: null,
+    pendingBackgroundTasks: [],
+    contextUsage: null,
+    nativeMetadata: {
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("opencode"),
+        model: "openai/gpt-6-sol",
+        options: [{ id: "variant", value: "default" }],
+      },
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+  const previous = {
+    ...emptyProjection,
+    thread: {
+      ...emptyProjection.thread,
+      activeProviderThreadId: ProviderThreadId.make("native-codex"),
+      providerInstanceId: nativeThread.providerInstanceId,
+      modelSelection: { instanceId: nativeThread.providerInstanceId, model: "openai/gpt-6-sol" },
+    },
+  };
+  const update = {
+    id: "event-provider-active",
+    type: "provider-thread.updated",
+    threadId,
+    driver: "opencode",
+    occurredAt: now,
+    payload: nativeThread,
+  } as OrchestrationV2DomainEvent;
+  it("activates the resumed provider thread after switching back to an existing native conversation", () => {
+    const result = applyOrchestrationV2ProjectionEvent(previous, update)!;
+    expect(result.thread.activeProviderThreadId).toBe(nativeThread.id);
+    expect(result.providerThreads[0]?.nativeMetadata).toEqual(nativeThread.nativeMetadata);
+    expect(deriveReportedModelSelection(result)).toEqual(
+      nativeThread.nativeMetadata.modelSelection,
+    );
+  });
+  it("preserves active identity for roster-only provider updates", () => {
+    const result = applyOrchestrationV2ProjectionEvent(previous, {
+      ...update,
+      activate: false,
+    } as OrchestrationV2DomainEvent)!;
+    expect(result.thread.activeProviderThreadId).toBe(previous.thread.activeProviderThreadId);
+  });
+  it("does not activate a reserved future native thread", () => {
+    const result = applyOrchestrationV2ProjectionEvent(previous, {
+      ...update,
+      payload: { ...nativeThread, status: "not_loaded", firstRunOrdinal: null },
+    } as OrchestrationV2DomainEvent)!;
+    expect(result.thread.activeProviderThreadId).toBe(previous.thread.activeProviderThreadId);
+  });
 });

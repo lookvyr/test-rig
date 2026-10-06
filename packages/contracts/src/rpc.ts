@@ -1,4 +1,10 @@
 import {
+  WorktreeSetupSubscribeInput,
+  WorktreeSetupStreamEvent,
+  WorktreeSetupCancelInput,
+  WorktreeSetupCancelResult,
+} from "./worktreeSetup.ts";
+import {
   ScheduledTaskDeleteInput,
   ScheduledTaskDeleteResult,
   ScheduledTaskError,
@@ -294,6 +300,8 @@ export const WS_METHODS = {
 
   // Streaming subscriptions
   subscribeVcsStatus: "subscribeVcsStatus",
+  subscribeWorktreeSetup: "subscribeWorktreeSetup",
+  worktreeSetupCancel: "worktreeSetup.cancel",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeTerminalMetadata: "subscribeTerminalMetadata",
   subscribePreviewEvents: "subscribePreviewEvents",
@@ -519,6 +527,19 @@ export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
   success: VcsStatusStreamEvent,
   error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
   stream: true,
+});
+
+export const WsSubscribeWorktreeSetupRpc = Rpc.make(WS_METHODS.subscribeWorktreeSetup, {
+  payload: WorktreeSetupSubscribeInput,
+  success: WorktreeSetupStreamEvent,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+export const WsWorktreeSetupCancelRpc = Rpc.make(WS_METHODS.worktreeSetupCancel, {
+  payload: WorktreeSetupCancelInput,
+  success: WorktreeSetupCancelResult,
+  error: EnvironmentAuthorizationError,
 });
 
 export const WsVcsPullRpc = Rpc.make(WS_METHODS.vcsPull, {
@@ -978,6 +999,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsAssetsCreateUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,
   WsSubscribeVcsStatusRpc,
+  WsSubscribeWorktreeSetupRpc,
+  WsWorktreeSetupCancelRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,

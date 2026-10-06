@@ -1,5 +1,6 @@
 import {
   EnvironmentId,
+  ThreadId,
   WS_METHODS,
   type VcsListRefsInput,
   type VcsListRefsResult,
@@ -148,6 +149,67 @@ it.effect("releases the VCS stream when its last consumer leaves, without an idl
     yield* Deferred.await(stopped);
     expect(subscriptions).toBe(1);
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "releases the worktree setup stream when its last consumer leaves, without an idle delay",
+  () =>
+    Effect.gen(function* () {
+      const stopped = yield* Deferred.make<void>();
+      let subscriptions = 0;
+      const client = {
+        [WS_METHODS.subscribeWorktreeSetup]: () =>
+          Stream.concat(
+            Stream.fromEffect(
+              Effect.sync(() => {
+                subscriptions++;
+                return null;
+              }),
+            ),
+            Stream.never,
+          ).pipe(Stream.ensuring(Deferred.succeed(stopped, undefined))),
+      } as unknown as WsRpcProtocolClient;
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: yield* SubscriptionRef.make(CONNECTED_CONNECTION_STATE),
+        session: yield* SubscriptionRef.make(Option.some(session(client))),
+        prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      });
+      const followStream: EnvironmentRegistry.EnvironmentRegistry["Service"]["followStream"] = (
+        _environmentId,
+        stream,
+      ) => Stream.provideService(stream, EnvironmentSupervisor.EnvironmentSupervisor, supervisor);
+      const runtime = Atom.runtime(
+        Layer.merge(
+          Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, {
+            followStream,
+          } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]),
+          Layer.succeed(Persistence.EnvironmentCacheStore, cacheWithRefs(Option.none())),
+        ),
+      );
+      const atoms = createVcsEnvironmentAtoms(runtime);
+      const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+        Effect.sync(() => registry.dispose()),
+      );
+      const target = {
+        environmentId: TARGET.environmentId,
+        input: { threadId: ThreadId.make("setup-thread") },
+      };
+      const query = atoms.worktreeSetup(target);
+      const releasePalette = registry.mount(query);
+      expect(yield* AtomRegistry.getResult(registry, query)).toBeNull();
+      const releaseChat = registry.mount(atoms.worktreeSetup(target));
+      expect(subscriptions).toBe(1);
+      releasePalette();
+      expect(yield* Deferred.isDone(stopped)).toBe(false);
+      releaseChat();
+      // The real subscription finalizer must run without a five-minute clock advance.
+      yield* Deferred.await(stopped);
+      expect(subscriptions).toBe(1);
+    }).pipe(Effect.scoped),
 );
 
 function session(client: WsRpcProtocolClient): RpcSession {

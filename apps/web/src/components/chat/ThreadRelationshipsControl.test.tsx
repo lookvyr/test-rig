@@ -1,7 +1,12 @@
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { resolveThreadLineageWindow, ThreadLineageRowList } from "./ThreadRelationshipsControl";
+import {
+  liveSubagent,
+  resolveThreadLineageWindow,
+  ThreadLineageRowList,
+} from "./ThreadRelationshipsControl";
 
 const rows = Array.from({ length: 20 }, (_, index) => `row-${index}`);
 
@@ -45,5 +50,31 @@ describe("thread lineage row list", () => {
     expect(list).toContain("overflow-y-auto");
     expect(list).toContain("overscroll-contain");
     expect(markup.indexOf("</ul>")).toBeLessThan(markup.indexOf("<button"));
+  });
+});
+
+describe("child follow-up metadata", () => {
+  it("uses the live child timer and clears the original task preview", () => {
+    const settled = {
+      status: "completed",
+      startedAt: "old",
+      completedAt: "finished",
+      result: "Original answer",
+      progress: "Original progress",
+      error: null,
+    } as never;
+    const live = liveSubagent(settled, {
+      activityRunStatus: "running",
+      activityRunStartedAt: DateTime.makeUnsafe("2026-10-06T13:00:00Z"),
+    } as never);
+    expect(live).toEqual({
+      status: "running",
+      startedAt: "2026-10-06T13:00:00.000Z",
+      completedAt: null,
+      result: null,
+      progress: null,
+      error: null,
+    });
+    expect(liveSubagent(settled, { activityRunStatus: null } as never)).toBe(settled);
   });
 });

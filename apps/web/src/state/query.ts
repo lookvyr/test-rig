@@ -24,7 +24,7 @@ function formatError(cause: Cause.Cause<unknown>): string {
 
 export function useEnvironmentQuery<A, E>(
   atom: Atom.Atom<AsyncResult.AsyncResult<A, E>> | null,
-): EnvironmentQueryView<A> {
+): EnvironmentQueryView<A> & { readonly hasValue: boolean } {
   const selectedAtom = atom ?? EMPTY_ASYNC_RESULT_ATOM;
   const result = useAtomValue(selectedAtom);
   const refresh = useAtomRefresh(selectedAtom);
@@ -35,9 +35,10 @@ function environmentQueryView<A, E>(
   result: AsyncResult.AsyncResult<A, E>,
   refresh: () => void,
   enabled = true,
-): EnvironmentQueryView<A> {
+): EnvironmentQueryView<A> & { readonly hasValue: boolean } {
   return {
     data: Option.getOrNull(AsyncResult.value(result)),
+    hasValue: enabled && Option.isSome(AsyncResult.value(result)),
     error: result._tag === "Failure" ? formatError(result.cause) : null,
     isPending: enabled && result.waiting,
     refresh,

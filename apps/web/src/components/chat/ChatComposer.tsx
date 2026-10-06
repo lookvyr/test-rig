@@ -1,3 +1,4 @@
+import { deriveReportedModelSelection } from "@t3tools/client-runtime/state/thread-execution";
 import type { ThreadContextRecord } from "@t3tools/contracts";
 import { matchComposerThreadItems } from "@t3tools/client-runtime/composerThreadItems";
 import { readThreadShell, useThreadShells } from "~/state/entities";
@@ -409,6 +410,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
     isComplete: boolean;
   } | null;
   isRunning: boolean;
+  canInterrupt: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
@@ -436,6 +438,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         compact={props.compact}
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
+        canInterrupt={props.canInterrupt}
         showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
         promptHasText={props.promptHasText}
         isSendBusy={props.isSendBusy}
@@ -561,6 +564,7 @@ export interface ChatComposerProps {
 
   // Context window
   activeThreadProjection: Thread["projection"] | undefined;
+  canInterrupt: boolean;
 
   // Misc
   resolvedTheme: "light" | "dark";
@@ -650,6 +654,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
     activeThreadProjection,
+    canInterrupt,
     resolvedTheme,
     settings,
     keybindings,
@@ -1215,6 +1220,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [composerDraftTarget, promptRef, scheduleComposerFocus, setComposerDraftPrompt],
   );
 
+  const reportedModelSelection = activeThreadProjection
+    ? deriveReportedModelSelection(activeThreadProjection)
+    : null;
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
     instanceId: selectedInstanceId,
@@ -1223,6 +1231,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     model: selectedModel,
     models: selectedProviderModels,
     modelOptions: composerModelOptions?.[selectedInstanceId],
+    reportedModelSelection,
     prompt,
     onPromptChange: setPromptFromTraits,
   });
@@ -1234,6 +1243,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     model: selectedModel,
     models: selectedProviderModels,
     modelOptions: composerModelOptions?.[selectedInstanceId],
+    reportedModelSelection,
     prompt,
     onPromptChange: setPromptFromTraits,
   });
@@ -2859,11 +2869,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         >
           {!isComposerCollapsedMobile &&
             (activePendingApproval ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+              <div className="flex flex-wrap items-center gap-3 rounded-t-[19px] border-b border-warning/28 bg-warning/8 px-4 py-3">
                 <ComposerPendingApprovalPanel
                   approval={activePendingApproval}
                   pendingCount={pendingApprovals.length}
                 />
+                <div className="ml-auto flex shrink-0 items-center gap-2">
+                  <ComposerPendingApprovalActions
+                    requestId={activePendingApproval.requestId}
+                    options={activePendingApproval.options}
+                    canRespond={activePendingApproval.responseCapability === "live"}
+                    isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
+                    onRespondToApproval={onRespondToApproval}
+                  />
+                </div>
               </div>
             ) : pendingUserInputs.length > 0 ? (
               <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
@@ -2897,6 +2916,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-3 sm:px-4">
                 <ComposerPendingApprovalActions
                   requestId={activePendingApproval.requestId}
+                  options={activePendingApproval.options}
+                  canRespond={activePendingApproval.responseCapability === "live"}
                   isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
                   onRespondToApproval={onRespondToApproval}
                 />
@@ -2943,6 +2964,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       compact
                       pendingAction={pendingPrimaryAction}
                       isRunning={false}
+                      canInterrupt={canInterrupt}
                       showPlanFollowUpPrompt={false}
                       promptHasText={false}
                       isSendBusy={isSendBusy}
@@ -3288,6 +3310,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     compact
                     pendingAction={pendingPrimaryAction}
                     isRunning={false}
+                    canInterrupt={canInterrupt}
                     showPlanFollowUpPrompt={false}
                     promptHasText={false}
                     isSendBusy={isSendBusy}
@@ -3313,15 +3336,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           </div>
 
           {/* Bottom toolbar */}
-          {isComposerCollapsedMobile ? null : activePendingApproval ? (
-            <div className="flex items-center justify-end gap-2 px-3 pb-3 sm:px-4 sm:pb-4">
-              <ComposerPendingApprovalActions
-                requestId={activePendingApproval.requestId}
-                isResponding={respondingRequestIds.includes(activePendingApproval.requestId)}
-                onRespondToApproval={onRespondToApproval}
-              />
-            </div>
-          ) : (
+          {isComposerCollapsedMobile || activePendingApproval ? null : (
             <div
               data-chat-composer-footer="true"
               data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
@@ -3414,6 +3429,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   activeThreadProviderDisplayName={activeThreadProviderDisplayName}
                   pendingAction={pendingPrimaryAction}
                   isRunning={phase === "running"}
+                  canInterrupt={canInterrupt}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}
                   isSendBusy={isSendBusy}

@@ -117,6 +117,17 @@ describe("follow-up actions", () => {
       }),
     );
 
+  it("keeps Stop available before the interruptible run starts", () => {
+    const html = renderActions({
+      isRunning: false,
+      canInterrupt: true,
+      isConnecting: true,
+      hasSendableContent: false,
+    });
+    expect(html).toContain('aria-label="Stop generation"');
+    expect(html).not.toContain('type="submit"');
+  });
+
   it("shows Send beside Stop for a follow-up, including attachment-only drafts", () => {
     for (const promptHasText of [true, false]) {
       const html = renderActions({ promptHasText });

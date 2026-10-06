@@ -1,3 +1,5 @@
+import { useEnvironmentQuery } from "../../state/query";
+import { vcsEnvironment } from "../../state/vcs";
 import { preloadDiffPanel } from "../diffPanelLoader";
 import type {
   EditorId,
@@ -39,6 +41,15 @@ export function ThreadDetailsPanel(props: {
   onDeleteScript: (id: string) => Promise<ProjectScriptActionResult>;
 }) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const gitStatus = useEnvironmentQuery(
+    props.gitCwd
+      ? vcsEnvironment.status({
+          environmentId: props.threadRef.environmentId,
+          input: { cwd: props.gitCwd },
+        })
+      : null,
+  ).data;
+  const changesTotals = gitStatus?.branchChanges ?? gitStatus?.workingTree;
   const fileScripts = useT3ProjectFileScripts(
     props.threadRef.environmentId,
     props.scripts ? props.openInCwd : null,
@@ -102,7 +113,11 @@ export function ThreadDetailsPanel(props: {
             onFocus={preloadDiffPanel}
           >
             <FileDiffIcon />
-            Changes
+            <span className="flex-1 text-left">Changes</span>
+            <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
+              <span className="text-success">+{changesTotals?.insertions ?? 0}</span>
+              <span className="text-destructive">-{changesTotals?.deletions ?? 0}</span>
+            </span>
           </ThreadDetailsControl>
           {props.onShowPullRequest ? (
             <ThreadDetailsControl onClick={props.onShowPullRequest}>

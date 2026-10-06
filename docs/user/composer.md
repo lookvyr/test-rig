@@ -45,6 +45,14 @@ Send stays disabled while the turn is starting or cannot accept steering. Your
 draft stays in the composer until you send it. Once the agent finishes, sending
 starts a new turn. This also applies to side chats.
 
+Stop is available while an interruptible turn is preparing or starting, as well
+as while the agent is working.
+
+## Plans and attachments
+
+When legacy plan mode is enabled, text feedback can refine a proposed plan.
+Adding an image sends your feedback and image together as a new message.
+
 ## Context compaction
 
 The work log distinguishes compaction in progress, completed compaction, a

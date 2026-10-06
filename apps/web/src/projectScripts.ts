@@ -12,17 +12,24 @@ export interface ProjectScriptInput {
   readonly command: ProjectScript["command"];
   readonly icon: ProjectScript["icon"];
   readonly runOnWorktreeCreate: ProjectScript["runOnWorktreeCreate"];
+  readonly async?: boolean;
   readonly previewUrl: Exclude<ProjectScript["previewUrl"], undefined> | null;
   readonly autoOpenPreview: boolean;
 }
 
-export function buildProjectScript(id: string, input: ProjectScriptInput): ProjectScript {
+export function buildProjectScript(
+  id: string,
+  input: ProjectScriptInput,
+  existingScript?: ProjectScript,
+): ProjectScript {
+  const async = input.async ?? existingScript?.async;
   return {
     id,
     name: input.name,
     command: input.command,
     icon: input.icon,
     runOnWorktreeCreate: input.runOnWorktreeCreate,
+    ...(async === undefined ? {} : { async }),
     ...(input.previewUrl === null
       ? {}
       : {

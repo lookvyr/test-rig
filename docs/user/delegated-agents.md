@@ -43,6 +43,10 @@ Open the child from its task row in the conversation, or from the right panel's
 Agents tab. Completed children appear under Previous agents. Inside the child,
 use Open parent thread to return to the conversation that delegated the work.
 
+If a child receives a follow-up, it returns to the active agents list. Its status,
+elapsed time, and preview follow the new work instead of the original completed
+task.
+
 When a parent stops waiting after a timeout, the delegated task can still be
 running. Ask the parent to inspect or cancel that task instead of launching a
 duplicate. For another app-owned review round, ask the parent to delegate again

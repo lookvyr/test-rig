@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
-import { classifyTaskAgentKind, ProviderRuntimeEvent } from "./providerRuntime.ts";
+import {
+  classifyTaskAgentKind,
+  ProviderRuntimeEvent,
+  UserInputQuestion,
+} from "./providerRuntime.ts";
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
+const decodeUserInputQuestion = Schema.decodeUnknownSync(UserInputQuestion);
 
 describe("ProviderRuntimeEvent", () => {
   it("accepts fork-provided driver kinds as branded slugs", () => {
@@ -200,4 +205,19 @@ describe("classifyTaskAgentKind", () => {
     // Nested agent: outlives its parent, stays in the roster.
     expect(classifyTaskAgentKind({ taskType: "local_agent", agentId: "owner" })).toBe("agent");
   });
+});
+
+describe("native question values", () => {
+  it.each(["prod", " first\t", ""])(
+    "preserves native option value %j through decoding",
+    (value) => {
+      const question = decodeUserInputQuestion({
+        id: "target",
+        header: "Target",
+        question: "Select target",
+        options: [{ label: "Production", description: "Deployment target", value }],
+      });
+      expect(question.options[0]?.value).toBe(value);
+    },
+  );
 });

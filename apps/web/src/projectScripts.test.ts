@@ -130,3 +130,26 @@ describe("projectScripts helpers", () => {
     ).toBe("/repo");
   });
 });
+
+describe("setup script execution mode", () => {
+  const input = {
+    name: "Setup",
+    command: "sleep 15",
+    icon: "configure" as const,
+    runOnWorktreeCreate: true,
+    previewUrl: null,
+    autoOpenPreview: false,
+  };
+  it("preserves explicit sync and async configuration when creating an imported script", () => {
+    expect(buildProjectScript("setup", { ...input, async: false }).async).toBe(false);
+    expect(buildProjectScript("setup", { ...input, async: true }).async).toBe(true);
+    expect(buildProjectScript("setup", input)).not.toHaveProperty("async");
+  });
+  it("retains the existing execution mode when editing a script through controls without that field", () => {
+    const existing = buildProjectScript("setup", { ...input, async: false });
+    expect(
+      buildProjectScript("setup", { ...input, name: "Renamed setup" }, existing),
+    ).toMatchObject({ name: "Renamed setup", async: false });
+    expect(buildProjectScript("setup", { ...input, async: true }, existing).async).toBe(true);
+  });
+});
