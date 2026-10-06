@@ -76,8 +76,8 @@ const labelled = (entry: ProviderReplayEntry, label: string): ProviderReplayEntr
  * then this thread's own is allowed again (last match wins).
  */
 const mcpRules = (name: string) => [
-  { action: "t3-code-*", resource: "*", effect: "deny" },
-  { action: `t3-code-thread_${name}_*`, resource: "*", effect: "allow" },
+  { action: "test_rig-*", resource: "*", effect: "deny" },
+  { action: `test_rig-thread_${name}_*`, resource: "*", effect: "allow" },
 ];
 const FULL_ACCESS = [{ action: "*", resource: "*", effect: "allow" }];
 /** Full access for the thread named `name`. */
@@ -165,7 +165,7 @@ const sessionInfo = (directory: string, permissions: ReadonlyArray<unknown>) => 
 });
 /** T3's instructions entry, written before a thread's first prompt and whenever it changes. */
 const instructionsWritten: ReadonlyArray<ProviderReplayEntry> = [
-  out("session.instructions.entry.put", { sessionID: SESSION, key: "t3-code", value: "<any>" }),
+  out("session.instructions.entry.put", { sessionID: SESSION, key: "test_rig", value: "<any>" }),
   reply("session.instructions.entry.put", null),
 ];
 /** One prompt the server accepts and answers with `text`. */
