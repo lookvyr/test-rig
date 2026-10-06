@@ -61,7 +61,11 @@ import { useThreadTimeline } from "./useThreadTimeline";
 import { useMessagesWithImages } from "./useMessagesWithImages";
 import { usePendingUserInput, clearPendingUserInputDrafts } from "./usePendingUserInput";
 import { AsyncUserInputPanel } from "./AsyncUserInputPanel";
-import { formatOutgoingPrompt, serializeComposerPrompt } from "./composerMessage";
+import {
+  formatOutgoingPrompt,
+  serializeComposerPrompt,
+  prepareComposerMessage,
+} from "./composerMessage";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -246,6 +250,15 @@ export function SideChatPanel(props: {
       return;
     }
     if (!snapshot.hasSendableContent) return;
+    const prepared = prepareComposerMessage(
+      serializeComposerPrompt({ ...context, terminalContexts: snapshot.sendableTerminalContexts }),
+      context.threadContexts,
+      threadRef.environmentId,
+    );
+    if (prepared.error) {
+      setError(prepared.error);
+      return;
+    }
     sending.current = true;
     setError(null);
     dispatch.beginLocalDispatch();
@@ -274,10 +287,7 @@ export function SideChatPanel(props: {
       }));
     };
     try {
-      const text = serializeComposerPrompt({
-        ...context,
-        terminalContexts: snapshot.sendableTerminalContexts,
-      });
+      const text = prepared.text;
       const attachments = await Promise.all(
         context.images.map(async (image) => ({
           type: "image" as const,
@@ -309,6 +319,7 @@ export function SideChatPanel(props: {
               text: text || "Respond using the conversation context and the attached images.",
             }),
             attachments,
+            ...(prepared.context ? { context: prepared.context } : {}),
           },
           modelSelection: context.selectedModelSelection,
           runtimeMode,

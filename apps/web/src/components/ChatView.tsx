@@ -1,3 +1,5 @@
+import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import type { OrchestrationMessageContext } from "@t3tools/contracts";
 import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
 import { useScratchDraftWorkspace } from "../hooks/useScratchDraftWorkspace";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
@@ -232,7 +234,11 @@ import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { useLocalDispatchState } from "./chat/useLocalDispatchState";
 import { usePersistThreadSettings } from "./chat/usePersistThreadSettings";
-import { formatOutgoingPrompt, serializeComposerPrompt } from "./chat/composerMessage";
+import {
+  formatOutgoingPrompt,
+  serializeComposerPrompt,
+  prepareComposerMessage,
+} from "./chat/composerMessage";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -1208,6 +1214,7 @@ function ChatViewContent(props: ChatViewProps) {
   const setComposerDraftPreviewAnnotations = useComposerDraftStore(
     (store) => store.setPreviewAnnotations,
   );
+  const setComposerDraftThreadContexts = useComposerDraftStore((store) => store.setThreadContexts);
   const setComposerDraftReviewComments = useComposerDraftStore((store) => store.setReviewComments);
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
@@ -4804,6 +4811,7 @@ function ChatViewContent(props: ChatViewProps) {
       elementContexts: composerElementContexts,
       previewAnnotations: sendContextPreviewAnnotations,
       reviewComments: composerReviewComments,
+      threadContexts: composerThreadContexts,
       selectedProvider: ctxSelectedProvider,
       selectedModel: ctxSelectedModel,
       selectedProviderModels: ctxSelectedProviderModels,
@@ -4845,18 +4853,47 @@ function ChatViewContent(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     });
+    const composerThreadContextsSnapshot = [...composerThreadContexts];
+    const preparedMessage = prepareComposerMessage(
+      serializeComposerPrompt({
+        prompt: promptForSend,
+        terminalContexts: sendableComposerTerminalContexts,
+        elementContexts: composerElementContexts,
+        previewAnnotations: composerPreviewAnnotations,
+        reviewComments: composerReviewComments,
+      }),
+      composerThreadContextsSnapshot,
+      environmentId,
+    );
+    if (preparedMessage.error) {
+      setThreadError(activeThread.id, preparedMessage.error);
+      return;
+    }
+    const messageContext = preparedMessage.context;
     if (!directAnnotation && showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
-        draftText: trimmed,
+        draftText: preparedMessage.text.trim(),
         planMarkdown: activeProposedPlan.planMarkdown,
       });
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
-      await onSubmitPlanFollowUp({
+      const sent = await onSubmitPlanFollowUp({
         text: followUp.text,
         interactionMode: followUp.interactionMode,
+        context: messageContext,
       });
+      if (
+        !sent &&
+        !useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.prompt
+      ) {
+        setComposerDraftPrompt(composerDraftTarget, promptForSend);
+        setComposerDraftThreadContexts(composerDraftTarget, composerThreadContextsSnapshot);
+        setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContexts);
+        setComposerDraftElementContexts(composerDraftTarget, composerElementContexts);
+        setComposerDraftPreviewAnnotations(composerDraftTarget, composerPreviewAnnotations);
+        setComposerDraftReviewComments(composerDraftTarget, composerReviewComments);
+      }
       return;
     }
     if (
@@ -4965,13 +5002,7 @@ function ChatViewContent(props: ChatViewProps) {
     const composerElementContextsSnapshot = [...composerElementContexts];
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
-    const messageTextForSend = serializeComposerPrompt({
-      prompt: promptForSend,
-      terminalContexts: composerTerminalContextsSnapshot,
-      elementContexts: composerElementContextsSnapshot,
-      previewAnnotations: composerPreviewAnnotationsSnapshot,
-      reviewComments: composerReviewCommentsSnapshot,
-    });
+    const messageTextForSend = preparedMessage.text;
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const outgoingMessageText = formatOutgoingPrompt({
@@ -5019,6 +5050,7 @@ function ChatViewContent(props: ChatViewProps) {
         id: messageIdForSend,
         role: "user",
         text: outgoingMessageText,
+        ...(messageContext ? { context: messageContext } : {}),
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
         runId: null,
         createdAt: messageCreatedAt,
@@ -5051,7 +5083,7 @@ function ChatViewContent(props: ChatViewProps) {
         firstComposerImageName = firstComposerImage.name;
       }
     }
-    let titleSeed = trimmed;
+    let titleSeed = replaceComposerContextReferences(trimmed, (reference) => reference.label);
     if (!titleSeed) {
       if (firstComposerImageName) {
         titleSeed = `Image: ${firstComposerImageName}`;
@@ -5149,6 +5181,7 @@ function ChatViewContent(props: ChatViewProps) {
             messageId: messageIdForSend,
             role: "user",
             text: outgoingMessageText,
+            ...(messageContext ? { context: messageContext } : {}),
             attachments: turnAttachmentsResult.value,
           },
           modelSelection: ctxSelectedModelSelection,
@@ -5197,6 +5230,7 @@ function ChatViewContent(props: ChatViewProps) {
         setComposerDraftElementContexts(composerDraftTarget, composerElementContextsSnapshot);
         setComposerDraftPreviewAnnotations(composerDraftTarget, composerPreviewAnnotationsSnapshot);
         setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot);
+        setComposerDraftThreadContexts(composerDraftTarget, composerThreadContextsSnapshot);
         composerRef.current?.resetCursorState({
           cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
           prompt: promptForSend,
@@ -5281,8 +5315,10 @@ function ChatViewContent(props: ChatViewProps) {
     async ({
       text,
       interactionMode: nextInteractionMode,
+      context,
     }: {
       text: string;
+      context?: OrchestrationMessageContext | undefined;
       interactionMode: "default" | "plan";
     }) => {
       if (
@@ -5292,17 +5328,17 @@ function ChatViewContent(props: ChatViewProps) {
         isConnecting ||
         sendInFlightRef.current
       ) {
-        return;
+        return false;
       }
 
       const trimmed = text.trim();
       if (!trimmed) {
-        return;
+        return false;
       }
 
       const sendCtx = composerRef.current?.getSendContext();
       if (!sendCtx?.providerAvailable) {
-        return;
+        return false;
       }
       const {
         selectedProvider: ctxSelectedProvider,
@@ -5348,6 +5384,7 @@ function ChatViewContent(props: ChatViewProps) {
           id: messageIdForSend,
           role: "user",
           text: outgoingMessageText,
+          ...(context ? { context } : {}),
           runId: null,
           createdAt: messageCreatedAt,
           updatedAt: messageCreatedAt,
@@ -5383,6 +5420,7 @@ function ChatViewContent(props: ChatViewProps) {
               messageId: messageIdForSend,
               role: "user",
               text: outgoingMessageText,
+              ...(context ? { context } : {}),
               attachments: [],
             },
             modelSelection: ctxSelectedModelSelection,
@@ -5406,7 +5444,7 @@ function ChatViewContent(props: ChatViewProps) {
       if (failure === null) {
         acknowledgeActiveThreadWoke();
         sendInFlightRef.current = false;
-        return;
+        return true;
       }
 
       setOptimisticUserMessages((existing) =>
@@ -5421,6 +5459,7 @@ function ChatViewContent(props: ChatViewProps) {
       }
       sendInFlightRef.current = false;
       resetLocalDispatch();
+      return false;
     },
     [
       activeThread,

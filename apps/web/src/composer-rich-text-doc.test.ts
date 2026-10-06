@@ -18,21 +18,22 @@ import {
 
 const schema = getSchema([
   StarterKit.configure({ link: false, horizontalRule: false }),
-  ...["composer-mention", "composer-skill", "composer-terminal-context"].map((name) =>
-    Node.create({
-      name,
-      group: "inline",
-      inline: true,
-      atom: true,
-      addAttributes: () => ({
-        path: { default: "" },
-        source: { default: "" },
-        skillName: { default: "" },
-        skillLabel: { default: "" },
-        skillDescription: { default: null },
-        contextId: { default: "" },
+  ...["composer-mention", "composer-skill", "composer-terminal-context", "composer-thread"].map(
+    (name) =>
+      Node.create({
+        name,
+        group: "inline",
+        inline: true,
+        atom: true,
+        addAttributes: () => ({
+          path: { default: "" },
+          source: { default: "" },
+          skillName: { default: "" },
+          skillLabel: { default: "" },
+          skillDescription: { default: null },
+          contextId: { default: "" },
+        }),
       }),
-    }),
   ),
 ]);
 const skill = (name: string) => ({ label: name, description: null });
@@ -43,6 +44,26 @@ const doc = (value: string, terminalContexts?: TerminalContextDraft[]) =>
 const roundTrip = (value: string) => serializeEditorDoc(doc(value)).value;
 
 describe("rich composer Markdown boundary", () => {
+  it("round-trips thread chips through rich Markdown and cursor positions", () => {
+    const reference = "[Backend performance](t3-context://v1/thread/thread-test)";
+    const value = `Use ${reference} then **review**`;
+    const document = doc(value);
+    expect(document.firstChild?.child(1).type.name).toBe("composer-thread");
+    const map = serializeEditorDoc(document);
+    expect(map.value).toBe(value);
+    expect(flatToMarkdown(map, 5)).toBe(4 + reference.length);
+    expect(collapsedToFlat(map, 5)).toBe(5);
+    expect(flatToCollapsed(map, 5)).toBe(5);
+  });
+
+  it("keeps thread links literal inside code", () => {
+    const reference = "[Backend performance](t3-context://v1/thread/thread-test)";
+    for (const value of [`\`${reference}\``, `\`\`\`md\n${reference}\n\`\`\``]) {
+      const map = serializeEditorDoc(doc(value));
+      expect(map.value).toBe(value);
+      expect(map.runs.some((run) => run.kind === "token")).toBe(false);
+    }
+  });
   it.each([
     "",
     "plain text\n\nnext line",

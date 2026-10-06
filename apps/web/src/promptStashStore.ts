@@ -1,3 +1,4 @@
+import { ThreadContextRecord } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
@@ -36,6 +37,7 @@ const StashEntrySchema = Schema.Struct({
   id: Schema.String,
   createdAt: Schema.String,
   prompt: Schema.String,
+  threadContexts: Schema.optionalKey(Schema.Array(ThreadContextRecord)),
   attachments: Schema.Array(PersistedComposerImageAttachment),
   /** Names of images that exceeded the attachment budget and were not saved. */
   droppedImageNames: Schema.Array(Schema.String),

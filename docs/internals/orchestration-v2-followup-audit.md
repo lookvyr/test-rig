@@ -67,7 +67,7 @@ Three selected compaction/background replays passed: Claude compact after a resu
 | LOO-29 | Native child send rejection and parent request ownership are present.                                           | Missing/archived parent and large-history edge acceptance; retain previous child/restart proof.                                                         |
 | LOO-30 | Delegation/cohort delivery and repeated acknowledgement/disposal tests pass.                                    | Resolve LOO-15 workspace/context defaults, then scoped app-owned provider/restart/nesting acceptance.                                                   |
 | LOO-31 | Scoped reading and same-project messaging exist.                                                                | Explicit side-to-main accepted-delivery/disposal semantics and busy-target/retry acceptance.                                                            |
-| LOO-32 | Rich composer supports files/skills; conversation-reference chips and sidebar drag payloads are absent.         | Wire thread references into rich drafts, scoped retrieval and persistence.                                                                              |
+| LOO-32 | Upstream title matching, rich reference chips, sidebar drag and draft persistence are implemented.              | Completed with live main/new/side-chat retrieval and a separate correctness/simplification review; see October 5 acceptance below.                      |
 | LOO-33 | Durable schedules and MCP controls exist; Settings management UI is absent.                                     | Resolve LOO-14 and complete the shared management surface and saved-launch-setting acceptance.                                                          |
 | LOO-34 | Backend recovery guards and independent snooze/auto-resume fields exist, default off.                           | Expose opt-in settings and per-thread recovery controls; preserve manual continuation without a trustworthy reset time.                                 |
 | LOO-35 | Attachment ownership/route repaired; setup failure, repository preservation and integration gates verified.     | Complete for scoped project/attachment/settings acceptance, including live Codex project launch/deletion.                                               |
@@ -398,3 +398,52 @@ sender attribution. This verifies agent-driven title discovery for a clear match
 it is not a dedicated semantic-search index or proof of ambiguous-title handling.
 The sender and target screenshots are retained as `loo31-soft-match-sender.png`
 and `loo31-soft-match-target.png` in the same isolated test directory.
+
+## October 5 acceptance: chat references — LOO-32
+
+Ported upstream `de343914273eceb852a1d1d739cd1d38df7796ee` title matching:
+case-insensitive substring search, the five newest matches in the current
+environment, excluding the current and archived chats, with no chat results
+for a bare `@`. No ranking or grouping refinements were added. Sidebar drag
+uses native drag data to fit the retained V2 sidebar, while reference atoms
+fit the retained rich composer. Selected sidebar rows can travel together.
+
+Reference records persist with drafts and prompt stashes, survive editor undo
+and clipboard transfer, and reach main, new-thread, plan-follow-up and side-chat
+messages through shared message preparation. Only references still present in
+the prompt are attached; existing terminal and other context chips are preserved.
+Cross-environment imports are rejected. The existing provider-neutral MCP history
+path grants user-attached cross-project reading without send authority.
+
+Live browser/Codex checks in `/tmp/test-rig-loo27.VFXMTW` verified title search,
+Tab selection, sidebar drag, two references surviving reload, delete/undo,
+stash/reload/restore, clipboard transfer into a new projectless chat, and actual
+history reads from main and side chats. Both known fixture markers were returned.
+Evidence includes `loo32-two-reference-draft.png`, `loo32-reference-read-result.png`,
+`loo32-cross-project-read.png` and `loo32-side-reference-read.png`.
+
+The separate review found and prompted repairs to stash closure dependencies,
+plan-follow-up and side-chat context forwarding, clipboard metadata, and mixed
+legacy context preservation. Its second pass found no remaining blocker or
+worthwhile simplification. Focused checks passed 231 tests across ten files,
+plus the web and server typechecks. Targeted lint/format and diff checks completed; existing
+React hook warnings remain. No repository-wide checks ran.
+
+Surface coverage: the shared web/desktop composer, sidebar and `/side` entry
+point apply; no Electron shell, Settings or command-palette changes are needed.
+Removal, undo and stash restore cover reverse actions. Environment identity is
+preserved in drag, clipboard and wire records; no origin is embedded. Codex was
+verified live; Claude/OpenCode use the same existing context contract and MCP
+reading path but were not re-run live for this UI change. Before committing,
+a fresh Codex plan-mode conversation produced a proposed plan. Its **Refine**
+action sent a cross-project reference and successfully read the expected final
+acknowledgment. Evidence: `loo32-plan-refine-read.png` in the same test directory.
+
+Three added deterministic MCP lifecycle cases verify that an attached archived
+chat remains readable, a soft-deleted chat returns `thread_not_found`, and a
+physically missing chat returns `orchestration_error` with an explicit load-failure
+message naming the target. The latter preserves the existing projection-error
+boundary, which does not distinguish a missing row from every storage/import
+failure; a follow-up review confirmed that broadly remapping it would be incorrect.
+The existing unavailable tooltip was source-verified. Archived targets are excluded
+by tested matching. User documentation is in `docs/user/composer.md`.

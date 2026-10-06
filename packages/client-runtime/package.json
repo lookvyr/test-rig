@@ -375,6 +375,10 @@
     "./providerSkills": {
       "types": "./src/providerSkills.ts",
       "default": "./src/providerSkills.ts"
+    },
+    "./composerThreadItems": {
+      "types": "./src/composerThreadItems.ts",
+      "default": "./src/composerThreadItems.ts"
     }
   },
   "scripts": {

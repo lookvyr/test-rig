@@ -1,3 +1,5 @@
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { threadContextRecord } from "./lib/composerContextRecords";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { removeLocalStorageItem } from "./hooks/useLocalStorage";
@@ -86,6 +88,16 @@ describe("partitionStashAttachments", () => {
 });
 
 describe("promptStashStore", () => {
+  it("hydrates reference identities with a stashed prompt", () => {
+    const record = threadContextRecord(
+      { environmentId: EnvironmentId.make("local"), threadId: ThreadId.make("source") },
+      "Source",
+    );
+    const entry = { ...makeEntry({ id: "with-reference" }), threadContexts: [record] };
+    writePromptStashStorageForTest(JSON.stringify({ version: 2, state: { entries: [entry] } }));
+    expect(usePromptStashStore.getState().entries[0]?.threadContexts).toEqual([record]);
+  });
+
   beforeEach(() => {
     resetPromptStashStore();
   });

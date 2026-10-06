@@ -109,6 +109,15 @@ export function buildTiptapContent(
         return splitPromptIntoComposerSegments(part)
           .map((segment) => {
             if (segment.type === "text") return segment.text;
+            if (segment.type === "thread")
+              return protect({
+                type: "composer-thread",
+                attrs: {
+                  contextId: segment.contextId,
+                  label: segment.label,
+                  source: segment.source,
+                },
+              });
             if (segment.type === "mention")
               return protect({
                 type: "composer-mention",
@@ -160,7 +169,7 @@ export function buildTiptapContent(
   const listPrefix = (line: string) => /^( *)([-+*]|\d+[.)]) +(.*)$/.exec(line);
   const parseBlocks = (lines: string[]): JSONContent[] => {
     const blocks: JSONContent[] = [];
-    for (let index = 0; index < lines.length; ) {
+    for (let index = 0; index < lines.length;) {
       const line = lines[index]!;
       if (options.styling === false) {
         blocks.push(paragraph(line));
@@ -289,6 +298,7 @@ export interface RichDocMap {
 function readAtomSource(node: ProseMirrorNode): string {
   const attrs = node.attrs as Record<string, unknown>;
   switch (node.type.name) {
+    case "composer-thread":
     case "composer-mention":
       return typeof attrs.source === "string" ? attrs.source : "";
     case "composer-terminal-context":
@@ -422,7 +432,7 @@ function appendInlineRuns(
   // A code span may contain literal backticks. Select a delimiter long enough
   // for the entire adjacent code range so it remains code after draft restore.
   const codeDelimiters: string[] = [];
-  for (let index = 0; index < children.length; ) {
+  for (let index = 0; index < children.length;) {
     if (!orderedMarks[index]!.includes("code")) {
       index++;
       continue;

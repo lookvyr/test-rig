@@ -890,6 +890,65 @@ it.effect.each([
   }).pipe(Effect.provide(mcpCoordinationLayer)),
 );
 
+it.effect.each(["archived", "deleted", "missing"] as const)(
+  "reports an attached %s chat through scoped history reading",
+  (state) =>
+    Effect.gen(function* () {
+      const { store } = yield* readySide;
+      const mcp = yield* OrchestratorMcp.OrchestratorMcpService;
+      const targetId = state === "missing" ? ThreadId.make("missing-reference") : parentId;
+      const target = yield* store.getThread(parentId);
+      yield* store.apply({
+        id: EventId.make("reference-lifecycle"),
+        type: "thread.metadata-updated",
+        threadId: parentId,
+        occurredAt: now,
+        payload: {
+          ...target,
+          projectId: ProjectId.make("other-project"),
+          archivedAt: state === "archived" ? now : null,
+          deletedAt: state === "deleted" ? now : null,
+        },
+      });
+      const message = (yield* store.getThreadRecords(childId, ["messages"])).messages[0]!;
+      yield* store.apply({
+        id: EventId.make("reference-message"),
+        type: "message.updated",
+        threadId: childId,
+        occurredAt: now,
+        payload: {
+          ...message,
+          context: {
+            version: 1,
+            records: [
+              {
+                kind: "thread",
+                version: 1,
+                contextId: ComposerContextId.make("lifecycle-reference"),
+                label: "Referenced chat",
+                environmentId: coordinationScope.environmentId,
+                threadId: targetId,
+                title: "Referenced chat",
+              },
+            ],
+          },
+        },
+      });
+      if (state === "archived") {
+        const result = yield* mcp.readThread(coordinationScope, { threadId: targetId });
+        assert.equal(result.thread.threadId, targetId);
+        assert.isTrue(result.thread.archived);
+      } else {
+        const error = yield* mcp
+          .readThread(coordinationScope, { threadId: targetId })
+          .pipe(Effect.flip);
+        assert.equal(error.code, state === "deleted" ? "thread_not_found" : "orchestration_error");
+        assert.include(error.message, targetId);
+        if (state === "missing") assert.include(error.message, "Unable to load thread");
+      }
+    }).pipe(Effect.provide(mcpCoordinationLayer)),
+);
+
 it.effect("recovers a partially accepted batch without duplicating its first continuation", () =>
   Effect.gen(function* () {
     yield* readySide;

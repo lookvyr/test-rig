@@ -1,3 +1,4 @@
+import { THREAD_CONTEXT_DRAG_TYPE } from "./chat/threadContextDrag";
 import { useUnlinkPullRequest } from "../hooks/useUnlinkPullRequest";
 import { openLinkThreadPullRequest } from "./LinkThreadPullRequestDialog";
 import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
@@ -12,6 +13,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/model
 import {
   scopeProjectRef,
   scopeThreadRef,
+  parseScopedThreadKey,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef, SidebarProjectGroupingMode } from "@t3tools/contracts";
@@ -633,6 +635,24 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     },
     [onAcknowledgeWoke, props.wokeAt, threadRef],
   );
+  const handleThreadDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+    if (
+      isRenaming ||
+      (event.target instanceof Element && event.target.closest("button, input, a"))
+    ) {
+      event.preventDefault();
+      return;
+    }
+    const selected = useThreadSelectionStore.getState().selectedThreadKeys;
+    const keys = selected.has(threadKey) ? [...selected] : [threadKey];
+    const refs = keys.flatMap((key) => {
+      const ref = parseScopedThreadKey(key);
+      return ref ? [ref] : [];
+    });
+    event.dataTransfer.setData(THREAD_CONTEXT_DRAG_TYPE, JSON.stringify(refs));
+    event.dataTransfer.effectAllowed = "copy";
+  };
+
   const handleContextMenu = useCallback(
     (event: ReactMouseEvent) => {
       event.preventDefault();
@@ -853,6 +873,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               <div
                 role="button"
                 tabIndex={0}
+                draggable={!isRenaming}
+                onDragStart={handleThreadDragStart}
                 data-testid="sidebar-v2-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
@@ -1001,6 +1023,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             <div
               role="button"
               tabIndex={0}
+              draggable={!isRenaming}
+              onDragStart={handleThreadDragStart}
               data-testid="sidebar-v2-row-card"
               aria-busy={isRegeneratingTitle || undefined}
               className={rowSurfaceClassName}

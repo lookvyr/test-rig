@@ -11,8 +11,29 @@ Links, tables, and task checkboxes remain literal Markdown in the composer.
 **Enter sends the prompt**, including from a list or code block. **Shift+Enter**
 continues the current list or inserts a line in code. Use Shift+Enter on an empty
 list item to leave the list; in code, use it after two trailing blank lines to
-continue below the block. **Tab** accepts a file, skill, or command suggestion.
+continue below the block. **Tab** accepts a file, chat, skill, or command suggestion.
 File and skill references inside code remain literal text.
+
+## Referencing another chat
+
+Type **@** followed by part of a chat title to find it alongside file suggestions.
+Chat matches come from the current environment, with the five most recently
+updated matches first. The current chat and archived chats are excluded from
+search. A bare **@** continues to show files.
+
+Select a chat with **Tab** or a click to insert a reference chip. You can also
+drag a sidebar chat into the composer, or select several sidebar chats and drag
+them together. Click a chip to open its chat; select or backspace over it to
+remove it. References survive draft reloads and stashing, and remain clickable
+in sent messages.
+
+A reference lets the current agent read that chat's history when needed. It
+does not copy the full conversation, start the referenced agent, or send it a
+message. References can point to another project in the same environment;
+reading permission does not grant permission to change or message that chat.
+An existing reference can still be read after its chat is archived. A deleted
+chat's reference shows that it is unavailable, and reading it reports that it
+is no longer available.
 
 ## Follow-up messages
 
@@ -110,7 +131,7 @@ its composer. Changing a model or another thread setting alone does not mark a
 thread as having an unsent draft.
 
 Press **Cmd+S** on macOS or **Ctrl+S** elsewhere to stash the current prompt and
-images. With an empty composer and exactly one ready stashed prompt, press the
+images, including chat references. With an empty composer and exactly one ready stashed prompt, press the
 shortcut again to restore it directly. If there are several entries or images
 are still being prepared, the shortcut opens the stash menu. You can always open
 that menu from the stash badge, navigate with the arrow keys, and restore with

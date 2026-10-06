@@ -1,13 +1,16 @@
+import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,
 } from "./lib/terminalContext";
 import {
   collectComposerInlineTokens,
+  collectComposerMarkdownCodeRanges,
   type ComposerInlineToken,
 } from "@t3tools/shared/composerInlineTokens";
 
 export type ComposerPromptSegment =
+  | { type: "thread"; contextId: string; label: string; source: string }
   | {
       type: "text";
       text: string;
@@ -130,7 +133,17 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
     return segments;
   }
 
-  const tokenMatches = collectComposerInlineTokens(text);
+  const codeRanges = collectComposerMarkdownCodeRanges(text);
+  const tokenMatches = [
+    ...collectComposerInlineTokens(text),
+    ...collectComposerContextReferences(text)
+      .filter(
+        (ref) =>
+          ref.kind === "thread" &&
+          !codeRanges.some((range) => ref.start < range.end && ref.end > range.start),
+      )
+      .map((ref) => ({ ...ref, type: "thread" as const, source: text.slice(ref.start, ref.end) })),
+  ].sort((a, b) => a.start - b.start);
   let cursor = 0;
   for (const match of tokenMatches) {
     if (match.start < cursor) {
@@ -145,6 +158,13 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
       segments.push({
         type: "mention",
         path: match.value,
+        source: match.source,
+      });
+    } else if (match.type === "thread") {
+      segments.push({
+        type: "thread",
+        contextId: match.contextId,
+        label: match.label,
         source: match.source,
       });
     } else {

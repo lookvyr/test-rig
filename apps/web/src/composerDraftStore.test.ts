@@ -1,3 +1,5 @@
+import { threadContextRecord, threadContextReference } from "./lib/composerContextRecords";
+import { formatInlineContextReference } from "./lib/composerContextReferences";
 import {
   scopedProjectKey,
   scopedThreadKey,
@@ -1897,5 +1899,47 @@ describe("createDebouncedStorage", () => {
     vi.advanceTimersByTime(300);
     expect(base.setItem).toHaveBeenCalledTimes(1);
     expect(base.setItem).toHaveBeenCalledWith("key", "v2");
+  });
+});
+
+describe("thread reference drafts", () => {
+  beforeEach(resetComposerDraftStore);
+  it("persists multiple reference identities and their inline positions, isolated by draft", () => {
+    const ref = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("reference-owner"));
+    const records = ["source-a", "source-b"].map((id) =>
+      threadContextRecord(scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make(id)), id),
+    );
+    const prompt = `Compare ${records.map((record) => formatInlineContextReference(threadContextReference(record))).join(" with ")}`;
+    const store = useComposerDraftStore.getState();
+    store.setThreadContexts(ref, [...records, records[0]!]);
+    store.setPrompt(ref, prompt);
+    const options = useComposerDraftStore.persist.getOptions();
+    const persisted = options.partialize!(useComposerDraftStore.getState());
+    resetComposerDraftStore();
+    const hydrated = options.merge!(persisted, useComposerDraftStore.getState());
+    useComposerDraftStore.setState(hydrated);
+    expect(draftFor(ref.threadId, TEST_ENVIRONMENT_ID)).toMatchObject({
+      prompt,
+      threadContexts: records,
+    });
+    expect(draftFor(ref.threadId, OTHER_TEST_ENVIRONMENT_ID)).toBeUndefined();
+    store.clearComposerContent(ref);
+    expect(draftFor(ref.threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
+  });
+
+  it("retains metadata for editor undo without treating removed references as unsent content", () => {
+    const ref = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("reference-undo"));
+    const record = threadContextRecord(
+      scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("source")),
+      "Source",
+    );
+    const store = useComposerDraftStore.getState();
+    store.setThreadContexts(ref, [record]);
+    store.setPrompt(ref, "");
+    const draft = draftFor(ref.threadId, TEST_ENVIRONMENT_ID);
+    expect(draft?.threadContexts).toEqual([record]);
+    expect(composerDraftHasUserContent(draft)).toBe(false);
+    store.clearComposerPromptAndImages(ref);
+    expect(draftFor(ref.threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
   });
 });

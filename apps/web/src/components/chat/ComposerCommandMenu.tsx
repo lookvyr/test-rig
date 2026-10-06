@@ -1,10 +1,11 @@
+import type { ComposerThreadItem } from "@t3tools/client-runtime/composerThreadItems";
 import {
   type ProjectEntry,
   type ProviderDriverKind,
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
-import { BotIcon } from "lucide-react";
+import { BotIcon, MessagesSquareIcon } from "lucide-react";
 import { memo, useLayoutEffect, useMemo, useRef } from "react";
 
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
@@ -21,6 +22,7 @@ import {
 import { PierreEntryIcon } from "./PierreEntryIcon";
 
 export type ComposerCommandItem =
+  | ComposerThreadItem
   | {
       id: string;
       type: "path";
@@ -241,6 +243,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         <span className="inline-flex size-4 shrink-0 items-center justify-center text-icon-muted">
           <SkillGlyph className="size-3.5" />
         </span>
+      ) : null}
+      {props.item.type === "thread" ? (
+        <MessagesSquareIcon className="size-4 shrink-0 text-icon-muted" />
       ) : null}
       {props.item.type === "skill" ? (
         <span className="inline-flex size-4 shrink-0 items-center justify-center text-icon-muted">

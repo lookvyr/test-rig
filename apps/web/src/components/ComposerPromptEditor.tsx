@@ -1,3 +1,12 @@
+import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import {
+  COMPOSER_CONTEXT_CLIPBOARD_MIME,
+  encodeComposerContextFragment,
+  encodeComposerContextClipboardHtml,
+  decodeComposerContextFragment,
+  decodeComposerContextClipboardHtml,
+} from "@t3tools/shared/composerContextClipboard";
+import { ThreadContextChip } from "./ThreadContextChip";
 import { Extension, Node, type Editor } from "@tiptap/core";
 import Code from "@tiptap/extension-code";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
@@ -10,7 +19,7 @@ import {
   type NodeViewProps,
 } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import type { ServerProviderSkill } from "@t3tools/contracts";
+import type { ServerProviderSkill, ThreadContextRecord } from "@t3tools/contracts";
 import {
   createContext,
   use,
@@ -76,6 +85,8 @@ interface ComposerPromptEditorProps {
   value: string;
   cursor: number;
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
+  threadContexts?: ReadonlyArray<ThreadContextRecord>;
+  onImportThreadContexts?: (records: ReadonlyArray<ThreadContextRecord>) => boolean;
   skills: ReadonlyArray<ServerProviderSkill>;
   disabled: boolean;
   placeholder: string;
@@ -95,6 +106,36 @@ interface ComposerPromptEditorProps {
   onPaste: React.ClipboardEventHandler<HTMLElement>;
   editorRef: React.RefObject<ComposerPromptEditorHandle | null>;
 }
+
+const EMPTY_THREAD_CONTEXTS: ReadonlyArray<ThreadContextRecord> = [];
+const ThreadContextsContext = createContext(EMPTY_THREAD_CONTEXTS);
+function ComposerThreadView({ node }: NodeViewProps) {
+  const records = use(ThreadContextsContext);
+  const record = records.find((record) => record.contextId === node.attrs.contextId);
+  return (
+    <NodeViewWrapper as="span" className={chipWrapperClass} contentEditable={false}>
+      {record ? (
+        <ThreadContextChip record={record} />
+      ) : (
+        <span title="Thread reference unavailable">{String(node.attrs.label)} (unavailable)</span>
+      )}
+    </NodeViewWrapper>
+  );
+}
+const ComposerThreadExtension = Node.create({
+  name: "composer-thread",
+  group: "inline",
+  inline: true,
+  atom: true,
+  addAttributes: () => ({
+    contextId: { default: "" },
+    label: { default: "Thread" },
+    source: { default: "" },
+  }),
+  parseHTML: () => [{ tag: "span[data-composer-thread]" }],
+  renderHTML: ({ HTMLAttributes }) => ["span", { "data-composer-thread": "", ...HTMLAttributes }],
+  addNodeView: () => ReactNodeViewRenderer(ComposerThreadView),
+});
 
 const TerminalContextsContext = createContext<ReadonlyArray<TerminalContextDraft>>([]);
 const chipWrapperClass = "composer-inline-chip relative inline-flex align-[-0.125em] leading-none";
@@ -331,6 +372,7 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
         }),
         Code.extend({ excludes: "" }),
         ComposerMentionExtension,
+        ComposerThreadExtension,
         ComposerSkillExtension,
         ComposerTerminalExtension,
         ComposerSelectionExtension,
@@ -469,6 +511,18 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
           if (instance.isActive("codeBlock") || instance.isActive("code")) {
             view.dispatch(view.state.tr.insertText(text).scrollIntoView());
             return true;
+          }
+          const fragment =
+            decodeComposerContextFragment(
+              event.clipboardData.getData(COMPOSER_CONTEXT_CLIPBOARD_MIME),
+            ) ?? decodeComposerContextClipboardHtml(event.clipboardData.getData("text/html"));
+          if (fragment) {
+            const ids = new Set(collectComposerContextReferences(text).map((ref) => ref.contextId));
+            const records = fragment.records.filter(
+              (record): record is ThreadContextRecord =>
+                record.kind === "thread" && "threadId" in record && ids.has(record.contextId),
+            );
+            if (records.length && !latest.current.onImportThreadContexts?.(records)) return true;
           }
           const tokens = collectComposerInlineTokens(`${text}\n`);
           const lastToken = tokens.at(-1);
@@ -609,25 +663,44 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
     const { from, to } = editor.state.selection;
     if (from === to) return;
     event.preventDefault();
-    event.clipboardData.setData("text/plain", serializeComposerSelection(editor));
+    const text = serializeComposerSelection(editor);
+    event.clipboardData.setData("text/plain", text);
+    const ids = new Set(collectComposerContextReferences(text).map((ref) => ref.contextId));
+    const records = (props.threadContexts ?? []).filter((record) => ids.has(record.contextId));
+    if (records[0]) {
+      const fragment = encodeComposerContextFragment({
+        version: 1,
+        source: { environmentId: records[0].environmentId },
+        records,
+      });
+      if (fragment) {
+        event.clipboardData.setData(COMPOSER_CONTEXT_CLIPBOARD_MIME, fragment);
+        event.clipboardData.setData(
+          "text/html",
+          encodeComposerContextClipboardHtml(text, fragment),
+        );
+      }
+    }
     if (cut) editor.chain().focus().deleteSelection().run();
   };
 
   return (
-    <TerminalContextsContext value={terminalContexts}>
-      <div className="composer-editor-surface relative">
-        <EditorContent
-          editor={editor}
-          onPasteCapture={props.onPaste}
-          onCopyCapture={(event) => copySelection(event, false)}
-          onCutCapture={(event) => copySelection(event, true)}
-        />
-        {isEmpty && terminalContexts.length === 0 ? (
-          <div className="pointer-events-none absolute inset-0 leading-relaxed text-placeholder">
-            {placeholder}
-          </div>
-        ) : null}
-      </div>
-    </TerminalContextsContext>
+    <ThreadContextsContext value={props.threadContexts ?? EMPTY_THREAD_CONTEXTS}>
+      <TerminalContextsContext value={terminalContexts}>
+        <div className="composer-editor-surface relative">
+          <EditorContent
+            editor={editor}
+            onPasteCapture={props.onPaste}
+            onCopyCapture={(event) => copySelection(event, false)}
+            onCutCapture={(event) => copySelection(event, true)}
+          />
+          {isEmpty && terminalContexts.length === 0 ? (
+            <div className="pointer-events-none absolute inset-0 leading-relaxed text-placeholder">
+              {placeholder}
+            </div>
+          ) : null}
+        </div>
+      </TerminalContextsContext>
+    </ThreadContextsContext>
   );
 }
