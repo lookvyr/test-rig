@@ -47,3 +47,11 @@ When a parent stops waiting after a timeout, the delegated task can still be
 running. Ask the parent to inspect or cancel that task instead of launching a
 duplicate. For another app-owned review round, ask the parent to delegate again
 with the original brief, prior findings, and any unresolved questions.
+
+## Stopping delegated work
+
+Stopping the parent prevents its current delegation round from automatically
+waking it with results. App-owned children are separate conversations and can
+continue running. To stop a particular child, ask the parent to cancel that task,
+or open the child and choose Stop. Cancelling a child does not recursively cancel
+its own delegated children; stop those separately when needed.

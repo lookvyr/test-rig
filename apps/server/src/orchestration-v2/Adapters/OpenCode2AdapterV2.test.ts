@@ -76,7 +76,7 @@ const durable = { durable: { aggregateID: SESSION, seq: 1, version: 1 } };
 /** The rules T3 gives every session it runs, with only this thread's own T3 MCP server allowed. */
 const mcpRules = [
   { action: "test_rig-*", resource: "*", effect: "deny" },
-  { action: "test_rig-thread_opencode2-adapter_*", resource: "*", effect: "allow" },
+  { action: "test_rig-c26f2f1fb6fbbcc2da5f69c036cefddc_*", resource: "*", effect: "allow" },
 ];
 const t3Rules = [{ action: "*", resource: "*", effect: "allow" }, ...mcpRules];
 const sessionInfo = (overrides: Record<string, unknown> = {}) => ({
@@ -313,7 +313,11 @@ const colorForm = {
  */
 const resumed = (
   entries: ReadonlyArray<ProviderReplayEntry>,
-  options?: { readonly external?: boolean; readonly supervised?: boolean },
+  options?: {
+    readonly external?: boolean;
+    readonly supervised?: boolean;
+    readonly threadId?: ThreadId;
+  },
 ) =>
   Effect.gen(function* () {
     const runtime = yield* openCode2ReplayRuntime(
@@ -335,8 +339,11 @@ const resumed = (
       options?.external === undefined ? undefined : { external: options.external },
     );
     const thread = yield* runtime.resumeThread({
-      providerThread: providerThread(yield* DateTime.now),
-      threadId,
+      providerThread: {
+        ...providerThread(yield* DateTime.now),
+        appThreadId: options?.threadId ?? threadId,
+      },
+      threadId: options?.threadId ?? threadId,
       modelSelection: bigPickle,
       runtimePolicy: policy(options?.supervised === true ? "approval-required" : "full-access"),
     });
@@ -2658,13 +2665,23 @@ describe("OpenCode2 adapter", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect(
-    "registers T3's MCP server for the thread alone and removes it when the thread unloads",
-    () =>
+  it.effect.each([
+    { name: "ordinary", threadId, server: "test_rig-c26f2f1fb6fbbcc2da5f69c036cefddc" },
+    {
+      name: "long delegated",
+      threadId: ThreadId.make(
+        "thread:delegated-task:command%3Amcp%3Aprovider-session%3Adelegate-task%3A" +
+          "nested-review-".repeat(12),
+      ),
+      server: "test_rig-44312673015bbeba75310be102059fc1",
+    },
+  ])(
+    "registers and isolates MCP tools for a $name thread, then removes them on unload",
+    (scenario) =>
       Effect.gen(function* () {
         McpProviderSession.setMcpProviderSession({
           environmentId: EnvironmentId.make("environment:opencode2-adapter"),
-          threadId,
+          threadId: scenario.threadId,
           providerSessionId: "mcp:opencode2-adapter",
           providerInstanceId: instanceId,
           endpoint: "http://127.0.0.1:3773/mcp",
@@ -2672,31 +2689,48 @@ describe("OpenCode2 adapter", () => {
           browserToolsAvailable: false,
         });
         yield* Effect.addFinalizer(() =>
-          Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+          Effect.sync(() => McpProviderSession.clearMcpProviderSession(scenario.threadId)),
         );
-        const server = "test_rig-thread_opencode2-adapter";
-        const { runtime, thread } = yield* resumed([
-          // Registered for the session's directory under the thread's own name;
-          // the session's rules allow only this name's tools (see `t3Rules`).
-          out("mcp.add", {
-            server,
-            "location[directory]": WORK,
-            config: {
-              type: "remote",
-              url: "http://127.0.0.1:3773/mcp",
-              headers: { Authorization: "Bearer thread-credential" },
-              oauth: false,
-            },
-          }),
-          reply("mcp.add", null),
-          out("session.prompt", { sessionID: SESSION, text: "<any>" }),
-          promptAccepted,
-          event("session.execution.succeeded", { sessionID: SESSION }),
-          out("mcp.remove", { server, "location[directory]": WORK }),
-          reply("mcp.remove", null),
-        ]);
+        const server = scenario.server;
+        assert.isAtMost(server.length, 100);
+        const { runtime, thread } = yield* resumed(
+          [
+            ...(scenario.threadId === threadId
+              ? []
+              : [
+                  out("session.update", {
+                    sessionID: SESSION,
+                    permissions: [
+                      { action: "*", resource: "*", effect: "allow" },
+                      { action: "test_rig-*", resource: "*", effect: "deny" },
+                      { action: `${server}_*`, resource: "*", effect: "allow" },
+                    ],
+                  }),
+                  reply("session.update", null),
+                ]),
+            // Registered for the session's directory under the thread's own name;
+            // the session's rules allow only this name's tools (see `t3Rules`).
+            out("mcp.add", {
+              server,
+              "location[directory]": WORK,
+              config: {
+                type: "remote",
+                url: "http://127.0.0.1:3773/mcp",
+                headers: { Authorization: "Bearer thread-credential" },
+                oauth: false,
+              },
+            }),
+            reply("mcp.add", null),
+            out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+            promptAccepted,
+            event("session.execution.succeeded", { sessionID: SESSION }),
+            out("mcp.remove", { server, "location[directory]": WORK }),
+            reply("mcp.remove", null),
+          ],
+          { threadId: scenario.threadId },
+        );
         const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
-        yield* runtime.startTurn(turnInput(thread));
+        yield* runtime.startTurn({ ...turnInput(thread), threadId: scenario.threadId });
         assert.equal((yield* Fiber.join(terminal))?.status, "completed");
         yield* runtime.unloadThread!({ providerThread: thread });
       }).pipe(Effect.scoped),
@@ -3597,7 +3631,11 @@ describe("OpenCode2 adapter", () => {
           permissions: [
             { action: "*", resource: "*", effect: "allow" },
             { action: "test_rig-*", resource: "*", effect: "deny" },
-            { action: "test_rig-thread_opencode2-adapter_fork_*", resource: "*", effect: "allow" },
+            {
+              action: "test_rig-7c81f4ba96860743baebd01c07478498_*",
+              resource: "*",
+              effect: "allow",
+            },
           ],
         }),
         reply("session.update", null),

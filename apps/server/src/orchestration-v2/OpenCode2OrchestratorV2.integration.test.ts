@@ -3,6 +3,7 @@
  * the transcript fixes the order of every request the adapter sends, so a
  * request the orchestrator never lets it make fails the run.
  */
+import * as NodeCrypto from "node:crypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -77,7 +78,11 @@ const labelled = (entry: ProviderReplayEntry, label: string): ProviderReplayEntr
  */
 const mcpRules = (name: string) => [
   { action: "test_rig-*", resource: "*", effect: "deny" },
-  { action: `test_rig-thread_${name}_*`, resource: "*", effect: "allow" },
+  {
+    action: `test_rig-${NodeCrypto.createHash("sha256").update(`thread:${name}`).digest("hex").slice(0, 32)}_*`,
+    resource: "*",
+    effect: "allow",
+  },
 ];
 const FULL_ACCESS = [{ action: "*", resource: "*", effect: "allow" }];
 /** Full access for the thread named `name`. */

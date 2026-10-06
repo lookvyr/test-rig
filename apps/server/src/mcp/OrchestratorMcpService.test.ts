@@ -9,9 +9,12 @@ import {
   RunId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ServerCommand,
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
@@ -1035,5 +1038,179 @@ describe("OrchestratorMcpService provider resolution", () => {
           }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
         }
       }),
+  );
+  it.effect.each([
+    {
+      name: "broader runtime permissions",
+      parentRuntime: "approval-required",
+      parentInteraction: "default",
+      requestedRuntime: "full-access",
+      requestedInteraction: "inherit",
+      enabled: true,
+      code: "runtime_mode_escalation_denied",
+    },
+    {
+      name: "leaving the parent's plan mode",
+      parentRuntime: "full-access",
+      parentInteraction: "plan",
+      requestedRuntime: "inherit",
+      requestedInteraction: "default",
+      enabled: true,
+      code: "interaction_mode_escalation_denied",
+    },
+    {
+      name: "an explicitly disabled target",
+      parentRuntime: "full-access",
+      parentInteraction: "default",
+      requestedRuntime: "inherit",
+      requestedInteraction: "inherit",
+      enabled: false,
+      code: "provider_unavailable",
+    },
+  ] as const)("rejects $name before creating child work", (scenario) =>
+    Effect.gen(function* () {
+      const parent = parentProjection([]);
+      const dispatched = yield* Ref.make<ReadonlyArray<string>>([]);
+      const dependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: () =>
+            Effect.succeed({
+              ...parent,
+              thread: {
+                ...parent.thread,
+                runtimeMode: scenario.parentRuntime,
+                interactionMode: scenario.parentInteraction,
+              },
+            }),
+          dispatch: (command) =>
+            Ref.update(dispatched, (types) => [...types, command.type]).pipe(
+              Effect.andThen(Effect.die("rejected delegation must not dispatch")),
+            ),
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+              enabled: scenario.enabled,
+            }),
+          ]),
+        }),
+        adapterRegistryLayer([codexInstanceId]),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const error = yield* service
+          .delegateTask(scope, {
+            task: "Review without changing the parent's permission boundary.",
+            target: { providerInstanceId: codexInstanceId },
+            runtimeMode: scenario.requestedRuntime,
+            interactionMode: scenario.requestedInteraction,
+            clientRequestId: `boundary-${scenario.name}`,
+          })
+          .pipe(Effect.flip);
+        assert.equal(error.code, scenario.code);
+        assert.deepEqual(yield* Ref.get(dispatched), []);
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+    }),
+  );
+
+  it.effect("a wait timeout preserves the child and enables later completion delivery", () =>
+    Effect.gen(function* () {
+      const task = {
+        id: taskId,
+        threadId: parentThreadId,
+        runId: parentRunId,
+        parentNodeId,
+        origin: "app_owned",
+        createdBy: "agent",
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        providerThreadId: null,
+        childThreadId,
+        nativeTaskRef: null,
+        prompt: "Keep working after the parent stops waiting.",
+        title: null,
+        model: "gpt-5.4",
+        status: "running",
+        result: null,
+        startedAt: null,
+        completedAt: null,
+      };
+      const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
+      const runningChild = {
+        ...childProjection,
+        runs: [
+          {
+            ...parentProjection([]).runs[0]!,
+            id: RunId.make("run:timeout-child"),
+            threadId: childThreadId,
+          },
+        ],
+      } satisfies OrchestrationV2ThreadProjection;
+      const dependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: (id) =>
+            Effect.succeed(id === parentThreadId ? parentProjection([task]) : runningChild),
+          dispatch: (command) =>
+            Ref.update(commands, (all) => [...all, command]).pipe(
+              Effect.as({
+                sequence: 1,
+                storedEvents: [
+                  {
+                    sequence: 1,
+                    commandId: null,
+                    event: { type: "subagent.updated", payload: task },
+                  },
+                ],
+              } as never),
+            ),
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed([
+            providerSnapshot({
+              instanceId: codexInstanceId,
+              driver: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            }),
+          ]),
+        }),
+        adapterRegistryLayer([codexInstanceId]),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const waiting = yield* Effect.forkChild(
+          service.delegateTask(scope, {
+            task: task.prompt,
+            mode: "wait",
+            timeoutMs: 1000,
+            clientRequestId: "wait-timeout",
+          }),
+        );
+        yield* TestClock.adjust("1 second");
+        const result = yield* Fiber.join(waiting);
+        assert.isTrue(result.waitTimedOut);
+        assert.equal(result.status, "running");
+        assert.equal(result.childThreadId, childThreadId);
+        const later = yield* service.taskStatus(scope, result.taskId);
+        assert.isFalse(later.waitTimedOut);
+        assert.equal(later.status, "running");
+        const dispatched = yield* Ref.get(commands);
+        assert.deepEqual(
+          dispatched.map((command) => command.type),
+          ["delegated_task.request", "delegated_task.wake-policy"],
+        );
+        const wake = dispatched[1];
+        assert.equal(
+          wake?.type === "delegated_task.wake-policy" ? wake.completionWake : null,
+          "always",
+        );
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+    }),
   );
 });

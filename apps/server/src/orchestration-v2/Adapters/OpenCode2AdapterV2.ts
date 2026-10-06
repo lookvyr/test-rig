@@ -21,6 +21,7 @@
  *
  * @module orchestration-v2/Adapters/OpenCode2AdapterV2
  */
+import * as NodeCrypto from "node:crypto";
 import {
   AbsolutePath,
   Agent,
@@ -444,11 +445,12 @@ const rule = (action: string, effect: Rule["effect"]): Rule => ({ action, resour
  */
 /**
  * T3's MCP server is registered per directory, not per session, so each thread
- * gets its own `test_rig-<thread>` entry with its own credential. OpenCode names
+ * gets its own entry with its own credential. Hash thread IDs so delegated IDs
+ * stay below OpenCode's 100-character route parameter limit. OpenCode names
  * an MCP tool's permission `<server>_<tool>` (non-alphanumerics become `_`).
  */
 const t3McpServerName = (threadId: string) =>
-  `test_rig-${threadId.replaceAll(/[^a-zA-Z0-9_-]/g, "_")}`;
+  `test_rig-${NodeCrypto.createHash("sha256").update(threadId).digest("hex").slice(0, 32)}`;
 
 /**
  * The rules that keep T3's MCP servers to their own thread, after the mode's:
@@ -3262,6 +3264,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             Effect.as(true),
             Effect.catchCause((cause) =>
               Effect.logWarning("Could not add T3 Code's MCP server to OpenCode.", cause).pipe(
+                Effect.annotateLogs({ threadId: turnInput.threadId, mcpServerName: name }),
                 Effect.as(false),
               ),
             ),
