@@ -447,3 +447,39 @@ boundary, which does not distinguish a missing row from every storage/import
 failure; a follow-up review confirmed that broadly remapping it would be incorrect.
 The existing unavailable tooltip was source-verified. Archived targets are excluded
 by tested matching. User documentation is in `docs/user/composer.md`.
+
+## Delegation defaults — October 6, 2026
+
+The user approved the upstream app-owned delegation defaults in LOO-15:
+
+- Children share the parent's project, branch, and current checkout, including
+  uncommitted edits. The delegation tool has no workspace override. Explicitly
+  requested independent work uses the existing top-level thread launch flow
+  with a new or existing worktree; no child-worktree selector is being added.
+- Children receive the supplied self-contained task prompt. Parent history and
+  attachments are not automatically inherited. There is no include-history
+  option; relevant context is selected by what the parent includes in the brief.
+  Existing thread-read permissions remain unchanged, and cross-project context
+  attached to the parent is not automatically forwarded as child read authority.
+- Completion returns findings, not conversation merge-back or an automatic Git
+  merge. Native provider subagents retain their separate provider behavior.
+
+These decisions match nightly `v0.0.46-nightly.20261005.2702` for app-owned
+workspace/context defaults. They settle LOO-15's product choices, not LOO-30's
+remaining live cross-provider, restart, cancellation, and nesting acceptance.
+
+Live Codex browser verification in Test Rig and that nightly confirmed the same
+checkout, visibility of an uncommitted draft line, a child containing only its
+supplied brief, and findings returned to the parent. A parent-only marker was
+absent from the child's task context. Task-row and parent navigation worked in
+both; Test Rig's Agents-tab navigation also passed. No browser errors occurred.
+The existing presentation differs: upstream embeds Lineage in thread details,
+while Test Rig exposes it in a separate Agents tab. This change does not move
+that UI or alter Test Rig's diff panel.
+
+The 17 existing delegation/projection/completion tests and 10 guidance/tool tests
+passed. The guidance tests also needed stale T3 Code branding expectations
+updated to the existing Test Rig strings. Targeted formatting, lint, and diff
+checks passed. An independent correctness and simplification review found no
+actionable issues. Live Claude/OpenCode, Electron-shell, and remote-transport
+acceptance were not exercised for this guidance-only change.

@@ -57,9 +57,9 @@ describe("T3 orchestration provider instructions", () => {
       state: { interactionMode: "default", hasT3Mcp: true },
     });
 
-    assert.include(injected, "T3 Code interaction mode: Default");
-    assert.include(injected, "T3 Code collaborative browser");
-    assert.include(injected, "T3 Code orchestration");
+    assert.include(injected, "Test Rig interaction mode: Default");
+    assert.include(injected, "Test Rig collaborative browser");
+    assert.include(injected, "Test Rig orchestration");
     assert.include(injected, "<user_request>\nInspect the repository.\n</user_request>");
   });
 
@@ -77,14 +77,14 @@ describe("T3 orchestration provider instructions", () => {
         state: { ...defaultState, interactionMode: "plan" },
         previousState: defaultState,
       }),
-      "T3 Code interaction mode: Plan",
+      "Test Rig interaction mode: Plan",
     );
     const withoutMcp = t3AcpPromptWithInstructions({
       prompt,
       state: { interactionMode: "default", hasT3Mcp: false },
     });
-    assert.include(withoutMcp, "T3 Code interaction mode: Default");
-    assert.notInclude(withoutMcp, "T3 Code collaborative browser");
-    assert.notInclude(withoutMcp, "T3 Code orchestration");
+    assert.include(withoutMcp, "Test Rig interaction mode: Default");
+    assert.notInclude(withoutMcp, "Test Rig collaborative browser");
+    assert.notInclude(withoutMcp, "Test Rig orchestration");
   });
 });
