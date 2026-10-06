@@ -6,6 +6,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import { ServerConfig } from "../config.ts";
 import { makeOpenCode2Fixture } from "../provider/opencode2/OpenCode2TestFixture.ts";
 import { makeOpenCodeTextGeneration } from "./OpenCodeTextGeneration.ts";
@@ -19,6 +20,32 @@ const input = {
   modelSelection: { instanceId: ProviderInstanceId.make("opencode"), model: "opencode/big-pickle" },
 };
 it.layer(layer)("OpenCode 2 text generation", (it) => {
+  for (const [mode, raw, expected, promptRule] of [
+    ["static", "Fix login", "Team/fix-login", "without a prefix or namespace"],
+    ["semantic", "fix/login-timeout", "fix/login-timeout", "Include a semantic prefix"],
+    ["custom", "LOO-43.Release", "LOO-43.Release", "Use the exact issue ID."],
+  ] as const) {
+    it.effect(`applies ${mode} branch naming through OpenCode`, () =>
+      Effect.gen(function* () {
+        const fixture = yield* makeOpenCode2Fixture;
+        fixture.behavior.onPrompt = (id) => {
+          fixture.emit(fixture.text(id, JSON.stringify({ branch: raw })));
+          fixture.emit(fixture.terminal(id));
+        };
+        const service = yield* makeOpenCodeTextGeneration(fixture.runtime);
+        const result = yield* service.generateBranchName({
+          ...input,
+          naming: { mode, prefix: "Team/", instructions: "Use the exact issue ID." },
+        });
+        assert.equal(result.branch, expected);
+        assert.include(
+          yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(fixture.requests),
+          promptRule,
+        );
+      }),
+    );
+  }
+
   it.effect("uses a subscribed temporary session and removes it after structured output", () =>
     Effect.gen(function* () {
       const fixture = yield* makeOpenCode2Fixture;

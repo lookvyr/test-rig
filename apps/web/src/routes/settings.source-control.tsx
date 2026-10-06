@@ -15,7 +15,12 @@ function SettingsSourceControlRoute() {
 }
 
 export const Route = createFileRoute("/settings/source-control")({
-  validateSearch: (search: Record<string, unknown>) => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { project?: string; environmentId: string | undefined } => ({
+    ...(typeof search.project === "string" && search.project.length > 0
+      ? { project: search.project }
+      : {}),
     environmentId:
       typeof search.environmentId === "string" && search.environmentId.length > 0
         ? search.environmentId

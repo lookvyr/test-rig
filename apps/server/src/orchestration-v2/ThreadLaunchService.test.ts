@@ -147,7 +147,7 @@ function makeHarness(options: HarnessOptions = {}) {
     options.runSetup ?? (() => Effect.succeed({ status: "no-script" as const })),
   );
   const generateBranchName = vi.fn(
-    options.generateBranchName ?? (() => Effect.succeed({ branch: "generated-branch" })),
+    options.generateBranchName ?? (() => Effect.succeed({ branch: "test-rig/generated-branch" })),
   );
   const generateThreadTitle = vi.fn(
     options.generateTitle ?? (() => Effect.succeed({ title: "Generated title" })),
@@ -1153,7 +1153,7 @@ it.effect.each([false, true])(
         generateBranchName: () =>
           Deferred.succeed(generationStarted, undefined).pipe(
             Effect.andThen(Deferred.await(finishGeneration)),
-            Effect.as({ branch: "late-name" }),
+            Effect.as({ branch: "test-rig/late-name" }),
           ),
         renameBranch: (input) =>
           Effect.sync(() => {
@@ -1239,7 +1239,7 @@ it.effect("renames a temporary t3code/<hash> branch off the provisioning critica
       generateBranchName: () =>
         Deferred.succeed(branchNameStarted, undefined).pipe(
           Effect.andThen(Deferred.await(allowBranchName)),
-          Effect.as({ branch: "generated-branch" }),
+          Effect.as({ branch: "test-rig/generated-branch" }),
         ),
     });
     yield* Effect.gen(function* () {
@@ -1268,28 +1268,30 @@ it.effect("renames a temporary t3code/<hash> branch off the provisioning critica
       yield* waitUntil(() =>
         threads
           .getThreadProjection(launched.threadId)
-          .pipe(Effect.map((projection) => projection.thread.branch === "t3code/generated-branch")),
+          .pipe(
+            Effect.map((projection) => projection.thread.branch === "test-rig/generated-branch"),
+          ),
       );
       assert.deepEqual(harness.renameBranch.mock.calls[0]?.[0], {
         cwd: "/repo-worktrees/temp",
         oldBranch: "t3code/abcd1234",
-        newBranch: "t3code/generated-branch",
+        newBranch: "test-rig/generated-branch",
       });
     }).pipe(Effect.provide(harness.layer));
   }),
 );
 
-it.effect("preserves the configured worktree prefix when settings change during generation", () =>
+it.effect("captures the naming policy before generation and ignores the temporary namespace", () =>
   Effect.gen(function* () {
     const generationStarted = yield* Deferred.make<void>();
     const finishGeneration = yield* Deferred.make<void>();
     const renamed = yield* Deferred.make<void>();
     const harness = makeHarness({
-      serverSettings: { newWorktreeBranchPrefix: "example/team" },
-      generateBranchName: () =>
+      serverSettings: { branchNamePrefix: "example/team" },
+      generateBranchName: (input) =>
         Deferred.succeed(generationStarted, undefined).pipe(
           Effect.andThen(Deferred.await(finishGeneration)),
-          Effect.as({ branch: "fix-reconnect" }),
+          Effect.as({ branch: `${input.naming!.prefix}/fix-reconnect` }),
         ),
       renameBranch: (input) =>
         Deferred.succeed(renamed, undefined).pipe(Effect.as({ branch: input.newBranch })),
@@ -1307,8 +1309,8 @@ it.effect("preserves the configured worktree prefix when settings change during 
       );
       yield* Deferred.await(generationStarted);
       const temporaryBranch = harness.createWorktree.mock.calls[0]?.[0]?.newRefName ?? "";
-      assert.match(temporaryBranch, /^example\/team\/_worktree\/[0-9a-f]{8}$/u);
-      yield* settings.updateSettings({ newWorktreeBranchPrefix: "changed" });
+      assert.match(temporaryBranch, /^test-rig\/_worktree\/[0-9a-f]{8}$/u);
+      yield* settings.updateSettings({ branchNamePrefix: "changed" });
       yield* Deferred.succeed(finishGeneration, undefined);
       yield* Deferred.await(renamed);
       assert.deepEqual(harness.renameBranch.mock.calls[0]?.[0], {
@@ -1325,7 +1327,6 @@ it.effect("preserves custom exact branch names without adding the temporary pref
     const renamed = yield* Deferred.make<void>();
     const harness = makeHarness({
       serverSettings: {
-        newWorktreeBranchPrefix: "example/team",
         branchNamingMode: "custom",
         branchNamePrefix: "",
         branchNameInstructions: "Use the exact issue identifier without a prefix.",
@@ -1436,12 +1437,14 @@ it.effect("renames a temporary branch on an existing worktree to a generated nam
       yield* waitUntil(() =>
         threads
           .getThreadProjection(launched.threadId)
-          .pipe(Effect.map((projection) => projection.thread.branch === "t3code/generated-branch")),
+          .pipe(
+            Effect.map((projection) => projection.thread.branch === "test-rig/generated-branch"),
+          ),
       );
       assert.deepEqual(harness.renameBranch.mock.calls[0]?.[0], {
         cwd: "/repo-worktrees/t3code-abcd1234",
         oldBranch: "t3code/abcd1234",
-        newBranch: "t3code/generated-branch",
+        newBranch: "test-rig/generated-branch",
       });
     }).pipe(Effect.provide(harness.layer));
   }),
@@ -2358,4 +2361,35 @@ it.effect.each(["worktree", "existing_worktree", "root"] as const)(
         );
       }).pipe(Effect.provide(harness.layer));
     }),
+);
+
+it.effect("uses project semantic naming without adding a temporary or global prefix", () =>
+  Effect.gen(function* () {
+    const renamed = yield* Deferred.make<void>();
+    const harness = makeHarness({
+      serverSettings: {
+        branchNamePrefix: "global",
+        projectSettingsOverrides: { [projectId]: { branchNamingMode: "semantic" } },
+      },
+      generateBranchName: (input) => {
+        assert.equal(input.naming?.mode, "semantic");
+        return Effect.succeed({ branch: "fix/login-timeout" });
+      },
+      renameBranch: (input) =>
+        Deferred.succeed(renamed, undefined).pipe(Effect.as({ branch: input.newBranch })),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      yield* launches.launch(
+        launchInput({
+          command: "command:semantic",
+          thread: "thread:semantic",
+          message: "Fix login",
+          workspace: { type: "worktree", baseRef: "main" },
+        }),
+      );
+      yield* Deferred.await(renamed);
+      assert.equal(harness.renameBranch.mock.calls[0]?.[0]?.newBranch, "fix/login-timeout");
+    }).pipe(Effect.provide(harness.layer));
+  }),
 );

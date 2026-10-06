@@ -754,7 +754,9 @@ export const ServerSettings = Schema.Struct({
   branchNamingMode: BranchNamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("static" as const)),
   ),
-  branchNamePrefix: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("codex"))),
+  branchNamePrefix: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_NEW_WORKTREE_BRANCH_PREFIX)),
+  ),
   branchNameInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   pullRequestMergeMethod: Schema.NullOr(PullRequestMergeMethod).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
@@ -782,9 +784,6 @@ export const ServerSettings = Schema.Struct({
   ),
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
-  ),
-  newWorktreeBranchPrefix: NewWorktreeBranchPrefix.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_NEW_WORKTREE_BRANCH_PREFIX)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   textGenerationModelSelection: ModelSelection.pipe(
@@ -941,35 +940,35 @@ export const ServerSettingsPatch = Schema.Struct({
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
     }),
   ),
-  responseStreamingMode: Schema.optionalKey(ServerSettings.fields.responseStreamingMode),
-  continueThreadsAfterServerUpdate: Schema.optionalKey(
-    ServerSettings.fields.continueThreadsAfterServerUpdate,
-  ),
-  enableAgentBrowserAccess: Schema.optionalKey(ServerSettings.fields.enableAgentBrowserAccess),
-  defaultAutoPull: Schema.optionalKey(ServerSettings.fields.defaultAutoPull),
-  defaultProjectScripts: Schema.optionalKey(ServerSettings.fields.defaultProjectScripts),
+  responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
+  continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
+  enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
+  defaultAutoPull: Schema.optionalKey(Schema.Boolean),
+  defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
   projectAgentBrowserAccessOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),
-  projectScriptOverrides: Schema.optionalKey(ServerSettings.fields.projectScriptOverrides),
+  projectScriptOverrides: Schema.optionalKey(
+    Schema.Record(ProjectId, Schema.NullOr(Schema.Array(ProjectScript))),
+  ),
   projectAutoPullOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),
-  defaultModelSelection: Schema.optionalKey(ServerSettings.fields.defaultModelSelection),
-  defaultRuntimeMode: Schema.optionalKey(ServerSettings.fields.defaultRuntimeMode),
+  defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
   ),
-  projectSettingsFolded: Schema.optionalKey(ServerSettings.fields.projectSettingsFolded),
-  sidebarAutoSettleAfterDays: Schema.optionalKey(ServerSettings.fields.sidebarAutoSettleAfterDays),
-  sidebarAutoSettleOnMerge: Schema.optionalKey(ServerSettings.fields.sidebarAutoSettleOnMerge),
-  snoozeLimitedThreads: Schema.optionalKey(ServerSettings.fields.snoozeLimitedThreads),
-  autoResumeLimitedThreads: Schema.optionalKey(ServerSettings.fields.autoResumeLimitedThreads),
-  worktreeSubmodules: Schema.optionalKey(ServerSettings.fields.worktreeSubmodules),
-  branchNamingMode: Schema.optionalKey(ServerSettings.fields.branchNamingMode),
-  branchNamePrefix: Schema.optionalKey(ServerSettings.fields.branchNamePrefix),
-  branchNameInstructions: Schema.optionalKey(ServerSettings.fields.branchNameInstructions),
-  pullRequestMergeMethod: Schema.optionalKey(ServerSettings.fields.pullRequestMergeMethod),
+  projectSettingsFolded: Schema.optionalKey(Schema.Boolean),
+  sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
+  sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
+  snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
+  autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
+  worktreeSubmodules: Schema.optionalKey(ForwardCompatibleNullable(WorktreeSubmodules)),
+  branchNamingMode: Schema.optionalKey(BranchNamingMode),
+  branchNamePrefix: Schema.optionalKey(TrimmedString),
+  branchNameInstructions: Schema.optionalKey(TrimmedString),
+  pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
   autoRemoveSettledWorktrees: Schema.optionalKey(Schema.Boolean),
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
@@ -986,7 +985,6 @@ export const ServerSettingsPatch = Schema.Struct({
   backgroundActivityProfile: Schema.optionalKey(BackgroundActivityProfile),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
-  newWorktreeBranchPrefix: Schema.optionalKey(NewWorktreeBranchPrefix),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   sourceControlWritingStyle: Schema.optionalKey(

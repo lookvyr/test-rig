@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyGitStatusStreamEvent,
+  formatGeneratedBranchName,
   buildGeneratedWorktreeBranchName,
   buildTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
@@ -214,5 +215,41 @@ describe("applyGitStatusStreamEvent", () => {
       behindCount: 1,
       pr: null,
     });
+  });
+});
+
+describe("formatGeneratedBranchName", () => {
+  it("supports nested, trailing-slash and empty static prefixes", () => {
+    for (const [prefix, expected] of [
+      ["Team/SDK/", "Team/SDK/fix-login"],
+      ["", "fix-login"],
+    ]) {
+      expect(
+        formatGeneratedBranchName("Fix login", {
+          mode: "static",
+          prefix: prefix!,
+          instructions: "",
+        }),
+      ).toBe(expected);
+    }
+  });
+  it("leaves semantic namespaces intact without the static prefix", () => {
+    expect(
+      formatGeneratedBranchName("Fix/Login timeout", {
+        mode: "semantic",
+        prefix: "ignored",
+        instructions: "",
+      }),
+    ).toBe("fix/login-timeout");
+  });
+  it("preserves custom names exactly, including case, punctuation and length", () => {
+    const branch = "Team/LOO-43.Release-" + "long".repeat(20);
+    expect(
+      formatGeneratedBranchName(`  ${branch}  `, {
+        mode: "custom",
+        prefix: "ignored",
+        instructions: "",
+      }),
+    ).toBe(branch);
   });
 });

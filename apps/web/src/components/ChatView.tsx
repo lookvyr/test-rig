@@ -7,6 +7,7 @@ import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
 import {
   type RuntimeRequestId,
   DEFAULT_MODEL,
+  DEFAULT_NEW_WORKTREE_BRANCH_PREFIX,
   defaultInstanceIdForDriver,
   type EnvironmentId,
   type MessageId,
@@ -5163,7 +5164,7 @@ function ChatViewContent(props: ChatViewProps) {
                       baseBranch: baseBranchForWorktree,
                       branch: buildTemporaryWorktreeBranchName(
                         randomHex,
-                        primaryServerSettings.newWorktreeBranchPrefix,
+                        DEFAULT_NEW_WORKTREE_BRANCH_PREFIX,
                       ),
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
                     },

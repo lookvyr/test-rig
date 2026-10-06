@@ -227,44 +227,41 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   });
 });
 
+describe("ServerSettingsPatch", () => {
+  it("keeps an empty patch empty instead of injecting full-settings defaults", () => {
+    expect(decodeServerSettingsPatch({})).toEqual({});
+  });
+});
+
 describe("ServerSettings worktree defaults", () => {
-  it("defaults legacy configs to Test Rig worktree naming", () => {
+  it("defaults to Test Rig static naming", () => {
     const settings = decodeServerSettings({});
-
     expect(settings.newWorktreesStartFromOrigin).toBe(true);
-    expect(settings.newWorktreeBranchPrefix).toBe("test-rig");
+    expect(settings.branchNamingMode).toBe("static");
+    expect(settings.branchNamePrefix).toBe("test-rig");
+    expect(settings.branchNameInstructions).toBe("");
   });
 
-  it("accepts worktree default updates", () => {
-    const patch = decodeServerSettingsPatch({
-      newWorktreesStartFromOrigin: false,
-      newWorktreeBranchPrefix: "example/team",
+  it("does not reset naming when a settings patch omits it", () => {
+    const unrelated = decodeServerSettingsPatch({ addProjectBaseDirectory: "/projects" });
+    expect(unrelated.branchNamingMode).toBeUndefined();
+    expect(unrelated.branchNamePrefix).toBeUndefined();
+    expect(unrelated.branchNameInstructions).toBeUndefined();
+  });
+
+  it("accepts the upstream naming modes, empty prefixes, and trimmed instructions", () => {
+    expect(
+      decodeServerSettingsPatch({
+        branchNamingMode: "custom",
+        branchNamePrefix: "",
+        branchNameInstructions: "  Use issue IDs.  ",
+      }),
+    ).toMatchObject({
+      branchNamingMode: "custom",
+      branchNamePrefix: "",
+      branchNameInstructions: "Use issue IDs.",
     });
-
-    expect(patch.newWorktreesStartFromOrigin).toBe(false);
-    expect(patch.newWorktreeBranchPrefix).toBe("example/team");
-  });
-
-  it("trims valid prefixes and accepts the length boundary", () => {
-    expect(
-      decodeServerSettingsPatch({ newWorktreeBranchPrefix: "  example/team  " })
-        .newWorktreeBranchPrefix,
-    ).toBe("example/team");
-    expect(
-      decodeServerSettingsPatch({ newWorktreeBranchPrefix: "a".repeat(64) })
-        .newWorktreeBranchPrefix,
-    ).toBe("a".repeat(64));
-  });
-
-  it.each(["", "UPPERCASE", "has spaces", "/leading", "trailing/", "double//slash", "dot.name"])(
-    "rejects invalid worktree branch prefix %j",
-    (newWorktreeBranchPrefix) => {
-      expect(() => decodeServerSettingsPatch({ newWorktreeBranchPrefix })).toThrow();
-    },
-  );
-
-  it("rejects worktree branch prefixes longer than 64 characters", () => {
-    expect(() => decodeServerSettingsPatch({ newWorktreeBranchPrefix: "a".repeat(65) })).toThrow();
+    expect(() => decodeServerSettingsPatch({ branchNamingMode: "unknown" })).toThrow();
   });
 });
 

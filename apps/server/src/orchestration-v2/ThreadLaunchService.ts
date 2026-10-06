@@ -4,6 +4,7 @@ import * as TerminalManager from "../terminal/Manager.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   CommandId,
+  DEFAULT_NEW_WORKTREE_BRANCH_PREFIX,
   type ChatAttachment,
   type MessageId,
   type ModelSelection,
@@ -29,7 +30,6 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import {
-  buildGeneratedWorktreeBranchName,
   buildTemporaryWorktreeBranchName,
   parseTemporaryWorktreeBranchPrefix,
 } from "@t3tools/shared/git";
@@ -279,7 +279,7 @@ const make = Effect.gen(function* () {
         const uuid = yield* randomUuidV4;
         branch = buildTemporaryWorktreeBranchName(
           () => uuid.replaceAll("-", ""),
-          (yield* serverSettings.getSettings).newWorktreeBranchPrefix,
+          DEFAULT_NEW_WORKTREE_BRANCH_PREFIX,
         );
       } else {
         branch = requestedBranch ?? null;
@@ -395,9 +395,7 @@ const make = Effect.gen(function* () {
             git.renameBranch({
               cwd: worktreeCwd,
               oldBranch,
-              newBranch: exactName
-                ? newBranch
-                : buildGeneratedWorktreeBranchName(newBranch, branchPrefix),
+              newBranch,
               ...(exactName ? { exactName: true } : {}),
             }),
           ),

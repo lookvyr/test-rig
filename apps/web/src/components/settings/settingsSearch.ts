@@ -132,9 +132,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
-    id: "worktree-branch-prefix",
-    title: "Worktree branch prefix",
-    to: "/settings/general",
+    id: "worktree-branch-naming",
+    title: "Worktree branch naming",
+    to: "/settings/source-control",
   },
   {
     id: "add-project-starts-in",

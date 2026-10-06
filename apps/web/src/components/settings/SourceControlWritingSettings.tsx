@@ -1,11 +1,13 @@
+import { BranchNamingSettings } from "./BranchNamingSettings";
+import { ProjectSettingsScope } from "./ProjectSettingsScope";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
-import type { SourceControlWritingStyleMode } from "@t3tools/contracts";
+import type { EnvironmentId, SourceControlWritingStyleMode } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
 
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -15,7 +17,7 @@ import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
-import { primaryServerProvidersAtom } from "../../state/server";
+import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -73,10 +75,15 @@ function instructionDrafts(style: {
   };
 }
 
-export function SourceControlWritingSettingsSection() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+export function SourceControlWritingSettingsSection({
+  environmentId,
+}: {
+  environmentId: EnvironmentId;
+}) {
+  const settings = useEnvironmentSettings(environmentId);
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const serverProviders =
+    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
   const style = settings.sourceControlWritingStyle;
   const defaults = DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle;
   const [activeInstruction, setActiveInstruction] = useState<InstructionKey>("commitInstructions");
@@ -134,6 +141,9 @@ export function SourceControlWritingSettingsSection() {
 
   return (
     <SettingsSection title="Text generation">
+      <ProjectSettingsScope environmentId={environmentId}>
+        <BranchNamingSettings />
+      </ProjectSettingsScope>
       <SettingsRow
         title="Source control writing style"
         description={MODE_OPTIONS[style.mode].description}

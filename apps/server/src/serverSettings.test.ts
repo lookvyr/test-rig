@@ -49,6 +49,22 @@ const makeFailingSecretStoreLayer = (cause: ServerSecretStore.SecretStoreError) 
   );
 
 it.layer(NodeServices.layer)("server settings", (it) => {
+  it.effect("ignores the obsolete prefix instead of migrating it", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const config = yield* ServerConfig.ServerConfig;
+      yield* fs.writeFileString(config.settingsPath, '{"newWorktreeBranchPrefix":"old-team"}');
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const settings = yield* service.getSettings;
+      assert.equal(settings.branchNamePrefix, "test-rig");
+      assert.equal(settings.branchNamingMode, "static");
+      assert.equal("newWorktreeBranchPrefix" in settings, false);
+      yield* service.updateSettings({ newWorktreesStartFromOrigin: false });
+      const saved = yield* fs.readFileString(config.settingsPath);
+      assert.equal(saved.includes("newWorktreeBranchPrefix"), false);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("preserves context when reading a provider environment secret fails", () => {
     const platformCause = PlatformError.systemError({
       _tag: "PermissionDenied",
@@ -92,6 +108,30 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.notInclude(error.message, cause.message);
     }).pipe(Effect.provide(settingsLayer));
   });
+
+  it.effect("preserves configured preferences when an unrelated decoded patch is saved", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const preferences = {
+        enableAgentBrowserAccess: false,
+        defaultAutoPull: true,
+        continueThreadsAfterServerUpdate: true,
+        sidebarAutoSettleAfterDays: 14,
+        sidebarAutoSettleOnMerge: false,
+        snoozeLimitedThreads: true,
+        autoResumeLimitedThreads: true,
+      };
+      yield* service.updateSettings(yield* decodeSettingsPatch(preferences));
+      const before = yield* service.getSettings;
+      const patch = yield* decodeSettingsPatch({ addProjectBaseDirectory: "/projects" });
+      yield* service.updateSettings(patch);
+      const after = yield* service.getSettings;
+      assert.deepEqual(after, { ...before, addProjectBaseDirectory: "/projects" });
+      for (const [key, value] of Object.entries(preferences)) {
+        assert.equal(after[key as keyof typeof preferences], value);
+      }
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
 
   it.effect("decodes nested settings patches", () =>
     Effect.gen(function* () {

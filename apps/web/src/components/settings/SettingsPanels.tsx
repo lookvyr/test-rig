@@ -127,7 +127,6 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
-import { WorktreeBranchPrefixInput } from "./WorktreeBranchPrefixInput";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: "Artwork",
@@ -278,9 +277,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees
         ? ["Automatic worktree cleanup"]
         : []),
-      ...(settings.newWorktreeBranchPrefix !== DEFAULT_UNIFIED_SETTINGS.newWorktreeBranchPrefix
-        ? ["Worktree branch prefix"]
-        : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
         : []),
@@ -300,7 +296,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.autoRemoveSettledWorktrees,
-      settings.newWorktreeBranchPrefix,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
       settings.environmentIdentificationMode,
@@ -399,7 +394,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       autoRemoveSettledWorktrees: DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees,
-      newWorktreeBranchPrefix: DEFAULT_UNIFIED_SETTINGS.newWorktreeBranchPrefix,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
@@ -1607,39 +1601,6 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
-          }
-        />
-
-        <SettingsRow
-          className="bg-muted/20 sm:pl-9"
-          {...searchableSetting("worktree-branch-prefix")}
-          description={
-            <>
-              Branches created for ordinary new worktree threads start with this namespace.
-              Temporary worktree folders keep their <code className="font-mono">_worktree</code>{" "}
-              name after the branch is renamed.
-            </>
-          }
-          resetAction={
-            settings.newWorktreeBranchPrefix !==
-            DEFAULT_UNIFIED_SETTINGS.newWorktreeBranchPrefix ? (
-              <SettingResetButton
-                label="worktree branch prefix"
-                onClick={() =>
-                  updateSettings({
-                    newWorktreeBranchPrefix: DEFAULT_UNIFIED_SETTINGS.newWorktreeBranchPrefix,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <WorktreeBranchPrefixInput
-              value={settings.newWorktreeBranchPrefix}
-              onValueChange={(newWorktreeBranchPrefix) =>
-                updateSettings({ newWorktreeBranchPrefix })
-              }
-            />
           }
         />
 

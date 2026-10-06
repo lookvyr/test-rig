@@ -705,7 +705,7 @@ function EnvironmentSourceControlSettingsPanel(props: {
         ))}
       </SettingsSection>
 
-      {props.isPrimary ? <SourceControlWritingSettingsSection /> : null}
+      <SourceControlWritingSettingsSection environmentId={environmentId} />
     </SettingsPageContainer>
   );
 }

@@ -84,13 +84,32 @@ Use the copy button beside a filename in the diff panel to copy its repository-r
 
 ## Worktree branch names
 
-Set the prefix for new worktree branches under **Settings** → **General** → **New threads** →
-**Worktree branch prefix**. The default is `test-rig`.
+Choose how new worktree branches are named under **Settings** → **Source Control** →
+**Text generation** → **Worktree branch naming**:
 
-With `example/team`, Test Rig creates `example/team/_worktree/a1b2c3d4`, then renames it after the first prompt, for example to `example/team fix-reconnect-backoff`. If naming fails, the temporary branch still works. Its folder keeps the temporary name.
+- **Static prefix:** generate a descriptive name from your first message under a fixed prefix,
+  such as `test-rig/fix-login`. Leave the prefix empty for `fix-login`.
+- **Semantic prefix:** choose a prefix that describes the work, such as `feat/add-search`,
+  `fix/login-timeout`, or `refactor/auth`.
+- **Custom instructions:** tell the model your naming convention. It returns the complete name;
+  Test Rig adds no prefix or collision suffix and preserves capitalization.
 
-The setting applies only to new worktrees. It does not rename existing branches or folders, or
-affect synthetic branches for cross-repository pull requests.
+Choose **All projects** to edit the defaults, or select a project to override its naming
+settings. Projects inherit each value until you change it. Use a row’s reset control to
+remove its project override and inherit again. Changing a default preserves project overrides.
+If a grouped project’s checkouts have different values, the field shows **Mixed**; editing
+it applies the value to those checkouts in the selected environment.
+
+The default prefix is `test-rig`. The old Test Rig branch-prefix setting is no longer used;
+configure your preferred prefix here.
+
+Worktree creation and the agent do not wait for name generation. A temporary branch is renamed
+when naming finishes; its folder keeps the temporary name. Automatically generated static or
+semantic names receive a numeric suffix if already taken. If generation or renaming fails
+(including an invalid or already-taken custom name), the temporary branch remains usable.
+
+Names you explicitly choose are preserved. Changing these settings does not rename existing
+branches or folders or affect synthetic branches for cross-repository pull requests.
 
 When **Start from origin** is enabled for a new worktree, Test Rig fetches origin and uses the selected branch there. If origin or that branch is absent, it uses the selected local branch. A fetch failure is reported instead of silently using stale local state.
 

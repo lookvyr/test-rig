@@ -1,6 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Scope from "effect/Scope";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -205,6 +207,24 @@ function withFakeCodexEnv<A, E, R>(
 }
 
 it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
+  it.effect("generates a branch after the caller's request scope has closed", () =>
+    withFakeCodexEnv({ output: JSON.stringify({ branch: "Fix login" }) }, (textGeneration) =>
+      Effect.gen(function* () {
+        const requestScope = yield* Scope.make();
+        yield* Scope.close(requestScope, Exit.void);
+        const result = yield* textGeneration
+          .generateBranchName({
+            cwd: process.cwd(),
+            message: "Fix login",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            naming: { mode: "static", prefix: "team", instructions: "" },
+          })
+          .pipe(Effect.provideService(Scope.Scope, requestScope));
+        expect(result.branch).toBe("team/fix-login");
+      }),
+    ),
+  );
+
   it.effect("generates and sanitizes commit messages without branch by default", () =>
     withFakeCodexEnv(
       {
@@ -399,6 +419,28 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         }),
     ),
   );
+
+  for (const [mode, raw, expected, promptRule] of [
+    ["static", "Fix login", "Team/fix-login", "without a prefix or namespace"],
+    ["semantic", "fix/login-timeout", "fix/login-timeout", "Include a semantic prefix"],
+    ["custom", "LOO-43.Release", "LOO-43.Release", "Use the exact issue ID."],
+  ] as const) {
+    it.effect(`applies ${mode} branch naming through the provider`, () =>
+      withFakeCodexEnv(
+        { output: JSON.stringify({ branch: raw }), stdinMustContain: promptRule },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateBranchName({
+              cwd: process.cwd(),
+              message: "Fix login",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+              naming: { mode, prefix: "Team/", instructions: "Use the exact issue ID." },
+            });
+            expect(generated.branch).toBe(expected);
+          }),
+      ),
+    );
+  }
 
   it.effect("generates thread titles and trims them for sidebar use", () =>
     withFakeCodexEnv(

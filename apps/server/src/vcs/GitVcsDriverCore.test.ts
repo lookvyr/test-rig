@@ -1694,6 +1694,33 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("suffixes generated collisions but never alters an exact custom name", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        yield* initRepoWithCommit(cwd);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* driver.createRef({ cwd, refName: "LOO-43.Release" });
+        yield* driver.createRef({ cwd, refName: "temporary" });
+        yield* driver.switchRef({ cwd, refName: "temporary" });
+        const exact = yield* driver
+          .renameBranch({
+            cwd,
+            oldBranch: "temporary",
+            newBranch: "LOO-43.Release",
+            exactName: true,
+          })
+          .pipe(Effect.result);
+        assert.equal(exact._tag, "Failure");
+        assert.equal(yield* git(cwd, ["branch", "--show-current"]), "temporary");
+        const generated = yield* driver.renameBranch({
+          cwd,
+          oldBranch: "temporary",
+          newBranch: "LOO-43.Release",
+        });
+        assert.match(generated.branch, /^LOO-43\.Release-\d+$/);
+      }),
+    );
+
     it.effect("creates, checks out, renames, and lists refs", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

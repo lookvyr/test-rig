@@ -13,7 +13,7 @@ import {
   type ModelSelection,
   TextGenerationError,
 } from "@t3tools/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
+import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
@@ -93,9 +93,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         ),
       );
 
-  const safeUnlink = (filePath: string): Effect.Effect<void, never> =>
-    fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
-
   const encodeJsonForOperation = (
     operation:
       | "generateCommitMessage"
@@ -155,7 +152,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     prompt,
     outputSchemaJson,
     imagePaths = [],
-    cleanupPaths = [],
     modelSelection,
   }: {
     operation:
@@ -167,7 +163,6 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     prompt: string;
     outputSchemaJson: S;
     imagePaths?: ReadonlyArray<string>;
-    cleanupPaths?: ReadonlyArray<string>;
     modelSelection: ModelSelection;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const schemaJson = yield* encodeJsonForOperation(
@@ -253,53 +248,44 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       }
     });
 
-    const cleanup = Effect.all(
-      [schemaPath, outputPath, ...cleanupPaths].map((filePath) => safeUnlink(filePath)),
-      {
-        concurrency: "unbounded",
-      },
-    ).pipe(Effect.asVoid);
+    yield* runCodexCommand().pipe(
+      Effect.scoped,
+      Effect.timeoutOption(CODEX_TIMEOUT_MS),
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              new TextGenerationError({ operation, detail: "Codex CLI request timed out." }),
+            ),
+          onSome: () => Effect.void,
+        }),
+      ),
+    );
 
-    return yield* Effect.gen(function* () {
-      yield* runCodexCommand().pipe(
-        Effect.scoped,
-        Effect.timeoutOption(CODEX_TIMEOUT_MS),
-        Effect.flatMap(
-          Option.match({
-            onNone: () =>
-              Effect.fail(
-                new TextGenerationError({ operation, detail: "Codex CLI request timed out." }),
-              ),
-            onSome: () => Effect.void,
+    const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
+
+    return yield* fileSystem.readFileString(outputPath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new TextGenerationError({
+            operation,
+            detail: "Failed to read Codex output file.",
+            cause,
           }),
-        ),
-      );
-
-      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
-
-      return yield* fileSystem.readFileString(outputPath).pipe(
-        Effect.mapError(
-          (cause) =>
+      ),
+      Effect.flatMap(decodeOutput),
+      Effect.catchTags({
+        SchemaError: (cause) =>
+          Effect.fail(
             new TextGenerationError({
               operation,
-              detail: "Failed to read Codex output file.",
+              detail: "Codex returned invalid structured output.",
               cause,
             }),
-        ),
-        Effect.flatMap(decodeOutput),
-        Effect.catchTags({
-          SchemaError: (cause) =>
-            Effect.fail(
-              new TextGenerationError({
-                operation,
-                detail: "Codex returned invalid structured output.",
-                cause,
-              }),
-            ),
-        }),
-      );
-    }).pipe(Effect.ensuring(cleanup));
-  });
+          ),
+      }),
+    );
+  }, Effect.scoped);
 
   const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
     Effect.fn("CodexTextGeneration.generateCommitMessage")(function* (input) {
@@ -361,6 +347,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         input.attachments,
       );
       const { prompt, outputSchema } = buildBranchNamePrompt({
+        naming: input.naming,
         message: input.message,
         attachments: input.attachments,
       });
@@ -375,7 +362,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       });
 
       return {
-        branch: sanitizeBranchFragment(generated.branch),
+        branch: formatGeneratedBranchName(generated.branch, input.naming),
       };
     });
 

@@ -2068,7 +2068,11 @@ export const layerWithOptions = (
                       Option.match({
                         onNone: () =>
                           Effect.fail(
-                            new Error("Provider stream ended before the interrupted turn settled."),
+                            new ProviderAdapterEventStreamError({
+                              driver: currentEntry.runtime.driver,
+                              providerSessionId: input.providerSessionId,
+                              cause: "Provider stream ended before the interrupted turn settled.",
+                            }),
                           ),
                         onSome: () => Effect.void,
                       }),

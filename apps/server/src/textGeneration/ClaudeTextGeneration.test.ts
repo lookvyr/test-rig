@@ -255,6 +255,31 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
     ),
   );
 
+  for (const [mode, raw, expected, promptRule] of [
+    ["static", "Fix login", "Team/fix-login", "without a prefix or namespace"],
+    ["semantic", "fix/login-timeout", "fix/login-timeout", "Include a semantic prefix"],
+    ["custom", "LOO-43.Release", "LOO-43.Release", "Use the exact issue ID."],
+  ] as const) {
+    it.effect(`applies ${mode} branch naming through the provider`, () =>
+      withFakeClaudeEnv(
+        { output: JSON.stringify({ structured_output: { branch: raw } }), stdinMustContain: promptRule },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateBranchName({
+              cwd: process.cwd(),
+              message: "Fix login",
+              modelSelection: createModelSelection(
+                ProviderInstanceId.make("claudeAgent"),
+                "claude-haiku-4-5",
+              ),
+              naming: { mode, prefix: "Team/", instructions: "Use the exact issue ID." },
+            });
+            expect(generated.branch).toBe(expected);
+          }),
+      ),
+    );
+  }
+
   it.effect("generates thread titles through the Claude provider", () =>
     withFakeClaudeEnv(
       {
