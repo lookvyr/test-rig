@@ -1,5 +1,6 @@
 import { OrchestrationThreadShell, ThreadPullRequestAssociation } from "./orchestration.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
+import { WorktreeMcpHandoffResult } from "./worktreeMcp.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
@@ -1423,6 +1424,8 @@ export const OrchestrationV2TurnItem = Schema.Union([
     ...OrchestrationV2TurnItemBaseFields,
     type: Schema.Literal("system_notice"),
     message: Schema.String,
+    /** App-owned receipt, independent of the provider's interrupted tool response. */
+    worktreeHandoff: Schema.optional(WorktreeMcpHandoffResult),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2157,6 +2160,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     ...OrchestrationV2TurnItemJsonBaseFields,
     type: Schema.Literal("system_notice"),
     message: Schema.String,
+    worktreeHandoff: Schema.optional(WorktreeMcpHandoffResult),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,

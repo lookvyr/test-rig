@@ -690,7 +690,10 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       continue;
     }
 
-    if (STANDALONE_V2_ITEM_TYPES.has(item.type)) {
+    if (
+      STANDALONE_V2_ITEM_TYPES.has(item.type) ||
+      (item.type === "system_notice" && item.worktreeHandoff !== undefined)
+    ) {
       entries.push({
         id: item.id,
         kind: "event",

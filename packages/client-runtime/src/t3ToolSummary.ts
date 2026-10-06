@@ -58,7 +58,7 @@ function readResult(value: unknown, depth = 0): ToolResult {
   return { data: record, failed };
 }
 
-function readInput(value: unknown): Record<string, unknown> | undefined {
+export function readT3ToolInput(value: unknown): Record<string, unknown> | undefined {
   const input = readResult(value).data;
   // Cursor retains its MCP args envelope; other adapters retain the arguments directly.
   return input && typeof input.toolName === "string" ? asRecord(input.args) : input;
@@ -88,7 +88,7 @@ export function summarizeT3ToolCalls(
   const results = calls.map((call) => {
     const result = readResult(call.output);
     return {
-      input: readInput(call.input),
+      input: readT3ToolInput(call.input),
       output: result.data,
       outcome: result.failed ? ("failed" as const) : call.outcome,
     };

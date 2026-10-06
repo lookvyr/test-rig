@@ -1,3 +1,4 @@
+import { resolveT3McpToolDefinition } from "@t3tools/shared/t3McpToolPresentation";
 import type {
   OrchestrationV2ProjectedTurnItem,
   OrchestrationV2ThreadProjection,
@@ -296,6 +297,9 @@ function isControlDependency(
 ): boolean {
   return (
     item.type === "run_interrupt_request" ||
+    (item.type === "system_notice" && item.worktreeHandoff !== undefined) ||
+    (item.type === "dynamic_tool" &&
+      resolveT3McpToolDefinition(item.toolName)?.summaryAction === "worktree-handoff") ||
     ((item.type === "user_input_request" || item.type === "approval_request") &&
       pendingRequestIds.has(item.requestId))
   );
@@ -308,6 +312,8 @@ function isControlDependency(
  * later history page that introduces the matching result still has the request
  * available for live attempt/run reducers. Pending questions and approvals also
  * retain their display payload when their original turn leaves the window.
+ * Handoff receipts and tool calls retain the evidence needed to label a move
+ * and detect ambiguous calls even when they straddle a page boundary.
  */
 function retainedControlTurnItems(
   projection: OrchestrationV2ThreadProjection,

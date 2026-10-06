@@ -436,6 +436,56 @@ describe("threadHistoryPaging", () => {
     expect(bounded.hasMoreHistory).toBe(true);
   });
 
+  it("retains handoff tools so paging cannot hide duplicate attempts", () => {
+    const source = makeRow(0);
+    if (source.item.type !== "command_execution") throw new Error("Expected command fixture");
+    const tool = {
+      ...source,
+      item: {
+        ...source.item,
+        type: "dynamic_tool" as const,
+        toolName: "test_rig.t3_worktree_handoff",
+        input: { branch: "feature/demo" },
+      },
+    };
+    const bounded = buildBoundedThreadProjection({
+      projection: makeProjection([tool, makeRow(1)]),
+      snapshotSequence: 2,
+      policy: { maxItems: 1, maxEncodedBytes: 10_000_000 },
+    });
+    expect(bounded.projection.visibleTurnItems.map((row) => row.sourceItemId)).toEqual(["item-1"]);
+    expect(bounded.projection.turnItems).toContainEqual(tool.item);
+  });
+
+  it("retains a handoff receipt outside the visible window", () => {
+    const source = makeRow(0);
+    if (source.item.type !== "command_execution") throw new Error("Expected command fixture");
+    const receipt = {
+      ...source,
+      item: {
+        ...source.item,
+        type: "system_notice" as const,
+        message: "Moved to worktree",
+        worktreeHandoff: {
+          worktreePath: "/worktrees/demo",
+          branch: "feature/demo",
+          baseRef: "main",
+          startedFromOrigin: false,
+          setupScript: { status: "skipped" },
+          continuation: { status: "skipped" },
+          note: "Recorded",
+        },
+      } satisfies OrchestrationV2TurnItem,
+    };
+    const bounded = buildBoundedThreadProjection({
+      projection: makeProjection([receipt, makeRow(1)]),
+      snapshotSequence: 2,
+      policy: { maxItems: 1, maxEncodedBytes: 10_000_000 },
+    });
+    expect(bounded.projection.visibleTurnItems.map((row) => row.sourceItemId)).toEqual(["item-1"]);
+    expect(bounded.projection.turnItems).toContainEqual(receipt.item);
+  });
+
   it("retains all run_interrupt_request items even when no result is in the initial window", () => {
     // Cold open: recent window is only filler. Request and result both live on
     // older pages, but the request must still ride in turnItems so a later

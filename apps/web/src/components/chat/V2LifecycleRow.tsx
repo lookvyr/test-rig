@@ -57,7 +57,10 @@ const LIFECYCLE_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
 ]);
 
 export function isV2LifecycleItem(item: OrchestrationV2TurnItem): boolean {
-  return LIFECYCLE_TYPES.has(item.type);
+  return (
+    LIFECYCLE_TYPES.has(item.type) ||
+    (item.type === "system_notice" && item.worktreeHandoff !== undefined)
+  );
 }
 
 export type { HandoffTimelineRun } from "@t3tools/client-runtime/handoff";
@@ -73,6 +76,23 @@ export function V2LifecycleRow(props: {
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
   const { item } = props;
+  if (item.type === "system_notice" && item.worktreeHandoff !== undefined) {
+    const result = item.worktreeHandoff;
+    const failures = [
+      result.continuation.status === "failed"
+        ? `Continuation failed: ${result.continuation.detail}`
+        : null,
+      result.setupScript.status === "failed" ? `Setup failed: ${result.setupScript.detail}` : null,
+    ].filter((detail) => detail !== null);
+    return (
+      <TimelineSystemDivider
+        label="Moved to worktree"
+        detail={[result.branch, ...failures].join(" · ")}
+        tone={failures.length > 0 ? "danger" : "neutral"}
+        icon={ArrowRightLeftIcon}
+      />
+    );
+  }
   if (item.type === "run_interrupt_request") {
     return (
       <div className="flex justify-end px-1 py-1" data-v2-item-type={item.type}>

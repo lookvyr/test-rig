@@ -3,6 +3,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   EnvironmentId,
+  NodeId,
+  RunId,
+  ProviderThreadId,
+  ProviderTurnId,
+  OrchestrationV2DomainEvent,
+  OrchestrationV2TurnItemJson,
   type OrchestrationV2ThreadProjection,
   type Project,
   ProjectId,
@@ -26,12 +32,17 @@ import {
   OrchestratorProjectionError,
 } from "../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import type * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as WorktreeMcpService from "./WorktreeMcpService.ts";
+
+const decodeDomainEvent = Schema.decodeUnknownSync(OrchestrationV2DomainEvent);
+const encodeTurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
+const decodeTurnItemJson = Schema.decodeUnknownSync(OrchestrationV2TurnItemJson);
 
 const environmentId = EnvironmentId.make("environment-worktree-test");
 const threadId = ThreadId.make("thread-worktree-test");
@@ -58,6 +69,11 @@ interface ThreadFixture {
 
 const makeProjection = (overrides: ThreadFixture = {}): OrchestrationV2ThreadProjection =>
   ({
+    runs: [],
+    nodes: [],
+    providerThreads: [],
+    providerTurns: [],
+    turnItems: [],
     thread: {
       id: threadId,
       projectId,
@@ -68,7 +84,7 @@ const makeProjection = (overrides: ThreadFixture = {}): OrchestrationV2ThreadPro
       deletedAt: null,
       ...overrides,
     },
-  }) as OrchestrationV2ThreadProjection;
+  }) as unknown as OrchestrationV2ThreadProjection;
 
 const project: Project = {
   id: projectId,
@@ -83,6 +99,7 @@ const project: Project = {
 
 interface HarnessOptions {
   readonly thread?: ThreadFixture | null;
+  readonly activeRun?: boolean;
   readonly threadReadError?: "projection" | "dispatch";
   readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>;
   readonly currentBranch?: string | null;
@@ -112,6 +129,44 @@ interface HarnessOptions {
 const makeHarness = (options: HarnessOptions = {}) => {
   const thread = options.thread === undefined ? {} : options.thread;
   const scope = makeScope(options.capabilities ?? new Set(["preview", "worktree"]));
+  const writeEvents = vi.fn((input: Parameters<EventSink.EventSinkV2Shape["write"]>[0]) => {
+    for (const event of input.events) {
+      decodeDomainEvent(event);
+      if (event.type === "turn-item.updated") {
+        const json = encodeTurnItemJson(event.payload);
+        expect(decodeTurnItemJson(json)).toEqual(event.payload);
+      }
+    }
+    return Effect.succeed([]);
+  });
+  const execution = options.activeRun
+    ? {
+        runs: [
+          {
+            id: RunId.make("calling-run"),
+            rootNodeId: NodeId.make("calling-node"),
+            status: "running",
+            providerInstanceId: scope.providerInstanceId,
+            ordinal: 1,
+          },
+        ],
+        nodes: [
+          {
+            id: NodeId.make("calling-node"),
+            runId: RunId.make("calling-run"),
+            providerThreadId: ProviderThreadId.make("calling-provider-thread"),
+            providerTurnId: ProviderTurnId.make("calling-provider-turn"),
+          },
+        ],
+        providerTurns: [
+          {
+            id: ProviderTurnId.make("calling-provider-turn"),
+            nodeId: NodeId.make("calling-node"),
+            status: "running",
+          },
+        ],
+      }
+    : { runs: [], nodes: [], providerTurns: [] };
   const dispatch = vi.fn((_: unknown) =>
     (options.dispatchGate ?? Effect.void).pipe(
       Effect.andThen(
@@ -166,7 +221,10 @@ const makeHarness = (options: HarnessOptions = {}) => {
       return Effect.succeed(makeProjection({ ...thread, archivedAt: "2026-01-02T00:00:00.000Z" }));
     }
     return id === threadId && thread !== null
-      ? Effect.succeed(makeProjection(thread))
+      ? Effect.succeed({
+          ...makeProjection(thread),
+          ...execution,
+        } as unknown as OrchestrationV2ThreadProjection)
       : Effect.fail(new OrchestratorProjectionError({ threadId: id }));
   });
   const sendToThread = vi.fn((_: unknown) => {
@@ -303,6 +361,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
   const layer = serviceLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(EventSink.EventSinkV2)({ write: writeEvents }),
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           dispatch,
           getThreadRecords,
@@ -337,6 +396,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
 
   return {
     layer,
+    writeEvents,
     scope,
     dispatch,
     sendToThread,
@@ -385,6 +445,46 @@ const runStatus = (harness: ReturnType<typeof makeHarness>) =>
   }).pipe(Effect.provide(harness.layer));
 
 describe("t3_worktree_handoff", () => {
+  it.effect("records the app-owned result against the calling run after binding", () => {
+    const harness = makeHarness({ activeRun: true });
+    return Effect.gen(function* () {
+      const result = yield* runHandoff(harness, {
+        branch: "feature/handoff",
+        continuationPrompt: "Continue",
+      });
+      expect(harness.writeEvents).toHaveBeenCalledOnce();
+      expect(harness.writeEvents.mock.calls[0]?.[0].events[0]?.payload).toMatchObject({
+        type: "system_notice",
+        runId: "calling-run",
+        nodeId: "calling-node",
+        providerTurnId: "calling-provider-turn",
+        worktreeHandoff: result,
+      });
+    });
+  });
+  it.effect.each(["fails", "dies"] as const)(
+    "retains setup and continuation %s in the receipt",
+    (outcome) => {
+      const harness = makeHarness({ activeRun: true, setupScript: outcome, continuation: outcome });
+      return Effect.gen(function* () {
+        yield* runHandoff(harness, { branch: "feature/handoff", continuationPrompt: "Continue" });
+        expect(harness.writeEvents.mock.calls[0]?.[0].events[0]?.payload).toMatchObject({
+          worktreeHandoff: {
+            setupScript: { status: "failed" },
+            continuation: { status: "failed" },
+          },
+        });
+      });
+    },
+  );
+  it.effect("does not record a transition when binding fails", () => {
+    const harness = makeHarness({ activeRun: true, dispatchFails: true });
+    return Effect.gen(function* () {
+      yield* runHandoff(harness, { branch: "feature/handoff" }).pipe(Effect.exit);
+      expect(harness.writeEvents).not.toHaveBeenCalled();
+    });
+  });
+
   it.effect("creates a worktree from the current branch and re-points the thread", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

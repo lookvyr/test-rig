@@ -77,6 +77,7 @@ import {
 } from "./orchestration-v2/testkit/fixtures.ts";
 import { OrchestratorProjectionError } from "./orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
+import * as EventSink from "./orchestration-v2/EventSink.ts";
 import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
@@ -734,6 +735,7 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(Layer.mock(OrchestratorV2.OrchestratorV2)({})),
+      Layer.provide(Layer.mock(EventSink.EventSinkV2)({})),
       Layer.provide(Layer.mock(ProviderAdapterRegistryV2.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
       Layer.provide(resourceTelemetryLayer),

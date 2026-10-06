@@ -1,6 +1,8 @@
 import {
   CommandId,
+  EventId,
   MessageId,
+  TurnItemId,
   type ProjectId,
   WorktreeMcpFailure,
   type WorktreeMcpContinuationStatus,
@@ -12,6 +14,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -19,6 +22,7 @@ import * as Path from "effect/Path";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -59,6 +63,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const path = yield* Path.Path;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+  const eventSink = yield* EventSink.EventSinkV2;
   const projects = yield* ProjectService.ProjectService;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
@@ -77,21 +82,23 @@ const make = Effect.gen(function* () {
           failure("capability_denied", "This MCP credential does not grant worktree capabilities."),
         );
 
-  const loadThread = (scope: McpInvocationScope) =>
-    threadManagement.getThreadRecords(scope.threadId, []).pipe(
-      Effect.mapError((error) =>
-        error._tag === "OrchestratorProjectionError"
-          ? failure("thread_not_found", `Thread '${scope.threadId}' was not found.`)
-          : failure(
-              "operation_failed",
-              `Unable to read thread ${scope.threadId}: ${errorMessage(error)}`,
-            ),
-      ),
-      Effect.filterOrFail(
-        (projection) => projection.thread.deletedAt === null,
-        () => failure("thread_not_found", `Thread '${scope.threadId}' was not found.`),
-      ),
-    );
+  const loadThread = (scope: McpInvocationScope, includeExecution = false) =>
+    threadManagement
+      .getThreadRecords(scope.threadId, includeExecution ? ["runs", "nodes", "providerTurns"] : [])
+      .pipe(
+        Effect.mapError((error) =>
+          error._tag === "OrchestratorProjectionError"
+            ? failure("thread_not_found", `Thread '${scope.threadId}' was not found.`)
+            : failure(
+                "operation_failed",
+                `Unable to read thread ${scope.threadId}: ${errorMessage(error)}`,
+              ),
+        ),
+        Effect.filterOrFail(
+          (projection) => projection.thread.deletedAt === null,
+          () => failure("thread_not_found", `Thread '${scope.threadId}' was not found.`),
+        ),
+      );
 
   const loadProject = (scope: McpInvocationScope, projectId: ProjectId) =>
     projects.getById(projectId).pipe(
@@ -139,7 +146,7 @@ const make = Effect.gen(function* () {
         `Thread '${scope.threadId}' is already attached to worktree '${worktreePath}'.`,
       );
 
-    const projection = yield* loadThread(scope);
+    const projection = yield* loadThread(scope, true);
     if (projection.thread.worktreePath !== null) {
       return yield* alreadyInWorktree(projection.thread.worktreePath);
     }
@@ -154,6 +161,15 @@ const make = Effect.gen(function* () {
 
     const project = yield* loadProject(scope, projection.thread.projectId);
     const projectCwd = project.workspaceRoot;
+    // MCP credentials are thread-scoped, not runtime session IDs. Capture the
+    // calling run before the binding can launch its continuation.
+    const callingRun = projection.runs.find(
+      (run) => run.status === "running" && run.providerInstanceId === scope.providerInstanceId,
+    );
+    const callingNode = projection.nodes.find((node) => node.id === callingRun?.rootNodeId);
+    const callingTurn = projection.providerTurns.find(
+      (turn) => turn.nodeId === callingNode?.id && turn.status === "running",
+    );
 
     if (input.path !== undefined && !path.isAbsolute(input.path)) {
       return yield* failure(
@@ -424,6 +440,43 @@ const make = Effect.gen(function* () {
               ? "Handoff recorded. Changing the workspace detaches this provider session, so the current turn ends shortly after this call; the queued continuation prompt then starts the next turn inside the worktree with the conversation preserved. The worktree is not removed automatically when the thread is deleted."
               : "Handoff recorded. Changing the workspace detaches this provider session, so the current turn ends shortly after this call; the conversation continues inside the worktree when the thread receives its next message. Pass continuationPrompt to resume automatically. The worktree is not removed automatically when the thread is deleted.",
         };
+        if (callingNode !== undefined && callingRun !== undefined) {
+          const now = yield* DateTime.now;
+          yield* eventSink
+            .write({
+              events: [
+                {
+                  id: EventId.make(`event:${ids.commandId}:result`),
+                  type: "turn-item.updated",
+                  threadId: scope.threadId,
+                  runId: callingRun.id,
+                  nodeId: callingNode.id,
+                  providerInstanceId: scope.providerInstanceId,
+                  occurredAt: now,
+                  payload: {
+                    id: TurnItemId.make(`item:${ids.commandId}:result`),
+                    threadId: scope.threadId,
+                    runId: callingRun.id,
+                    nodeId: callingNode.id,
+                    providerThreadId: callingNode.providerThreadId,
+                    providerTurnId: callingTurn?.id ?? null,
+                    nativeItemRef: null,
+                    parentItemId: null,
+                    ordinal: callingRun.ordinal * 100 + 99,
+                    type: "system_notice",
+                    status: "completed",
+                    title: "Worktree handoff",
+                    message: `Moved to worktree ${result.branch}.`,
+                    worktreeHandoff: result,
+                    startedAt: now,
+                    completedAt: now,
+                    updatedAt: now,
+                  },
+                },
+              ],
+            })
+            .pipe(Effect.ignoreCause({ log: true }));
+        }
         return result;
       }),
     );
@@ -484,6 +537,7 @@ export const layer: Layer.Layer<
   | Crypto.Crypto
   | Path.Path
   | ThreadManagementService.ThreadManagementService
+  | EventSink.EventSinkV2
   | ProjectService.ProjectService
   | ServerSettings.ServerSettingsService
   | GitWorkflowService.GitWorkflowService

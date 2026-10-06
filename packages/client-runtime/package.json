@@ -379,6 +379,10 @@
     "./composerThreadItems": {
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"
+    },
+    "./state/worktreeHandoff": {
+      "types": "./src/state/worktreeHandoff.ts",
+      "default": "./src/state/worktreeHandoff.ts"
     }
   },
   "scripts": {

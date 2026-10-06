@@ -1,5 +1,6 @@
+import { createWorktreeHandoffProjector } from "@t3tools/client-runtime/state/worktreeHandoff";
 import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   deriveTimelineEntriesFromVisibleTurnItemsWithState,
   type TimelineEntriesProjection,
@@ -11,6 +12,7 @@ export function useThreadTimeline(
   thread: OrchestrationV2ThreadProjection | null | undefined,
   messages: ReadonlyArray<ChatMessage>,
 ) {
+  const [projectHandoffs] = useState(createWorktreeHandoffProjector);
   const previous = useRef<{
     threadId: string | undefined;
     projection: TimelineEntriesProjection;
@@ -29,7 +31,7 @@ export function useThreadTimeline(
     }
     const projection = deriveTimelineEntriesFromVisibleTurnItemsWithState(
       {
-        visibleTurnItems: thread?.visibleTurnItems ?? [],
+        visibleTurnItems: projectHandoffs(thread?.visibleTurnItems ?? [], thread?.turnItems ?? []),
         optimisticMessages: messages.filter((message) => !committedIds.has(message.id)),
         attachmentUrlById,
         attempts: thread?.attempts ?? [],
@@ -40,5 +42,5 @@ export function useThreadTimeline(
     );
     previous.current = { threadId: thread?.thread.id, projection };
     return projection.entries;
-  }, [thread, messages]);
+  }, [thread, messages, projectHandoffs]);
 }

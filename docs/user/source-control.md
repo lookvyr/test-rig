@@ -118,7 +118,9 @@ When **Start from origin** is enabled for a new worktree, Test Rig fetches origi
 Ask the agent to move the current conversation into a new worktree, specifying
 the new branch and base branch when needed. The conversation stays in the same
 chat. Its current turn ends, and a requested continuation starts in the new
-worktree with the earlier conversation available.
+worktree with the earlier conversation available. The timeline marks a completed
+move as **Moved to worktree**. Setup and continuation failures remain visible,
+and pressing **Stop** still shows a user interruption.
 
 The move starts the project's action marked **Run automatically on worktree
 creation** in the new worktree. Project-specific actions override environment
