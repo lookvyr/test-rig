@@ -1,8 +1,17 @@
 # Scheduled tasks
 
-Ask an agent to schedule a recurring prompt, list your tasks, change one, pause it,
-or delete it. A task can send into the current conversation or start a new
-conversation for each run. No tasks are created automatically.
+Open **Settings → Scheduled Tasks** to see tasks on your connected environments.
+Choose **New task**, select a project, workspace, model, and permissions, and write
+the prompt to repeat. Choose **No project** to run without a repository; each run
+gets its own folder on the selected environment. Pick a time and weekdays or an interval of at least one
+minute. The form shows the server timezone. No tasks are created automatically.
+
+Each task has an Enabled toggle and an actions menu with **Edit**, **Run now**, and
+**Delete**. Tasks created here start a new conversation for each run. You can also
+ask an agent to create or manage tasks, including tasks that send into an existing
+conversation. Both paths use the same saved tasks, and the list updates live.
+Editing a task bound to a conversation preserves its binding; its workspace and
+permissions come from that conversation.
 
 ## When a task runs
 
@@ -12,8 +21,11 @@ prompt can start immediately. This behavior applies to scheduled work; messages
 you send interactively still steer an active turn when steering is available.
 
 The scheduler waits for the prompt to be accepted, not for the agent to finish.
-The task's `succeeded` status means that dispatch succeeded. Inspect the resulting
-conversation to see whether the agent finished successfully.
+The list shows **Dispatching** while the prompt is being sent, **Sent** after it
+is accepted, and **Dispatch failed** if sending fails. Sent does not mean the
+agent's work is complete. Inspect the resulting conversation to see whether the
+agent finished successfully. Agent tools expose these statuses as `running`,
+`succeeded`, and `failed`.
 
 Successive scheduled runs can overlap. Runs targeting the same conversation can
 accumulate as queued work; runs creating new conversations can execute at the same

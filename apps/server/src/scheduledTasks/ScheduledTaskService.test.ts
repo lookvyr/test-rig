@@ -3,13 +3,20 @@ import * as NodeUtil from "node:util";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
-import { ScheduledTaskError, ScheduledTaskId } from "@t3tools/contracts";
+import {
+  ScheduledTaskError,
+  ScheduledTaskId,
+  ProviderInstanceId,
+  ModelSelection,
+  OrchestrationV2ThreadLaunchWorkspaceStrategy,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import * as Fiber from "effect/Fiber";
 import * as Deferred from "effect/Deferred";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -21,6 +28,10 @@ import { V2SqlitePersistenceMemory as SqlitePersistenceMemory } from "../persist
 import * as ScheduledTaskService from "./ScheduledTaskService.ts";
 
 const isScheduledTaskError = Schema.is(ScheduledTaskError);
+const encodeModelSelection = Schema.encodeEffect(Schema.fromJsonString(ModelSelection));
+const encodeWorkspaceStrategy = Schema.encodeEffect(
+  Schema.fromJsonString(OrchestrationV2ThreadLaunchWorkspaceStrategy),
+);
 
 const insertRow = (
   sql: SqlClient.SqlClient,
@@ -404,3 +415,150 @@ it.effect(
       );
     }).pipe(Effect.provide(SqlitePersistenceMemory)),
 );
+
+for (const mutation of ["edit", "pause", "delete", "replace"] as const) {
+  it.effect(`preserves a concurrent ${mutation} while dispatch is awaiting acceptance`, () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-10-06T12:00:00.000Z";
+      yield* TestClock.setTime(Date.parse(now));
+      const id = ScheduledTaskId.make("concurrent");
+      yield* insertRow(
+        sql,
+        { id, next: "2026-10-06T13:00:00.000Z", enabled: 1, status: "never" },
+        now,
+      );
+      const dispatched = yield* Deferred.make<void>();
+      const accepted = yield* Deferred.make<void>();
+      let launches = 0;
+      yield* Effect.gen(function* () {
+        const service = yield* ScheduledTaskService.ScheduledTaskService;
+        const before = (yield* service.list()).tasks[0]!;
+        const run = yield* service.runNow({ id }).pipe(Effect.forkChild);
+        yield* Deferred.await(dispatched);
+        const pending = (yield* service.list()).tasks[0]!;
+        assert.equal(pending.lastRunStatus, "running");
+        assert.equal(pending.runCount, 0);
+        const duplicate = yield* Effect.result(service.runNow({ id }));
+        assert.equal(duplicate._tag, "Failure");
+        assert.equal(launches, 1);
+
+        if (mutation === "edit") {
+          yield* service.upsert({
+            ...before,
+            requireExisting: true,
+            title: "Edited during dispatch",
+            schedule: { type: "interval", everyMs: 120_000 },
+          });
+        } else if (mutation === "pause") {
+          yield* service.setEnabled({ id, enabled: false });
+        } else {
+          yield* service.delete({ id });
+          const staleSave = yield* Effect.result(
+            service.upsert({ ...before, requireExisting: true }),
+          );
+          assert.equal(staleSave._tag, "Failure");
+          if (mutation === "replace") yield* service.upsert({ ...before, title: "Replacement" });
+        }
+        yield* Deferred.succeed(accepted, undefined);
+        yield* Fiber.join(run);
+        const { tasks, timeZone } = yield* service.list();
+        assert.equal(timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+        if (mutation === "delete") {
+          assert.deepEqual(tasks, []);
+        } else {
+          const after = tasks[0]!;
+          assert.equal(after.runCount, mutation === "replace" ? 0 : 1);
+          assert.equal(after.lastRunStatus, mutation === "replace" ? "never" : "succeeded");
+          if (mutation === "edit") {
+            assert.equal(after.title, "Edited during dispatch");
+            assert.equal(after.nextRunAt, "2026-10-06T12:02:00.000Z");
+          } else if (mutation === "pause") {
+            assert.isFalse(after.enabled);
+            assert.isNull(after.nextRunAt);
+          } else {
+            assert.equal(after.title, "Replacement");
+          }
+        }
+      }).pipe(
+        Effect.provide(
+          ScheduledTaskService.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+                  launch: () =>
+                    Effect.sync(() => {
+                      launches++;
+                    }).pipe(
+                      Effect.andThen(Deferred.succeed(dispatched, undefined)),
+                      Effect.andThen(Deferred.await(accepted)),
+                      Effect.as({} as never),
+                    ),
+                }),
+                Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+                NodeCrypto.layer,
+                Scheduler.layer,
+              ),
+            ),
+          ),
+        ),
+        Effect.scoped,
+      );
+    }).pipe(Effect.provide(SqlitePersistenceMemory)),
+  );
+}
+
+for (const instanceId of ["codex", "claude-code", "opencode"]) {
+  it.effect(`launches ${instanceId} with the saved model, permissions, and workspace`, () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-10-06T12:00:00.000Z";
+      yield* TestClock.setTime(Date.parse(now));
+      const id = ScheduledTaskId.make(`provider-${instanceId}`);
+      yield* insertRow(sql, { id, next: null, enabled: 0, status: "never" }, now);
+      const selection = {
+        instanceId: ProviderInstanceId.make(instanceId),
+        model: "saved-model",
+        options: [{ id: "reasoning", value: "high" }],
+      };
+      const workspace = { type: "worktree", baseRef: "release", startFromOrigin: false } as const;
+      const selectionJson = yield* encodeModelSelection(selection);
+      const workspaceJson = yield* encodeWorkspaceStrategy(workspace);
+      yield* sql`UPDATE scheduled_tasks SET model_selection_json = ${selectionJson}, workspace_strategy_json = ${workspaceJson}, runtime_mode = 'approval-required', interaction_mode = 'plan' WHERE task_id = ${id}`;
+      const launches: Array<
+        Parameters<ThreadLaunchService.ThreadLaunchService["Service"]["launch"]>[0]
+      > = [];
+      yield* Effect.gen(function* () {
+        const service = yield* ScheduledTaskService.ScheduledTaskService;
+        const { task } = yield* service.runNow({ id });
+        assert.equal(task.lastRunStatus, "succeeded");
+        assert.equal(launches.length, 1);
+        assert.deepEqual(launches[0]!.modelSelection, selection);
+        assert.deepEqual(launches[0]!.workspaceStrategy, workspace);
+        assert.equal(launches[0]!.runtimeMode, "approval-required");
+        assert.equal(launches[0]!.interactionMode, "plan");
+        assert.equal(launches[0]!.initialMessage?.scheduledTaskId, id);
+      }).pipe(
+        Effect.provide(
+          ScheduledTaskService.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+                  launch: (input) =>
+                    Effect.sync(() => {
+                      launches.push(input);
+                      return {} as never;
+                    }),
+                }),
+                Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+                NodeCrypto.layer,
+                Scheduler.layer,
+              ),
+            ),
+          ),
+        ),
+        Effect.scoped,
+      );
+    }).pipe(Effect.provide(SqlitePersistenceMemory)),
+  );
+}

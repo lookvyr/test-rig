@@ -28,6 +28,20 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("separates schedule observation from mutations and dispatch", () => {
+    for (const method of [WS_METHODS.scheduledTasksList, WS_METHODS.scheduledTasksSubscribe]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    }
+    for (const method of [
+      WS_METHODS.scheduledTasksUpsert,
+      WS_METHODS.scheduledTasksSetEnabled,
+      WS_METHODS.scheduledTasksDelete,
+      WS_METHODS.scheduledTasksRunNow,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
+
   it("rejects unknown RPC method names", () => {
     for (const method of ["server.notRegistered", "toString", "constructor"]) {
       expect(() => requiredScopeForRpcMethod(method)).toThrow(

@@ -118,6 +118,7 @@ export const ScheduledTaskListInput = Schema.Struct({});
 export type ScheduledTaskListInput = typeof ScheduledTaskListInput.Type;
 
 export const ScheduledTaskListResult = Schema.Struct({
+  timeZone: Schema.String,
   tasks: Schema.Array(ScheduledTask),
 });
 export type ScheduledTaskListResult = typeof ScheduledTaskListResult.Type;
