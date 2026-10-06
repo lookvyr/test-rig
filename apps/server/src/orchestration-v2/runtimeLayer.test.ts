@@ -4329,6 +4329,7 @@ it.layer(TestLayer)("usage-limit recovery", (it) => {
     "archive",
     "settle",
     "replacement",
+    "provider-change",
     "manual-snooze",
     "manual-snooze-after-recovery",
     "invalid-snooze",
@@ -4712,6 +4713,20 @@ it.layer(TestLayer)("usage-limit recovery", (it) => {
           commandId: CommandId.make(`recovery:settle:${scenario}`),
           threadId,
         });
+      if (scenario === "provider-change") {
+        const current = yield* orchestrator.getThreadProjection(threadId);
+        yield* events.write({
+          events: [
+            {
+              id: EventId.make("recovery:provider-change"),
+              type: "thread.metadata-updated",
+              threadId,
+              occurredAt: yield* DateTime.now,
+              payload: { ...current.thread, providerInstanceId: ProviderInstanceId.make("claude") },
+            },
+          ],
+        });
+      }
       if (scenario === "replacement") {
         const current = yield* orchestrator.getThreadProjection(threadId);
         const error = current.turnItems.find((item) => item.type === "error")!;

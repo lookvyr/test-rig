@@ -1,3 +1,4 @@
+import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type { OrchestrationMessageContext } from "@t3tools/contracts";
 import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
@@ -4264,7 +4265,29 @@ function ChatViewContent(props: ChatViewProps) {
       ? [{ id: "worktree-cleanup", variant: "info", icon: <GitBranchIcon />, title: status.reason }]
       : [];
   }, [activeThreadShell?.worktreeCleanup, parkedThreadBannerItem]);
+  const limitRecoveryBanner =
+    activeRuntime?.status === "failed" &&
+    activeRuntime.lastErrorClass === "usage_limit" &&
+    activeThreadShell?.latestRun &&
+    activeThreadShell.archivedAt === null &&
+    !activeThreadSettled
+      ? usageLimitRecoveryBannerItem({
+          runId: activeThreadShell.latestRun.runId,
+          resetAt: activeRuntime.usageLimitResetAt ?? null,
+          stoppedAt: activeThreadShell.latestRun.completedAt ?? activeThreadShell.updatedAt,
+          recovery: activeThreadShell.limitRecovery ?? null,
+          snoozedUntil: activeThreadShell.snoozedUntil,
+          onChange: async (limitRecovery) => {
+            const result = await updateThreadMetadata({
+              environmentId,
+              input: { threadId: activeThreadShell.id, limitRecovery },
+            });
+            if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+          },
+        })
+      : null;
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+    const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
     const isUrgentSystemItem = (item: ComposerBannerStackItem) =>
       item.urgent === true || item.variant === "error" || item.variant === "warning";
     const urgentSystemItems = systemComposerBannerItems.filter(isUrgentSystemItem);
@@ -4275,6 +4298,7 @@ function ChatViewContent(props: ChatViewProps) {
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
+        ...limitRecoveryItems,
         ...urgentSystemItems,
         ...backgroundLivenessItems,
         ...calmSystemItems,
@@ -4284,6 +4308,7 @@ function ChatViewContent(props: ChatViewProps) {
       ];
     }
     return [
+      ...limitRecoveryItems,
       ...urgentSystemItems,
       ...backgroundLivenessItems,
       ...calmSystemItems,
@@ -4333,6 +4358,7 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeBranchMismatchKey,
     backgroundLivenessBannerItem,
+    limitRecoveryBanner,
     handleRestoreThreadBranch,
     isRestoringThreadBranch,
     localCheckoutBranchMismatch,

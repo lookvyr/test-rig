@@ -178,3 +178,28 @@ A fork is a durable chat, separate from a temporary `/side` conversation.
 Forking a conversation does not create a Git worktree or isolate file changes.
 Test Rig does not rewind conversations or edit sent messages; use a fork to try
 another direction. Checkpoint diffs remain available for reviewing file changes.
+
+## Recovering from provider limits
+
+When a provider stops a chat because of a usage limit, a banner shows its reported
+reset time. **Resume at reset** schedules one continuation for that chat;
+**Cancel auto-resume** cancels it. If the reset has already passed, choose
+**Resume now**. Without a reliable reset time, send a message to retry manually.
+
+**Snooze until reset** hides the chat until that time. Snoozing never sends a
+message by itself. **Wake now** reverses the snooze without canceling a scheduled
+continuation; cancel auto-resume separately if you want both off.
+
+To apply these choices automatically, open **Settings → General** and enable
+**Auto-resume limited threads**, **Snooze limited threads**, or both. Both settings
+are off by default. Changing these defaults does not cancel choices already
+scheduled in a chat; use that chat’s controls to cancel or wake it.
+
+Recovery needs the Test Rig server running and survives a server restart. New
+messages, archiving, settlement, a provider change, or canceling recovery prevent
+an outdated continuation from starting. A provider failure with a missing or
+already-expired reset time never starts an automatic retry loop.
+
+Codex and Claude can report reset times for this recovery flow. OpenCode currently
+reports generic provider errors without a reliable reset time, so continue those
+chats manually. Test Rig does not infer a reset time from an error message.

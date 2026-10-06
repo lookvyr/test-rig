@@ -277,6 +277,12 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees
         ? ["Automatic worktree cleanup"]
         : []),
+      ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
+        ? ["Auto-resume limited threads"]
+        : []),
+      ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
+        ? ["Snooze limited threads"]
+        : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
         : []),
@@ -296,6 +302,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.autoRemoveSettledWorktrees,
+      settings.autoResumeLimitedThreads,
+      settings.snoozeLimitedThreads,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
       settings.environmentIdentificationMode,
@@ -394,6 +402,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       autoRemoveSettledWorktrees: DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees,
+      autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
+      snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
@@ -1556,6 +1566,50 @@ export function GeneralSettingsPanel() {
                 onOpenChange={setBackgroundActivityDialogOpen}
               />
             </>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("auto-resume-limited-threads")}
+          description="Automatically schedule continuation after a provider reports a usage-limit reset time. Off by default. Cancel an already scheduled continuation in its chat."
+          resetAction={
+            settings.autoResumeLimitedThreads ? (
+              <SettingResetButton
+                label="Auto-resume limited threads"
+                onClick={() => updateSettings({ autoResumeLimitedThreads: false })}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.autoResumeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Auto-resume limited threads"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("snooze-limited-threads")}
+          description="Snooze usage-limited chats until the reported reset time. Off by default and independent of auto-resume; snoozing alone never sends a message."
+          resetAction={
+            settings.snoozeLimitedThreads ? (
+              <SettingResetButton
+                label="Snooze limited threads"
+                onClick={() => updateSettings({ snoozeLimitedThreads: false })}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.snoozeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ snoozeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Snooze limited threads"
+            />
           }
         />
 

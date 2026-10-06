@@ -444,3 +444,21 @@ describe("ServerSettingsPatch string normalization", () => {
     expect(encoded.providers?.codex?.launchArgs).toBe("--strict-config");
   });
 });
+
+describe("usage-limit recovery opt-in", () => {
+  it("defaults both choices off for fresh and existing settings", () => {
+    for (const settings of [DEFAULT_SERVER_SETTINGS, decodeServerSettings({})]) {
+      expect(settings.autoResumeLimitedThreads).toBe(false);
+      expect(settings.snoozeLimitedThreads).toBe(false);
+    }
+  });
+
+  it("keeps the choices independent in settings patches", () => {
+    expect(decodeServerSettingsPatch({ autoResumeLimitedThreads: true })).toEqual({
+      autoResumeLimitedThreads: true,
+    });
+    expect(decodeServerSettingsPatch({ snoozeLimitedThreads: true })).toEqual({
+      snoozeLimitedThreads: true,
+    });
+  });
+});
