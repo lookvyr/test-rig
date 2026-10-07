@@ -1,3 +1,4 @@
+import { SecretRequestCard } from "./SecretRequestCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { useChatCanvas } from "./ChatCanvasContext";
 import { ThreadFind } from "./ThreadFind";
@@ -2766,6 +2767,15 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
 function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event" }> }) {
   const ctx = use(TimelineRowCtx);
   const { item, visibility, sourceThreadId } = row.projectedItem;
+  if (item.type === "secret_request") {
+    return (
+      <SecretRequestCard
+        environmentId={ctx.activeThreadEnvironmentId}
+        item={item}
+        visibility={visibility}
+      />
+    );
+  }
   if (item.type === "subagent" && (row.subagents?.length ?? 1) > 1) {
     return <V2SubagentGroup key={row.id} row={row} />;
   }

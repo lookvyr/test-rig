@@ -1,3 +1,4 @@
+import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import { persistChatAttachments } from "./orchestration-v2/AttachmentUpload.ts";
@@ -329,6 +330,7 @@ const makeWsRpcLayer = (
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
+      const secretRequests = yield* SecretRequests.SecretRequests;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -624,6 +626,7 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "orchestration" },
           ),
+        [WS_METHODS.secretsAnswerRequest]: (input) => secretRequests.answer(input),
         [WS_METHODS.scheduledTasksList]: (_input) =>
           observeRpcEffect(WS_METHODS.scheduledTasksList, scheduledTasks.list(), {
             "rpc.aggregate": "scheduledTasks",

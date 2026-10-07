@@ -1,3 +1,4 @@
+import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -154,7 +155,13 @@ it.effect("retrieves whole omitted handoff items through paged MCP history", () 
         textOffset = item.nextTextOffset;
       }
       assert.equal(recovered, longText);
-    }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+    }).pipe(
+      Effect.provide(
+        OrchestratorMcpService.layer
+          .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
+          .pipe(Layer.provide(dependencies)),
+      ),
+    );
   }).pipe(
     Effect.provide(
       Layer.mergeAll(

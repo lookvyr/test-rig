@@ -1,3 +1,4 @@
+import * as Tracer from "effect/Tracer";
 import * as NodeEvents from "node:events";
 import { it as effectIt } from "@effect/vitest";
 import type { DesktopPreviewRecordingFrame } from "@t3tools/contracts";
@@ -2296,3 +2297,63 @@ effectIt.effect(
       }),
     ),
 );
+
+effectIt.effect("private typing sanitizes native failures before traces and action history", () => {
+  const spans: Array<Tracer.NativeSpan> = [];
+  const tracer = Tracer.make({
+    span: (options) => {
+      const span = new Tracer.NativeSpan(options);
+      spans.push(span);
+      return span;
+    },
+  });
+  return withManager((manager) =>
+    Effect.gen(function* () {
+      const sentinel = "private-native-canary";
+      const image = {
+        toJPEG: () => Buffer.from("image"),
+        toPNG: () => Buffer.from("image"),
+        getSize: () => ({ width: 100, height: 100 }),
+      };
+      const wc: Electron.WebContents = makeTestPreviewWebContents(async () => image);
+      wc.isDevToolsOpened = () => false;
+      vi.spyOn(wc.debugger, "sendCommand").mockImplementation(async (method, params) => {
+        if (method === "Runtime.evaluate" && String(params?.expression).includes(sentinel))
+          throw new Error(`Could not type ${sentinel}`);
+        if (method === "Runtime.evaluate")
+          return {
+            result: {
+              value: {
+                url: "https://example.com",
+                title: "Example",
+                loading: false,
+                visibleText: "",
+                interactiveElements: [],
+              },
+            },
+          };
+        return {};
+      });
+      fromId.mockReturnValue(wc as never);
+      yield* manager.createTab("private_tab");
+      yield* manager.registerWebview("private_tab", 42);
+      const result = yield* manager
+        .automationType("private_tab", { text: sentinel, clear: true }, true)
+        .pipe(Effect.exit);
+      expect(Exit.isFailure(result)).toBe(true);
+      if (Exit.isFailure(result)) expect(Cause.pretty(result.cause)).not.toContain(sentinel);
+      const snapshot = yield* manager.automationSnapshot("private_tab");
+      expect(snapshot.actionTimeline).toContainEqual(
+        expect.objectContaining({
+          action: "typeSecret",
+          error: "Could not enter the private value.",
+        }),
+      );
+      for (const span of spans) {
+        if (span.status._tag === "Ended" && Exit.isFailure(span.status.exit)) {
+          expect(Cause.pretty(span.status.exit.cause)).not.toContain(sentinel);
+        }
+      }
+    }),
+  ).pipe(Effect.withTracer(tracer));
+});

@@ -1590,6 +1590,15 @@ const make = Effect.gen(function* () {
         return recordAction(tab, "upload", () =>
           uploadFiles(tab, input as PreviewAutomationUploadInput),
         );
+      case "typeSecret":
+        return recordAction(tab, "typeSecret", async () => {
+          try {
+            await ServerBrowserPage.type(tab.page, input as PreviewAutomationTypeInput);
+          } catch {
+            // Playwright errors can quote the supplied value.
+            throw new Error("Could not enter the private value.");
+          }
+        });
       case "type":
         return recordAction(tab, "type", () =>
           ServerBrowserPage.type(tab.page, input as PreviewAutomationTypeInput),

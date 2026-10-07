@@ -1,3 +1,4 @@
+import * as Cause from "effect/Cause";
 import * as NodeEvents from "node:events";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -8,6 +9,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type PreviewAutomationStatus,
+  type PreviewAutomationSnapshot,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -695,6 +697,39 @@ it.live("viewers see the agent's pointer move to its target and click there", ()
         expect.objectContaining({ phase: "click", x: 140, y: 50 }),
       ]);
       expect(click).toHaveBeenCalledOnce();
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("private typing failures cannot leak into responses or action timelines", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const sentinel = "private-canary-server";
+      const page = contexts[0]!.page;
+      page.locator.mockReturnValue({
+        fill: async () => {
+          throw new Error(`Cannot fill ${sentinel}`);
+        },
+      } as never);
+      const error = yield* broker
+        .invoke<void>({
+          scope,
+          tabId,
+          operation: "typeSecret",
+          input: { text: sentinel, locator: "#password", clear: true },
+        })
+        .pipe(Effect.flip);
+      expect(Cause.pretty(Cause.fail(error))).not.toContain(sentinel);
+      expect(String(error)).not.toContain(sentinel);
+      const snapshot = yield* broker.invoke<PreviewAutomationSnapshot>({
+        scope,
+        tabId,
+        operation: "snapshot",
+        input: {},
+      });
+      expect(snapshot.actionTimeline?.at(-1)?.error).toBe("Could not enter the private value.");
+      expect(snapshot.actionTimeline?.map((event) => event.error).join()).not.toContain(sentinel);
     }),
   ).pipe(Effect.provide(layer)),
 );

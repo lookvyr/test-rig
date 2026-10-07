@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import { EnvironmentId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, SecretRef, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   PREVIEW_VIEWPORT_MAX_AREA,
   PreviewRenderedViewportSize,
@@ -41,6 +41,7 @@ export const PREVIEW_AUTOMATION_V1_OPERATIONS = [
 /** Advertised by current desktop hosts for mixed-version routing. */
 export const PREVIEW_AUTOMATION_OPERATIONS = [
   ...PREVIEW_AUTOMATION_V1_OPERATIONS,
+  "typeSecret",
   "resize",
   "setColorScheme",
 ] as const;
@@ -524,6 +525,17 @@ export const PreviewAutomationTypeInput = Schema.Struct({
       "Types into locator/selector, or into the currently focused element when neither target is provided.",
   });
 export type PreviewAutomationTypeInput = typeof PreviewAutomationTypeInput.Type;
+
+/** Private tool arguments contain a reference, never the literal value. */
+export const PreviewAutomationTypeSecretInput = Schema.Struct({
+  secretRef: SecretRef,
+  tabId: PreviewTabId,
+  locator: Locator.annotate({
+    description: "Explicit Playwright locator for the destination field.",
+  }),
+  timeoutMs: OptionalTimeoutMs,
+});
+export type PreviewAutomationTypeSecretInput = typeof PreviewAutomationTypeSecretInput.Type;
 
 export const PreviewAutomationPressInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,

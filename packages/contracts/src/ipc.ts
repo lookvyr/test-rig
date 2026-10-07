@@ -1,3 +1,4 @@
+import { privatePayload } from "./privatePayload.ts";
 import { BrowserProfileId } from "./browserProfile.ts";
 import type {
   GitGetPullRequestStatsInput,
@@ -888,10 +889,13 @@ export const DesktopPreviewAutomationClickInputSchema = Schema.Struct({
   input: PreviewAutomationClickInput,
 });
 
-export const DesktopPreviewAutomationTypeInputSchema = Schema.Struct({
-  tabId: DesktopPreviewTabIdSchema,
-  input: PreviewAutomationTypeInput,
-});
+export const DesktopPreviewAutomationTypeInputSchema = privatePayload(
+  Schema.Struct({
+    tabId: DesktopPreviewTabIdSchema,
+    input: PreviewAutomationTypeInput,
+    privateValue: Schema.optional(Schema.Boolean),
+  }),
+);
 
 export const DesktopPreviewAutomationPressInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
@@ -1041,7 +1045,11 @@ export interface DesktopPreviewBridge {
     status: (tabId: string) => Promise<PreviewAutomationStatus>;
     snapshot: (tabId: string) => Promise<PreviewAutomationSnapshot>;
     click: (tabId: string, input: PreviewAutomationClickInput) => Promise<void>;
-    type: (tabId: string, input: PreviewAutomationTypeInput) => Promise<void>;
+    type: (
+      tabId: string,
+      input: PreviewAutomationTypeInput,
+      privateValue?: boolean,
+    ) => Promise<void>;
     press: (tabId: string, input: PreviewAutomationPressInput) => Promise<void>;
     scroll: (tabId: string, input: PreviewAutomationScrollInput) => Promise<void>;
     evaluate: (tabId: string, input: PreviewAutomationEvaluateInput) => Promise<unknown>;

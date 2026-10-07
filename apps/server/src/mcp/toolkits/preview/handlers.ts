@@ -1,3 +1,6 @@
+import { SecretRequestError } from "@t3tools/contracts";
+import * as SecretRequests from "../../../secrets/SecretRequests.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Effect from "effect/Effect";
 import type {
   PreviewAutomationSelectResult,
@@ -62,6 +65,27 @@ const invokeTargeted = <A>(
 };
 
 const handlers = {
+  preview_type_secret: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+      const threads = yield* ThreadManagementService.ThreadManagementService;
+      const secrets = yield* SecretRequests.SecretRequests;
+      const records = yield* threads
+        .getThreadRecords(scope.threadId, [], { turnItemTypes: [], messageRoles: [] })
+        .pipe(Effect.mapError(() => new SecretRequestError({ reason: "load_failed" })));
+      const text = yield* secrets.consume({
+        ref: input.secretRef,
+        projectId: records.thread.projectId,
+      });
+      yield* invoke<void>(
+        "typeSecret",
+        { text, locator: input.locator, clear: true, timeoutMs: input.timeoutMs },
+        input.timeoutMs,
+        input.tabId,
+      ).pipe(Effect.mapError(() => new SecretRequestError({ reason: "entry_failed" })));
+      return null;
+    }),
+
   preview_close: (input) => invokeTargeted<void>("close", input ?? {}).pipe(Effect.as(null)),
   preview_dialog: (input) => invokeTargeted<PreviewAutomationStatus>("dialog", input),
   preview_hover: (input) =>

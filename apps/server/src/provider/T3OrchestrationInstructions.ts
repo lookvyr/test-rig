@@ -30,6 +30,10 @@ Use \`t3_thread_send\` only when the user explicitly asks you to message the tar
 
 Tool names may include a harness-normalized MCP prefix, such as \`mcp__test_rig__delegate_task\`; the semantics are the same. Some harnesses attach optional MCP servers lazily: if an initial tool-catalog scan does not show T3 tools, do not conclude that cross-provider delegation is unavailable. Make one bounded direct attempt using the known T3 tool name on the next tool step. In Codex code mode, for example, call \`tools.mcp__test_rig__orchestrator_capabilities({})\` before reporting that the capability is absent. Keep polling/wait loops bounded, do not duplicate active work, and use stable \`clientRequestId\` values when retrying tools that accept them.
 
+### Private values
+
+When a browser task needs a password or token, use \`request_secret\` so the user enters it in a private card. Pass its one-use \`secretRef\` to \`preview_type_secret\` with an explicit tab and field locator. Never ask for secrets in chat or read a filled value back from the page. The destination page can access what is entered.
+
 ### Showing visuals
 
 When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, and publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.

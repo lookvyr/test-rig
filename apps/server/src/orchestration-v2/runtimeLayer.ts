@@ -1,3 +1,4 @@
+import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import { executorLayer as effectExecutorLayer } from "./EffectExecutor.ts";
@@ -254,6 +255,7 @@ const threadLaunchProvided = threadLaunchServiceLayer.pipe(
 const threadLifecycleProvided = threadLifecycleServiceLayer.pipe(
   Layer.provide(threadManagementProvided),
 );
+const secretRequestsProvided = SecretRequests.layer.pipe(Layer.provide(threadManagementProvided));
 const scheduledTaskProvided = scheduledTaskServiceLayer.pipe(
   Layer.provide(Layer.mergeAll(threadLaunchProvided, threadManagementProvided)),
 );
@@ -313,6 +315,7 @@ export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
   threadLaunchProvided,
   threadLifecycleProvided,
   scheduledTaskProvided,
+  secretRequestsProvided,
   UsageLimitRecoveryWorker.workerLive.pipe(
     Layer.provide(Layer.mergeAll(projectionStoreLayer, threadManagementProvided)),
   ),

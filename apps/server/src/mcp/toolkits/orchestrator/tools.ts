@@ -1,5 +1,7 @@
 import {
   OrchestratorMcpCapabilitiesResult,
+  OrchestratorMcpRequestSecretInput,
+  OrchestratorMcpRequestSecretResult,
   OrchestratorMcpCreateThreadsInput,
   OrchestratorMcpCreateThreadsResult,
   OrchestratorMcpDelegateTaskInput,
@@ -144,6 +146,18 @@ const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
   .annotate(Tool.Title, "Delete a scheduled task")
   .annotate(Tool.Destructive, true);
 
+const RequestSecretTool = Tool.make("request_secret", {
+  description:
+    "Ask for a password or token through a private card and wait for the user. The value is stored by the app and not included in chat or this result. Pass the returned one-use secretRef to preview_type_secret to enter it into an explicit browser tab and field. The destination page can access the value. Never ask the user to paste secrets in chat, read them back from the page, or invent them.",
+  parameters: OrchestratorMcpRequestSecretInput,
+  success: OrchestratorMcpRequestSecretResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Request a secret from the user")
+  .annotate(Tool.Destructive, false);
+
 export const CreateThreadsTool = Tool.make("create_threads", {
   description:
     "Create one or more ORDINARY TOP-LEVEL T3 conversations. This is not delegation and does not create child agents/subagents. For delegated work, choose models from orchestrator_capabilities. Prefer native subagents only when they support the chosen model; otherwise call delegate_task, including for same-provider work. Use create_threads for a batch of separate top-level threads sharing this checkout. Prefer t3_thread_launch for a single thread. Both require the user to request separate/new/top-level threads or conversations. Each entry may override provider, model, options, runtime mode, and interaction mode; omitted settings inherit. Project, branch, and worktree always inherit and cannot be overridden here. For independent implementation or a PR stack in its own worktree, use t3_thread_launch with workspaceStrategy instead of asking the agent to create a worktree in its prompt. A batch can partially succeed before returning an error. Supply clientRequestId and retry the identical ordered batch with the same key in the same provider session to recover accepted entries without restarting them. After a session changes, inspect t3_thread_list before creating replacements.",
@@ -238,6 +252,7 @@ const ThreadInterruptTool = Tool.make("t3_thread_interrupt", {
   .annotate(Tool.Destructive, true);
 
 export const OrchestratorToolkit = Toolkit.make(
+  RequestSecretTool,
   OrchestratorCapabilitiesTool,
   DelegateTaskTool,
   TaskStatusTool,

@@ -586,11 +586,13 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               request.input as Parameters<typeof ready.bridge.automation.click>[1],
             );
           }
+          case "typeSecret":
           case "type": {
             const ready = await requireReadyTab();
             return await ready.bridge.automation.type(
               ready.runtimeTabId,
               request.input as Parameters<typeof ready.bridge.automation.type>[1],
+              request.operation === "typeSecret",
             );
           }
           case "press": {

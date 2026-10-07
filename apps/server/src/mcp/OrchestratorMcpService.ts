@@ -1,6 +1,11 @@
+import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as Exit from "effect/Exit";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   CommandId,
+  TurnItemId,
+  type OrchestratorMcpRequestSecretInput,
+  type OrchestratorMcpRequestSecretResult,
   type RunId,
   isProviderAvailable,
   MessageId,
@@ -90,6 +95,10 @@ type TerminalTaskStatus = Extract<
 >;
 
 export interface OrchestratorMcpServiceShape {
+  readonly requestSecret: (
+    scope: McpInvocationScope,
+    input: OrchestratorMcpRequestSecretInput,
+  ) => Effect.Effect<OrchestratorMcpRequestSecretResult, OrchestratorMcpFailure>;
   readonly capabilities: (
     scope: McpInvocationScope,
   ) => Effect.Effect<OrchestratorMcpCapabilitiesResult, OrchestratorMcpFailure>;
@@ -690,6 +699,8 @@ function turnItemText(item: OrchestrationV2TurnItem): string | null {
       return jsonText({ pattern: item.pattern, results: item.results });
     case "web_search":
       return jsonText({ patterns: item.patterns, results: item.results });
+    case "secret_request":
+      return `${item.label}: ${item.secretStatus}`;
     case "approval_request":
       return item.prompt ?? item.requestKind;
     case "checkpoint":
@@ -759,6 +770,7 @@ const make = Effect.gen(function* () {
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const providerAdapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
+  const secretRequests = yield* SecretRequests.SecretRequests;
   const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
 
   const requireCapability = (scope: McpInvocationScope) =>
@@ -1372,6 +1384,139 @@ const make = Effect.gen(function* () {
           );
         return { scheduledTaskId: existing.id, deleted: true };
       }),
+    requestSecret: (scope, input) =>
+      Effect.gen(function* () {
+        // The card is shown in, and answered from, the caller's own thread.
+        const { parent } = yield* loadWritableThread(scope, scope.threadId);
+        const threadId = scope.threadId;
+        const run = ThreadManagementService.latestActiveRun(parent);
+        if (
+          run === undefined ||
+          run.rootNodeId === null ||
+          run.providerInstanceId !== scope.providerInstanceId
+        ) {
+          return yield* failure(
+            "parent_not_active",
+            "Asking for a secret requires an active run owned by this MCP provider session.",
+          );
+        }
+        const runId = run.id;
+        const nodeId = run.rootNodeId;
+        const key = yield* requestKey(input.clientRequestId);
+        // Turn item ids are global; scope the key to this thread. A retry with
+        // the same clientRequestId finds this card, answered or not.
+        const turnItemId = TurnItemId.make(
+          `turn-item:secret-request:${stablePart(threadId)}:${stablePart(key)}`,
+        );
+        const record = (secretStatus: "pending" | "cancelled") =>
+          threadManagement
+            .dispatch({
+              type: "secret_request.record",
+              commandId: stableCommandId({
+                scope,
+                requestKey: key,
+                operation: `secret-${secretStatus}`,
+              }),
+              threadId: threadId,
+              runId,
+              nodeId,
+              turnItemId,
+              label: input.label,
+              reason: input.reason,
+              ...(input.placeholder === undefined ? {} : { placeholder: input.placeholder }),
+              secretStatus,
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                failure(
+                  "orchestration_error",
+                  `Could not record the secret request: ${errorMessage(error)}`,
+                ),
+              ),
+            );
+        yield* record("pending");
+        // Only this call can hand the agent its ref, so the card must not
+        // outlive it: a timeout, a failed wait or an aborted call closes it as
+        // cancelled. If even that fails, the server still refuses an answer
+        // once the run ends, and an unused value expires.
+        const closeCard = record("cancelled").pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Could not close a secret request card", { error: error.message }),
+          ),
+        );
+
+        // The user answers the card (secrets.answerRequest), or it ends with
+        // the run; poll it like a delegated task.
+        const answered = yield* Effect.gen(function* () {
+          while (true) {
+            const projection = yield* threadManagement
+              .getThreadRecords(threadId, ["runs", "turnItems"], {
+                turnItemTypes: ["secret_request"],
+                messageRoles: [],
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  failure(
+                    "orchestration_error",
+                    `Unable to read the secret request: ${errorMessage(error)}`,
+                  ),
+                ),
+              );
+            const item = projection.turnItems.find((candidate) => candidate.id === turnItemId);
+            if (item?.type === "secret_request" && item.secretStatus !== "pending") {
+              return item.secretStatus;
+            }
+            const current = projection.runs.find((candidate) => candidate.id === runId);
+            if (
+              current === undefined ||
+              ThreadManagementService.isTerminalRunStatus(current.status)
+            ) {
+              yield* record("cancelled");
+              return "cancelled" as const;
+            }
+            yield* Effect.sleep(Duration.millis(500));
+          }
+        }).pipe(
+          Effect.timeoutOption(
+            Duration.millis(
+              Math.min(input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS, MAX_WAIT_TIMEOUT_MS),
+            ),
+          ),
+          Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeCard)),
+        );
+        if (Option.isNone(answered)) yield* closeCard;
+        // An answer that raced the timeout still wins: the card is answered once.
+        const status = Option.isSome(answered)
+          ? answered.value
+          : yield* threadManagement
+              .getThreadRecords(threadId, ["turnItems"], {
+                turnItemTypes: ["secret_request"],
+                messageRoles: [],
+              })
+              .pipe(
+                Effect.map((records) => {
+                  const item = records.turnItems.find((candidate) => candidate.id === turnItemId);
+                  return item?.type === "secret_request" &&
+                    (item.secretStatus === "saved" || item.secretStatus === "declined")
+                    ? item.secretStatus
+                    : ("timed_out" as const);
+                }),
+                Effect.orElseSucceed(() => "timed_out" as const),
+              );
+        yield* Effect.annotateCurrentSpan({ "secret_request.status": status });
+        if (status !== "saved") return { status };
+        // Saved means the value was stored before the card said so; a missing
+        // value is a storage fault, not an answer the agent can act on.
+        const secretRef = yield* secretRequests.savedRef({ threadId: threadId, turnItemId });
+        if (Option.isNone(secretRef)) {
+          return yield* failure(
+            "orchestration_error",
+            "The user saved the secret, but it could not be read. Ask again with a new clientRequestId.",
+          );
+        }
+        return { status, secretRef: secretRef.value };
+      }).pipe(Effect.withSpan("OrchestratorMcpService.requestSecret")),
+
     capabilities: (scope) =>
       Effect.gen(function* () {
         yield* requireCapability(scope);
@@ -2015,4 +2160,5 @@ export const layer: Layer.Layer<
   | ProviderRegistry.ProviderRegistry
   | ProviderAdapterRegistry.ProviderAdapterRegistryV2
   | ScheduledTaskService.ScheduledTaskService
+  | SecretRequests.SecretRequests
 > = Layer.effect(OrchestratorMcpService, make);

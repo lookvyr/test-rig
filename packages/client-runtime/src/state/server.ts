@@ -353,6 +353,17 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
+    // Off the config lane: answering a card must not queue behind settings
+    // edits. One answer per card at a time.
+    answerSecretRequest: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:secrets:answer-request",
+      tag: WS_METHODS.secretsAnswerRequest,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.turnItemId]),
+      },
+    }),
     updateSettings: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:update-settings",
       tag: WS_METHODS.serverUpdateSettings,

@@ -1,3 +1,5 @@
+import * as SecretRequests from "../../../secrets/SecretRequests.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import {
   PreviewAutomationDialogInput,
   PreviewAutomationHoverInput,
@@ -22,6 +24,8 @@ import {
   PreviewAutomationStatus,
   PreviewAutomationTabTargetInput,
   PreviewAutomationTypeInput,
+  PreviewAutomationTypeSecretInput,
+  SecretRequestError,
   PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -147,6 +151,21 @@ export const PreviewTypeTool = browserTool(
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Type into preview page"),
+);
+
+export const PreviewTypeSecretTool = browserTool(
+  Tool.make("preview_type_secret", {
+    description:
+      "Enter a one-use secretRef from request_secret into an explicit browser tab and field, replacing its contents. The private value is not included in this call or result. The page receives it; do not read it back or echo it. A failed entry may require asking again.",
+    parameters: PreviewAutomationTypeSecretInput,
+    success: Schema.Null,
+    failure: Schema.Union([PreviewAutomationError, SecretRequestError]),
+    dependencies: [
+      ...dependencies,
+      SecretRequests.SecretRequests,
+      ThreadManagementService.ThreadManagementService,
+    ],
+  }).annotate(Tool.Title, "Enter a private value"),
 );
 
 export const PreviewPressTool = browserTool(
@@ -296,6 +315,7 @@ export const PreviewToolkit = Toolkit.make(
   PreviewSnapshotTool,
   PreviewClickTool,
   PreviewTypeTool,
+  PreviewTypeSecretTool,
   PreviewPressTool,
   PreviewScrollTool,
   PreviewEvaluateTool,
@@ -318,6 +338,7 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewSetAppearanceTool,
   PreviewClickTool,
   PreviewTypeTool,
+  PreviewTypeSecretTool,
   PreviewPressTool,
   PreviewScrollTool,
   PreviewEvaluateTool,

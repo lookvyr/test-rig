@@ -82,3 +82,20 @@ change that tab's sound without muting the whole app.
 **Cmd+Shift+T** on macOS or **Ctrl+Shift+T** elsewhere reopens a closed browser view
 with its saved profile and viewport. Incognito tabs can reopen during the current session, but their closed-view
 history is not saved across reloads.
+
+## Private sign-in values
+
+When an agent needs a password or token for a browser task, it can request a
+private card in chat. Enter the value in the masked field and choose **Save
+privately**, or choose **Decline**. Saved and declined cards collapse to a compact
+outcome row. Stopping the agent ends an unanswered request.
+
+The value goes to the connected environment's secret store. Chat records contain
+only the request and its status; the agent receives a reference that can be used
+once to fill a specific browser tab and field. Input is preserved exactly,
+including spaces. Unused values expire after 24 hours and are cleaned up hourly.
+A failed browser entry may require a fresh request.
+
+The destination page receives the value. This does not prevent the page—or an
+agent subsequently reading that page—from accessing it. The private card keeps
+the entry and transfer out of chat; it is not a password vault.

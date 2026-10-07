@@ -1,3 +1,4 @@
+import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as OrchestratorV2 from "./orchestration-v2/Orchestrator.ts";
@@ -739,6 +740,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(Layer.mock(EventSink.EventSinkV2)({})),
       Layer.provide(Layer.mock(ProviderAdapterRegistryV2.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
+      Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       Layer.provide(WorktreeSetupTracker.layer),
       Layer.provide(resourceTelemetryLayer),
       Layer.provide(

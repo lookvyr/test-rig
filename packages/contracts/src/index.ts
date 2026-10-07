@@ -329,3 +329,10 @@ export * from "./agentSessions.ts";
 export { ProjectScript, ProjectScriptIcon } from "./project.ts";
 
 export * from "./composerContextClipboard.ts";
+
+export * from "./secretRequest.ts";
+
+export {
+  OrchestratorMcpRequestSecretInput,
+  OrchestratorMcpRequestSecretResult,
+} from "./orchestratorMcp.ts";

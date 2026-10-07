@@ -231,3 +231,6 @@ export const OmittedWhenNull = <Value extends Schema.Top>(value: Value) => {
 
 export const ClientSurface = Schema.Literals(["web", "desktop", "cli"]);
 export type ClientSurface = typeof ClientSurface.Type;
+
+export const SecretRef = makeEntityId("SecretRef");
+export type SecretRef = typeof SecretRef.Type;

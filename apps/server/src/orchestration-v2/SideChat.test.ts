@@ -1,3 +1,4 @@
+import * as SecretRequests from "../secrets/SecretRequests.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -577,17 +578,19 @@ const coordinationScope: McpInvocationScope = {
   issuedAt: 1,
 };
 
-const mcpCoordinationLayer = OrchestratorMcp.layer.pipe(
-  Layer.provideMerge(coordinationLayer),
-  Layer.provide(
-    Layer.mergeAll(
-      NodeServices.layer,
-      Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
-      Layer.mock(ProviderAdapterRegistryV2)({}),
-      Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
+const mcpCoordinationLayer = OrchestratorMcp.layer
+  .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
+  .pipe(
+    Layer.provideMerge(coordinationLayer),
+    Layer.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+        Layer.mock(ProviderAdapterRegistryV2)({}),
+        Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
+      ),
     ),
-  ),
-);
+  );
 
 const readySide = Effect.gen(function* () {
   const seeded = yield* seed;
@@ -1017,6 +1020,12 @@ it.effect("recovers a partially accepted batch without duplicating its first con
       assert.deepEqual(after.messages, before.messages);
       assert.deepEqual(after.runs, before.runs);
       assert.deepEqual(yield* mcp.createThreads(coordinationScope, input), result);
-    }).pipe(Effect.provide(OrchestratorMcp.layer.pipe(Layer.provide(dependencies))));
+    }).pipe(
+      Effect.provide(
+        OrchestratorMcp.layer
+          .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
+          .pipe(Layer.provide(dependencies)),
+      ),
+    );
   }).pipe(Effect.provide(coordinationLayer)),
 );

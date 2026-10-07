@@ -1,3 +1,4 @@
+import * as References from "effect/References";
 /**
  * Desktop side of the in-app browser preview.
  *
@@ -2962,11 +2963,26 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const automationType = Effect.fn("PreviewManager.automationType")(function* (
     tabId: string,
     input: PreviewAutomationTypeInput,
+    privateValue = false,
   ) {
     const wc = yield* requireWebContents(tabId);
-    yield* withControlSession(tabId, wc, "type", (send) =>
-      performAutomationType(tabId, input, send),
-    );
+    yield* withControlSession(tabId, wc, privateValue ? "typeSecret" : "type", (send) => {
+      const action = performAutomationType(tabId, input, send);
+      return privateValue
+        ? action.pipe(
+            Effect.provideService(References.TracerEnabled, false),
+            Effect.catchCause(() =>
+              Effect.fail(
+                new PreviewOperationError({
+                  operation: "typeSecret",
+                  tabId,
+                  cause: new Error("Could not enter the private value."),
+                }),
+              ),
+            ),
+          )
+        : action;
+    });
   });
 
   const performAutomationPress = Effect.fn("PreviewManager.performAutomationPress")(function* (
@@ -3611,6 +3627,7 @@ export class PreviewManager extends Context.Service<
     readonly automationType: (
       tabId: string,
       input: PreviewAutomationTypeInput,
+      privateValue?: boolean,
     ) => Effect.Effect<void, PreviewManagerError>;
     readonly automationPress: (
       tabId: string,

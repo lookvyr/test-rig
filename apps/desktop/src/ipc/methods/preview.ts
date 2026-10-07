@@ -309,9 +309,13 @@ export const automationType = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_TYPE_CHANNEL,
   payload: DesktopPreviewAutomationTypeInputSchema,
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.automationType")(function* ({ tabId, input }) {
+  handler: Effect.fn("desktop.ipc.preview.automationType")(function* ({
+    tabId,
+    input,
+    privateValue,
+  }) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.automationType(tabId, input);
+    yield* manager.automationType(tabId, input, privateValue);
   }),
 });
 
