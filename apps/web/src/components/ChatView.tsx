@@ -6726,28 +6726,22 @@ function ChatViewContent(props: ChatViewProps) {
                           onRespond={onRespondToUserInput}
                         />
                       )}
-                      {reviewWorkspacePending && (
+                      {reviewWorkspacePending && reviewWorkspace.error && (
                         <div
                           className="mx-auto mb-3 flex max-w-3xl items-center gap-2 px-2 text-xs text-muted-foreground"
-                          role={reviewWorkspace.error ? "alert" : "status"}
+                          role="alert"
                         >
-                          {reviewWorkspace.error ? (
-                            <>
-                              <span>
-                                Could not prepare the review worktree: {reviewWorkspace.error} Your
-                                prompt is saved.
-                              </span>
-                              <button
-                                type="button"
-                                className="shrink-0 underline"
-                                onClick={reviewWorkspace.retry}
-                              >
-                                Retry
-                              </button>
-                            </>
-                          ) : (
-                            <span>Preparing review worktree… You can write your prompt now.</span>
-                          )}
+                          <span>
+                            Could not prepare the review worktree: {reviewWorkspace.error} Your
+                            prompt is saved.
+                          </span>
+                          <button
+                            type="button"
+                            className="shrink-0 underline"
+                            onClick={reviewWorkspace.retry}
+                          >
+                            Retry
+                          </button>
                         </div>
                       )}
                       {threadSyncPhase && !activeEnvironmentUnavailable ? (
