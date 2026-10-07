@@ -2419,8 +2419,8 @@ label:has(> select#reasoning-effort) select {
   }
 }
 
-/* Reveal a settled review layout without animating its dimensions. */
-@keyframes diff-panel-reveal {
+/* Reveal settled file and review surfaces without animating their dimensions. */
+@keyframes surface-reveal {
   from {
     opacity: 0;
   }
@@ -2428,20 +2428,26 @@ label:has(> select#reasoning-effort) select {
     opacity: 1;
   }
 }
-.diff-panel-reveal {
-  animation: diff-panel-reveal 180ms ease-out;
+.diff-panel-reveal,
+.file-surface-reveal,
+.file-surface-content > :not([data-file-loading], .file-surface-document, [role="status"]) {
+  animation: surface-reveal 180ms ease-out;
 }
 .diff-panel-placeholder [data-slot="skeleton"] {
   animation: none;
   background: var(--color-muted);
   opacity: 0.45;
 }
-.diff-panel-loading-label {
-  animation: diff-panel-reveal 180ms ease-out 600ms both;
+.diff-panel-loading-label,
+.file-surface-loading-label {
+  animation: surface-reveal 180ms ease-out 600ms both;
 }
 @media (prefers-reduced-motion: reduce) {
   .diff-panel-reveal,
-  .diff-panel-loading-label {
+  .diff-panel-loading-label,
+  .file-surface-reveal,
+  .file-surface-content > :not([data-file-loading], .file-surface-document, [role="status"]),
+  .file-surface-loading-label {
     animation: none;
   }
 }

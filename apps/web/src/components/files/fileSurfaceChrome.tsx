@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 
-import { Spinner } from "~/components/ui/spinner";
 import { Button } from "~/components/ui/button";
 import { Toggle } from "~/components/ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -129,12 +128,15 @@ export function FileSurfaceLoading(props: { readonly className?: string }) {
     <div
       role="status"
       aria-label="Loading file"
-      className={cn(
-        "flex min-h-0 flex-1 items-center justify-center text-muted-foreground",
-        props.className,
-      )}
+      data-file-loading
+      className={cn("min-h-0 flex-1 overflow-hidden bg-background p-4", props.className)}
     >
-      <Spinner size="lg" />
+      <div aria-hidden className="space-y-3">
+        <div className="h-3 w-2/5 max-w-60 rounded-sm bg-muted-foreground/15" />
+        <div className="h-2.5 w-3/5 max-w-96 rounded-sm bg-muted-foreground/15" />
+        <div className="h-2.5 w-1/2 max-w-80 rounded-sm bg-muted-foreground/15" />
+      </div>
+      <p className="file-surface-loading-label mt-4 text-xs text-muted-foreground">Loading file…</p>
     </div>
   );
 }

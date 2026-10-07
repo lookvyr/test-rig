@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
 import { cn } from "~/lib/utils";
+import { FileSurfaceLoading } from "./fileSurfaceChrome";
 
 /**
  * Chromium's viewer opens with its own toolbar, a thumbnail rail and a small
@@ -33,30 +34,48 @@ export function BrowserDocumentFrame(props: {
   readonly pdf: boolean;
   readonly htmlRender?: boolean;
 }) {
-  const className = "min-h-0 flex-1 border-0 bg-white";
-  return props.pdf ? (
-    // oxlint-disable-next-line react/iframe-missing-sandbox -- the built-in PDF viewer needs an unsandboxed frame.
-    <iframe
-      key={props.src}
-      src={`${props.src}${PDF_VIEWER_FRAGMENT}`}
-      title={props.title}
-      className={className}
-    />
-  ) : props.htmlRender ? (
-    <HtmlRenderDocument
-      key={props.src}
-      src={props.src}
-      title={props.title}
-      className="min-h-0 flex-1"
-    />
-  ) : (
-    <iframe
-      key={props.src}
-      src={props.src}
-      title={props.title}
-      className={className}
-      sandbox="allow-scripts allow-forms allow-popups allow-modals"
-    />
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const loaded = loadedSrc === props.src;
+  const onLoad = () => setLoadedSrc(props.src);
+  const className = cn(
+    "min-h-0 w-full flex-1 border-0",
+    loaded ? "file-surface-reveal" : "pointer-events-none opacity-0",
+    !props.htmlRender && "bg-white",
+  );
+  return (
+    <div
+      className="file-surface-document relative flex min-h-0 flex-1 flex-col"
+      aria-busy={!loaded}
+    >
+      {!loaded && <FileSurfaceLoading className="absolute inset-0" />}
+      {props.pdf ? (
+        // oxlint-disable-next-line react/iframe-missing-sandbox -- the built-in PDF viewer needs an unsandboxed frame.
+        <iframe
+          key={props.src}
+          src={`${props.src}${PDF_VIEWER_FRAGMENT}`}
+          title={props.title}
+          className={className}
+          onLoad={onLoad}
+        />
+      ) : props.htmlRender ? (
+        <HtmlRenderDocument
+          key={props.src}
+          src={props.src}
+          title={props.title}
+          className={className}
+          onLoad={onLoad}
+        />
+      ) : (
+        <iframe
+          key={props.src}
+          src={props.src}
+          title={props.title}
+          className={className}
+          onLoad={onLoad}
+          sandbox="allow-scripts allow-forms allow-popups allow-modals"
+        />
+      )}
+    </div>
   );
 }
 
@@ -70,6 +89,7 @@ export function HtmlRenderDocument(props: {
   readonly src: string;
   readonly title: string;
   readonly className?: string;
+  readonly onLoad?: () => void;
   /** Receives the page's content height whenever it changes, so an inline frame can fit it. */
   readonly onContentHeight?: (height: number) => void;
 }) {
@@ -129,6 +149,7 @@ export function HtmlRenderDocument(props: {
       loading="lazy"
       onLoad={() => {
         setLoaded(true);
+        props.onLoad?.();
         // Covers a theme change that landed while the page was loading.
         postTheme();
       }}

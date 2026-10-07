@@ -17,7 +17,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronRight, Code2, Eye, Table2, FolderTree, Globe2, LoaderCircle } from "lucide-react";
+import { ChevronRight, Code2, Eye, Table2, FolderTree, Globe2 } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
@@ -48,7 +48,7 @@ import { useThreadWorkspaceMutationId } from "~/hooks/useThreadWorkspaceMutation
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 import { WorkspaceMediaPreview } from "./WorkspaceMediaPreview";
 import { DelimitedTablePreview } from "./DelimitedTablePreview";
-import { FileSurfaceFailure, FileSurfaceNotice } from "./fileSurfaceChrome";
+import { FileSurfaceFailure, FileSurfaceLoading, FileSurfaceNotice } from "./fileSurfaceChrome";
 import FileBrowserPanel from "./FileBrowserPanel";
 import {
   type FileCommentAnnotationEntry,
@@ -1001,7 +1001,7 @@ export default function FilePreviewPanel({
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div
           className={cn(
-            "min-w-0 flex-1 flex-col overflow-hidden",
+            "file-surface-content min-w-0 flex-1 flex-col overflow-hidden",
             relativePath && !isDirectory ? "flex" : "hidden",
           )}
         >
@@ -1019,9 +1019,7 @@ export default function FilePreviewPanel({
           ) : relativePath && file.error && file.data === null ? (
             <FileSurfaceFailure message={file.error} onRetry={refreshSelectedFile} />
           ) : relativePath && file.data === null ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
-              <LoaderCircle className="size-5 animate-spin" />
-            </div>
+            <FileSurfaceLoading />
           ) : relativePath && file.data ? (
             isMarkdown && renderMarkdown ? (
               <RenderedMarkdownSurface

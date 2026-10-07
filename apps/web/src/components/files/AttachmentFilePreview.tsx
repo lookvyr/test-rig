@@ -36,7 +36,8 @@ import {
   FileSurfaceNotice,
 } from "./fileSurfaceChrome";
 
-const SourcePreview = lazy(() => import("./ReadOnlySourcePreview"));
+const loadSourcePreview = () => import("./ReadOnlySourcePreview");
+const SourcePreview = lazy(loadSourcePreview);
 
 /** Signed asset URLs live for an hour; treat anything older than this as worth re-minting. */
 const STALE_URL_MS = 5 * 60_000;
@@ -105,6 +106,9 @@ export function AttachmentFilePreview(props: {
   const [localUrl, setLocalUrl] = useState<string | null>(null);
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   const [rendered, setRendered] = useState(true);
+  const [HtmlSourcePreview, setHtmlSourcePreview] = useState<
+    typeof import("./ReadOnlySourcePreview").default | null
+  >(null);
   const [revision, setRevision] = useState(0);
   const [content, setContent] = useState<{ text: string; truncated: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -175,13 +179,18 @@ export function AttachmentFilePreview(props: {
             cache: revision === 0 ? "default" : "reload",
           });
       const result = await readFilePreviewResponse(response, controller.signal);
-      if (!controller.signal.aborted) setContent(result);
+      // Keep the HTML page visible until both its source and the source viewer are ready.
+      const sourceModule = kind === "html" ? await loadSourcePreview() : null;
+      if (!controller.signal.aborted) {
+        if (sourceModule) setHtmlSourcePreview(() => sourceModule.default);
+        setContent(result);
+      }
     })().catch((cause: unknown) => {
       if (!controller.signal.aborted)
         setContentError(cause instanceof Error ? cause.message : "Could not load this file.");
     });
     return () => controller.abort();
-  }, [url, needsText, revision, props.sizeBytes, props.file, refresh]);
+  }, [url, needsText, kind, revision, props.sizeBytes, props.file, refresh]);
   const failure = error ?? (needsText ? contentError : null);
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
   const updateClientSettings = useUpdateClientSettings();
@@ -229,6 +238,9 @@ export function AttachmentFilePreview(props: {
     })();
   };
 
+  const awaitingHtmlSource = kind === "html" && !rendered && content === null && failure === null;
+  const showDocument = kind === "pdf" || (kind === "html" && (rendered || awaitingHtmlSource));
+
   const body = failure ? (
     <FileSurfaceFailure
       message={failure}
@@ -239,6 +251,13 @@ export function AttachmentFilePreview(props: {
         setRevision((value) => value + 1);
       }}
     />
+  ) : url && showDocument ? (
+    <BrowserDocumentFrame
+      src={url}
+      title={props.name}
+      pdf={kind === "pdf"}
+      htmlRender={props.htmlRender === true}
+    />
   ) : !url || (needsText && !content) ? (
     <FileSurfaceLoading />
   ) : needsText && content ? (
@@ -248,16 +267,11 @@ export function AttachmentFilePreview(props: {
       <ScrollArea className="min-h-0 flex-1">
         <ChatMarkdown text={content.text} cwd={undefined} className="mx-auto max-w-4xl px-6 py-5" />
       </ScrollArea>
+    ) : kind === "html" && HtmlSourcePreview ? (
+      <HtmlSourcePreview name={props.name} text={content.text} />
     ) : (
       <ReadOnlySourcePreview name={props.name} text={content.text} />
     )
-  ) : kind === "pdf" || kind === "html" ? (
-    <BrowserDocumentFrame
-      src={url}
-      title={props.name}
-      pdf={kind === "pdf"}
-      htmlRender={props.htmlRender === true}
-    />
   ) : kind === "audio" ? (
     <AudioPreview src={url} name={props.name} onError={() => setError("Unable to load audio.")} />
   ) : kind === "video" ? (
@@ -311,7 +325,14 @@ export function AttachmentFilePreview(props: {
           <FileSurfaceAction
             label={renderedToggleLabel(renderedMode, rendered)}
             pressed={rendered}
-            onPress={() => setRendered((value) => !value)}
+            onPress={() => {
+              // Start source loading with the existing document still mounted, even on repeat switches.
+              if (kind === "html" && rendered) {
+                setContent(null);
+                setContentError(null);
+              }
+              setRendered((value) => !value);
+            }}
           >
             {rendered ? (
               <Code2 className="size-3.5" />
@@ -365,7 +386,20 @@ export function AttachmentFilePreview(props: {
           the file to read it in full.
         </FileSurfaceNotice>
       ) : null}
-      {body}
+      <div
+        className="file-surface-content relative flex min-h-0 flex-1 flex-col overflow-hidden"
+        aria-busy={!failure && (!url || (needsText && !content))}
+      >
+        {body}
+        {awaitingHtmlSource && url ? (
+          <p
+            role="status"
+            className="file-surface-loading-label pointer-events-none absolute bottom-3 right-3 rounded bg-background px-2 py-1 text-xs text-muted-foreground"
+          >
+            Loading source…
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }
