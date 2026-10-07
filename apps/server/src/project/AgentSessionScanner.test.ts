@@ -915,7 +915,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
         yield* fileSystem.makeDirectory(submoduleGitDir, { recursive: true });
         yield* fileSystem.writeFileString(
           path.join(submoduleGitDir, "config"),
-          '[remote "origin"]\n\turl = ssh://github.com/pingdotgg/vendor.git\n',
+          '[remote "origin"]\n\turl = ssh://git@github.com/pingdotgg/vendor.git\n',
         );
         yield* fileSystem.writeFileString(
           path.join(submodule, ".git"),
@@ -987,6 +987,8 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
         // only its realpath reveals the managed sandbox.
         const worktreeCwd = path.join(configBaseDir, "worktrees", "t3code", "wt-3");
         yield* fileSystem.makeDirectory(worktreeCwd, { recursive: true });
+        const configBaseLink = path.join(linkParent, "app-home");
+        yield* fileSystem.symlink(configBaseDir, configBaseLink);
         const symlinkCwd = path.join(linkParent, "innocent-project");
         yield* fileSystem.symlink(worktreeCwd, symlinkCwd);
         yield* writeTranscript({
@@ -995,7 +997,11 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           mtimeMs: Date.parse("2026-01-01T00:00:00.000Z"),
         });
 
-        const result = yield* runScan({ claudeHomePath, codexHomePath, configBaseDir });
+        const result = yield* runScan({
+          claudeHomePath,
+          codexHomePath,
+          configBaseDir: configBaseLink,
+        });
 
         expect(result.candidates).toEqual([]);
       }),

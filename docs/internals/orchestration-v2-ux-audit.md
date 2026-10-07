@@ -29,23 +29,23 @@ behaviors have been missed in the adapted client wiring.
 
 ## User-flow coverage
 
-| Flow | Paired observation and disposition |
-| --- | --- |
-| Create a project and start a chat | Added the same disposable local Git project in both apps. Project selection, current checkout, provider controls, send, streaming, and completion worked. Test Rig's existing project palette, rich composer, and local-checkout default are retained adaptations. |
-| Create a worktree and run project setup | Saved the same automatic setup action, created a worktree, and completed a real Codex response in each app. Upstream surfaced slow setup and failure; Test Rig did not. **F2.** |
-| Approve a tool action | Both displayed a real supervised Codex command approval. Upstream uses a compact approval card and a secondary menu; Test Rig uses four fixed buttons. The fixed choices also miss provider-advertised options. **F3.** |
-| Answer a question and receive a plan | Enabled legacy plan mode in isolated settings, requested a native Codex format question, selected a choice, and received plans in both apps. Ordinary label-based choices worked. Native distinct-value questions have a source-confirmed gap. **F4.** |
-| Refine a plan with an image | Attached the same icon in both apps. Test Rig kept Refine and silently dropped the image; upstream switched to ordinary submission and retained it. The Test Rig provider explicitly could not see the image; upstream identified the T3 icon. **F1.** |
-| Stop during startup | Running-turn Stop was visible. Preparing/starting cancellation was compared through source and existing tests; a deliberately delayed provider-start browser run was not added. **F5.** |
-| Delegate, inspect a child, then follow up | Real app-managed children completed in both apps. Opening children and returning to parents worked. During a new child turn, Test Rig kept it under Previous agents/Done; upstream displayed one running agent. **F6.** |
-| Switch providers and retain context | Codex → OpenCode succeeded in both apps and recalled the original marker. Test Rig also switched back to Codex and recalled it again. Upstream displayed Default; Test Rig persistently displayed Unknown for the OpenCode variant. **F8.** |
-| Fork historical context | Forked the first response after later parent activity. Both opened the selected earlier history without the later delegation turn. Test Rig retains explicit parent navigation and omits merge-back/rewind by decision. |
-| Inspect Changes | Both showed the same one-line dirty diff. Test Rig's Review panel retained staging, file navigation, and its preferred presentation; upstream uses its own Diff panel. Only upstream's entry button showed `+1 -0`. **F9.** |
-| Inspect workspace identity | Current checkout/worktree selection worked. Upstream names the actual workspace and supports full-path interactions; Test Rig shows a generic kind. **F10.** |
-| Configure recurring tasks | Compared empty lists, new-task dialogs, project/workspace choices, time fields, and settings. Test Rig's explicit permissions and server-timezone disclosure are useful additions. Its permissions initialization ignores project overrides. **F7.** This pass did not repeat real schedule dispatch; the preceding LOO-33 acceptance covered two no-project runs and a settled first thread. |
-| Configure usage-limit recovery | Both apps showed opt-in auto-resume and snooze switches off. No actual limited thread was available for another live recovery run. No new source discrepancy was established. |
-| Reload and navigate | Browser reload preserved the live handoff history in both apps. Child/parent, historical-fork, settings, and review navigation worked. This was not a backend-restart recovery test. |
-| Preserve Test Rig additions | Whole-thread Find matched the marker across history. The separate Review panel remained intact. Temporary side-chat opening, inherited context, and discard were checked separately; these do not require replacing the fork's layout with upstream's. |
+| Flow                                      | Paired observation and disposition                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create a project and start a chat         | Added the same disposable local Git project in both apps. Project selection, current checkout, provider controls, send, streaming, and completion worked. Test Rig's existing project palette, rich composer, and local-checkout default are retained adaptations.                                                                                                                            |
+| Create a worktree and run project setup   | Saved the same automatic setup action, created a worktree, and completed a real Codex response in each app. Upstream surfaced slow setup and failure; Test Rig did not. **F2.**                                                                                                                                                                                                               |
+| Approve a tool action                     | Both displayed a real supervised Codex command approval. Upstream uses a compact approval card and a secondary menu; Test Rig uses four fixed buttons. The fixed choices also miss provider-advertised options. **F3.**                                                                                                                                                                       |
+| Answer a question and receive a plan      | Enabled legacy plan mode in isolated settings, requested a native Codex format question, selected a choice, and received plans in both apps. Ordinary label-based choices worked. Native distinct-value questions have a source-confirmed gap. **F4.**                                                                                                                                        |
+| Refine a plan with an image               | Attached the same icon in both apps. Test Rig kept Refine and silently dropped the image; upstream switched to ordinary submission and retained it. The Test Rig provider explicitly could not see the image; upstream identified the T3 icon. **F1.**                                                                                                                                        |
+| Stop during startup                       | Running-turn Stop was visible. Preparing/starting cancellation was compared through source and existing tests; a deliberately delayed provider-start browser run was not added. **F5.**                                                                                                                                                                                                       |
+| Delegate, inspect a child, then follow up | Real app-managed children completed in both apps. Opening children and returning to parents worked. During a new child turn, Test Rig kept it under Previous agents/Done; upstream displayed one running agent. **F6.**                                                                                                                                                                       |
+| Switch providers and retain context       | Codex → OpenCode succeeded in both apps and recalled the original marker. Test Rig also switched back to Codex and recalled it again. Upstream displayed Default; Test Rig persistently displayed Unknown for the OpenCode variant. **F8.**                                                                                                                                                   |
+| Fork historical context                   | Forked the first response after later parent activity. Both opened the selected earlier history without the later delegation turn. Test Rig retains explicit parent navigation and omits merge-back/rewind by decision.                                                                                                                                                                       |
+| Inspect Changes                           | Both showed the same one-line dirty diff. Test Rig's Review panel retained staging, file navigation, and its preferred presentation; upstream uses its own Diff panel. Only upstream's entry button showed `+1 -0`. **F9.**                                                                                                                                                                   |
+| Inspect workspace identity                | Current checkout/worktree selection worked. Upstream names the actual workspace and supports full-path interactions; Test Rig shows a generic kind. **F10.**                                                                                                                                                                                                                                  |
+| Configure recurring tasks                 | Compared empty lists, new-task dialogs, project/workspace choices, time fields, and settings. Test Rig's explicit permissions and server-timezone disclosure are useful additions. Its permissions initialization ignores project overrides. **F7.** This pass did not repeat real schedule dispatch; the preceding LOO-33 acceptance covered two no-project runs and a settled first thread. |
+| Configure usage-limit recovery            | Both apps showed opt-in auto-resume and snooze switches off. No actual limited thread was available for another live recovery run. No new source discrepancy was established.                                                                                                                                                                                                                 |
+| Reload and navigate                       | Browser reload preserved the live handoff history in both apps. Child/parent, historical-fork, settings, and review navigation worked. This was not a backend-restart recovery test.                                                                                                                                                                                                          |
+| Preserve Test Rig additions               | Whole-thread Find matched the marker across history. The separate Review panel remained intact. Temporary side-chat opening, inherited context, and discard were checked separately; these do not require replacing the fork's layout with upstream's.                                                                                                                                        |
 
 ## Confirmed findings
 
@@ -275,7 +275,6 @@ The three agent notes, browser scripts, screenshots, accessibility snapshots, an
 disposable project are under `/workspace/v2-ux-audit`. No fix was committed,
 pushed, or recorded as completed in Linear by this audit.
 
-
 ## Follow-up implementation and verification
 
 The approved batch addresses F1–F10 while retaining Test Rig's rich composer,
@@ -332,7 +331,6 @@ under `/workspace/v2-ux-audit`. These are local verification artifacts, not ship
 product files. Claude, Electron shell, remote connections, actual usage-limit
 recovery, and every lifecycle permutation were not re-run in this batch.
 
-
 ### Post-push comparison
 
 Repeated source comparison with the same current nightly and paired browser
@@ -352,7 +350,6 @@ Multi-account identity badges remain a minor upstream presentation difference
 outside this batch. No multi-account live case was exercised. All earlier
 verification limits still apply. Post-push evidence is under
 `/workspace/v2-ux-fixes/post-push`.
-
 
 ### Account indicators follow-up
 

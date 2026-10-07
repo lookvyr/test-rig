@@ -109,8 +109,6 @@ describe("VcsProcess.run", () => {
         failureKind: "command-failed",
         stderrLength: secretStderr.length,
         stderrTruncated: false,
-        stdoutInvalidUtf8: false,
-        stderrInvalidUtf8: false,
       });
       expect(error.message).not.toContain(secretArgument);
       expect(error.message).not.toContain(secretStderr);
@@ -136,8 +134,6 @@ describe("VcsProcess.run", () => {
         failureKind: "authentication",
         stderrLength: secretStderr.length,
         stderrTruncated: false,
-        stdoutInvalidUtf8: false,
-        stderrInvalidUtf8: false,
       });
       expect(error.message).not.toContain(secretStderr);
       expect(error.message).not.toContain("super-secret-token");

@@ -61,6 +61,7 @@ import {
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
+import { composerStashTargetsOtherEditor } from "./composerStashShortcut";
 import {
   dataTransferHasComposerMention,
   makeComposerMentionDragHandlers,
@@ -2477,6 +2478,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       if (command !== "composer.stash") return;
       const target = event.target instanceof Element ? event.target : document.activeElement;
+      if (
+        composerStashTargetsOtherEditor(
+          target,
+          event.composedPath().filter((entry): entry is Element => entry instanceof Element),
+        )
+      )
+        return;
       const targetComposer = target?.closest("[data-chat-composer-form]");
       const pickerComposer = document.querySelector("[data-composer-model-picker-open]");
       if (pickerComposer && pickerComposer !== composerFormRef.current) return;

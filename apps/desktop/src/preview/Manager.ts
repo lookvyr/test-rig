@@ -2668,13 +2668,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       );
       const [accessibility, sourceImage, diagnostics, timelines] = yield* Effect.all([
         send("Accessibility.getFullAXTree"),
-        attemptPromise(
-          {
-            operation: "automationSnapshot.capturePage",
-            tabId,
-            webContentsId: wc.id,
-          },
-          () => wc.capturePage(),
+        // Capture through the tab's debugger: capturePage needs an attached
+        // native view and can fail or stall while an agent tab is floating.
+        send("Page.captureScreenshot", { format: "png" }).pipe(
+          Effect.map((response) =>
+            nativeImage.createFromBuffer(
+              Buffer.from((response as { readonly data: string }).data, "base64"),
+            ),
+          ),
         ),
         Ref.get(diagnosticsRef),
         Ref.get(actionTimelineRef),

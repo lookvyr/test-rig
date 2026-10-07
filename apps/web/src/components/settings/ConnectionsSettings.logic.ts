@@ -11,9 +11,7 @@ export function isQrShareableEndpoint(endpoint: AdvertisedEndpoint): boolean {
   return endpoint.reachability !== "loopback";
 }
 
-export function advertisedEndpointStatusLabel(
-  status: AdvertisedEndpoint["status"],
-): string | null {
+export function advertisedEndpointStatusLabel(status: AdvertisedEndpoint["status"]): string | null {
   return status === "available" ? null : "Not verified";
 }
 

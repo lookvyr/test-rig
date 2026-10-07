@@ -280,7 +280,7 @@ interface ServerTab {
   readonly networkEntries: Array<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: Array<PreviewAutomationActionEvent>;
   readonly control: SessionControl;
-  /** The tab's own storage context, closed with it. Popups share their opener's. */
+  /** Isolated storage closes after its last page, including adopted popups. */
   readonly isolatedContext: boolean;
   readonly profileId: string | undefined;
   /** Set when a page in another tab opened this one with `window.open` or a link. */
@@ -624,8 +624,15 @@ const make = Effect.gen(function* () {
     tab.closing = true;
     for (const viewer of tab.viewers) viewer.push({ _tag: "gone" });
     void tab.control.close().catch(constVoid);
-    void tab.page.close().catch(constVoid);
-    if (tab.isolatedContext) void tab.page.context().close().catch(constVoid);
+    const context = tab.page.context();
+    void tab.page
+      .close()
+      .catch(constVoid)
+      .then(() => {
+        if (tab.isolatedContext && !context.pages().some((page) => !page.isClosed())) {
+          return context.close().catch(constVoid);
+        }
+      });
     void tab.recording?.encoder.close().catch(constVoid);
     void NodeFSP.rm(downloadDir(tab), { recursive: true, force: true }).catch(constVoid);
     reportLiveTabs();
@@ -638,9 +645,7 @@ const make = Effect.gen(function* () {
     const adopted = adoptedPages.get(tabKey(snapshot.threadId, snapshot.tabId));
     adoptedPages.delete(tabKey(snapshot.threadId, snapshot.tabId));
     const isolatedContext =
-      adopted === undefined &&
-      (snapshot.automationOwner !== undefined ||
-        snapshot.profileId === INCOGNITO_BROWSER_PROFILE_ID);
+      snapshot.automationOwner !== undefined || snapshot.profileId === INCOGNITO_BROWSER_PROFILE_ID;
     const context =
       adopted?.page.context() ??
       (await contexts.contextFor(
@@ -752,7 +757,9 @@ const make = Effect.gen(function* () {
     if (closedPendingTabs.delete(key)) {
       await control.close().catch(constVoid);
       await page.close().catch(constVoid);
-      if (isolatedContext) await context.close().catch(constVoid);
+      if (isolatedContext && !context.pages().some((candidate) => !candidate.isClosed())) {
+        await context.close().catch(constVoid);
+      }
       throw new ServerBrowserTabNotFoundError({ threadId: tab.threadId, tabId: tab.tabId });
     }
     page.on("close", () => dropTab(tab, true));

@@ -60,30 +60,28 @@ it.effect(
       yield* Effect.gen(function* () {
         const server = yield* McpServer.McpServer;
         const invoke = (capabilities: Set<"orchestration">, html = "<p>Ready</p>") =>
-          server
-            .callTool({ name: "html_preview", arguments: { html, width: 390 } })
-            .pipe(
-              Effect.provideService(McpInvocationContext.McpInvocationContext, {
-                environmentId: EnvironmentId.make("test"),
-                threadId,
-                providerInstanceId,
-                providerSessionId: "session",
-                issuedAt: 0,
-                capabilities,
-              }),
-              Effect.provideService(McpSchema.McpServerClient, {
-                clientId: 1,
-                clientCapabilities: {},
-                clientInfo: { name: "test", version: "1" },
+          server.callTool({ name: "html_preview", arguments: { html, width: 390 } }).pipe(
+            Effect.provideService(McpInvocationContext.McpInvocationContext, {
+              environmentId: EnvironmentId.make("test"),
+              threadId,
+              providerInstanceId,
+              providerSessionId: "session",
+              issuedAt: 0,
+              capabilities,
+            }),
+            Effect.provideService(McpSchema.McpServerClient, {
+              clientId: 1,
+              clientCapabilities: {},
+              clientInfo: { name: "test", version: "1" },
+              protocolVersion: "2025-06-18",
+              initializePayload: {
                 protocolVersion: "2025-06-18",
-                initializePayload: {
-                  protocolVersion: "2025-06-18",
-                  capabilities: {},
-                  clientInfo: { name: "test", version: "1" },
-                },
-                getClient: Effect.die("unused"),
-              }),
-            );
+                capabilities: {},
+                clientInfo: { name: "test", version: "1" },
+              },
+              getClient: Effect.die("unused"),
+            }),
+          );
         const result = yield* invoke(new Set(["orchestration"]));
         expect(result.isError).toBe(false);
         expect(result.structuredContent).toEqual({

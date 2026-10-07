@@ -69,6 +69,10 @@ describe("ElectronProtocol", () => {
             response.headers.get("content-security-policy") ?? "",
             "font-src 'self' test-rig-dev: data:",
           );
+          assert.include(
+            response.headers.get("content-security-policy") ?? "",
+            "frame-src 'self' http: https:",
+          );
         }),
       );
 
@@ -208,5 +212,6 @@ describe("ElectronProtocol", () => {
       "https:",
     ]);
     assert.deepEqual(directives["font-src"], ["'self'", "test-rig:", "data:"]);
+    assert.deepEqual(directives["frame-src"], ["'self'", "http:", "https:"]);
   });
 });

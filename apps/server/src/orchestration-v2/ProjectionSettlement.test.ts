@@ -457,7 +457,16 @@ it.effect("shell failure lookups stay on the thread's own turn items", () =>
     // A failed run's root node is often null, and every runless item shares that
     // node_id, so a node_ordinal lookup walks the whole history once per thread.
     const itemLookups = plan.filter((row) => row.detail.startsWith("SEARCH item "));
-    assert.lengthOf(itemLookups, 2);
-    assert.isTrue(itemLookups.every((row) => row.detail.includes("turn_items_thread_run_idx")));
+    // The current todo adds one run-ordinal lookup; both failure lookups must
+    // still constrain the search by thread and run.
+    assert.lengthOf(itemLookups, 3);
+    assert.lengthOf(
+      itemLookups.filter((row) => row.detail.includes("turn_items_thread_run_idx")),
+      2,
+    );
+    assert.lengthOf(
+      itemLookups.filter((row) => row.detail.includes("turn_items_run_ordinal_idx")),
+      1,
+    );
   }).pipe(Effect.provide(SqlLayer)),
 );

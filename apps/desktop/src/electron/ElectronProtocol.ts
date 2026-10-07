@@ -80,7 +80,8 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
     "style-src 'self' 'unsafe-inline'",
     `font-src 'self' ${input.scheme}: data:`,
     "worker-src 'self' blob:",
-    "frame-src 'self'",
+    // Signed HTML and PDF documents are served by the selected environment.
+    "frame-src 'self' http: https:",
     "form-action 'self'",
   ].join("; ");
 }

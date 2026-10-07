@@ -189,7 +189,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         autoBootstrapProjectFromCwd: true,
         logWebSocketEvents: true,
       });
-      assert.equal(resolved.dbPath, join(baseDir, "userdata", "state.sqlite"));
+      assert.equal(resolved.dbPath, join(baseDir, "userdata", "statev2.sqlite"));
     }),
   );
 

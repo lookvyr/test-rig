@@ -79,7 +79,12 @@ const handlers = {
       });
       yield* invoke<void>(
         "typeSecret",
-        { text, locator: input.locator, clear: true, timeoutMs: input.timeoutMs },
+        {
+          text,
+          locator: input.locator,
+          clear: true,
+          ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        },
         input.timeoutMs,
         input.tabId,
       ).pipe(Effect.mapError(() => new SecretRequestError({ reason: "entry_failed" })));

@@ -528,11 +528,14 @@ export type PreviewAutomationTypeInput = typeof PreviewAutomationTypeInput.Type;
 
 /** Private tool arguments contain a reference, never the literal value. */
 export const PreviewAutomationTypeSecretInput = Schema.Struct({
-  secretRef: SecretRef,
-  tabId: PreviewTabId,
-  locator: Locator.annotate({
-    description: "Explicit Playwright locator for the destination field.",
-  }),
+  secretRef: Schema.String.annotate({
+    description:
+      "The one-use secretRef returned by request_secret after the user saves a private value.",
+  }).pipe(Schema.decodeTo(SecretRef)),
+  tabId: Schema.String.annotate({
+    description: "The explicit browser tabId containing the destination field.",
+  }).pipe(Schema.decodeTo(PreviewTabId)),
+  locator: DescribedLocator("Explicit Playwright locator for the destination field."),
   timeoutMs: OptionalTimeoutMs,
 });
 export type PreviewAutomationTypeSecretInput = typeof PreviewAutomationTypeSecretInput.Type;

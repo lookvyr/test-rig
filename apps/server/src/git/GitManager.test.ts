@@ -5954,6 +5954,16 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         localMainBefore,
       );
       expect(NodeFS.existsSync(NodePath.join(mainWorktreePath, "contributor.txt"))).toBe(false);
+      expect(
+        (yield* runGit(mainWorktreePath, [
+          "rev-parse",
+          "--abbrev-ref",
+          "@{upstream}",
+        ])).stdout.trim(),
+      ).toBe("origin/main");
+      expect((yield* runGit(repoDir, ["config", "branch.main.remote"])).stdout.trim()).toBe(
+        "origin",
+      );
       expect(setupCalls).toHaveLength(0);
     }),
   );
@@ -6098,7 +6108,14 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         "..",
         `pr-reused-fork-${NodePath.basename(repoDir)}`,
       );
-      yield* runGit(repoDir, ["worktree", "add", worktreePath, "feature/pr-reused-fork"]);
+      yield* runGit(repoDir, [
+        "worktree",
+        "add",
+        "-b",
+        "t3code/pr-83/feature/pr-reused-fork",
+        worktreePath,
+        "feature/pr-reused-fork",
+      ]);
       yield* runGit(worktreePath, ["branch", "--unset-upstream"], true);
 
       const { manager } = yield* makeManager({

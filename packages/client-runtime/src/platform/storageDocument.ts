@@ -67,9 +67,8 @@ export const ConnectionCatalogDocument = ConnectionCatalogDocumentSource.pipe(
             credentials: document.credentials,
           },
     ),
-    encode: SchemaGetter.transform(
-      (document): ConnectionCatalogDocumentSource =>
-        decodeCurrentConnectionCatalogDocument(document),
+    encode: SchemaGetter.transform((document): ConnectionCatalogDocumentSource =>
+      decodeCurrentConnectionCatalogDocument(document),
     ),
   }),
 );

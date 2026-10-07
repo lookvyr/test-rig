@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { V2SqlitePersistenceMemory as SqlitePersistenceMemory } from "../persistence/Layers/V2Sqlite.ts";
 import { listLinkedPullRequestThreads } from "./linkedThreads.ts";
 
 const encodePayload = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));

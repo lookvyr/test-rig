@@ -30,6 +30,21 @@ To update, close the app, update your source checkout and dependencies, then bui
 On macOS, `vp run dist:desktop:dmg` creates a DMG in `./release`. See the maintainer
 [scripts reference](../internals/scripts.md) for other platforms.
 
+### Upgrading to Orchestrator V2
+
+Before your first V2 launch, close Test Rig and copy its entire application home
+(`~/.test-rig` by default) to a backup location. Keep the same `TEST_RIG_HOME` if
+you use a custom home, then update dependencies and rebuild or install the new
+desktop app.
+
+The first V2 launch imports your existing conversations into a separate database
+and preserves the original. Existing chats keep their saved history; continuing
+one starts a fresh provider session with that history available. After the
+upgrade, the old and new databases are not synchronized: an older app cannot
+show work done in V2. Keep both databases. See the
+[recovery guide](../operations/orchestration-v2-recovery.md) before restoring a
+backup or returning to an older build.
+
 ## Providers
 
 Test Rig drives provider CLIs; it does not ship them. Install the CLI for each provider you want

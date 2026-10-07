@@ -29,6 +29,7 @@ describe("Codex question runtime", () => {
           threadId: wire.rootThreadId,
           turnId: wire.responses.turnStart.turn.id,
           itemId: "item-not-the-rpc-id",
+          isBlocking: mode !== "timeout",
           questions: [{ id: "name", header: "Name", question: "What name?", options: null }],
           ...(mode === "timeout" ? { autoResolutionMs: 0 } : {}),
         };

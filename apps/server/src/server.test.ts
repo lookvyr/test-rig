@@ -2697,6 +2697,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "b3",
         "content-type",
         "traceparent",
+        "x-t3-orchestration-protocol",
       ]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -3663,6 +3664,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             isInsideWorkTree: () => Effect.succeed(true),
           },
           gitManager: {
+            createWorktree: () =>
+              Effect.succeed({
+                worktree: { path: "/tmp/wt", refName: "feature/demo" },
+              }),
             invalidateLocalStatus: () => Effect.void,
             invalidateRemoteStatus: () => Effect.void,
             invalidateStatus: () => Effect.void,
@@ -3789,10 +3794,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 hasPrimaryRemote: true,
                 nextCursor: null,
                 totalCount: 1,
-              }),
-            createWorktree: () =>
-              Effect.succeed({
-                worktree: { path: "/tmp/wt", refName: "feature/demo" },
               }),
             removeWorktree: () => Effect.void,
             createRef: (input) => Effect.succeed({ refName: input.refName }),

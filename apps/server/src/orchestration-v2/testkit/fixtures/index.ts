@@ -42,8 +42,6 @@ import { assertMultiTurnClaudeOutput } from "./multi_turn/claude_output.ts";
 import { assertMultiTurnOutput } from "./multi_turn/codex_output.ts";
 import { multiTurnInput } from "./multi_turn/input.ts";
 import { openCode2InboxInput } from "./opencode2_inbox/input.ts";
-import { openCode2RevertInput } from "./opencode2_revert/input.ts";
-import { assertOpenCode2RevertOutput } from "./opencode2_revert/output.ts";
 import { assertOpenCode2InboxOutput } from "./opencode2_inbox/output.ts";
 import { openCode2CompactionInput } from "./opencode2_compaction/input.ts";
 import { assertOpenCode2CompactionOutput } from "./opencode2_compaction/output.ts";
@@ -91,13 +89,6 @@ import {
 import { assertSubagentV2NestedOutput } from "./subagent_v2_nested/codex_output.ts";
 import { assertSubagentV2NestedApprovalOutput } from "./subagent_v2_nested_approval/codex_output.ts";
 import { subagentV2NestedApprovalInput } from "./subagent_v2_nested_approval/input.ts";
-import { assertClaudeThreadRollbackOutput } from "./thread_rollback/claude_output.ts";
-import { assertThreadRollbackOutput } from "./thread_rollback/codex_output.ts";
-import { threadRollbackInput } from "./thread_rollback/input.ts";
-import { assertThreadRollbackAfterRestartOutput } from "./thread_rollback_after_restart/codex_output.ts";
-import { threadRollbackAfterRestartInput } from "./thread_rollback_after_restart/input.ts";
-import { assertThreadRollbackToStoppedTurnOutput } from "./thread_rollback_to_stopped_turn/codex_output.ts";
-import { threadRollbackToStoppedTurnInput } from "./thread_rollback_to_stopped_turn/input.ts";
 import { assertTodoListOutput } from "./todo_list/codex_output.ts";
 import { todoListInput } from "./todo_list/input.ts";
 import { assertToolCallDeniedWriteClaudeOutput } from "./tool_call_denied_write/claude_output.ts";
@@ -138,6 +129,9 @@ import {
   WORKSPACE_NEVER_POLICY,
 } from "./shared.ts";
 
+// Replay retained orchestration workflows only. Historical opencode2_revert
+// and thread_rollback captures remain available to adapter tests; FORK.md
+// excludes initiating conversation rewind through the orchestrator.
 export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixture> = [
   {
     name: "claude_background_subagent_after_root",
@@ -681,21 +675,6 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
     ],
   },
   {
-    name: "opencode2_revert",
-    buildInput: openCode2RevertInput,
-    providers: [
-      {
-        driver: ProviderDriverKind.make("opencode"),
-        transcriptFile: new URL("./opencode2_revert/opencode_transcript.ndjson", import.meta.url),
-        modelSelection: {
-          instanceId: OPENCODE2_MODEL_SELECTION.instanceId,
-          model: "opencode/big-pickle",
-        },
-        assertOutput: assertOpenCode2RevertOutput,
-      },
-    ],
-  },
-  {
     name: "opencode2_permission",
     buildInput: openCode2PermissionInput,
     providers: [
@@ -1012,55 +991,6 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
         assertOutput: assertTurnInterruptRestartClaudeOutput,
-      },
-    ],
-  },
-  {
-    name: "thread_rollback",
-    buildInput: threadRollbackInput,
-    providers: [
-      {
-        driver: ProviderDriverKind.make("codex"),
-        transcriptFile: new URL("./thread_rollback/codex_transcript.ndjson", import.meta.url),
-        modelSelection: CODEX_MODEL_SELECTION,
-        assertOutput: assertThreadRollbackOutput,
-      },
-      {
-        driver: ProviderDriverKind.make("claudeAgent"),
-        transcriptFile: new URL("./thread_rollback/claude_transcript.ndjson", import.meta.url),
-        modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeThreadRollbackOutput,
-      },
-    ],
-  },
-  {
-    name: "thread_rollback_after_restart",
-    buildInput: threadRollbackAfterRestartInput,
-    providers: [
-      {
-        driver: ProviderDriverKind.make("codex"),
-        transcriptFile: new URL(
-          "./thread_rollback_after_restart/codex_transcript.ndjson",
-          import.meta.url,
-        ),
-        modelSelection: CODEX_MODEL_SELECTION,
-        assertOutput: assertThreadRollbackAfterRestartOutput,
-      },
-    ],
-  },
-  {
-    name: "thread_rollback_to_stopped_turn",
-    buildInput: threadRollbackToStoppedTurnInput,
-    providers: [
-      {
-        driver: ProviderDriverKind.make("codex"),
-        transcriptFile: new URL(
-          "./thread_rollback_to_stopped_turn/codex_transcript.ndjson",
-          import.meta.url,
-        ),
-        modelSelection: CODEX_MODEL_SELECTION,
-        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
-        assertOutput: assertThreadRollbackToStoppedTurnOutput,
       },
     ],
   },

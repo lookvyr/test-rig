@@ -20,6 +20,14 @@ function assertUnique(values: ReadonlyArray<string>, label: string) {
 }
 
 describe("orchestrator replay fixture contract", () => {
+  it("replays retained workflows without excluded conversation rewind", () => {
+    for (const fixture of ORCHESTRATOR_REPLAY_FIXTURES) {
+      assert.isFalse(
+        fixture.buildInput().steps.some((step) => step.type === "rollback"),
+        `${fixture.name} must follow the fork's retained orchestration boundary`,
+      );
+    }
+  });
   it.effect(
     "defines one stable input and provider-specific replay/output contracts per scenario",
     () =>

@@ -114,6 +114,7 @@ describe("isPreviewAppShortcut", () => {
 
 const {
   browserWindowConstructor,
+  createFromBuffer,
   createFromPath,
   fromId,
   getFocusedWebContents,
@@ -124,6 +125,10 @@ const {
   writeImage,
 } = vi.hoisted(() => ({
   browserWindowConstructor: vi.fn(),
+  createFromBuffer: vi.fn(() => ({
+    toPNG: () => Buffer.from("debugger-image"),
+    getSize: () => ({ width: 100, height: 100 }),
+  })),
   createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
   fromId: vi.fn((_id?: number) => null),
   getFocusedWebContents: vi.fn(() => null),
@@ -140,6 +145,7 @@ vi.mock("electron", () => ({
     writeImage,
   },
   nativeImage: {
+    createFromBuffer,
     createFromPath,
   },
   shell: {
@@ -2298,6 +2304,48 @@ effectIt.effect(
     ),
 );
 
+effectIt.effect("agent snapshots capture through CDP without requiring a native view", () =>
+  withManager((manager) =>
+    Effect.gen(function* () {
+      const capturePage = vi.fn(async (): Promise<TestCapturedPreviewImage> => {
+        throw new Error("UnknownVizError");
+      });
+      const wc: Electron.WebContents = makeTestPreviewWebContents(capturePage);
+      wc.isDevToolsOpened = () => false;
+      const send = vi.spyOn(wc.debugger, "sendCommand").mockImplementation(async (method) => {
+        if (method === "Page.captureScreenshot")
+          return { data: Buffer.from("debugger-image").toString("base64") };
+        if (method === "Runtime.evaluate")
+          return {
+            result: {
+              value: {
+                url: "https://example.com",
+                title: "Example",
+                loading: false,
+                visibleText: "Test",
+                interactiveElements: [],
+              },
+            },
+          };
+        return {};
+      });
+      fromId.mockReturnValue(wc as never);
+      yield* manager.createTab("floating_snapshot");
+      yield* manager.registerWebview("floating_snapshot", 42);
+      const snapshot = yield* manager.automationSnapshot("floating_snapshot");
+      expect(capturePage).not.toHaveBeenCalled();
+      expect(send).toHaveBeenCalledWith("Page.captureScreenshot", { format: "png" });
+      expect(snapshot.screenshot).toEqual({
+        mimeType: "image/png",
+        data: Buffer.from("debugger-image").toString("base64"),
+        width: 100,
+        height: 100,
+      });
+      expect(snapshot.visibleText).toBe("Test");
+    }),
+  ),
+);
+
 effectIt.effect("private typing sanitizes native failures before traces and action history", () => {
   const spans: Array<Tracer.NativeSpan> = [];
   const tracer = Tracer.make({
@@ -2332,6 +2380,8 @@ effectIt.effect("private typing sanitizes native failures before traces and acti
               },
             },
           };
+        if (method === "Page.captureScreenshot")
+          return { data: Buffer.from("debugger-image").toString("base64") };
         return {};
       });
       fromId.mockReturnValue(wc as never);

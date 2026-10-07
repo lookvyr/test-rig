@@ -10,8 +10,6 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { deriveLatestContextWindowSnapshot } from "../../web/src/lib/contextWindow.ts";
-import { deriveWorkLogEntries } from "../../web/src/session-logic.ts";
 import {
   projectActivityEvent,
   projectActivityPayload,
@@ -179,21 +177,19 @@ describe("projectActivityPayload", () => {
     });
   });
 
-  it("keeps current web-derived output identical for every tool item type", () => {
+  it("preserves legacy activity identity and presentation metadata for every tool type", () => {
     for (const activity of fixtures) {
       const projected = projectActivityPayload(activity);
-      if (activity === fixtures[4]) {
-        // MCP is the one deliberate difference: the expanded row's toolData
-        // loses result bulk but keeps the rendered identity fields.
-        const [entry] = deriveWorkLogEntries([projected]);
-        expect(entry?.toolData).toEqual({
-          server: "repository",
-          tool: "search",
-          arguments: { query: "activity projection" },
-        });
-        continue;
-      }
-      expect(deriveWorkLogEntries([projected])).toEqual(deriveWorkLogEntries([activity]));
+      expect(projected).toMatchObject({
+        id: activity.id,
+        kind: activity.kind,
+        tone: activity.tone,
+        summary: activity.summary,
+        turnId: activity.turnId,
+        createdAt: activity.createdAt,
+      });
+      const { data: _data, ...metadata } = activity.payload as Record<string, unknown>;
+      expect(projected.payload).toMatchObject(metadata);
     }
   });
 
@@ -389,7 +385,7 @@ describe("superseded tool.updated snapshot dedup", () => {
     ).toEqual(update.id);
   });
 
-  it("leaves the collapsed work log identical to the full history", () => {
+  it("retains the completed lifecycle row and its presentation after dropping superseded updates", () => {
     const activities = [
       makeToolLifecycleActivity("upd-1", "tool.updated", { detail: "writing" }),
       makeToolLifecycleActivity("upd-2", "tool.updated", { detail: "writing" }),
@@ -400,10 +396,7 @@ describe("superseded tool.updated snapshot dedup", () => {
       thread: makeThread(activities),
     });
 
-    const before = deriveWorkLogEntries(activities);
-    const after = deriveWorkLogEntries(projected.thread.activities);
-    expect(after).toHaveLength(before.length);
-    expect(after.map((entry) => entry.label)).toEqual(before.map((entry) => entry.label));
+    expect(projected.thread.activities).toEqual([projectActivityPayload(activities[2]!)]);
   });
 });
 
@@ -445,7 +438,7 @@ describe("context-window snapshot dedup", () => {
     expect(projected.thread.activities[2]?.payload).toEqual(latestB.payload);
   });
 
-  it("still resolves a meter value after the client reverts the newest turn", () => {
+  it("retains the older turn usage when the newest turn is filtered out", () => {
     // A live thread.reverted makes the client drop all activities from
     // discarded turns; each surviving turn must keep a usable row.
     const olderTurn = makeContextWindowActivity("ctx-old", 1_500, "turn-kept");
@@ -459,12 +452,11 @@ describe("context-window snapshot dedup", () => {
       (activity) => activity.turnId === TurnId.make("turn-kept"),
     );
 
-    expect(deriveLatestContextWindowSnapshot(afterRevert)).toEqual(
-      deriveLatestContextWindowSnapshot([olderTurn]),
-    );
+    expect(afterRevert).toEqual([olderTurn]);
+    expect(afterRevert[0]?.payload).toEqual({ usedTokens: 1_500, maxTokens: 200_000 });
   });
 
-  it("matches what the web client derives from the full history", () => {
+  it("preserves the newest legacy usage row and its complete payload", () => {
     const activities = [
       makeContextWindowActivity("ctx-1", 1_000),
       makeContextWindowActivity("ctx-2", 2_000),
@@ -474,9 +466,11 @@ describe("context-window snapshot dedup", () => {
       thread: makeThread(activities),
     });
 
-    expect(deriveLatestContextWindowSnapshot(projected.thread.activities)).toEqual(
-      deriveLatestContextWindowSnapshot(activities),
-    );
+    expect(projected.thread.activities.at(-1)).toEqual(activities[1]);
+    expect(projected.thread.activities.at(-1)?.payload).toEqual({
+      usedTokens: 2_000,
+      maxTokens: 200_000,
+    });
   });
 
   it("does not let a malformed row shadow an earlier valid row in the same turn", () => {
@@ -497,9 +491,11 @@ describe("context-window snapshot dedup", () => {
       valid.id,
       malformed.id,
     ]);
-    expect(deriveLatestContextWindowSnapshot(projected.thread.activities)).toEqual(
-      deriveLatestContextWindowSnapshot([valid, malformed]),
-    );
+    expect(projected.thread.activities).toEqual([valid, malformed]);
+    expect(projected.thread.activities[0]?.payload).toEqual({
+      usedTokens: 5_000,
+      maxTokens: 200_000,
+    });
   });
 
   it("applies only payload slimming when there are no context-window activities", () => {

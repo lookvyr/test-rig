@@ -42,7 +42,9 @@ rl.on("line", (line) => {
     return;
   }
   if (method === "thread/start" || method === "thread/resume" || method === "thread/fork") {
-    write({ id, result: fixture.responses.threadStart });
+    // The captured CLI predates the current protocol's nullable project binding.
+    const result = fixture.responses.threadStart;
+    write({ id, result: { ...result, thread: { projectId: null, ...result.thread } } });
     return;
   }
   if (method === "turn/start") {

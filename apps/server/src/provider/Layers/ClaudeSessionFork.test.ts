@@ -425,10 +425,11 @@ it.layer(NodeServices.layer)("Claude native session forks", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("does not advance a saved tail to an unresolved queued request", () =>
+  it.effect("preserves queued requests exposed by the SDK's saved tail", () =>
     Effect.gen(function* () {
       const {
         fs,
+        path,
         cwd,
         homes: [home],
       } = yield* makeFixture();
@@ -443,17 +444,22 @@ it.layer(NodeServices.layer)("Claude native session forks", (it) => {
           attachment: { type: "queued_command", source_uuid: LATER_ID, prompt: "Queued request" },
         }) +
         "\n";
-      for (const content of [home!.source, source, source + '{"type":']) {
+      const missing = yield* home!
+        .fork({ sessionId: SOURCE_ID, cwd, afterMessageId: LATER_ID })
+        .pipe(Effect.result);
+      assert.equal(missing._tag, "Failure");
+      assert.deepEqual(yield* fs.readDirectory(home!.directory), before);
+      for (const content of [source, source + '{"type":']) {
         yield* fs.writeFileString(home!.sourcePath, content);
-        const result = yield* home!
-          .fork({
-            sessionId: SOURCE_ID,
-            cwd,
-            afterMessageId: LATER_ID,
-          })
-          .pipe(Effect.result);
-        assert.equal(result._tag, "Failure");
-        assert.deepEqual(yield* fs.readDirectory(home!.directory), before);
+        const child = yield* home!.fork({
+          sessionId: SOURCE_ID,
+          cwd,
+          afterMessageId: LATER_ID,
+        });
+        const childRaw = yield* fs.readFileString(path.join(home!.directory, `${child}.jsonl`));
+        assert.include(childRaw, "Queued request");
+        assert.include(childRaw, LATER_ID);
+        assert.equal(yield* fs.readFileString(home!.sourcePath), content);
       }
     }).pipe(Effect.scoped),
   );

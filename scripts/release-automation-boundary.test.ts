@@ -21,8 +21,6 @@ const removedPaths = [
   "scripts/notify-discord-release.ts",
   "scripts/notify-discord-release.test.ts",
   "scripts/lib/update-manifest.ts",
-  "apps/server/src/cli/invocation.ts",
-  "apps/server/src/cli/invocation.test.ts",
   "apps/server/src/cli/service.ts",
   "apps/server/src/cli/service.test.ts",
   "apps/server/src/cli/servicePreflight.ts",

@@ -262,7 +262,10 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
   ] as const) {
     it.effect(`applies ${mode} branch naming through the provider`, () =>
       withFakeClaudeEnv(
-        { output: JSON.stringify({ structured_output: { branch: raw } }), stdinMustContain: promptRule },
+        {
+          output: JSON.stringify({ structured_output: { branch: raw } }),
+          stdinMustContain: promptRule,
+        },
         (textGeneration) =>
           Effect.gen(function* () {
             const generated = yield* textGeneration.generateBranchName({

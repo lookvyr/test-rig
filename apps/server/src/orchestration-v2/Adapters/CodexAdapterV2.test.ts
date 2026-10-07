@@ -2790,7 +2790,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           ],
         });
         const harness = yield* makeCodexReplayHarness(transcript, (event) =>
-          event.type === "turn_item.updated" && event.turnItem.type === "approval_request"
+          event.type === "runtime_request.updated"
             ? Deferred.succeed(ready, undefined)
             : Effect.void,
         );
@@ -2807,6 +2807,15 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         const request = harness.events.find((event) => event.type === "runtime_request.updated");
         assert.equal(request?.type, "runtime_request.updated");
         if (request?.type !== "runtime_request.updated") return;
+        assert.isTrue(
+          harness.events.some(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.type === "approval_request" &&
+              event.turnItem.requestId === request.runtimeRequest.id,
+          ),
+          "the approval card must exist before the request can be answered",
+        );
         yield* harness.runtime.respondToRuntimeRequest({
           requestId: request.runtimeRequest.id,
           decision,
@@ -2882,7 +2891,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         ],
       });
       const harness = yield* makeCodexReplayHarness(transcript, (event) =>
-        event.type === "turn_item.updated" && event.turnItem.type === "user_input_request"
+        event.type === "runtime_request.updated"
           ? Deferred.succeed(questionReady, undefined)
           : Effect.void,
       );
@@ -2899,6 +2908,15 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       const request = harness.events.find((event) => event.type === "runtime_request.updated");
       assert.isDefined(request);
       if (request?.type !== "runtime_request.updated") return;
+      assert.isTrue(
+        harness.events.some(
+          (event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.type === "user_input_request" &&
+            event.turnItem.requestId === request.runtimeRequest.id,
+        ),
+        "the question card must exist before the request can be answered",
+      );
       yield* harness.runtime.respondToRuntimeRequest({
         requestId: request.runtimeRequest.id,
         answers: { name: "Test project" },

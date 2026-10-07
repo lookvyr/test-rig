@@ -10,6 +10,7 @@ import * as CodexRpc from "effect-codex-app-server/rpc";
 
 import {
   buildCodexDeveloperInstructions,
+  buildCodexAdditionalContext,
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
@@ -446,12 +447,18 @@ describe("buildCodexDeveloperInstructions", () => {
   });
 });
 
-describe("T3 browser developer instructions", () => {
-  it("prefers the product-native preview tools in both collaboration modes", () => {
-    for (const instructions of [
-      CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
-      CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
-    ]) {
+describe("T3 browser additional context", () => {
+  it("prefers the product-native preview tools in stable application context", () => {
+    for (const browser of [true, false]) {
+      const context = buildCodexAdditionalContext(
+        { model: DEFAULT_MODEL, reasoningEffort: "high" },
+        browser,
+      );
+      if (!browser) {
+        NodeAssert.equal(context.test_rig_tools, undefined);
+        continue;
+      }
+      const instructions = context.test_rig_tools!.value;
       NodeAssert.match(instructions, /test_rig/);
       NodeAssert.match(instructions, /preview_status/);
       NodeAssert.match(instructions, /preview_open/);
@@ -547,7 +554,7 @@ describe("isRecoverableThreadResumeError", () => {
 
 describe("openCodexThread", () => {
   for (const operation of ["start", "resume", "fork"] as const) {
-    it.effect(`preserves history mode for ${operation}`, () =>
+    it.effect(`leaves history mode to the native protocol for ${operation}`, () =>
       Effect.gen(function* () {
         const client = {
           request: <M extends ThreadOpenMethod>(
@@ -560,10 +567,7 @@ describe("openCodexThread", () => {
                 "lastTurnId" in payload ? payload.lastTurnId : undefined,
                 "completed-turn",
               );
-            NodeAssert.equal(
-              "historyMode" in payload ? payload.historyMode : undefined,
-              operation === "start" ? "paginated" : undefined,
-            );
+            NodeAssert.equal("historyMode" in payload ? payload.historyMode : undefined, undefined);
             return Effect.succeed(
               makeThreadOpenResponse("thread-1") as CodexRpc.ClientRequestResponsesByMethod[M],
             );
@@ -656,7 +660,8 @@ describe("openCodexThread", () => {
 
       NodeAssert.equal(opened.thread.id, "fresh-thread");
       NodeAssert.ok(calls[1]);
-      NodeAssert.equal((calls[1].payload as { historyMode: string }).historyMode, "paginated");
+      NodeAssert.ok(typeof calls[1].payload === "object" && calls[1].payload !== null);
+      NodeAssert.equal("historyMode" in calls[1].payload, false);
       NodeAssert.deepStrictEqual(
         calls.map((call) => call.method),
         ["thread/resume", "thread/start"],

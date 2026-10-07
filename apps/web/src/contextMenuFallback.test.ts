@@ -32,6 +32,22 @@ class FakeElement {
 
   constructor(readonly tagName: string) {}
 
+  setAttribute(name: string, value: string) {
+    this.dataset[name] = value;
+  }
+
+  focus() {
+    (document as unknown as FakeDocument).activeElement = this;
+  }
+
+  contains(node: unknown): boolean {
+    return node === this || this.children.some((child) => child.contains(node));
+  }
+
+  get isConnected(): boolean {
+    return this.tagName === "body" || this.parent?.isConnected === true;
+  }
+
   appendChild(child: FakeElement) {
     child.parent = this;
     this.children.push(child);
@@ -116,6 +132,7 @@ class FakeBody extends FakeElement {
 
 class FakeDocument {
   body = new FakeBody();
+  activeElement: FakeElement | null = null;
   private readonly listeners = new Map<string, FakeListener[]>();
 
   createElement(tagName: string) {
@@ -151,6 +168,8 @@ function findButton(label: string): FakeElement | undefined {
 }
 
 beforeEach(() => {
+  vi.stubGlobal("HTMLElement", FakeElement);
+  vi.stubGlobal("Node", FakeElement);
   vi.stubGlobal("document", new FakeDocument());
   vi.stubGlobal("window", {
     innerWidth: 1280,

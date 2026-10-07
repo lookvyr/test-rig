@@ -120,6 +120,7 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
   };
   const context = {
     page,
+    pages: () => (closed ? [] : [page]),
     sessions,
     newPage: async () => page as unknown as Page,
     grantPermissions: vi.fn(async () => {}),
@@ -514,6 +515,58 @@ it.live("a popup becomes the agent's own tab and keeps its opener page", () =>
       while ((yield* manager.list({ threadId: scope.threadId })).sessions.length > 1) {
         yield* Effect.sleep("5 millis");
       }
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("closing an isolated opener preserves its popup until the last page closes", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const context = contexts[0]!;
+      const popup = makeContext().page;
+      popup.context = () => context;
+      context.pages = () => [context.page, popup].filter((page) => !page.isClosed());
+      context.page.emit("popup", popup);
+      const manager = yield* Manager.PreviewManager;
+      let popupTabId: string | undefined;
+      while (popupTabId === undefined) {
+        const status = yield* broker.invoke<PreviewAutomationStatus>({
+          scope,
+          tabId,
+          operation: "status",
+          input: {},
+        });
+        popupTabId = status.tabs?.find((tab) => tab.tabId !== tabId)?.tabId;
+        if (popupTabId === undefined) yield* Effect.yieldNow;
+      }
+      const openerClosed = Promise.withResolvers<void>();
+      const closeOpener = context.page.close.getMockImplementation()!;
+      const openerClosing = openerClosed.promise.then(closeOpener);
+      context.page.close.mockImplementation(() => openerClosing);
+      yield* broker.invoke({ scope, tabId, operation: "close", input: {} });
+      expect(context.close).not.toHaveBeenCalled();
+      expect(popup.isClosed()).toBe(false);
+      expect(
+        (yield* manager.list({ threadId: scope.threadId })).sessions.map((tab) => tab.tabId),
+      ).toEqual([popupTabId]);
+      const popupClosed = Promise.withResolvers<void>();
+      const contextDisposed = Promise.withResolvers<void>();
+      const closeContext = context.close.getMockImplementation()!;
+      context.close.mockImplementation(async () => {
+        await closeContext();
+        contextDisposed.resolve();
+      });
+      const closePopup = popup.close.getMockImplementation()!;
+      const closing = popupClosed.promise.then(closePopup);
+      popup.close.mockImplementation(() => closing);
+      yield* broker.invoke({ scope, tabId: popupTabId, operation: "close", input: {} });
+      expect(context.close).not.toHaveBeenCalled();
+      openerClosed.resolve();
+      popupClosed.resolve();
+      yield* Effect.promise(() => contextDisposed.promise);
+      expect(context.close).toHaveBeenCalled();
+      expect(popup.isClosed()).toBe(true);
     }),
   ).pipe(Effect.provide(layer)),
 );
