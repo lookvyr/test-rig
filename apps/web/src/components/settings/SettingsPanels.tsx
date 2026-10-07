@@ -1,3 +1,4 @@
+import { BrowserProfilesSettings } from "./BrowserProfilesSettings";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import { ArchiveIcon, ArchiveX, LoaderIcon, SettingsIcon } from "lucide-react";
 import { Link } from "@tanstack/react-router";
@@ -1878,6 +1879,7 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
+      <BrowserProfilesSettings />
     </SettingsPageContainer>
   );
 }

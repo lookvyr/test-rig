@@ -6,6 +6,8 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -769,6 +771,135 @@ const GitManagerTestLayer = GitVcsDriver.layer.pipe(
 );
 
 it.layer(GitManagerTestLayer)("GitManager", (it) => {
+  it.effect.each(["failure", "cancel"] as const)(
+    "keeps partial staging intact when message generation ends by %s",
+    (mode) =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir("test-rig-commit-prepare-");
+        yield* initRepo(cwd);
+        NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "hello\nstaged\n");
+        NodeFS.writeFileSync(NodePath.join(cwd, "other.txt"), "staged unrelated\n");
+        yield* runGit(cwd, ["add", "README.md", "other.txt"]);
+        NodeFS.writeFileSync(NodePath.join(cwd, "README.md"), "hello\nstaged\nunstaged\n");
+        const before = NodeFS.readFileSync(NodePath.join(cwd, ".git", "index"));
+        const entered = yield* Deferred.make<void>();
+        const { manager } = yield* makeManager({
+          textGeneration: {
+            generateCommitMessage: () =>
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(
+                  mode === "cancel"
+                    ? Effect.never
+                    : Effect.fail(
+                        new TextGenerationError({
+                          operation: "generateCommitMessage",
+                          detail: "generation failed",
+                        }),
+                      ),
+                ),
+              ),
+          },
+        });
+        const action = runStackedAction(manager, {
+          cwd,
+          action: "commit",
+          filePaths: ["README.md"],
+        });
+        if (mode === "cancel") {
+          const fiber = yield* Effect.forkChild(action);
+          yield* Deferred.await(entered);
+          yield* Fiber.interrupt(fiber);
+        } else {
+          const result = yield* Effect.exit(action);
+          expect(result._tag).toBe("Failure");
+        }
+        expect(NodeFS.readFileSync(NodePath.join(cwd, ".git", "index"))).toEqual(before);
+      }),
+  );
+
+  it.effect.each(["environment", "project"] as const)(
+    "uses configured %s submodule settings for generic worktrees and honors explicit overrides",
+    (scope) =>
+      Effect.gen(function* () {
+        const sandbox = yield* makeTempDir("test-rig-worktree-settings-");
+        const cwd = NodePath.join(sandbox, "repo");
+        NodeFS.mkdirSync(cwd);
+        yield* initRepo(cwd);
+        NodeFS.writeFileSync(NodePath.join(cwd, ".gitmodules"), "");
+        yield* runGit(cwd, ["add", ".gitmodules"]);
+        yield* runGit(cwd, ["commit", "-m", "Record submodule configuration"]);
+        const projectId = ProjectId.make("project:submodule-settings");
+        const { manager } = yield* makeManager({
+          serverSettings:
+            scope === "environment"
+              ? { worktreeSubmodules: "none" }
+              : {
+                  worktreeSubmodules: "recursive",
+                  projectSettingsOverrides: { [projectId]: { worktreeSubmodules: "none" } },
+                },
+          ...(scope === "project"
+            ? {
+                seed: Effect.gen(function* () {
+                  yield* (yield* ProjectStore.ProjectStoreV2).apply({
+                    sequence: 1,
+                    eventId: EventId.make("project:submodules"),
+                    aggregateKind: "project",
+                    aggregateId: projectId,
+                    occurredAt: "2026-10-06T00:00:00.000Z",
+                    commandId: null,
+                    causationEventId: null,
+                    correlationId: null,
+                    metadata: {},
+                    type: "project.created",
+                    payload: {
+                      projectId,
+                      title: "Submodules",
+                      workspaceRoot: cwd,
+                      defaultModelSelection: null,
+                      scripts: [],
+                      createdAt: "2026-10-06T00:00:00.000Z",
+                      updatedAt: "2026-10-06T00:00:00.000Z",
+                    },
+                  });
+                }),
+              }
+            : {}),
+        });
+        let disabled = 0;
+        let started = 0;
+        const progress = {
+          onSubmodulesDisabled: () =>
+            Effect.sync(() => {
+              disabled++;
+            }),
+          onSubmodulesStarted: () =>
+            Effect.sync(() => {
+              started++;
+            }),
+        };
+        yield* manager.createWorktree(
+          {
+            cwd,
+            refName: "main",
+            newRefName: "setting-none",
+            path: NodePath.join(sandbox, "none"),
+          },
+          { progress },
+        );
+        expect(disabled).toBe(1);
+        expect(started).toBe(0);
+        yield* manager.createWorktree(
+          {
+            cwd,
+            refName: "main",
+            newRefName: "explicit-top-level",
+            path: NodePath.join(sandbox, "explicit"),
+          },
+          { submodules: "top-level", progress },
+        );
+        expect(started).toBe(1);
+      }),
+  );
   it.effect("status includes draft PR metadata when branch already has a draft PR", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");

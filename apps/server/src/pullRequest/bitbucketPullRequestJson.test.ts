@@ -375,3 +375,21 @@ describe("repository permission decoding", () => {
     expect(expectSuccess(decodeRepositoryPermissionJson(page([])))).toBe(true);
   });
 });
+
+it("keeps comment edit timestamps for PR watchers", () => {
+  const comments = expectSuccess(
+    decodeCommentsJson(
+      JSON.stringify({
+        values: [
+          {
+            id: 7,
+            content: { raw: "Updated findings" },
+            created_on: "2026-07-01T00:00:00Z",
+            updated_on: "2026-07-02T00:00:00Z",
+          },
+        ],
+      }),
+    ),
+  );
+  expect(comments.comments[0]?.editedAt).toBe("2026-07-02T00:00:00.000Z");
+});

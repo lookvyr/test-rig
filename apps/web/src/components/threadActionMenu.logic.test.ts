@@ -6,10 +6,18 @@ const baseState: ThreadActionMenuState = {
   branch: null,
   isPinned: false,
   isSettled: false,
+  autoSettleEnabled: true,
   isSnoozed: false,
   canSnoozeNow: true,
   isRegeneratingTitle: false,
-  supports: { settlement: true, snooze: true, pinning: true, titleRegeneration: true },
+  isRunning: false,
+  supports: {
+    settlement: true,
+    autoSettleOptOut: true,
+    snooze: true,
+    pinning: true,
+    titleRegeneration: true,
+  },
   snoozePresets: [
     { id: "hour", label: "In 1 hour", whenLabel: "3:00 PM", snoozedUntil: "2026-08-07T15:00:00Z" },
   ],
@@ -24,9 +32,15 @@ describe("buildThreadActionMenuItems", () => {
     expect(
       ids({
         ...baseState,
-        supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
+        supports: {
+          settlement: false,
+          autoSettleOptOut: false,
+          snooze: false,
+          pinning: false,
+          titleRegeneration: false,
+        },
       }),
-    ).toEqual(["rename", "mark-unread", "link-pr", "copy-path", "delete"]);
+    ).toEqual(["rename", "mark-unread", "link-pr", "copy-path", "archive", "delete"]);
   });
 
   it("includes branch items only for threads with a branch", () => {
@@ -49,7 +63,7 @@ describe("buildThreadActionMenuItems", () => {
       (item) => item.id === "snooze",
     );
     expect(snooze?.disabled).toBe(true);
-    expect(snooze?.children?.map((child) => child.id)).toEqual(["snooze:hour"]);
+    expect(snooze?.children?.map((child) => child.id)).toEqual(["snooze:hour", "snooze:custom"]);
   });
 
   it("disables title regeneration while one is in flight", () => {
@@ -62,5 +76,18 @@ describe("buildThreadActionMenuItems", () => {
   it("marks delete as destructive and keeps it last", () => {
     const items = buildThreadActionMenuItems({ ...baseState, branch: "main" });
     expect(items.at(-1)).toMatchObject({ id: "delete", destructive: true });
+  });
+
+  it("shows the saved auto-settle preference and disables archive during active work", () => {
+    const items = buildThreadActionMenuItems({
+      ...baseState,
+      autoSettleEnabled: false,
+      isRunning: true,
+    });
+    expect(items.find((item) => item.id === "auto-settle")?.children).toEqual([
+      { id: "auto-settle:enabled", label: "Enabled", checked: false },
+      { id: "auto-settle:disabled", label: "Disabled", checked: true },
+    ]);
+    expect(items.find((item) => item.id === "archive")).toMatchObject({ disabled: true });
   });
 });

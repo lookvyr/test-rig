@@ -1,0 +1,5 @@
+import { evaluatePullRequestWatch } from '/Users/smills/REPOS/test-rig/apps/server/src/orchestration-v2/pullRequestWatch.ts';
+const watch = {startedAt:'2026-10-06T12:00:00Z',headSha:'abc',failedChecks:[],passed:true,remarksThrough:'2026-10-06T12:00:00Z',remarkIds:['bot-1'],conflicting:false,wakes:0};
+const detail = {headSha:'abc',checks:[],mergeability:'mergeable',viewer:'human',author:{login:'human',name:null,avatarUrl:null}};
+const editedComment = {id:'bot-1',kind:'review-comment',author:{login:'review-bot',name:null,avatarUrl:null},body:'New finding after editing the existing comment',createdAt:'2026-10-06T11:59:00Z',editedAt:'2026-10-06T12:05:00Z',url:'https://example.invalid/comment',path:null,reviewState:null};
+console.log(JSON.stringify(evaluatePullRequestWatch(watch,detail,[editedComment])));

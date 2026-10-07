@@ -1,3 +1,12 @@
+import {
+  latestExecutedRun,
+  latestRootProviderFailure,
+} from "@t3tools/shared/orchestrationV2ThreadError";
+import {
+  isProviderNativeSubagentThread,
+  type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ProviderFailureClass,
+} from "@t3tools/contracts";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import * as DateTime from "effect/DateTime";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
@@ -34,21 +43,38 @@ export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
+/** Matches the server's manual-continuation eligibility; native children stay provider-owned. */
+export function resumableThreadRunId(
+  projection: OrchestrationV2ThreadProjection | null | undefined,
+  errorClass: OrchestrationV2ProviderFailureClass | null | undefined,
+) {
+  if (
+    !projection ||
+    isProviderNativeSubagentThread(projection.thread) ||
+    projection.thread.archivedAt !== null ||
+    projection.thread.deletedAt !== null ||
+    projection.runtimeRequests.some((request) => request.status === "pending")
+  )
+    return null;
+  const run = latestExecutedRun(projection.runs);
+  if (run?.status === "interrupted") return run.id;
+  return run?.status === "failed" &&
+    errorClass === "usage_limit" &&
+    latestRootProviderFailure(run, projection.turnItems)?.class === "usage_limit"
+    ? run.id
+    : null;
+}
+
 export function resolveComposerRuntimeMode(input: {
   isLocalDraftThread: boolean;
   provider: ProviderDriverKind;
   composerRuntimeMode: RuntimeMode | null;
   threadRuntimeMode: RuntimeMode | undefined;
+  projectRuntimeMode?: RuntimeMode;
 }): RuntimeMode {
   if (input.composerRuntimeMode !== null) return input.composerRuntimeMode;
-  // Resolve after provider selection so project defaults, custom instances,
-  // and provider changes in an unsent draft all use the same starting mode.
-  if (
-    input.isLocalDraftThread &&
-    (input.provider === "codex" || input.provider === "claudeAgent")
-  ) {
-    return "auto";
-  }
+  if (input.isLocalDraftThread && input.projectRuntimeMode !== undefined)
+    return input.projectRuntimeMode;
   return input.threadRuntimeMode ?? DEFAULT_RUNTIME_MODE;
 }
 

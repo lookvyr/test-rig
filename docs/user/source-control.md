@@ -43,6 +43,8 @@ Settings belong to the server environment that owns the repository. If you use m
 
 ## Generated writing defaults
 
+Generating a commit message keeps your existing staged and unstaged selections intact. The general Git commit workflow stages its selected changes when the commit runs. A failed or cancelled message-generation step leaves staging unchanged, including partially staged files.
+
 Open **Settings** → **Source Control** to choose a writing style for generated commit messages and change requests. You can also add separate instructions for commit messages, change request titles, and change request descriptions. These are global defaults for every project in the current environment.
 
 Repository conventions includes recent commit subjects and local `AGENTS.md` instructions. When Claude is the selected writer, it also includes local `CLAUDE.md` instructions. Test Rig adds these files to its writing prompt only when Repository conventions is selected.
@@ -90,7 +92,11 @@ In **Uncommitted**, the bulk button shows **Stage all** when nothing is staged, 
 
 The review header's **Commit** action commits only staged changes. Its confirmation lists the staged files, and later unstaged edits in those files remain untouched. This differs from the general chat Git menu, which still offers its existing file-selection workflow. After committing, **Push** sends existing commits to the configured remote.
 
-The Files panel and current workspace diff refresh after the active thread finishes a turn. Refreshes keep the file tree's expanded folders and the diff's scroll position and collapsed files. The Files refresh button also reloads the open text file. Pending edits in the file editor remain protected while a refresh runs.
+The Files panel and current workspace diff refresh after the agent finishes a file edit or shell command, and when a turn's snapshot is captured. Refreshes keep the file tree's expanded folders and the review's selected scope, scroll position, and collapsed files. The Files refresh button also reloads the open file. Refreshes wait for pending edits in the file editor to finish saving. Use the refresh button for files changed outside the agent's turn, including commands run directly in a terminal.
+
+Files loads folders as you open them, including ignored and empty folders. Search finds indexed paths without loading the whole tree; if results are limited, refine the search. A failed folder or file refresh keeps its previous contents visible and offers retry.
+
+CSV and TSV files open as a table. Use **Show source** to edit their text and **Show table** to return to the table; a link to a specific line opens source. Tables show up to 100 rows and 30 columns, with a notice when more content is available in source. Audio and video files play in the Files panel, and images refresh when the agent changes them.
 
 Use **Expand all folders** beside the Files search button to open every folder in the tree. Once all folders are expanded, the button becomes **Collapse all folders**. Collapsing folders keeps your selected file open.
 
@@ -126,6 +132,10 @@ semantic names receive a numeric suffix if already taken. If generation or renam
 
 Names you explicitly choose are preserved. Changing these settings does not rename existing
 branches or folders or affect synthetic branches for cross-repository pull requests.
+
+If a plain `test-rig` branch already exists, automatic worktree creation uses a flat temporary branch name so that Git can create it. An explicitly requested conflicting branch name is reported as a failure.
+
+The configured submodule mode applies to new chat worktrees, pull-request worktrees, and moves into a worktree. `none` leaves submodules unpopulated, `top-level` initializes their first level, and `recursive` includes nested submodules. Project overrides take precedence over the environment default.
 
 When **Start from origin** is enabled for a new worktree, Test Rig fetches origin and uses the selected branch there. If origin or that branch is absent, it uses the selected local branch. A fetch failure is reported instead of silently using stale local state.
 

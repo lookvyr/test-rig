@@ -9,17 +9,24 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useChatCanvas } from "./ChatCanvasContext";
-import { resolveThreadDetailsCardLayout } from "./threadDetailsCardLayout";
+import {
+  resolveThreadDetailsCardLayout,
+  resolveThreadDetailsCardDensity,
+} from "./threadDetailsCardLayout";
 
 /** One persistent controls tree: moving between card and popover must not discard open forms. */
 export function ThreadDetailsCard({
   threadRef,
   toggleContainer,
   children,
+  shortcutLabel,
+  contentKey,
 }: {
   threadRef: ScopedThreadRef;
   children: ReactNode;
   toggleContainer: HTMLElement | null;
+  shortcutLabel?: string | undefined;
+  contentKey?: string | undefined;
 }) {
   const canvas = useChatCanvas();
   const placement = canvas
@@ -37,11 +44,33 @@ export function ThreadDetailsCard({
         frame: null,
       })
     : null;
-  const inline = placement !== null;
+  const [showAll, setShowAll] = useState(false);
+  const inline = placement !== null && !showAll;
+  const measurementKey = `${scopedThreadKey(threadRef)}:${preferredPlacement?.width ?? "popup"}:${contentKey ?? ""}`;
+  const [measurements, setMeasurements] = useState({ key: measurementKey, full: 0, compact: 0 });
+  const contentHeights =
+    measurements.key === measurementKey ? measurements : { full: 0, compact: 0 };
+  const density = inline
+    ? resolveThreadDetailsCardDensity(placement.height, contentHeights)
+    : "full";
   const inlineOpen = useThreadDetailsStore(
     (state) => !state.hiddenByThreadKey[scopedThreadKey(threadRef)],
   );
-  const [popoverOpen, setPopoverOpen] = useState(false);
+  const popoverOpen = useThreadDetailsStore(
+    (state) => state.popoverOpenByThreadKey[scopedThreadKey(threadRef)] ?? false,
+  );
+  const setPopoverOpen = (open: boolean) =>
+    useThreadDetailsStore.getState().setPopoverOpen(threadRef, open);
+  useLayoutEffect(() => {
+    useThreadDetailsStore.getState().setPresentation(threadRef, inline ? "inline" : "popover");
+    if (inline) useThreadDetailsStore.getState().setPopoverOpen(threadRef, false);
+  }, [inline, threadRef.environmentId, threadRef.threadId]);
+  useLayoutEffect(() => {
+    if (showAll && !popoverOpen) {
+      setShowAll(false);
+      useThreadDetailsStore.getState().setOpen(threadRef, false);
+    }
+  }, [showAll, popoverOpen, threadRef.environmentId, threadRef.threadId]);
   const [content, setContent] = useState<HTMLDivElement | null>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const reportDetailsCard = canvas?.reportDetailsCard;
@@ -54,16 +83,29 @@ export function ThreadDetailsCard({
     const measure = () => {
       // A closed popover has no layout. Keep the last measured height so hiding it
       // cannot remove the obstacle and oscillate between inline and popover.
-      if (content.offsetHeight > 0) setContentHeight(content.offsetHeight);
+      if (content.offsetHeight > 0) {
+        setContentHeight(content.offsetHeight);
+        if (density !== "essential" && !showAll)
+          setMeasurements((current) => {
+            const base =
+              current.key === measurementKey
+                ? current
+                : { key: measurementKey, full: 0, compact: 0 };
+            return base[density] === content.offsetHeight
+              ? base
+              : { ...base, [density]: content.offsetHeight };
+          });
+      }
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(content);
     return () => observer.disconnect();
-  }, [content]);
+  }, [content, density, showAll, measurementKey]);
   useLayoutEffect(() => {
     reportDetailsCard?.(
-      inlineOpen &&
+      inline &&
+        inlineOpen &&
         contentHeight > 0 &&
         left !== undefined &&
         top !== undefined &&
@@ -72,9 +114,8 @@ export function ThreadDetailsCard({
         ? { left, right: left + width, bottom: top + Math.min(contentHeight, height) }
         : null,
     );
-  }, [contentHeight, inlineOpen, left, top, width, height, reportDetailsCard]);
+  }, [contentHeight, inline, inlineOpen, left, top, width, height, reportDetailsCard]);
   useLayoutEffect(() => () => reportDetailsCard?.(null), [reportDetailsCard]);
-  if (inline && popoverOpen) setPopoverOpen(false);
 
   const open = inline ? inlineOpen : popoverOpen;
   const anchor =
@@ -99,7 +140,13 @@ export function ThreadDetailsCard({
         if (inline) {
           if (details.reason === "trigger-press")
             useThreadDetailsStore.getState().setOpen(threadRef, next);
-        } else setPopoverOpen(next);
+        } else {
+          setPopoverOpen(next);
+          if (!next && showAll) {
+            setShowAll(false);
+            useThreadDetailsStore.getState().setOpen(threadRef, false);
+          }
+        }
       }}
     >
       {toggleContainer
@@ -121,7 +168,9 @@ export function ThreadDetailsCard({
                   />
                 }
               />
-              <TooltipPopup>Thread details</TooltipPopup>
+              <TooltipPopup>
+                Thread details{shortcutLabel ? ` (${shortcutLabel})` : ""}
+              </TooltipPopup>
             </Tooltip>,
             toggleContainer,
           )
@@ -141,14 +190,37 @@ export function ThreadDetailsCard({
         finalFocus={false}
         keepMounted
       >
-        <div data-thread-details-panel={inline ? "inline" : "popover"}>
+        <div data-thread-details-panel={inline ? "inline" : "popover"} data-density={density}>
           <div
             data-thread-details-card
             className="dropdown-glass isolate contain-paint grid max-h-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-3xl shadow-none"
-            style={{ maxHeight: placement?.height ?? "min(70dvh, var(--available-height))" }}
+            style={{ maxHeight: inline ? placement.height : "min(70dvh, var(--available-height))" }}
           >
             <ScrollArea scrollFade className="min-h-0">
-              <div ref={setContent}>{children}</div>
+              <div
+                ref={setContent}
+                className={
+                  density === "full"
+                    ? ""
+                    : density === "compact"
+                      ? "[&_[data-details-full]]:hidden"
+                      : "[&_[data-details-full]]:hidden [&_[data-details-secondary]]:hidden"
+                }
+              >
+                {children}
+                {inline && density !== "full" ? (
+                  <button
+                    type="button"
+                    className="w-full px-3 pb-2 text-left text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setShowAll(true);
+                      setPopoverOpen(true);
+                    }}
+                  >
+                    Show all details
+                  </button>
+                ) : null}
+              </div>
             </ScrollArea>
           </div>
         </div>

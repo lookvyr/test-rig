@@ -95,6 +95,7 @@ const RawThreadSchema = Schema.Struct({
           content: Schema.optional(Schema.NullOr(Schema.String)),
           author: Schema.optional(Schema.NullOr(RawIdentitySchema)),
           publishedDate: Schema.optional(Schema.NullOr(Schema.String)),
+          lastContentUpdatedDate: Schema.optional(Schema.NullOr(Schema.String)),
           isDeleted: Schema.optional(Schema.NullOr(Schema.Boolean)),
           /** `system` marks the notes Azure writes itself, which are events, not comments. */
           commentType: Schema.optional(Schema.NullOr(Schema.String)),
@@ -368,6 +369,7 @@ export function decodeThreadsJson(
         author: toActor(comment.author),
         body: comment.content ?? "",
         createdAt: publishedDate,
+        ...(comment.lastContentUpdatedDate ? { editedAt: comment.lastContentUpdatedDate } : {}),
         url: null,
         path,
         reviewState: null,

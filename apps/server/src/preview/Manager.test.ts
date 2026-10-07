@@ -385,3 +385,37 @@ it.layer(PreviewManager.layer)("PreviewManager", (it) => {
     }),
   );
 });
+
+it.effect("keeps a tab's cookie profile through navigation, status reports and resize", () =>
+  Effect.gen(function* () {
+    const manager = yield* PreviewManager.PreviewManager;
+    const threadId = ThreadId.make("profile-roundtrip");
+    const opened = yield* manager.open({
+      threadId,
+      profileId: "work",
+      viewport: { _tag: "freeform", width: 800, height: 600 },
+    });
+    expect(opened.profileId).toBe("work");
+    expect(opened.viewport).toEqual({ _tag: "freeform", width: 800, height: 600 });
+    const navigated = yield* manager.navigate({
+      threadId,
+      tabId: opened.tabId,
+      url: "https://example.com",
+    });
+    expect(navigated.profileId).toBe("work");
+    yield* manager.reportStatus({
+      threadId,
+      tabId: opened.tabId,
+      navStatus: { _tag: "Success", url: "https://example.com", title: "Example" },
+      canGoBack: true,
+      canGoForward: false,
+    });
+    const resized = yield* manager.resize({
+      threadId,
+      tabId: opened.tabId,
+      viewport: { _tag: "fill" },
+    });
+    expect(resized.profileId).toBe("work");
+    expect((yield* manager.list({ threadId })).sessions[0]?.profileId).toBe("work");
+  }).pipe(Effect.provide(PreviewManager.layer)),
+);

@@ -98,7 +98,7 @@ describe("isPreviewAppShortcut", () => {
         expect(PreviewManager.isPreviewAppShortcut(input, platform)).toBe(true);
         expect(PreviewManager.isPreviewAppShortcut({ ...input, alt: true }, platform)).toBe(false);
         expect(PreviewManager.isPreviewAppShortcut({ ...input, shift: true }, platform)).toBe(
-          false,
+          key === "t",
         );
         expect(PreviewManager.isPreviewAppShortcut({ ...input, type: "keyUp" }, platform)).toBe(
           false,
@@ -221,6 +221,8 @@ const makeTestPreviewWebContents = (
     getURL: () => "https://example.com",
     getTitle: () => "Example",
     isLoading: () => false,
+    isCurrentlyAudible: () => false,
+    setAudioMuted: vi.fn(),
     getZoomFactor: () => 1,
     setZoomFactor: vi.fn(),
     on: vi.fn(),
@@ -388,6 +390,8 @@ describe("PreviewManager", () => {
           getURL: () => "about:blank",
           getTitle: () => "",
           isLoading: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           loadURL,
@@ -443,6 +447,8 @@ describe("PreviewManager", () => {
           getURL: () => url,
           getTitle: () => "Example",
           isLoading: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => {
             if (!zoomReadable) throw new Error("zoom unavailable");
             return effectiveZoom;
@@ -504,6 +510,8 @@ describe("PreviewManager", () => {
           getURL: () => url,
           getTitle: () => "Example",
           isLoading: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: replacementSetZoomFactor,
           on: vi.fn(),
@@ -544,6 +552,8 @@ describe("PreviewManager", () => {
               getURL: () => "https://example.com",
               getTitle: () => "Example",
               isLoading: () => false,
+              isCurrentlyAudible: () => false,
+              setAudioMuted: vi.fn(),
               getZoomFactor: () => 1,
               setZoomFactor: vi.fn(),
               on: vi.fn(),
@@ -706,10 +716,10 @@ describe("PreviewManager", () => {
           getTitle: () => "Preview",
           isLoading: () => false,
           isDevToolsOpened: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
-          setAudioMuted: vi.fn(),
-          isCurrentlyAudible: () => false,
           reload: vi.fn(),
           loadURL: vi.fn(async () => undefined),
           on: vi.fn(),
@@ -750,6 +760,8 @@ describe("PreviewManager", () => {
           getURL: () => url,
           getTitle: () => "localhost:5733",
           isLoading: () => loading,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
@@ -840,6 +852,8 @@ describe("PreviewManager", () => {
           getURL: () => "https://example.com:8443/path?query=value",
           getTitle: () => "Example",
           isLoading: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn((event: string, listener: (...args: never[]) => void) => {
@@ -929,6 +943,8 @@ describe("PreviewManager", () => {
             getURL: () => `https://example.com/${id}`,
             getTitle: () => `Example ${id}`,
             isLoading: () => false,
+            isCurrentlyAudible: () => false,
+            setAudioMuted: vi.fn(),
             getZoomFactor: () => 1,
             setZoomFactor: vi.fn(),
             on: vi.fn(),
@@ -1139,6 +1155,8 @@ describe("PreviewManager", () => {
           getTitle: () => "Example",
           isLoading: () => false,
           isDevToolsOpened: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn(),
@@ -1219,6 +1237,8 @@ describe("PreviewManager", () => {
           getURL: () => "https://example.com",
           getTitle: () => "Example",
           isLoading: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn(),
@@ -1608,6 +1628,8 @@ describe("PreviewManager", () => {
           getTitle: () => "Example",
           isLoading: () => false,
           isFocused: () => true,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
@@ -1728,6 +1750,8 @@ describe("PreviewManager", () => {
           getTitle: () => "Example",
           isLoading: () => false,
           isDevToolsOpened: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn(),
@@ -1826,6 +1850,8 @@ describe("PreviewManager", () => {
           isLoading: () => false,
           isDevToolsOpened: () => false,
           focus,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn(),
@@ -1980,6 +2006,8 @@ describe("PreviewManager", () => {
           getTitle: () => "Example",
           isLoading: () => false,
           isDevToolsOpened: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn(),
@@ -2037,6 +2065,8 @@ describe("PreviewManager", () => {
           getTitle: () => "Example",
           isLoading: () => false,
           isDevToolsOpened: () => false,
+          isCurrentlyAudible: () => false,
+          setAudioMuted: vi.fn(),
           getZoomFactor: () => 1,
           setZoomFactor: vi.fn(),
           on: vi.fn(),
@@ -2174,3 +2204,95 @@ describe("Preview automation diagnostics", () => {
     expect("locator" in error).toBe(false);
   });
 });
+
+effectIt.effect(
+  "retains mute intent before attachment and across guest replacement, rolling back failures",
+  () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        yield* manager.createTab("audio-tab");
+        yield* manager.setAudioMuted("audio-tab", true);
+        const first = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from([]),
+            getSize: () => ({ width: 800, height: 600 }),
+          }),
+          41,
+        ) as Electron.WebContents;
+        const second = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from([]),
+            getSize: () => ({ width: 800, height: 600 }),
+          }),
+          42,
+        ) as Electron.WebContents;
+        fromId.mockImplementation((id) => (id === 41 ? first : second) as never);
+        yield* manager.registerWebview("audio-tab", 41);
+        expect(first.setAudioMuted).toHaveBeenCalledWith(true);
+        yield* manager.registerWebview("audio-tab", 42);
+        expect(second.setAudioMuted).toHaveBeenCalledWith(true);
+        let latest: PreviewManager.PreviewTabState | undefined;
+        yield* manager.subscribeStateChanges((_id, state) =>
+          Effect.sync(() => {
+            latest = state;
+          }),
+        );
+        vi.mocked(second.setAudioMuted).mockImplementationOnce(() => {
+          throw new Error("mute refused");
+        });
+        const failed = yield* Effect.exit(manager.setAudioMuted("audio-tab", false));
+        expect(Exit.isFailure(failed)).toBe(true);
+        expect(latest?.audioMuted).toBe(true);
+        yield* manager.setAudioMuted("audio-tab", false);
+        expect(second.setAudioMuted).toHaveBeenLastCalledWith(false);
+        expect(latest?.audioMuted).toBe(false);
+      }),
+    ),
+);
+
+effectIt.effect(
+  "reports audio from the owned guest, ignoring repeated and replaced-guest events",
+  () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const first = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from([]),
+            getSize: () => ({ width: 800, height: 600 }),
+          }),
+          41,
+        ) as Electron.WebContents;
+        const second = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from([]),
+            getSize: () => ({ width: 800, height: 600 }),
+          }),
+          42,
+        ) as Electron.WebContents;
+        fromId.mockImplementation((id) => (id === 41 ? first : second) as never);
+        yield* manager.createTab("audio-events");
+        yield* manager.registerWebview("audio-events", 41);
+        const listeners = vi.mocked(first.on).mock.calls as unknown as ReadonlyArray<
+          readonly [string, (event: { audible: boolean }) => Fiber.Fiber<void, never>]
+        >;
+        const audio = listeners.find(([event]) => event === "audio-state-changed")?.[1];
+        if (!audio) throw new Error("Missing audio listener");
+        const states: PreviewManager.PreviewTabState[] = [];
+        yield* manager.subscribeStateChanges((_id, state) =>
+          Effect.sync(() => {
+            states.push(state);
+          }),
+        );
+        yield* Fiber.join(audio({ audible: true }));
+        expect(states.at(-1)?.audible).toBe(true);
+        const count = states.length;
+        yield* Fiber.join(audio({ audible: true }));
+        expect(states).toHaveLength(count);
+        yield* manager.registerWebview("audio-events", 42);
+        const replacedCount = states.length;
+        yield* Fiber.join(audio({ audible: true }));
+        expect(states).toHaveLength(replacedCount);
+        expect(states.at(-1)?.audible).toBe(false);
+      }),
+    ),
+);

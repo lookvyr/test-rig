@@ -1,0 +1,21 @@
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const require = createRequire('/Users/smills/REPOS/test-rig/packages/shared/package.json');
+const Effect = await import(pathToFileURL(require.resolve('effect/Effect')).href);
+const Deferred = await import(pathToFileURL(require.resolve('effect/Deferred')).href);
+const Fiber = await import(pathToFileURL(require.resolve('effect/Fiber')).href);
+const { makeDrainableWorker } = await import('file:///Users/smills/REPOS/test-rig/packages/shared/src/DrainableWorker.ts');
+await Effect.runPromise(Effect.scoped(Effect.gen(function*(){
+  const processed = [];
+  const workerFiber = yield* Deferred.make();
+  const worker = yield* makeDrainableWorker(item => Effect.gen(function*(){
+    yield* Deferred.succeed(workerFiber, yield* Effect.fiber);
+    if (item === 'fail') return yield* Effect.fail('typed failure');
+    processed.push(item);
+  }));
+  yield* worker.enqueue('fail');
+  yield* worker.enqueue('later');
+  const exit = yield* Fiber.await(yield* Deferred.await(workerFiber));
+  const drain = yield* Effect.forkChild(worker.drain, { startImmediately:true });
+  console.log(JSON.stringify({workerExit:exit._tag, processed, drainResolved:drain.pollUnsafe() !== undefined}));
+})));

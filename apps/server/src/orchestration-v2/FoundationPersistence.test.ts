@@ -1555,6 +1555,7 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
     Effect.gen(function* () {
       const eventSink = yield* EventSink.EventSinkV2;
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
       const now = yield* DateTime.now;
       const threadId = ThreadId.make("thread:foundation-stale-provider-start");
       const runId = RunId.make("run:foundation-stale-provider-start");
@@ -1608,6 +1609,18 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
           runId,
           activeAttemptId: attemptId,
           expectedStatus: "starting",
+          effects: [
+            {
+              id: "effect:stale-guard-checkpoint",
+              commandId: CommandId.make("command:stale-guard-checkpoint"),
+              threadId,
+              request: {
+                type: "checkpoint.capture",
+                runId,
+                scopeId: CheckpointScopeId.make("scope:stale-guard-checkpoint"),
+              },
+            },
+          ],
           events: [
             {
               id: EventId.make("event:foundation-stale-provider-start:running"),
@@ -1651,6 +1664,7 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
       assert.isFalse(staleResult.committed);
       assert.deepEqual(staleResult.storedEvents, []);
       assert.equal(yield* Ref.get(providerStartCount), 0);
+      assert.isTrue(Option.isNone(yield* outbox.get("effect:stale-guard-checkpoint")));
       const projection = yield* projectionStore.getThreadProjection(threadId);
       assert.equal(projection.runs[0]?.status, "cancelled");
     }),

@@ -1,0 +1,27 @@
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const require = createRequire('/Users/smills/REPOS/test-rig/apps/server/package.json');
+const moduleAt = async name => import(pathToFileURL(require.resolve(name)).href);
+const [Effect, SqlClient, Cause] = await Promise.all(['effect/Effect','effect/unstable/sql/SqlClient','effect/Cause'].map(moduleAt));
+const Sqlite = await import('file:///Users/smills/REPOS/test-rig/apps/server/src/persistence/NodeSqliteClient.ts');
+const dir = mkdtempSync(join(tmpdir(),'testrig-sqlite-audit-'));
+const filename = join(dir,'state.sqlite');
+const other = new DatabaseSync(filename);
+other.exec('PRAGMA journal_mode=WAL; CREATE TABLE counters(value INTEGER); INSERT INTO counters VALUES(0)');
+try {
+await Effect.runPromise(Effect.gen(function*(){
+ const sql = yield* SqlClient.SqlClient;
+ let outsideCommit = false;
+ const exit = yield* Effect.exit(sql.withTransaction(Effect.gen(function*(){
+  const rows = yield* sql`SELECT value FROM counters`;
+  other.exec('UPDATE counters SET value=value+1');
+  outsideCommit = true;
+  yield* sql`UPDATE counters SET value=${rows[0].value+10}`;
+ })));
+ console.log(JSON.stringify({outsideCommit,exit:exit._tag,error:exit._tag==='Failure'?Cause.pretty(exit.cause):null}));
+}).pipe(Effect.provide(Sqlite.layer({filename}))));
+} finally {other.close();rmSync(dir,{recursive:true,force:true});}

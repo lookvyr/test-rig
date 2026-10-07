@@ -240,3 +240,49 @@ describe("BrowserSession", () => {
     }).pipe(Effect.provide(layer)),
   );
 });
+
+it.effect(
+  "isolates named profiles by environment and preserves the original Default partition",
+  () =>
+    Effect.gen(function* () {
+      const browser = yield* BrowserSession.BrowserSession;
+      const original = yield* browser.getPartition("scope-a");
+      assert.equal(yield* browser.getPartition("scope-a", "default"), original);
+      const work = yield* browser.getPartition("scope-a", "work");
+      const personal = yield* browser.getPartition("scope-a", "personal");
+      const otherEnvironment = yield* browser.getPartition("scope-b", "work");
+      assert.notEqual(work, original);
+      assert.notEqual(work, personal);
+      assert.notEqual(work, yield* browser.getPartition('["scope-a","work"]'));
+      assert.notEqual(work, otherEnvironment);
+      assert.isTrue(work.startsWith("persist:test-rig-preview-"));
+      const incognito = yield* browser.getPartition("scope-a", "incognito");
+      assert.isFalse(incognito.startsWith("persist:"));
+      assert.isTrue(browser.isPartition(incognito));
+      assert.isFalse(browser.isPartition("persist:t3code-preview-work"));
+      assert.strictEqual(
+        yield* browser.getSession("scope-a", "work"),
+        yield* browser.getSession("scope-a", "work"),
+      );
+      assert.notStrictEqual(
+        yield* browser.getSession("scope-a", "work"),
+        yield* browser.getSession("scope-a", "personal"),
+      );
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect("clears only the selected profile's cookies and cache", () =>
+  Effect.gen(function* () {
+    const browser = yield* BrowserSession.BrowserSession;
+    const workPartition = yield* browser.getPartition("clear-scope", "work");
+    const personalPartition = yield* browser.getPartition("clear-scope", "personal");
+    yield* browser.getSession("clear-scope", "work");
+    yield* browser.getSession("clear-scope", "personal");
+    yield* browser.clearCookies("clear-scope", "work");
+    yield* browser.clearCache("clear-scope", "work");
+    assert.equal(sessions.get(workPartition)?.clearStorageData.mock.calls.length, 1);
+    assert.equal(sessions.get(workPartition)?.clearCache.mock.calls.length, 1);
+    assert.equal(sessions.get(personalPartition)?.clearStorageData.mock.calls.length, 0);
+    assert.equal(sessions.get(personalPartition)?.clearCache.mock.calls.length, 0);
+  }).pipe(Effect.provide(layer)),
+);

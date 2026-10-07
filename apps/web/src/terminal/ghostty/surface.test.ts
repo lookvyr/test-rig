@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { GhosttyCell, GhosttyRow } from "./core";
 import {
+  GhosttyTerminalSurface,
   DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_FONT_SIZE,
   advanceTerminalSelectionClickSequence,
@@ -489,5 +490,43 @@ describe("terminal scrollbar", () => {
       maxOffset: 9_980,
     });
     expect(terminalScrollbarOffsetAtPointer(state, 200, 191, 9)).toBe(9_980);
+  });
+});
+
+describe("context-menu terminal paste", () => {
+  it("encodes exactly one bracketed paste and ignores a superseded read", async () => {
+    const onData = vi.fn();
+    const terminal = {
+      disposed: false,
+      pasteShortcutToken: 0,
+      core: { encodePaste: (text: string) => `bracketed:${text}` },
+      options: { onData },
+    };
+    const paste = (read: () => Promise<string>, isCurrent?: () => boolean) =>
+      GhosttyTerminalSurface.prototype.pasteFromClipboard.call(
+        terminal as unknown as GhosttyTerminalSurface,
+        read,
+        isCurrent,
+      );
+    await paste(async () => "printf hello");
+    expect(onData).toHaveBeenCalledExactlyOnceWith("bracketed:printf hello");
+    let resolve: ((text: string) => void) | undefined;
+    const pending = paste(
+      () =>
+        new Promise<string>((done) => {
+          resolve = done;
+        }),
+    );
+    terminal.pasteShortcutToken += 1;
+    resolve?.("old clipboard");
+    await pending;
+    await paste(
+      async () => "hidden",
+      () => false,
+    );
+    expect(onData).toHaveBeenCalledTimes(1);
+    terminal.disposed = true;
+    await paste(async () => "disposed");
+    expect(onData).toHaveBeenCalledTimes(1);
   });
 });

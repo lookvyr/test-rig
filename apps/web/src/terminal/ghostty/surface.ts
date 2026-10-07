@@ -795,6 +795,18 @@ export class GhosttyTerminalSurface {
     }, 150);
   }
 
+  /** Context-menu pastes share the native shortcut/event race and bracketed-paste encoding. */
+  async pasteFromClipboard(
+    read: () => Promise<string>,
+    isCurrent: () => boolean = () => true,
+  ): Promise<void> {
+    const token = ++this.pasteShortcutToken;
+    const text = await read();
+    if (this.disposed || this.pasteShortcutToken !== token || !isCurrent()) return;
+    this.pasteShortcutToken += 1;
+    if (text.length > 0) this.options.onData(this.core.encodePaste(text));
+  }
+
   focus(): void {
     this.input.focus({ preventScroll: true });
   }

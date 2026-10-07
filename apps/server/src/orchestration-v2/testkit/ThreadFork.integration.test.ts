@@ -45,7 +45,7 @@ const TRANSCRIPT_PATH = `${import.meta.dirname}/fixtures/thread_fork_native/code
 const PRIOR_TURN_TRANSCRIPT_PATH = `${import.meta.dirname}/fixtures/thread_fork_native_prior_turn/codex_transcript.ndjson`;
 const CLAUDE_TRANSCRIPT_PATH = `${import.meta.dirname}/fixtures/thread_fork_native/claude_transcript.ndjson`;
 const CLAUDE_PRIOR_TURN_TRANSCRIPT_PATH = `${import.meta.dirname}/fixtures/thread_fork_native_prior_turn/claude_transcript.ndjson`;
-const CLAUDE_FORK_LOCAL_ROLLBACK_TRANSCRIPT_PATH = `${import.meta.dirname}/fixtures/thread_fork_native_fork_local_rollback/claude_transcript.ndjson`;
+const CLAUDE_FORK_LOCAL_FORK_TRANSCRIPT_PATH = `${import.meta.dirname}/fixtures/thread_fork_native_fork_local_fork/claude_transcript.ndjson`;
 const CODEX_READ_ONLY_NEVER_POLICY = {
   approvalPolicy: "never",
   sandboxPolicy: {
@@ -783,15 +783,11 @@ describe("orchestration V2 thread fork", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("keeps a Claude native fork stable when the source thread rolls back", () =>
+  it.effect("keeps a Claude native fork independent when the source thread is archived", () =>
     Effect.gen(function* () {
       const rawTranscript = yield* readTranscript(CLAUDE_PRIOR_TURN_TRANSCRIPT_PATH);
       const transcript = yield* ClaudeOrchestratorReplayHarness.decodeTranscript(rawTranscript);
       const forkedNativeSessionId = metadataString(transcript, "forkedNativeSessionId");
-      const sourceAssistantMessageUuids = metadataStringArray(
-        transcript,
-        "sourceAssistantMessageUuids",
-      );
       const cwd = yield* Effect.acquireRelease(makeCheckpointWorkspace, (directory) =>
         Effect.service(FileSystem.FileSystem).pipe(
           Effect.flatMap((fs) => fs.remove(directory, { recursive: true, force: true })),
@@ -802,33 +798,21 @@ describe("orchestration V2 thread fork", () => {
       const materialized = yield* Effect.gen(function* () {
         const ids = yield* IdAllocator.IdAllocatorV2;
         const projectId = yield* ids.allocate.project({
-          fixtureName: "thread-fork-native-prior-turn-source-rollback",
+          fixtureName: "thread-fork-native-prior-turn-source-archive",
         });
         const sourceThreadId = yield* ids.allocate.thread({
-          fixtureName: "thread-fork-native-prior-turn-source-rollback-source",
+          fixtureName: "thread-fork-native-prior-turn-source-archive-source",
           projectId,
         });
-        const targetThreadId = ThreadId.make(
-          "thread-fork-native-prior-turn-source-rollback-target",
-        );
+        const targetThreadId = ThreadId.make("thread-fork-native-prior-turn-source-archive-target");
         const firstRunId = ids.derive.run({ threadId: sourceThreadId, ordinal: 1 });
-        const secondRunId = ids.derive.run({ threadId: sourceThreadId, ordinal: 2 });
-        const checkpointScopeId = yield* ids.allocate.checkpointScope({
-          threadId: sourceThreadId,
-          name: "root",
-        });
-        const firstCheckpointId = yield* ids.allocate.checkpoint({
-          checkpointScopeId,
-          name: "1",
-        });
-
         const commands = [
           {
             type: "thread.create",
             createdBy: "user",
             creationSource: "web",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-prior-turn-source-rollback",
+              fixtureName: "thread-fork-native-prior-turn-source-archive",
               commandName: "thread-create-source",
             }),
             threadId: sourceThreadId,
@@ -845,13 +829,11 @@ describe("orchestration V2 thread fork", () => {
             createdBy: "user",
             creationSource: "web",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-prior-turn-source-rollback",
+              fixtureName: "thread-fork-native-prior-turn-source-archive",
               commandName: "source-message-alpha",
             }),
             threadId: sourceThreadId,
-            messageId: MessageId.make(
-              "message-thread-fork-native-prior-turn-source-rollback-alpha",
-            ),
+            messageId: MessageId.make("message-thread-fork-native-prior-turn-source-archive-alpha"),
             text: THREAD_FORK_NATIVE_PRIOR_TURN_ALPHA_PROMPT,
             attachments: [],
             modelSelection: CLAUDE_MODEL_SELECTION,
@@ -862,11 +844,11 @@ describe("orchestration V2 thread fork", () => {
             createdBy: "user",
             creationSource: "web",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-prior-turn-source-rollback",
+              fixtureName: "thread-fork-native-prior-turn-source-archive",
               commandName: "source-message-beta",
             }),
             threadId: sourceThreadId,
-            messageId: MessageId.make("message-thread-fork-native-prior-turn-source-rollback-beta"),
+            messageId: MessageId.make("message-thread-fork-native-prior-turn-source-archive-beta"),
             text: THREAD_FORK_NATIVE_PRIOR_TURN_BETA_PROMPT,
             attachments: [],
             modelSelection: CLAUDE_MODEL_SELECTION,
@@ -876,7 +858,7 @@ describe("orchestration V2 thread fork", () => {
             type: "thread.fork",
             createdBy: "user",
             creationSource: "web",
-            commandId: CommandId.make("command-thread-fork-native-prior-turn-source-rollback"),
+            commandId: CommandId.make("command-thread-fork-native-prior-turn-source-archive"),
             sourceThreadId,
             targetThreadId,
             sourcePoint: { type: "run", runId: firstRunId },
@@ -887,12 +869,12 @@ describe("orchestration V2 thread fork", () => {
             createdBy: "user",
             creationSource: "web",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-prior-turn-source-rollback",
+              fixtureName: "thread-fork-native-prior-turn-source-archive",
               commandName: "target-message-repeat",
             }),
             threadId: targetThreadId,
             messageId: MessageId.make(
-              "message-thread-fork-native-prior-turn-source-rollback-repeat",
+              "message-thread-fork-native-prior-turn-source-archive-repeat",
             ),
             text: THREAD_FORK_NATIVE_PRIOR_TURN_REPEAT_PROMPT,
             attachments: [],
@@ -900,29 +882,25 @@ describe("orchestration V2 thread fork", () => {
             dispatchMode: { type: "start_immediately" },
           },
           {
-            type: "checkpoint.rollback",
-            restoreFiles: false,
+            type: "thread.archive",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-prior-turn-source-rollback",
-              commandName: "rollback-source-to-alpha",
+              fixtureName: "thread-fork-native-prior-turn-source-archive",
+              commandName: "archive-source",
             }),
             threadId: sourceThreadId,
-            scopeId: checkpointScopeId,
-            checkpointId: firstCheckpointId,
           },
         ] satisfies ReadonlyArray<OrchestrationV2Command>;
 
         return {
           sourceThreadId,
           targetThreadId,
-          secondRunId,
           commands,
         };
       }).pipe(Effect.provide(IdAllocator.layer), provideDeterministicTestRuntime);
 
       const result = yield* runOrchestratorV2ProviderReplayScenario(
         {
-          name: "thread_fork_native_prior_turn_source_rollback/claude",
+          name: "thread_fork_native_prior_turn_source_archive/claude",
           transcript,
           commands: materialized.commands,
           steps: [
@@ -936,12 +914,6 @@ describe("orchestration V2 thread fork", () => {
             { type: "dispatch", command: materialized.commands[4]!, await: true },
             { type: "await_thread_idle", threadId: materialized.targetThreadId },
             { type: "dispatch", command: materialized.commands[5]!, await: true },
-            {
-              type: "await_run_status",
-              threadId: materialized.sourceThreadId,
-              runId: materialized.secondRunId,
-              status: "rolled_back",
-            },
           ],
           projectionThreadIds: [materialized.sourceThreadId, materialized.targetThreadId],
           runtimePolicyOverride: { cwd },
@@ -954,15 +926,10 @@ describe("orchestration V2 thread fork", () => {
       assert.isDefined(sourceProjection);
       assert.isDefined(targetProjection);
 
-      assert.equal(
-        sourceProjection.runs.map((run) => run.status).join(","),
-        "completed,rolled_back",
-      );
-      assert.equal(
-        sourceProjection.providerThreads[0]?.nativeConversationHeadRef?.nativeId,
-        sourceAssistantMessageUuids[0],
-        "source rollback should persist the Claude resume cursor for the first assistant message",
-      );
+      assert.equal(sourceProjection.runs.map((run) => run.status).join(","), "completed,completed");
+      assert.isNotNull(sourceProjection.thread.archivedAt);
+      assert.equal(targetProjection.thread.archivedAt, null);
+      assert.equal(targetProjection.thread.lineage.parentThreadId, materialized.sourceThreadId);
       assert.equal(
         targetProjection.providerThreads[0]?.nativeThreadRef?.nativeId,
         forkedNativeSessionId,
@@ -971,25 +938,25 @@ describe("orchestration V2 thread fork", () => {
 
       const sourceVisibleText = userAndAssistantText(sourceProjection);
       assert.include(sourceVisibleText, "fork boundary alpha");
-      assert.notInclude(sourceVisibleText, "fork boundary beta");
+      assert.include(sourceVisibleText, "fork boundary beta");
 
       const targetVisibleText = userAndAssistantText(targetProjection);
       assert.include(targetVisibleText, "fork boundary alpha");
       assert.notInclude(
         targetVisibleText,
         "fork boundary beta",
-        "source rollback must not cause the fork target to inherit turns past its fork point",
+        "archiving the source must not change the fork boundary or truncate source history",
       );
       assert.equal(targetProjection.contextTransfers[0]?.resolution?.strategy, "native_fork");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("rolls back a Claude native fork to an earlier fork-local turn", () =>
+  it.effect("forks a Claude native fork from an earlier completed fork-local turn", () =>
     Effect.gen(function* () {
-      const rawTranscript = yield* readTranscript(CLAUDE_FORK_LOCAL_ROLLBACK_TRANSCRIPT_PATH);
+      const rawTranscript = yield* readTranscript(CLAUDE_FORK_LOCAL_FORK_TRANSCRIPT_PATH);
       const transcript = yield* ClaudeOrchestratorReplayHarness.decodeTranscript(rawTranscript);
       const forkedNativeSessionId = metadataString(transcript, "forkedNativeSessionId");
-      const resumeSessionAt = metadataString(transcript, "resumeSessionAt");
+      const nestedNativeSessionId = metadataString(transcript, "nestedForkedNativeSessionId");
       const prompts = metadataStringArray(transcript, "prompts");
       const [sourcePrompt, forkFirstPrompt, forkSecondPrompt, repeatPrompt] = prompts;
       if (
@@ -998,7 +965,7 @@ describe("orchestration V2 thread fork", () => {
         forkSecondPrompt === undefined ||
         repeatPrompt === undefined
       ) {
-        throw new Error("Claude fork-local rollback transcript is missing expected prompts.");
+        throw new Error("Claude nested fork transcript is missing expected prompts.");
       }
 
       const cwd = yield* Effect.acquireRelease(makeCheckpointWorkspace, (directory) =>
@@ -1011,22 +978,15 @@ describe("orchestration V2 thread fork", () => {
       const materialized = yield* Effect.gen(function* () {
         const ids = yield* IdAllocator.IdAllocatorV2;
         const projectId = yield* ids.allocate.project({
-          fixtureName: "thread-fork-native-fork-local-rollback",
+          fixtureName: "thread-fork-native-fork-local-fork",
         });
         const sourceThreadId = yield* ids.allocate.thread({
-          fixtureName: "thread-fork-native-fork-local-rollback-source",
+          fixtureName: "thread-fork-native-fork-local-fork-source",
           projectId,
         });
-        const targetThreadId = ThreadId.make("thread-fork-native-fork-local-rollback-target");
-        const targetSecondRunId = ids.derive.run({ threadId: targetThreadId, ordinal: 2 });
-        const targetCheckpointScopeId = yield* ids.allocate.checkpointScope({
-          threadId: targetThreadId,
-          name: "root",
-        });
-        const targetFirstCheckpointId = yield* ids.allocate.checkpoint({
-          checkpointScopeId: targetCheckpointScopeId,
-          name: "1",
-        });
+        const targetThreadId = ThreadId.make("thread-fork-native-fork-local-fork-target");
+        const nestedThreadId = ThreadId.make("thread-fork-native-fork-local-nested-target");
+        const targetFirstRunId = ids.derive.run({ threadId: targetThreadId, ordinal: 1 });
 
         const commands = [
           {
@@ -1034,7 +994,7 @@ describe("orchestration V2 thread fork", () => {
             createdBy: "user",
             creationSource: "web",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-fork-local-rollback",
+              fixtureName: "thread-fork-native-fork-local-fork",
               commandName: "thread-create-source",
             }),
             threadId: sourceThreadId,
@@ -1051,11 +1011,11 @@ describe("orchestration V2 thread fork", () => {
             createdBy: "user",
             creationSource: "web",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-fork-local-rollback",
+              fixtureName: "thread-fork-native-fork-local-fork",
               commandName: "source-message",
             }),
             threadId: sourceThreadId,
-            messageId: MessageId.make("message-thread-fork-native-fork-local-rollback-source"),
+            messageId: MessageId.make("message-thread-fork-native-fork-local-fork-source"),
             text: sourcePrompt,
             attachments: [],
             modelSelection: CLAUDE_MODEL_SELECTION,
@@ -1065,7 +1025,7 @@ describe("orchestration V2 thread fork", () => {
             type: "thread.fork",
             createdBy: "user",
             creationSource: "web",
-            commandId: CommandId.make("command-thread-fork-native-fork-local-rollback"),
+            commandId: CommandId.make("command-thread-fork-native-fork-local-fork"),
             sourceThreadId,
             targetThreadId,
             sourcePoint: { type: "latest_stable" },
@@ -1076,11 +1036,11 @@ describe("orchestration V2 thread fork", () => {
             createdBy: "user",
             creationSource: "web",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-fork-local-rollback",
+              fixtureName: "thread-fork-native-fork-local-fork",
               commandName: "fork-first-message",
             }),
             threadId: targetThreadId,
-            messageId: MessageId.make("message-thread-fork-native-fork-local-rollback-first"),
+            messageId: MessageId.make("message-thread-fork-native-fork-local-fork-first"),
             text: forkFirstPrompt,
             attachments: [],
             modelSelection: CLAUDE_MODEL_SELECTION,
@@ -1091,37 +1051,36 @@ describe("orchestration V2 thread fork", () => {
             createdBy: "user",
             creationSource: "web",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-fork-local-rollback",
+              fixtureName: "thread-fork-native-fork-local-fork",
               commandName: "fork-second-message",
             }),
             threadId: targetThreadId,
-            messageId: MessageId.make("message-thread-fork-native-fork-local-rollback-second"),
+            messageId: MessageId.make("message-thread-fork-native-fork-local-fork-second"),
             text: forkSecondPrompt,
             attachments: [],
             modelSelection: CLAUDE_MODEL_SELECTION,
             dispatchMode: { type: "start_immediately" },
           },
           {
-            type: "checkpoint.rollback",
-            restoreFiles: false,
-            commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-fork-local-rollback",
-              commandName: "rollback-fork-to-first",
-            }),
-            threadId: targetThreadId,
-            scopeId: targetCheckpointScopeId,
-            checkpointId: targetFirstCheckpointId,
+            type: "thread.fork",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make("command-thread-fork-native-fork-local-nested"),
+            sourceThreadId: targetThreadId,
+            targetThreadId: nestedThreadId,
+            sourcePoint: { type: "run", runId: targetFirstRunId },
+            title: "Forked from the first local response",
           },
           {
             type: "message.dispatch",
             createdBy: "user",
             creationSource: "web",
             commandId: yield* ids.allocate.command({
-              fixtureName: "thread-fork-native-fork-local-rollback",
-              commandName: "fork-repeat-after-rollback",
+              fixtureName: "thread-fork-native-fork-local-fork",
+              commandName: "nested-fork-repeat",
             }),
-            threadId: targetThreadId,
-            messageId: MessageId.make("message-thread-fork-native-fork-local-rollback-repeat"),
+            threadId: nestedThreadId,
+            messageId: MessageId.make("message-thread-fork-native-fork-local-fork-repeat"),
             text: repeatPrompt,
             attachments: [],
             modelSelection: CLAUDE_MODEL_SELECTION,
@@ -1132,14 +1091,14 @@ describe("orchestration V2 thread fork", () => {
         return {
           sourceThreadId,
           targetThreadId,
-          targetSecondRunId,
+          nestedThreadId,
           commands,
         };
       }).pipe(Effect.provide(IdAllocator.layer), provideDeterministicTestRuntime);
 
       const result = yield* runOrchestratorV2ProviderReplayScenario(
         {
-          name: "thread_fork_native_fork_local_rollback/claude",
+          name: "thread_fork_native_fork_local_fork/claude",
           transcript,
           commands: materialized.commands,
           steps: [
@@ -1153,48 +1112,69 @@ describe("orchestration V2 thread fork", () => {
             { type: "dispatch", command: materialized.commands[4]!, await: true },
             { type: "await_thread_idle", threadId: materialized.targetThreadId },
             { type: "dispatch", command: materialized.commands[5]!, await: true },
-            {
-              type: "await_run_status",
-              threadId: materialized.targetThreadId,
-              runId: materialized.targetSecondRunId,
-              status: "rolled_back",
-            },
             { type: "dispatch", command: materialized.commands[6]!, await: true },
-            { type: "await_thread_idle", threadId: materialized.targetThreadId },
+            { type: "await_thread_idle", threadId: materialized.nestedThreadId },
           ],
-          projectionThreadIds: [materialized.sourceThreadId, materialized.targetThreadId],
+          projectionThreadIds: [
+            materialized.sourceThreadId,
+            materialized.targetThreadId,
+            materialized.nestedThreadId,
+          ],
           runtimePolicyOverride: { cwd },
         },
         ClaudeOrchestratorReplayHarness,
       ).pipe(provideDeterministicTestRuntime);
 
+      const sourceProjection = result.projections.get(materialized.sourceThreadId);
       const targetProjection = result.projections.get(materialized.targetThreadId);
+      const nestedProjection = result.projections.get(materialized.nestedThreadId);
+      assert.isDefined(sourceProjection);
       assert.isDefined(targetProjection);
+      assert.isDefined(nestedProjection);
       assert.equal(
         targetProjection.providerThreads[0]?.nativeThreadRef?.nativeId,
         forkedNativeSessionId,
       );
-      assert.isString(resumeSessionAt);
-
-      const targetVisibleText = userAndAssistantText(targetProjection);
-      assert.include(targetVisibleText, "fork local source alpha");
-      assert.include(targetVisibleText, "fork local first");
-      assert.notInclude(
-        targetVisibleText,
-        "fork local second",
-        "rolled back fork-local turns must disappear from the projected fork thread",
+      assert.equal(
+        nestedProjection.providerThreads[0]?.nativeThreadRef?.nativeId,
+        nestedNativeSessionId,
       );
-
-      const targetVisibleAssistantText = targetProjection.visibleTurnItems
-        .map((row) => row.item)
-        .filter((item) => item.type === "assistant_message")
-        .map((item) => item.text)
-        .join("\n");
-      assert.notInclude(
-        targetVisibleAssistantText,
-        "fork local second",
-        "resumeSessionAt must reopen the Claude fork before the rolled-back second fork turn",
+      assert.equal(
+        nestedProjection.providerThreads[0]?.forkedFrom?.providerThreadId,
+        targetProjection.providerThreads[0]?.id,
       );
+      assert.equal(nestedProjection.thread.lineage.parentThreadId, materialized.targetThreadId);
+      assert.equal(nestedProjection.contextTransfers[0]?.resolution?.strategy, "native_fork");
+      assert.deepEqual(
+        sourceProjection.runs.map((run) => run.status),
+        ["completed"],
+      );
+      assert.deepEqual(
+        targetProjection.runs.map((run) => run.status),
+        ["completed", "completed"],
+      );
+      assert.deepEqual(
+        nestedProjection.runs.map((run) => run.status),
+        ["completed"],
+      );
+      const originalText = userAndAssistantText(targetProjection);
+      assert.include(originalText, "fork local source alpha");
+      assert.include(originalText, "fork local first");
+      assert.include(
+        originalText,
+        "fork local second",
+        "the original fork retains its later local turn",
+      );
+      const nestedText = userAndAssistantText(nestedProjection);
+      assert.include(nestedText, "fork local source alpha");
+      assert.include(nestedText, "fork local first");
+      assert.notInclude(
+        nestedText,
+        "fork local second",
+        "the nested native fork excludes turns after its selected local boundary",
+      );
+      assert.equal(targetProjection.providerThreads[0]?.nativeConversationHeadRef, null);
+      assert.equal(nestedProjection.providerThreads[0]?.nativeConversationHeadRef, null);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

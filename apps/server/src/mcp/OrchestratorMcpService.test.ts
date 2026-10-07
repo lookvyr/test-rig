@@ -1,3 +1,4 @@
+import { OrchestratorProjectionError } from "../orchestration-v2/Orchestrator.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -28,6 +29,87 @@ import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 
 describe("OrchestratorMcpService", () => {
+  it.effect("reports a restart-cut child as working until its continuation settles", () =>
+    Effect.gen(function* () {
+      const parentThreadId = ThreadId.make("thread:mcp-restart-parent");
+      const childThreadId = ThreadId.make("thread:mcp-restart-child");
+      const taskId = NodeId.make("node:mcp-restart-task");
+      const dispatched = yield* Ref.make(0);
+      let awaitsRestart = true;
+      let readFails = true;
+      const parentProjection = {
+        thread: { id: parentThreadId },
+        runs: [],
+        contextTransfers: [],
+        subagents: [
+          {
+            id: taskId,
+            threadId: parentThreadId,
+            origin: "app_owned",
+            childThreadId,
+            driver: "codex",
+            model: "gpt-5.6-terra",
+            status: "running",
+            result: null,
+            completionDelivery: { state: "pending" },
+          },
+        ],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const childProjection = {
+        thread: { id: childThreadId },
+        runs: [{ id: RunId.make("run:mcp-restart-child"), ordinal: 1, status: "cancelled" }],
+        contextTransfers: [],
+        messages: [],
+        subagents: [],
+        providerThreads: [],
+        turnItems: [],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const dependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: (threadId) =>
+            Effect.succeed(threadId === parentThreadId ? parentProjection : childProjection),
+          delegatedTaskResultPending: () =>
+            readFails
+              ? Effect.fail(new OrchestratorProjectionError({ threadId: childThreadId }))
+              : Effect.succeed(awaitsRestart),
+          dispatch: () => Ref.update(dispatched, (count) => count + 1).pipe(Effect.as({} as never)),
+        }),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+        Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+          list: () => Effect.succeed([]),
+        }),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      const scope: McpInvocationScope = {
+        environmentId: EnvironmentId.make("environment:mcp-restart"),
+        threadId: parentThreadId,
+        providerSessionId: "provider-session:mcp-restart",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const failed = yield* service.taskStatus(scope, taskId).pipe(Effect.flip);
+        assert.equal(failed.code, "orchestration_error");
+        assert.equal(yield* Ref.get(dispatched), 0);
+        readFails = false;
+        const held = yield* service.taskStatus(scope, taskId);
+        assert.equal(held.status, "running");
+        assert.equal(held.workState, "working");
+        assert.isNull(held.summary);
+        // Acknowledging the cut run would suppress the real result's wake.
+        assert.equal(yield* Ref.get(dispatched), 0);
+        awaitsRestart = false;
+        const settled = yield* service.taskStatus(scope, taskId);
+        assert.equal(settled.status, "cancelled");
+        assert.equal(yield* Ref.get(dispatched), 1);
+      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+    }),
+  );
+
   it.effect("retries terminal acknowledgement with a fresh command id", () =>
     Effect.gen(function* () {
       const parentThreadId = ThreadId.make("thread:mcp-ack-parent");
@@ -830,6 +912,117 @@ describe("OrchestratorMcpService provider resolution", () => {
         );
       }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
     }),
+  );
+
+  it.effect.each(["explicit", "inherited"] as const)(
+    "re-probes an unavailable %s target once before refusing it",
+    (mode) =>
+      Effect.gen(function* () {
+        const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+        const claudeDriver = ProviderDriverKind.make("claudeAgent");
+        const task = {
+          id: taskId,
+          threadId: parentThreadId,
+          runId: parentRunId,
+          parentNodeId,
+          origin: "app_owned",
+          createdBy: "agent",
+          driver: claudeDriver,
+          providerInstanceId: claudeInstanceId,
+          providerThreadId: null,
+          childThreadId,
+          nativeTaskRef: null,
+          prompt: "Review the diff.",
+          title: null,
+          model: "claude-opus-5-5",
+          status: "running",
+          result: null,
+          startedAt: null,
+          completedAt: null,
+        };
+        const healthy = providerSnapshot({
+          instanceId: claudeInstanceId,
+          driver: claudeDriver,
+          model: "claude-opus-5-5",
+        });
+        const missingCli: ServerProvider = {
+          ...healthy,
+          installed: false,
+          status: "error",
+          message: "Claude Agent CLI (`claude`) was not found on PATH.",
+        };
+        const codex = providerSnapshot({
+          instanceId: codexInstanceId,
+          driver: ProviderDriverKind.make("codex"),
+          model: "gpt-5.4",
+        });
+        // The cache still says the CLI is missing; a probe reports `cliInstalled`.
+        let cliInstalled = false;
+        const probes = yield* Ref.make(0);
+        const dispatched = yield* Ref.make(0);
+        const dependencies = Layer.mergeAll(
+          NodeServices.layer,
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadRecords: (threadId) =>
+              Effect.succeed(
+                threadId === parentThreadId
+                  ? parentProjection(
+                      [task],
+                      mode === "inherited"
+                        ? { instanceId: claudeInstanceId, model: "claude-opus-5-5" }
+                        : undefined,
+                    )
+                  : childProjection,
+              ),
+            dispatch: () =>
+              Ref.update(dispatched, (count) => count + 1).pipe(
+                Effect.as({
+                  sequence: 1,
+                  storedEvents: [
+                    {
+                      sequence: 1,
+                      commandId: null,
+                      event: { type: "subagent.updated", payload: task },
+                    },
+                  ],
+                } as never),
+              ),
+          }),
+          Layer.mock(ProviderRegistry.ProviderRegistry)({
+            getProviders: Effect.succeed([codex, missingCli]),
+            refreshInstance: () =>
+              Ref.update(probes, (count) => count + 1).pipe(
+                Effect.as([codex, cliInstalled ? healthy : missingCli]),
+              ),
+          }),
+          adapterRegistryLayer([codexInstanceId, claudeInstanceId]),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+        );
+
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const delegate = (clientRequestId: string) =>
+            service.delegateTask(scope, {
+              task: "Review the diff.",
+              ...(mode === "explicit"
+                ? { target: { providerInstanceId: claudeInstanceId, model: "claude-opus-5-5" } }
+                : {}),
+              mode: "async",
+              clientRequestId,
+            });
+
+          const error = yield* delegate("delegate-recheck-1").pipe(Effect.flip);
+          assert.equal(error.code, "provider_unavailable");
+          assert.equal(yield* Ref.get(probes), 1);
+          assert.equal(yield* Ref.get(dispatched), 0);
+
+          cliInstalled = true;
+          const result = yield* delegate("delegate-recheck-2");
+          assert.equal(result.providerInstanceId, claudeInstanceId);
+          assert.equal(yield* Ref.get(probes), 2);
+          assert.equal(yield* Ref.get(dispatched), 1);
+        }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }),
   );
 
   it.effect(

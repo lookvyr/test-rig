@@ -29,6 +29,22 @@ describe("compileClaudeModelSelection", () => {
     });
   });
 
+  it("treats omitted and explicit Normal identically while Fast stays distinct", () => {
+    const omitted = compileClaudeModelSelection({
+      instanceId: ProviderInstanceId.make("claude_test"),
+      model: "claude-opus-4-6",
+    });
+    const normal = compileClaudeModelSelection(
+      selection("claude-opus-4-6", [{ id: "fastMode", value: false }]),
+    );
+    const fast = compileClaudeModelSelection(
+      selection("claude-opus-4-6", [{ id: "fastMode", value: true }]),
+    );
+    expect(omitted.queryIdentity).toEqual(normal.queryIdentity);
+    expect(omitted.queryIdentity).not.toEqual(fast.queryIdentity);
+    expect(omitted.settings).toEqual({ fastMode: false });
+  });
+
   it("compiles fast mode only for models that expose it", () => {
     expect(
       compileClaudeModelSelection(selection("claude-opus-4-6", [{ id: "fastMode", value: true }]))

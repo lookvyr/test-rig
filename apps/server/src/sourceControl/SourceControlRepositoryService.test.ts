@@ -15,12 +15,49 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import type * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./SourceControlRepositoryService.ts";
+import * as BitbucketApi from "./BitbucketApi.ts";
 
 const CLONE_URLS = {
   nameWithOwner: "octocat/t3code",
   url: "https://github.com/octocat/t3code",
   sshUrl: "git@github.com:octocat/t3code.git",
 };
+
+it.effect("preserves safe explicit Bitbucket target validation detail", () =>
+  Effect.gen(function* () {
+    const error = yield* (yield* SourceControlRepositoryService.SourceControlRepositoryService)
+      .lookupRepository({
+        provider: "bitbucket",
+        repository: "private-invalid-target",
+        cwd: "/repo",
+      })
+      .pipe(Effect.flip);
+    assert.strictEqual(
+      error.detail,
+      "Bitbucket repositories must be specified as workspace/repository.",
+    );
+    assert.notInclude(error.message, "private-invalid-target");
+  }).pipe(
+    Effect.provide(
+      makeLayer({
+        provider: makeProvider({
+          getRepositoryCloneUrls: () =>
+            Effect.fail(
+              new SourceControlProviderError({
+                provider: "bitbucket",
+                operation: "getRepositoryCloneUrls",
+                cwd: "/repo",
+                detail: "invalid repository",
+                cause: new BitbucketApi.BitbucketRepositoryLocatorError({
+                  repository: "private-invalid-target",
+                }),
+              }),
+            ),
+        }),
+      }),
+    ),
+  ),
+);
 
 function makeProvider(
   overrides: Partial<SourceControlProvider.SourceControlProvider["Service"]> = {},
@@ -178,7 +215,7 @@ it.effect("clones a looked-up repository into the requested destination", () =>
       assert.deepStrictEqual(cloneCalls, [
         {
           cwd: parent,
-          args: ["clone", "--progress", CLONE_URLS.url, "t3code"],
+          args: ["clone", "--progress", "--", CLONE_URLS.url, "t3code"],
         },
       ]);
     }).pipe(
@@ -547,3 +584,40 @@ it.effect("publish succeeds with status remote_added when the local repo has no 
     ),
   );
 });
+
+it.effect.each(["--bare", "source.git"])(
+  "clones a local repository named %s as a working tree",
+  (repositoryName) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const git = yield* GitVcsDriver.GitVcsDriver;
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "t3-clone-options-" });
+      yield* git.execute({
+        operation: "test.init",
+        cwd: parent,
+        args: ["init", "--bare", path.join(parent, repositoryName)],
+      });
+      const destinationPath = path.join(parent, "checkout");
+      yield* Effect.gen(function* () {
+        const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+        const result = yield* service.cloneRepository({
+          remoteUrl: repositoryName,
+          destinationPath,
+        });
+        assert.strictEqual(result.cwd, destinationPath);
+        assert.isTrue(yield* fs.exists(path.join(destinationPath, ".git")));
+      }).pipe(Effect.provide(makeLayer({ git: { execute: git.execute } })));
+    }).pipe(
+      Effect.provide(
+        GitVcsDriver.layer.pipe(
+          Layer.provide(
+            ServerConfig.ServerConfig.layerTest(process.cwd(), {
+              prefix: "t3-clone-options-config-",
+            }),
+          ),
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
+);

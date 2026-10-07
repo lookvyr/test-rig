@@ -9,6 +9,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSettle, canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
+import { threadRuntimeCanArchive } from "@t3tools/client-runtime/state/models";
 import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
@@ -26,6 +27,7 @@ import { refreshArchivedThreadsForEnvironment } from "../lib/archivedThreadsStat
 import { readLocalApi } from "../localApi";
 import {
   readEnvironmentSupportsPinning,
+  readEnvironmentSupportsAutoSettleOptOut,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
   readEnvironmentThreadRefs,
@@ -61,6 +63,15 @@ export class ThreadSettlementUnsupportedError extends Schema.TaggedError<ThreadS
 ) {
   override get message(): string {
     return "This environment's server does not support settling yet. Update the server to use Settle.";
+  }
+}
+
+export class ThreadAutoSettleOptOutUnsupportedError extends Schema.TaggedError<ThreadAutoSettleOptOutUnsupportedError>()(
+  "ThreadAutoSettleOptOutUnsupportedError",
+  { environmentId: EnvironmentId, threadId: ThreadId },
+) {
+  override get message(): string {
+    return "This environment's server does not support per-thread auto-settle settings yet.";
   }
 }
 
@@ -129,6 +140,9 @@ export function useThreadActions() {
   const unsettleThreadMutation = useAtomCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   });
+  const setThreadAutoSettleMutation = useAtomCommand(threadEnvironment.setAutoSettle, {
+    reportFailure: false,
+  });
   const pinThreadMutation = useAtomCommand(threadEnvironment.pin, {
     reportFailure: false,
   });
@@ -185,7 +199,7 @@ export function useThreadActions() {
       const resolved = resolveThreadTarget(target);
       if (!resolved) return AsyncResult.success(undefined);
       const { thread, threadRef } = resolved;
-      if (thread.runtime?.status === "running" && thread.runtime.activeRunId != null) {
+      if (!threadRuntimeCanArchive(thread.runtime)) {
         return AsyncResult.failure(
           Cause.fail(
             new ThreadArchiveBlockedError({
@@ -536,6 +550,26 @@ export function useThreadActions() {
     [pinThreadMutation],
   );
 
+  const setThreadAutoSettle = useCallback(
+    async (target: ScopedThreadRef, enabled: boolean) => {
+      if (!readEnvironmentSupportsAutoSettleOptOut(target.environmentId)) {
+        return AsyncResult.failure(
+          Cause.fail(
+            new ThreadAutoSettleOptOutUnsupportedError({
+              environmentId: target.environmentId,
+              threadId: target.threadId,
+            }),
+          ),
+        );
+      }
+      return setThreadAutoSettleMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId, enabled },
+      });
+    },
+    [setThreadAutoSettleMutation],
+  );
+
   const unpinThread = useCallback(
     async (target: ScopedThreadRef) => {
       if (!readEnvironmentSupportsPinning(target.environmentId)) {
@@ -647,6 +681,7 @@ export function useThreadActions() {
       confirmAndDeleteThread,
       settleThread,
       unsettleThread,
+      setThreadAutoSettle,
       snoozeThread,
       unsnoozeThread,
       pinThread,
@@ -658,6 +693,7 @@ export function useThreadActions() {
       deleteThread,
       pinThread,
       settleThread,
+      setThreadAutoSettle,
       snoozeThread,
       unarchiveThread,
       unpinThread,

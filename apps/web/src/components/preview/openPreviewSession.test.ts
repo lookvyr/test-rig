@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { readThreadPreviewState, resetPreviewStateForTests } from "~/previewStateStore";
 
+import { __setClientSettingsForTests } from "~/hooks/useSettings";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
+
 import { openPreviewSession } from "./openPreviewSession";
 
 const threadRef = {
@@ -25,7 +28,10 @@ const snapshot: PreviewSessionSnapshot = {
   updatedAt: "2026-06-11T23:00:00.000Z",
 };
 
-beforeEach(resetPreviewStateForTests);
+beforeEach(() => {
+  resetPreviewStateForTests();
+  __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS);
+});
 
 describe("openPreviewSession", () => {
   it("creates an idle tab without recording a recently visited URL", async () => {
@@ -41,7 +47,7 @@ describe("openPreviewSession", () => {
       threadRef,
     });
 
-    expect(open).toHaveBeenCalledWith({ threadId: "thread-1" });
+    expect(open).toHaveBeenCalledWith({ threadId: "thread-1", profileId: "default" });
     expect(readThreadPreviewState(threadRef).snapshot).toEqual(idleSnapshot);
     expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual([]);
   });
@@ -55,7 +61,11 @@ describe("openPreviewSession", () => {
       url: "t3.chat",
     });
 
-    expect(open).toHaveBeenCalledWith({ threadId: "thread-1", url: "t3.chat" });
+    expect(open).toHaveBeenCalledWith({
+      threadId: "thread-1",
+      url: "t3.chat",
+      profileId: "default",
+    });
     expect(readThreadPreviewState(threadRef).snapshot).toEqual(snapshot);
     expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual(["https://t3.chat/"]);
   });
@@ -73,4 +83,24 @@ describe("openPreviewSession", () => {
     expect(readThreadPreviewState(threadRef).snapshot).toBeNull();
     expect(readThreadPreviewState(threadRef).recentlySeenUrls).toEqual([]);
   });
+});
+
+it("uses the saved profile default and retains an explicitly chosen profile", async () => {
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    browserProfiles: [{ id: "work", name: "Work", kind: "persistent" }],
+    browserDefaultProfileId: "work",
+  });
+  const open = vi.fn(async (_input: PreviewOpenInput) => AsyncResult.success(snapshot));
+  await openPreviewSession({ threadRef, openPreview: ({ input }) => open(input) });
+  expect(open).toHaveBeenLastCalledWith({ threadId: "thread-1", profileId: "work" });
+  await openPreviewSession({
+    threadRef,
+    profileId: "incognito",
+    openPreview: ({ input }) => open(input),
+  });
+  expect(open).toHaveBeenLastCalledWith({ threadId: "thread-1", profileId: "incognito" });
+  __setClientSettingsForTests({ ...DEFAULT_CLIENT_SETTINGS, browserDefaultProfileId: "deleted" });
+  await openPreviewSession({ threadRef, openPreview: ({ input }) => open(input) });
+  expect(open).toHaveBeenLastCalledWith({ threadId: "thread-1", profileId: "default" });
 });

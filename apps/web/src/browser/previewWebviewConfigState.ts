@@ -1,3 +1,4 @@
+import { DEFAULT_BROWSER_PROFILE_ID } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   DesktopPreviewBridge,
@@ -46,31 +47,35 @@ type PreviewConfigBridge = Pick<DesktopPreviewBridge, "getPreviewConfig">;
 export const loadPreviewWebviewConfig = (
   environmentId: EnvironmentId,
   bridge: PreviewConfigBridge | null = previewBridge,
+  profileId = DEFAULT_BROWSER_PROFILE_ID,
 ): Effect.Effect<DesktopPreviewWebviewConfig, PreviewWebviewConfigError> => {
   if (bridge === null) {
     return Effect.fail(new PreviewWebviewBridgeUnavailableError({ environmentId }));
   }
 
   return Effect.tryPromise({
-    try: () => bridge.getPreviewConfig(environmentId),
+    try: () => bridge.getPreviewConfig(environmentId, profileId),
     catch: (cause) => new PreviewWebviewConfigLoadError({ environmentId, cause }),
   });
 };
 
 const previewWebviewConfigAtom = Atom.family((environmentId: EnvironmentId) =>
-  Atom.make(loadPreviewWebviewConfig(environmentId)).pipe(
-    Atom.swr({
-      staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
-      revalidateOnMount: true,
-    }),
-    Atom.setIdleTTL(PREVIEW_CONFIG_IDLE_TTL_MS),
-    Atom.withLabel(`preview:webview-config:${environmentId}`),
+  Atom.family((profileId: string) =>
+    Atom.make(loadPreviewWebviewConfig(environmentId, previewBridge, profileId)).pipe(
+      Atom.swr({
+        staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
+        revalidateOnMount: true,
+      }),
+      Atom.setIdleTTL(PREVIEW_CONFIG_IDLE_TTL_MS),
+      Atom.withLabel(`preview:webview-config:${environmentId}:${profileId}`),
+    ),
   ),
 );
 
 export function usePreviewWebviewConfig(
   environmentId: EnvironmentId,
+  profileId = DEFAULT_BROWSER_PROFILE_ID,
 ): DesktopPreviewWebviewConfig | null {
-  const result = useAtomValue(previewWebviewConfigAtom(environmentId));
+  const result = useAtomValue(previewWebviewConfigAtom(environmentId)(profileId));
   return Option.getOrNull(AsyncResult.value(result));
 }

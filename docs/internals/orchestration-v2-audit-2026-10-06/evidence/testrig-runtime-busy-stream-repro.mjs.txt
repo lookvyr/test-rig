@@ -1,0 +1,20 @@
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const require = createRequire('/Users/smills/REPOS/test-rig/apps/server/package.json');
+const moduleAt = async name => import(pathToFileURL(require.resolve(name)).href);
+const [Effect, Queue, Stream, Fiber, Deferred, Schema, Rpc, RpcClient, RpcGroup] = await Promise.all(['effect/Effect','effect/Queue','effect/Stream','effect/Fiber','effect/Deferred','effect/Schema','effect/unstable/rpc/Rpc','effect/unstable/rpc/RpcClient','effect/unstable/rpc/RpcGroup'].map(moduleAt));
+const group = RpcGroup.make(Rpc.make('subscribe',{success:Schema.Number,stream:true}));
+await Effect.runPromise(Effect.scoped(Effect.gen(function*(){
+ const requests=yield* Queue.unbounded();
+ const consuming=yield* Deferred.make();
+ const client=yield* RpcClient.makeNoSerialization(group,{supportsAck:true,streamBufferSize:16,onFromClient:({message})=>Queue.offer(requests,message)});
+ const consumer=yield* client.client.subscribe().pipe(Stream.runForEach(()=>Deferred.succeed(consuming, undefined).pipe(Effect.andThen(Effect.never))),Effect.forkScoped);
+ const request=yield* Queue.take(requests);
+ yield* client.write({_tag:"Chunk",requestId:request.id,values:[1]});
+ yield* Deferred.await(consuming);
+ const writer=yield* client.write({_tag:'Chunk',requestId:request.id,values:Array.from({length:64},(_,i)=>i)}).pipe(Effect.forkScoped);
+ yield* Effect.yieldNow;
+ yield* Fiber.interrupt(consumer);
+ console.log(JSON.stringify({readerReleasedAfterStreamClosed:writer.pollUnsafe()!==undefined}));
+ yield* Fiber.interrupt(writer);
+})));

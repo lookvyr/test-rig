@@ -353,6 +353,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
               }),
             ),
           );
+          assert.deepStrictEqual(status.slashCommands, [
+            { name: "compact", description: "Compact conversation context" },
+          ]);
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.installed, true);
           assert.strictEqual(status.version, "1.0.0");

@@ -562,3 +562,82 @@ for (const instanceId of ["codex", "claude-code", "opencode"]) {
     }).pipe(Effect.provide(SqlitePersistenceMemory)),
   );
 }
+
+for (const mutation of ["edit", "pause", "delete", "recreate"] as const) {
+  it.effect(`preserves a concurrent ${mutation} before rescheduling a missed fixed-time task`, () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-10-06T12:00:00.000Z";
+      yield* TestClock.setTime(Date.parse(now));
+      yield* insertRow(
+        sql,
+        { id: "missed-a-block", next: "2026-10-06T10:00:00.000Z", enabled: 1, status: "never" },
+        now,
+      );
+      yield* insertRow(
+        sql,
+        {
+          id: "missed-b-victim",
+          next: "2026-10-06T11:00:00.000Z",
+          enabled: 1,
+          status: "never",
+          scheduleJson: '{"type":"fixed_time","timeOfDay":"11:00"}',
+        },
+        now,
+      );
+      yield* insertRow(sql, { id: "missed-c-drain", next: now, enabled: 1, status: "never" }, now);
+      const blocked = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const drained = yield* Deferred.make<void>();
+      yield* Effect.gen(function* () {
+        const service = yield* ScheduledTaskService.ScheduledTaskService;
+        yield* Deferred.await(blocked);
+        const before = (yield* service.list()).tasks.find((task) => task.id === "missed-b-victim")!;
+        if (mutation === "edit") {
+          yield* service.upsert({
+            ...before,
+            requireExisting: true,
+            schedule: { type: "interval", everyMs: 120_000 },
+          });
+        } else if (mutation === "pause") {
+          yield* service.setEnabled({ id: before.id, enabled: false });
+        } else {
+          yield* service.delete({ id: before.id });
+          if (mutation === "recreate")
+            yield* service.upsert({
+              ...before,
+              title: "Replacement",
+              schedule: { type: "interval", everyMs: 180_000 },
+            });
+        }
+        const saved = (yield* service.list()).tasks.find((task) => task.id === before.id);
+        yield* Deferred.succeed(release, undefined);
+        yield* Deferred.await(drained);
+        const after = (yield* service.list()).tasks.find((task) => task.id === before.id);
+        assert.deepEqual(after, saved);
+      }).pipe(
+        Effect.provide(
+          ScheduledTaskService.layer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+                  launch: (input) =>
+                    input.initialMessage?.scheduledTaskId === "missed-a-block"
+                      ? Deferred.succeed(blocked, undefined).pipe(
+                          Effect.andThen(Deferred.await(release)),
+                          Effect.as({} as never),
+                        )
+                      : Deferred.succeed(drained, undefined).pipe(Effect.andThen(Effect.never)),
+                }),
+                Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+                NodeCrypto.layer,
+                Scheduler.layer,
+              ),
+            ),
+          ),
+        ),
+        Effect.scoped,
+      );
+    }).pipe(Effect.provide(SqlitePersistenceMemory)),
+  );
+}

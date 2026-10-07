@@ -1,3 +1,4 @@
+import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -10,16 +11,17 @@ export const writeFileStringAtomically = (input: {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const targetDirectory = path.dirname(input.filePath);
+      const targetPath = yield* resolveSymlinkTarget(input.filePath);
+      const targetDirectory = path.dirname(targetPath);
 
       yield* fs.makeDirectory(targetDirectory, { recursive: true });
       const tempDirectory = yield* fs.makeTempDirectoryScoped({
         directory: targetDirectory,
-        prefix: `${path.basename(input.filePath)}.`,
+        prefix: `${path.basename(targetPath)}.`,
       });
       const tempPath = path.join(tempDirectory, "contents.tmp");
 
       yield* fs.writeFileString(tempPath, input.contents);
-      yield* fs.rename(tempPath, input.filePath);
+      yield* fs.rename(tempPath, targetPath);
     }),
   );

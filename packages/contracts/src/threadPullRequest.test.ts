@@ -54,3 +54,32 @@ it.effect("decodes thread pull request links with snapshot and stack", () =>
     assert.strictEqual(links[1]?.snapshot?.state, "open");
   }),
 );
+
+it.effect("keeps historical watch records readable without passed check names", () =>
+  Effect.gen(function* () {
+    const links = yield* decodeLinks([
+      {
+        host: "github.com",
+        repository: "owner/repo",
+        number: 1,
+        url: "https://github.com/owner/repo/pull/1",
+        source: "manual",
+        linkedAt: "2026-10-06T12:00:00.000Z",
+        snapshot: null,
+        stack: null,
+        watch: {
+          startedAt: "2026-10-06T12:00:00.000Z",
+          headSha: "head",
+          failedChecks: [],
+          passed: true,
+          remarksThrough: "2026-10-06T12:00:00.000Z",
+          remarkIds: [],
+          conflicting: false,
+          wakes: 0,
+        },
+      },
+    ]);
+    assert.equal(links[0]?.watch?.passed, true);
+    assert.isUndefined(links[0]?.watch?.passedChecks);
+  }),
+);

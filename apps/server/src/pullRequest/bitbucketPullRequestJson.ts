@@ -98,6 +98,7 @@ const RawCommentSchema = Schema.Struct({
   content: Schema.optional(Schema.NullOr(Schema.Struct({ raw: Schema.optional(Schema.String) }))),
   user: Schema.optional(Schema.NullOr(RawUserSchema)),
   created_on: Schema.String,
+  updated_on: Schema.optional(Schema.NullOr(Schema.String)),
   deleted: Schema.optional(Schema.Boolean),
   /** A comment still being drafted by its author. */
   pending: Schema.optional(Schema.Boolean),
@@ -473,6 +474,7 @@ export function buildReviewThreads(
         author: toActor(comment.user),
         body: comment.content?.raw ?? "",
         createdAt: toIsoUtc(comment.created_on),
+        ...(comment.updated_on ? { editedAt: toIsoUtc(comment.updated_on) } : {}),
         url: trimmed(comment.links?.html?.href),
       }));
     return entries.length === 0 ? [] : [{ ...thread, comments: entries }];
@@ -505,6 +507,7 @@ export function decodeCommentsJson(raw: string): Result.Result<BitbucketComments
       author: toActor(comment.user),
       body,
       createdAt: toIsoUtc(comment.created_on),
+      ...(comment.updated_on ? { editedAt: toIsoUtc(comment.updated_on) } : {}),
       url: trimmed(comment.links?.html?.href),
       path,
       reviewState: null,

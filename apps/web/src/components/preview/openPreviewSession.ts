@@ -1,10 +1,14 @@
 import type {
   EnvironmentId,
   PreviewOpenInput,
+  PreviewViewportSetting,
   PreviewSessionSnapshot,
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+
+import { ensureClientSettingsHydrated } from "~/hooks/useSettings";
+import { browserDefaultOpenProfileId } from "~/browser/browserDefaults";
 
 import { applyPreviewServerSnapshot, rememberPreviewUrl } from "~/previewStateStore";
 
@@ -15,15 +19,20 @@ interface OpenPreviewSessionInput<E> {
   }) => Promise<AtomCommandResult<PreviewSessionSnapshot, E>>;
   threadRef: ScopedThreadRef;
   url?: string;
+  profileId?: string;
+  viewport?: PreviewViewportSetting;
 }
 
 export async function openPreviewSession<E>(
   input: OpenPreviewSessionInput<E>,
 ): Promise<AtomCommandResult<PreviewSessionSnapshot, E>> {
+  if (input.profileId === undefined) await ensureClientSettingsHydrated();
   const result = await input.openPreview({
     environmentId: input.threadRef.environmentId,
     input: {
       threadId: input.threadRef.threadId,
+      profileId: input.profileId ?? browserDefaultOpenProfileId(),
+      ...(input.viewport === undefined ? {} : { viewport: input.viewport }),
       ...(input.url === undefined ? {} : { url: input.url }),
     },
   });

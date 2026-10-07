@@ -1,3 +1,4 @@
+import { BrowserProfileId } from "./browserProfile.ts";
 import type {
   GitListPullRequestsInput,
   GitListPullRequestsResult,
@@ -425,6 +426,8 @@ export const DesktopPreviewColorSchemeSchema: Schema.Codec<DesktopPreviewColorSc
   Schema.Literals(["system", "light", "dark"]);
 
 export interface DesktopPreviewTabState {
+  audioMuted?: boolean;
+  audible?: boolean;
   tabId: string;
   webContentsId: number | null;
   navStatus: DesktopPreviewNavStatus;
@@ -466,6 +469,8 @@ export const DesktopPreviewNavStatusSchema = Schema.Union([
 
 export const DesktopPreviewTabStateSchema: Schema.Codec<DesktopPreviewTabState> = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
+  audioMuted: Schema.optionalKey(Schema.Boolean),
+  audible: Schema.optionalKey(Schema.Boolean),
   webContentsId: Schema.NullOr(Schema.Int),
   navStatus: DesktopPreviewNavStatusSchema,
   canGoBack: Schema.Boolean,
@@ -843,6 +848,18 @@ export const DesktopPreviewNavigateInputSchema = Schema.Struct({
 
 export const DesktopPreviewConfigInputSchema = Schema.Struct({
   environmentId: EnvironmentId,
+  profileId: Schema.optional(BrowserProfileId),
+});
+
+/** Undefined preserves legacy global clear; a scoped payload must remain an object. */
+export const DesktopPreviewClearDataInputSchema = Schema.Union([
+  Schema.Undefined,
+  DesktopPreviewConfigInputSchema,
+]);
+
+export const DesktopPreviewSetAudioMutedInputSchema = Schema.Struct({
+  tabId: DesktopPreviewTabIdSchema,
+  audioMuted: Schema.Boolean,
 });
 
 export const DesktopPreviewSetColorSchemeInputSchema = Schema.Struct({
@@ -895,6 +912,7 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
 });
 
 export interface DesktopBridge {
+  pasteAsText?: () => Promise<void>;
   getAppBranding: () => DesktopAppBranding | null;
   // One bootstrap per pool instance currently registered with bootstrap
   // info (omits instances whose backend hasn't produced a config yet).
@@ -973,19 +991,23 @@ export interface DesktopPreviewBridge {
    * override). Persists per tab and is re-applied across webview swaps.
    */
   setColorScheme: (tabId: string, colorScheme: DesktopPreviewColorScheme) => Promise<void>;
+  setAudioMuted: (tabId: string, audioMuted: boolean) => Promise<void>;
   /** Open the guest webview's DevTools (detached). */
   openDevTools: (tabId: string) => Promise<void>;
-  /** Drop cookies + storage data for the preview partition (all tabs). */
-  clearCookies: () => Promise<void>;
-  /** Drop the HTTP cache for the preview partition (all tabs). */
-  clearCache: () => Promise<void>;
+  /** Drop cookies and storage for the chosen profile, or all initialized profiles when omitted. */
+  clearCookies: (environmentId?: EnvironmentId, profileId?: string) => Promise<void>;
+  /** Drop the HTTP cache for the chosen profile, or all initialized profiles when omitted. */
+  clearCache: (environmentId?: EnvironmentId, profileId?: string) => Promise<void>;
   /**
    * One-shot config for mounting a preview `<webview>`. Replaces three
    * earlier round-trip calls (`getBrowserPartition`, `getWebviewPreferences`,
    * `getPickPreloadPath`) so adding a new field here only requires touching
    * the contract + main, not the renderer's mount logic.
    */
-  getPreviewConfig: (environmentId: EnvironmentId) => Promise<DesktopPreviewWebviewConfig>;
+  getPreviewConfig: (
+    environmentId: EnvironmentId,
+    profileId?: string,
+  ) => Promise<DesktopPreviewWebviewConfig>;
   setAnnotationTheme: (theme: DesktopPreviewAnnotationTheme) => Promise<void>;
   /**
    * Activate the in-page element picker for the given tab. Resolves with

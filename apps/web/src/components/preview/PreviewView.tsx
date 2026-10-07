@@ -59,6 +59,7 @@ interface Props {
   tabId?: string | null;
   configuredUrls?: ReadonlyArray<string> | undefined;
   visible: boolean;
+  browserZIndex?: number;
   onSendAnnotation?: (
     annotation: PreviewAnnotationPayload,
     image: ComposerImageAttachment | null,
@@ -76,6 +77,7 @@ export function PreviewView({
   tabId: requestedTabId,
   configuredUrls,
   visible,
+  browserZIndex = 30,
   onSendAnnotation,
 }: Props) {
   const [focusUrlNonce, setFocusUrlNonce] = useState<number | undefined>(undefined);
@@ -673,6 +675,8 @@ export function PreviewView({
         trailingActions={
           previewBridge ? (
             <PreviewMoreMenu
+              environmentId={threadRef.environmentId}
+              profileId={snapshot?.profileId}
               tabId={runtimeTabId}
               hasWebContents={desktopOverlay?.hasWebContents ?? false}
               zoomFactor={desktopOverlay?.zoomFactor ?? 1}
@@ -692,6 +696,7 @@ export function PreviewView({
             key={runtimeTabId}
             tabId={runtimeTabId}
             visible={visible && !isUnreachable}
+            zIndex={browserZIndex}
             className="absolute inset-0 h-full w-full"
           />
         ) : null}

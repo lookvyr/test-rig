@@ -29,6 +29,7 @@ import {
   getLocalEnvironmentBearerToken,
   getWindowFullscreenState,
   openExternal,
+  pasteAsText,
   pickFolder,
   pickThemeFiles,
   setTheme,
@@ -76,6 +77,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(setTheme);
   yield* ipc.handle(showContextMenu);
   yield* ipc.handle(openExternal);
+  yield* ipc.handle(pasteAsText);
   for (const previewMethod of PreviewIpc.methods) {
     yield* ipc.handle(previewMethod);
   }

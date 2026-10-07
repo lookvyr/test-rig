@@ -100,6 +100,7 @@ const adapter = {
 interface HarnessOptions {
   readonly managedFolders?: Layer.Layer<ManagedProjectFolders.ManagedProjectFolders>;
   readonly createWorktree?: GitWorkflow.GitWorkflowService["Service"]["createWorktree"];
+  readonly hasCommit?: GitWorkflow.GitWorkflowService["Service"]["hasCommit"];
   readonly fetchRemote?: GitWorkflow.GitWorkflowService["Service"]["fetchRemote"];
   readonly renameBranch?: GitWorkflow.GitWorkflowService["Service"]["renameBranch"];
   readonly refreshLocalStatus?: VcsStatusBroadcaster.VcsStatusBroadcaster["Service"]["refreshLocalStatus"];
@@ -176,6 +177,7 @@ function makeHarness(options: HarnessOptions = {}) {
     }),
     Layer.mock(GitWorkflow.GitWorkflowService)({
       createWorktree,
+      hasCommit: options.hasCommit ?? (() => Effect.succeed(false)),
       renameBranch,
       fetchRemote: options.fetchRemote ?? (() => Effect.void),
       remoteExists: () => Effect.succeed(true),
@@ -1135,6 +1137,71 @@ it.effect("names the worktree itself when the client provides no branch", () =>
             Effect.map((projection) => projection.thread.branch === "test-rig/generated-branch"),
           ),
       );
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect.each(["test-rig", "test-rig/_worktree"])(
+  "flattens only server-invented worktree refs when %s already exists",
+  (conflictingBranch) =>
+    Effect.gen(function* () {
+      const claimed = yield* Deferred.make<string | null>();
+      const harness = makeHarness({
+        hasCommit: ({ refName }) => Effect.succeed(refName === `refs/heads/${conflictingBranch}`),
+        createWorktree: (input) =>
+          Deferred.succeed(claimed, input.newRefName ?? null).pipe(
+            Effect.as({
+              worktree: {
+                path: "/repo-worktrees/flat",
+                refName: input.newRefName ?? input.refName,
+              },
+            }),
+          ),
+      });
+      yield* Effect.gen(function* () {
+        yield* (yield* ThreadLaunch.ThreadLaunchService).launch(
+          launchInput({
+            command: `command:flat:${conflictingBranch}`,
+            thread: `thread:flat:${conflictingBranch}`,
+            message: "Start isolated work",
+            workspace: { type: "worktree", baseRef: "main" },
+          }),
+        );
+        assert.match((yield* Deferred.await(claimed)) ?? "", /^test-rig-_worktree-[0-9a-f]{8}$/u);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+);
+
+it.effect("passes an explicitly requested branch through without collision rewriting", () =>
+  Effect.gen(function* () {
+    const claimed = yield* Deferred.make<string | null>();
+    const requested = "test-rig/_worktree/deadbeef";
+    const harness = makeHarness({
+      hasCommit: () => Effect.succeed(true),
+      createWorktree: (input) =>
+        Deferred.succeed(claimed, input.newRefName ?? null).pipe(
+          Effect.andThen(
+            Effect.fail(
+              new GitCommandError({
+                operation: "createWorktree",
+                command: "git",
+                cwd: "/repo",
+                detail: "namespace collision",
+              }),
+            ),
+          ),
+        ),
+    });
+    yield* Effect.gen(function* () {
+      yield* (yield* ThreadLaunch.ThreadLaunchService).launch(
+        launchInput({
+          command: "command:explicit-collision",
+          thread: "thread:explicit-collision",
+          message: "Use the exact branch",
+          workspace: { type: "worktree", baseRef: "main", branch: requested },
+        }),
+      );
+      assert.equal(yield* Deferred.await(claimed), requested);
     }).pipe(Effect.provide(harness.layer));
   }),
 );
@@ -2254,14 +2321,14 @@ it.effect("cancels tracked setup before provider work is released", () =>
         attachments: original.attachments,
         ...(original.context ? { context: original.context } : {}),
         modelSelection,
-        runtimeMode: input.runtimeMode,
-        interactionMode: input.interactionMode,
         dispatchMode: { type: "start_immediately" },
         createdBy: "user",
         creationSource: "web",
       });
       const continued = yield* threads.getThreadProjection(launched.threadId);
       assert.isNull(continued.thread.worktreePath);
+      assert.equal(continued.thread.runtimeMode, input.runtimeMode);
+      assert.equal(continued.thread.interactionMode, input.interactionMode);
       assert.equal(continued.runs[0]?.status, "failed");
       assert.equal(continued.runs[1]?.status, "starting");
       assert.equal(continued.messages.at(-1)?.text, original.text);

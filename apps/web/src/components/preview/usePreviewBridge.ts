@@ -83,6 +83,8 @@ function projectDesktopState(state: DesktopPreviewTabState): DesktopPreviewOverl
     loading: state.navStatus.kind === "Loading",
     zoomFactor: state.zoomFactor,
     pictureInPicture: state.pictureInPicture,
+    audioMuted: state.audioMuted ?? false,
+    audible: state.audible ?? false,
     colorScheme: state.colorScheme,
     controller: state.controller,
   };

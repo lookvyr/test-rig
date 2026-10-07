@@ -1,4 +1,5 @@
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Mark, type Node as ProseMirrorNode } from "@tiptap/pm/model";
+import type { EditorState, Transaction } from "@tiptap/pm/state";
 import type { JSONContent } from "@tiptap/core";
 import { collectComposerMarkdownCodeRanges } from "@t3tools/shared/composerInlineTokens";
 
@@ -702,4 +703,22 @@ export function pmToFlat(map: RichDocMap, pmPos: number): number {
     if (run.pmPos <= pmPos) best = run.flatStart + run.docLen;
   }
   return Math.max(0, Math.min(best, map.docLength));
+}
+
+/** Arrow keys can choose either side's formatting at one styled text boundary. */
+export function stepCaretAcrossStyledEdge(
+  state: EditorState,
+  direction: -1 | 1,
+): Transaction | null {
+  const { selection } = state;
+  if (!selection.empty || !selection.$from.parent.inlineContent) return null;
+  const { $from } = selection;
+  const before = $from.nodeBefore?.marks ?? Mark.none;
+  const after = $from.nodeAfter?.marks ?? Mark.none;
+  if (Mark.sameSet(before, after)) return null;
+  const current = state.storedMarks ?? $from.marks();
+  // Preserve formatting explicitly toggled by the user at this boundary.
+  if (!Mark.sameSet(current, before) && !Mark.sameSet(current, after)) return null;
+  const target = direction === -1 ? before : after;
+  return Mark.sameSet(current, target) ? null : state.tr.setStoredMarks(target);
 }

@@ -1,3 +1,4 @@
+import { DESKTOP_PASTE_AS_TEXT_EVENT } from "~/lib/desktopPasteAsText";
 import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
@@ -47,6 +48,7 @@ import {
   flatToPm,
   pmToFlat,
   serializeEditorDoc,
+  stepCaretAcrossStyledEdge,
   type SkillMeta,
 } from "~/composer-rich-text-doc";
 import type { TerminalContextDraft } from "~/lib/terminalContext";
@@ -73,6 +75,7 @@ export interface ComposerPromptEditorHandle {
   focus: () => void;
   focusAt: (cursor: number) => void;
   focusAtEnd: () => void;
+  isCaretOnVisualEdge: (edge: "start" | "end") => boolean;
   readSnapshot: () => {
     value: string;
     cursor: number;
@@ -305,6 +308,7 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
     terminalContexts: ReadonlyArray<TerminalContextDraft>;
   } | null>(null);
   const appliedInitialSelection = useRef(false);
+  const pasteAsTextUntilRef = useRef(0);
   const editorHolder = useRef<Editor | null>(null);
   const snapshot = useRef({
     value,
@@ -370,7 +374,7 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
           link: false,
           code: false,
         }),
-        Code.extend({ excludes: "" }),
+        Code.extend({ excludes: "", exitable: false }),
         ComposerMentionExtension,
         ComposerThreadExtension,
         ComposerSkillExtension,
@@ -422,6 +426,15 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
           ) {
             const { $from } = view.state.selection;
             const backwards = event.key === "ArrowLeft" || event.key === "Backspace";
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              const step = stepCaretAcrossStyledEdge(view.state, backwards ? -1 : 1);
+              if (step) {
+                event.preventDefault();
+                event.stopPropagation();
+                view.dispatch(step);
+                return true;
+              }
+            }
             const adjacent = backwards ? $from.nodeBefore : $from.nodeAfter;
             if (adjacent?.type.name.startsWith("composer-")) {
               const other = $from.pos + (backwards ? -adjacent.nodeSize : adjacent.nodeSize);
@@ -496,12 +509,17 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
           return true;
         },
         handlePaste: (view, event) => {
-          if (
-            event.defaultPrevented ||
-            !event.clipboardData ||
-            event.clipboardData.files.length > 0
-          )
-            return false;
+          if (event.defaultPrevented || !event.clipboardData) return false;
+          const plainTextOnly = Date.now() <= pasteAsTextUntilRef.current;
+          pasteAsTextUntilRef.current = 0;
+          if (plainTextOnly) {
+            const text = event.clipboardData.getData("text/plain");
+            if (!text) return false;
+            event.preventDefault();
+            view.dispatch(view.state.tr.insertText(text).scrollIntoView());
+            return true;
+          }
+          if (event.clipboardData.files.length > 0) return false;
           let text = event.clipboardData.getData("text/plain");
           if (!text) return false;
           event.preventDefault();
@@ -633,6 +651,28 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
     },
     [editor],
   );
+  useEffect(() => {
+    const arm = () => {
+      if (document.activeElement && editor?.view.dom.contains(document.activeElement))
+        pasteAsTextUntilRef.current = Date.now() + 1_000;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "v")
+        arm();
+    };
+    const clear = () => {
+      pasteAsTextUntilRef.current = 0;
+    };
+    window.addEventListener(DESKTOP_PASTE_AS_TEXT_EVENT, arm);
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("blur", clear);
+    return () => {
+      window.removeEventListener(DESKTOP_PASTE_AS_TEXT_EVENT, arm);
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("blur", clear);
+    };
+  }, [editor]);
+
   useImperativeHandle(
     editorRef,
     () => ({
@@ -641,6 +681,19 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
       focusAtEnd: () => {
         const nextValue = pendingControlled.current?.value ?? snapshot.current.value;
         focusAt(collapseExpandedComposerCursor(nextValue, nextValue.length));
+      },
+      isCaretOnVisualEdge: (edge) => {
+        if (!editor || !editor.state.selection.empty) return false;
+        const { from } = editor.state.selection;
+        const root = editor.view.dom;
+        const edgeElement = edge === "start" ? root.firstElementChild : root.lastElementChild;
+        if (!edgeElement) return true;
+        const caret = editor.view.coordsAtPos(from);
+        const bounds = edgeElement.getBoundingClientRect();
+        const lineHeight = Math.max(1, caret.bottom - caret.top);
+        return edge === "start"
+          ? caret.top - bounds.top < lineHeight / 2
+          : bounds.bottom - caret.bottom < lineHeight / 2;
       },
       readSnapshot: () => {
         const pending = pendingControlled.current;

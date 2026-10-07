@@ -617,6 +617,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     checkedAt,
     models: snapshot.models,
     skills: snapshot.skills,
+    slashCommands: [{ name: "compact", description: "Compact conversation context" }],
     probe: {
       installed: true,
       version: snapshot.version ?? null,

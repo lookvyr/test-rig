@@ -1,5 +1,6 @@
 import {
   type FilesystemBrowseEntry,
+  type EnvironmentId,
   type KeybindingCommand,
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
@@ -24,7 +25,8 @@ export const ADDON_ICON_CLASS = "size-4";
 export type SearchOverlayMode = "command" | "files" | "content";
 
 export interface CommandPaletteOpenIntent {
-  readonly kind: "add-project" | "new-thread-in";
+  readonly environmentId?: EnvironmentId;
+  readonly kind: "add-project" | "new-thread-in" | "new-project";
 }
 
 export interface CommandPaletteUiState {
@@ -36,6 +38,7 @@ export interface CommandPaletteUiState {
 export type CommandPaletteUiAction =
   | { readonly _tag: "SetOpen"; readonly open: boolean }
   | { readonly _tag: "ToggleMode"; readonly mode: SearchOverlayMode }
+  | { readonly _tag: "OpenNewProject"; readonly environmentId?: EnvironmentId }
   | { readonly _tag: "OpenAddProject" }
   | { readonly _tag: "OpenNewThreadIn" }
   | { readonly _tag: "ClearOpenIntent" };
@@ -55,6 +58,15 @@ export function reduceCommandPaletteUiState(
       return state.open && state.mode === action.mode
         ? { open: false, mode: "command", openIntent: null }
         : { open: true, mode: action.mode, openIntent: null };
+    case "OpenNewProject":
+      return {
+        open: true,
+        mode: "command",
+        openIntent: {
+          kind: "new-project",
+          ...(action.environmentId ? { environmentId: action.environmentId } : {}),
+        },
+      };
     case "OpenAddProject":
       return { open: true, mode: "command", openIntent: { kind: "add-project" } };
     case "OpenNewThreadIn":

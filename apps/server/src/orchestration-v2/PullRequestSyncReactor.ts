@@ -17,6 +17,7 @@ import {
   visibleThreadPullRequests,
 } from "@t3tools/shared/threadPullRequests";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -32,6 +33,7 @@ import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import { isTerminalRunStatus } from "./ThreadManagementService.ts";
+import { pullRequestRateLimitFailure } from "./pullRequestRateLimit.ts";
 
 const SLOW_SYNC_INTERVAL_MS = 15 * 60 * 1_000;
 /** Shell commands that can merge or close a pull request without a merge notification. */
@@ -142,6 +144,8 @@ export const make = Effect.gen(function* () {
   // linking dozens of pull requests) is read together and shares the summary batches.
   let requestedSweepQueued = false;
   const retryStacks = new Set<string>();
+  // Keep forced refreshes pending while their credential's host waits for a reset.
+  const pausedUntil = new Map<string, number>();
 
   const isDue = (key: string, entries: ReadonlyArray<LinkEntry>, nowMs: number): boolean => {
     if (requested.has(key) || retryStacks.has(key)) return true;
@@ -282,10 +286,14 @@ export const make = Effect.gen(function* () {
               })),
               Effect.catchCauseIf(
                 (cause) => !Cause.hasInterruptsOnly(cause),
-                () =>
-                  Effect.logWarning("pull request stack lookup failed", {
-                    key,
-                  }).pipe(Effect.as(null)),
+                (cause) =>
+                  pullRequestRateLimitFailure(cause) !== null
+                    ? Effect.sync(() => retryStacks.add(key)).pipe(
+                        Effect.andThen(Effect.failCause(cause)),
+                      )
+                    : Effect.logWarning("pull request stack lookup failed", {
+                        key,
+                      }).pipe(Effect.as(null)),
               ),
             );
       if (needsStack) {
@@ -317,12 +325,29 @@ export const make = Effect.gen(function* () {
 
     yield* Effect.forEach(
       groups,
-      ([key, entries]) =>
-        (scope === "all" || requested.has(key)) && isDue(key, entries, nowMs)
-          ? syncGroup(key, entries).pipe(
-              Effect.catchCause(logSkipped("pull request sync skipped", { key })),
-            )
-          : Effect.void,
+      ([key, entries]) => {
+        if (!((scope === "all" || requested.has(key)) && isDue(key, entries, nowMs)))
+          return Effect.void;
+        const first = entries[0]!;
+        const pauseKey = `${first.thread.projectId}\0${normalizeThreadPullRequestKey(first.link).host}`;
+        return Clock.currentTimeMillis.pipe(
+          Effect.flatMap((startedAt) =>
+            (pausedUntil.get(pauseKey) ?? 0) > startedAt
+              ? Effect.void
+              : syncGroup(key, entries).pipe(
+                  Effect.catchCause((cause) => {
+                    const pause = pullRequestRateLimitFailure(cause);
+                    if (pause?.retryAt !== undefined)
+                      pausedUntil.set(
+                        pauseKey,
+                        Math.max(pause.retryAt, pausedUntil.get(pauseKey) ?? 0),
+                      );
+                    return logSkipped("pull request sync skipped", { key })(cause);
+                  }),
+                ),
+          ),
+        );
+      },
       // As wide as one batched summary read, so the sweep's reads on a host arrive together and
       // GitHub answers them in one request rather than one `gh pr view` apiece.
       { concurrency: 25, discard: true },

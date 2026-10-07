@@ -52,6 +52,58 @@ function settings(
 }
 
 describe("buildProjectGroups", () => {
+  it("keeps a fork apart from its upstream checkout and labels it by its own remote", () => {
+    const fork = makeProject("fork", "/work/t3code-fork", {
+      repositoryIdentity: {
+        ...repositoryIdentity,
+        origin: {
+          canonicalKey: "github.com/julius/t3code-fork",
+          displayName: "julius/t3code-fork",
+        },
+      },
+    });
+    const forkWorktree = makeProject("fork-2", "/work/t3code-fork-2", {
+      repositoryIdentity: fork.repositoryIdentity,
+    });
+    const projects = [makeProject("t3code", "/work/t3code"), fork, forkWorktree];
+
+    const groups = buildProjectGroups({ projects, settings: settings("repository") });
+    expect(groups.map((group) => group.key)).toEqual([
+      "github.com/t3tools/t3code",
+      "github.com/julius/t3code-fork",
+    ]);
+    expect(groups[1]?.members.map((member) => member.project.id)).toEqual(["fork", "fork-2"]);
+    expect(groups[1]?.label).toBe("julius/t3code-fork");
+  });
+
+  it("does not combine different forks that share one canonical upstream", () => {
+    const projects = ["alice", "bob"].map((owner) =>
+      makeProject(owner, `/work/${owner}`, {
+        repositoryIdentity: {
+          ...repositoryIdentity,
+          origin: { canonicalKey: `github.com/${owner}/fork`, displayName: `${owner}/fork` },
+        },
+      }),
+    );
+    expect(
+      buildProjectGroups({ projects, settings: settings("repository") }).map(({ key }) => key),
+    ).toEqual(["github.com/alice/fork", "github.com/bob/fork"]);
+  });
+
+  it("labels a fork by its canonical key when its origin has no display name", () => {
+    const identity = {
+      ...repositoryIdentity,
+      origin: { canonicalKey: "internal-host" },
+    };
+    const projects = [
+      makeProject("fork", "/work/fork", { repositoryIdentity: identity }),
+      makeProject("fork-2", "/work/fork-2", { repositoryIdentity: identity }),
+    ];
+
+    const groups = buildProjectGroups({ projects, settings: settings("repository") });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.label).toBe("internal-host");
+  });
   it("preserves every physical clone as a selectable member in repository modes", () => {
     const projects = [
       makeProject("t3code", "/work/t3code"),

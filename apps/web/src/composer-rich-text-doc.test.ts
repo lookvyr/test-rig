@@ -1,5 +1,6 @@
 import { getSchema, Node } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -10,6 +11,7 @@ import {
   flatToPm,
   pmToFlat,
   serializeEditorDoc,
+  stepCaretAcrossStyledEdge,
 } from "./composer-rich-text-doc";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
@@ -42,6 +44,87 @@ const doc = (value: string, terminalContexts?: TerminalContextDraft[]) =>
     buildDocJson(value, skill, terminalContexts ? { terminalContexts } : undefined),
   );
 const roundTrip = (value: string) => serializeEditorDoc(doc(value)).value;
+
+describe("caret stops at styled edges", () => {
+  function stateAt(value: string, position: number) {
+    const document = doc(value);
+    return EditorState.create({
+      doc: document,
+      selection: TextSelection.create(document, position),
+    });
+  }
+
+  function typed(state: EditorState, text: string) {
+    return serializeEditorDoc(state.apply(state.tr.insertText(text)).doc).value;
+  }
+
+  it("lets ArrowLeft type before initial bold and ArrowRight return inside", () => {
+    const inside = stateAt("**bold** tail", 1);
+    expect(typed(inside, "x")).toBe("**xbold** tail");
+    const outside = inside.apply(stepCaretAcrossStyledEdge(inside, -1)!);
+    expect(typed(outside, "x")).toBe("x**bold** tail");
+    expect(stepCaretAcrossStyledEdge(outside, -1)).toBeNull();
+    const back = outside.apply(stepCaretAcrossStyledEdge(outside, 1)!);
+    expect(typed(back, "x")).toBe("**xbold** tail");
+  });
+
+  it("lets ArrowRight type after final bold without changing the content", () => {
+    const inside = stateAt("head **bold**", 10);
+    expect(typed(inside, "x")).toBe("head **boldx**");
+    const outside = inside.apply(stepCaretAcrossStyledEdge(inside, 1)!);
+    expect(serializeEditorDoc(outside.doc).value).toBe("head **bold**");
+    expect(typed(outside, "x")).toBe("head **bold**x");
+    expect(stepCaretAcrossStyledEdge(outside, 1)).toBeNull();
+  });
+
+  it("offers both stops between plain and styled text", () => {
+    const plain = stateAt("a **b** c", 3);
+    expect(typed(plain, "x")).toBe("a x**b** c");
+    const bold = plain.apply(stepCaretAcrossStyledEdge(plain, 1)!);
+    expect(typed(bold, "x")).toBe("a **xb** c");
+  });
+
+  it("keeps the unstyled stop before an adjacent chip reachable", () => {
+    const document = schema.node("doc", null, [
+      schema.node("paragraph", null, [
+        schema.text("bold", [schema.marks.bold!.create()]),
+        schema.nodes["composer-mention"]!.create({ path: "README.md", source: "@README.md" }),
+      ]),
+    ]);
+    const inside = EditorState.create({
+      doc: document,
+      selection: TextSelection.create(document, 5),
+    });
+    const outside = inside.apply(stepCaretAcrossStyledEdge(inside, 1)!);
+    const withText = outside.apply(outside.tr.insertText("x")).doc;
+    expect(withText.child(0).child(1).text).toBe("x");
+    expect(withText.child(0).child(1).marks).toEqual([]);
+  });
+
+  it.each(["`code`", "***both***"])("can leave the styles of %s", (value) => {
+    const inside = stateAt(value, 1);
+    const outside = inside.apply(stepCaretAcrossStyledEdge(inside, -1)!);
+    expect(outside.storedMarks).toEqual([]);
+    expect(typed(outside, "x")).toBe(`x${roundTrip(value)}`);
+  });
+
+  it("preserves styles explicitly toggled at an edge", () => {
+    const inside = stateAt("a **b** c", 3);
+    const toggled = inside.apply(
+      inside.tr.setStoredMarks([schema.marks.bold!.create(), schema.marks.italic!.create()]),
+    );
+    expect(stepCaretAcrossStyledEdge(toggled, 1)).toBeNull();
+    expect(stepCaretAcrossStyledEdge(toggled, -1)).toBeNull();
+  });
+
+  it("does not intercept plain text, interior positions or range selections", () => {
+    expect(stepCaretAcrossStyledEdge(stateAt("plain", 1), -1)).toBeNull();
+    expect(stepCaretAcrossStyledEdge(stateAt("**bold**", 3), -1)).toBeNull();
+    const inside = stateAt("**bold**", 1);
+    const selected = inside.apply(inside.tr.setSelection(TextSelection.create(inside.doc, 1, 3)));
+    expect(stepCaretAcrossStyledEdge(selected, 1)).toBeNull();
+  });
+});
 
 describe("rich composer Markdown boundary", () => {
   it("round-trips thread chips through rich Markdown and cursor positions", () => {

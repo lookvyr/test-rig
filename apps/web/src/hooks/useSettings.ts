@@ -173,6 +173,9 @@ function splitPatch(patch: UnifiedSettingsPatch): {
  * Used by non-React code paths (e.g. runtime services) that need the latest
  * settings without subscribing.
  */
+/** Wait until desktop/local client preferences have been loaded. */
+export const ensureClientSettingsHydrated = hydrateClientSettings;
+
 export function getClientSettings(): ClientSettings {
   return getClientSettingsSnapshot();
 }

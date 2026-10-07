@@ -8,7 +8,7 @@ import {
   projectSettingsAreMixed,
   projectSettingsPatch,
   resolveProjectSettingsTargets,
-} from "./projectSettingsScope";
+} from "./projectSettingsScope.logic";
 
 const first = ProjectId.make("first");
 const second = ProjectId.make("second");
@@ -165,9 +165,7 @@ describe("project settings save ordering", () => {
       projectSettingsPatch(current, [first], { branchNamePrefix: "acknowledged" }),
     );
     const firstAcknowledgement = persisted;
-    await save((current) =>
-      projectSettingsPatch(current, [first], { branchNamingMode: "custom" }),
-    );
+    await save((current) => projectSettingsPatch(current, [first], { branchNamingMode: "custom" }));
     observed = firstAcknowledgement;
     await save((current) =>
       projectSettingsPatch(current, [first], { branchNameInstructions: "Keep case." }),

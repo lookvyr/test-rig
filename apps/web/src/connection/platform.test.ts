@@ -2,17 +2,27 @@ import {
   AuthStandardClientScopes,
   EnvironmentId,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
+  type DesktopEnvironmentBootstrap,
   type DesktopBridge,
   type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
+import {
+  ConnectionBlockedError,
+  ConnectionTransientError,
+} from "@t3tools/client-runtime/connection";
 import { describe, expect, it } from "@effect/vitest";
+import { FetchHttpClient } from "effect/unstable/http";
 import * as Effect from "effect/Effect";
 
 import {
   canRetainCachedPlatformRegistrationAfterRefreshFailure,
   canReuseCachedPlatformRegistration,
+  isRejectedBootstrapCredentialError,
+  isRejectedSecondaryBootstrap,
+  nextRejectedSecondaryBootstrap,
   primaryRegistrationToRetainAfterTopologyRead,
   provisionDesktopSshEnvironment,
+  resolveDesktopSecondaryRegistrations,
   readPrimaryEnvironmentTargetResult,
   secondaryRegistrationsToRetainAfterTopologyRead,
   secondaryBearerExpiresAtEpochMs,
@@ -222,4 +232,179 @@ describe("primary topology cache", () => {
       }),
     ).toBeUndefined();
   });
+});
+
+describe("rejected desktop-local bootstrap tokens", () => {
+  it("backs off on a rejected signature and retries it on a growing, capped delay", () => {
+    const signature = "http://a|ws://a|old-token";
+    const first = nextRejectedSecondaryBootstrap(undefined, signature, 0);
+
+    expect(isRejectedSecondaryBootstrap(first, signature, 59_999)).toBe(true);
+    // A backend restarted on the same port accepts the same token again, so it is retried.
+    expect(isRejectedSecondaryBootstrap(first, signature, 60_000)).toBe(false);
+
+    const second = nextRejectedSecondaryBootstrap(first, signature, 60_000);
+    expect(second.retryAtEpochMs).toBe(180_000);
+
+    let backoff = second;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      backoff = nextRejectedSecondaryBootstrap(backoff, signature, 0);
+    }
+    expect(backoff.delayMs).toBe(30 * 60_000);
+  });
+
+  it("retries at once when the token or endpoint changes", () => {
+    const rejected = nextRejectedSecondaryBootstrap(undefined, "http://a|ws://a|old-token", 0);
+
+    expect(isRejectedSecondaryBootstrap(rejected, "http://a|ws://a|new-token", 1)).toBe(false);
+    expect(isRejectedSecondaryBootstrap(rejected, "http://b|ws://b|old-token", 1)).toBe(false);
+    expect(isRejectedSecondaryBootstrap(undefined, "http://a|ws://a|old-token", 1)).toBe(false);
+    expect(nextRejectedSecondaryBootstrap(rejected, "http://a|ws://a|new-token", 1).delayMs).toBe(
+      60_000,
+    );
+  });
+
+  it("treats only authentication rejections as a dead credential", () => {
+    expect(
+      isRejectedBootstrapCredentialError(
+        new ConnectionBlockedError({ reason: "authentication", detail: "invalid" }),
+      ),
+    ).toBe(true);
+    expect(
+      isRejectedBootstrapCredentialError(
+        new ConnectionTransientError({ reason: "endpoint-unavailable", detail: "booting" }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("desktop-local bearer cache across token changes", () => {
+  it("keeps a live bearer when only the bootstrap token rotates", () => {
+    // Cached by endpoint: a rotated token reuses the bearer instead of
+    // dropping the environment (and its drafts) when the new token is rejected.
+    const cached = {
+      signature: "http://a|ws://a",
+      registration: {} as never,
+      expiresAtEpochMs: 20_000,
+      refreshAtEpochMs: 15_000,
+    };
+
+    expect(canReuseCachedPlatformRegistration(cached, "http://a|ws://a", 10_000)).toBe(true);
+    expect(
+      canRetainCachedPlatformRegistrationAfterRefreshFailure(cached, "http://a|ws://a", 16_000),
+    ).toBe(true);
+    expect(canReuseCachedPlatformRegistration(cached, "http://b|ws://b", 10_000)).toBe(false);
+  });
+});
+
+describe("secondary desktop registration reconciliation", () => {
+  const bootstrap: DesktopEnvironmentBootstrap = {
+    id: "wsl:default",
+    label: "WSL",
+    runningDistro: "Ubuntu",
+    httpBaseUrl: "http://a",
+    wsBaseUrl: "ws://a",
+    bootstrapToken: "new",
+  };
+  const registration = {} as never;
+  const cached = {
+    signature: "http://a|ws://a",
+    bootstrapToken: "old",
+    registration,
+    expiresAtEpochMs: 120000,
+    refreshAtEpochMs: 115000,
+  };
+  it.effect(
+    "keeps the same owned registration during a rejected rotated token and skips subsequent polls",
+    () =>
+      Effect.gen(function* () {
+        let loads = 0;
+        const load = () => {
+          loads++;
+          return Effect.fail(
+            new ConnectionBlockedError({ reason: "authentication", detail: "rejected" }),
+          );
+        };
+        const first = yield* resolveDesktopSecondaryRegistrations(
+          {
+            previous: new Map([[bootstrap.id, cached]]),
+            rejected: new Map(),
+            topologyRead: { _tag: "Success", bootstraps: [bootstrap] },
+            nowEpochMs: 0,
+          },
+          load,
+        );
+        expect(first.registrations).toEqual([registration]);
+        expect(first.registrations[0]).toBe(registration);
+        expect(first.cache.get(bootstrap.id)).toBe(cached);
+        const retry = yield* resolveDesktopSecondaryRegistrations(
+          {
+            previous: first.cache,
+            rejected: first.rejected,
+            topologyRead: { _tag: "Success", bootstraps: [bootstrap] },
+            nowEpochMs: 3000,
+          },
+          load,
+        );
+        expect(retry.registrations[0]).toBe(registration);
+        expect(loads).toBe(1);
+        const nextToken = yield* resolveDesktopSecondaryRegistrations(
+          {
+            previous: retry.cache,
+            rejected: retry.rejected,
+            topologyRead: {
+              _tag: "Success",
+              bootstraps: [{ ...bootstrap, bootstrapToken: "changed-again" }],
+            },
+            nowEpochMs: 3001,
+          },
+          load,
+        );
+        expect(nextToken.registrations[0]).toBe(registration);
+        expect(loads).toBe(2);
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+  );
+  it.effect(
+    "never retains expired or different-endpoint credentials, and respects explicit disappearance",
+    () =>
+      Effect.gen(function* () {
+        const load = () =>
+          Effect.fail(
+            new ConnectionTransientError({ reason: "endpoint-unavailable", detail: "starting" }),
+          );
+        const expired = yield* resolveDesktopSecondaryRegistrations(
+          {
+            previous: new Map([[bootstrap.id, cached]]),
+            rejected: new Map(),
+            topologyRead: { _tag: "Success", bootstraps: [bootstrap] },
+            nowEpochMs: cached.expiresAtEpochMs,
+          },
+          load,
+        );
+        expect(expired.registrations).toEqual([]);
+        const moved = yield* resolveDesktopSecondaryRegistrations(
+          {
+            previous: new Map([[bootstrap.id, cached]]),
+            rejected: new Map(),
+            topologyRead: {
+              _tag: "Success",
+              bootstraps: [{ ...bootstrap, httpBaseUrl: "http://b" }],
+            },
+            nowEpochMs: 0,
+          },
+          load,
+        );
+        expect(moved.registrations).toEqual([]);
+        const absent = yield* resolveDesktopSecondaryRegistrations(
+          {
+            previous: new Map([[bootstrap.id, cached]]),
+            rejected: new Map(),
+            topologyRead: { _tag: "Success", bootstraps: [] },
+            nowEpochMs: 0,
+          },
+          load,
+        );
+        expect(absent.registrations).toEqual([]);
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+  );
 });

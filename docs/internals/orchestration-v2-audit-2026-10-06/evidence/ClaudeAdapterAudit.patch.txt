@@ -1,0 +1,91 @@
+--- audited/ClaudeAdapterV2.test.ts
++++ diagnostic/ClaudeAdapterAudit.test.ts
+@@ -49,26 +49,26 @@
+ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+ import { SpawnExecutableResolution } from "@t3tools/shared/shell";
+ 
+-import { attachmentRelativePath } from "../../attachmentStore.ts";
+-import * as ServerConfig from "../../config.ts";
+-import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+-import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
+-import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
+-import { ProjectToolkit } from "../../mcp/toolkits/project/tools.ts";
+-import { WorktreeToolkit } from "../../mcp/toolkits/worktree/tools.ts";
+-import { ThreadToolkit } from "../../mcp/toolkits/thread/tools.ts";
+-import { OrchestratorToolkit } from "../../mcp/toolkits/orchestrator/tools.ts";
+-import { ClaudeExecutableFileCheck } from "../../provider/Drivers/ClaudeExecutable.ts";
+-import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.ts";
++import { attachmentRelativePath } from "/Users/smills/REPOS/test-rig/apps/server/src/attachmentStore.ts";
++import * as ServerConfig from "/Users/smills/REPOS/test-rig/apps/server/src/config.ts";
++import * as McpProviderSession from "/Users/smills/REPOS/test-rig/apps/server/src/mcp/McpProviderSession.ts";
++import { PreviewControlsToolkit } from "/Users/smills/REPOS/test-rig/apps/server/src/mcp/toolkits/previewControls/tools.ts";
++import { EnvironmentToolkit } from "/Users/smills/REPOS/test-rig/apps/server/src/mcp/toolkits/environment/tools.ts";
++import { ProjectToolkit } from "/Users/smills/REPOS/test-rig/apps/server/src/mcp/toolkits/project/tools.ts";
++import { WorktreeToolkit } from "/Users/smills/REPOS/test-rig/apps/server/src/mcp/toolkits/worktree/tools.ts";
++import { ThreadToolkit } from "/Users/smills/REPOS/test-rig/apps/server/src/mcp/toolkits/thread/tools.ts";
++import { OrchestratorToolkit } from "/Users/smills/REPOS/test-rig/apps/server/src/mcp/toolkits/orchestrator/tools.ts";
++import { ClaudeExecutableFileCheck } from "/Users/smills/REPOS/test-rig/apps/server/src/provider/Drivers/ClaudeExecutable.ts";
++import type { EventNdjsonLogger } from "/Users/smills/REPOS/test-rig/apps/server/src/provider/Layers/EventNdjsonLogger.ts";
+ import {
+   ProviderAdapterV2RuntimePolicy,
+   type ProviderAdapterV2Event,
+   type ProviderAdapterV2TurnInput,
+-} from "../ProviderAdapter.ts";
+-import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
+-import { makeProviderFailure } from "../ProviderFailure.ts";
+-import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
+-import * as IdAllocator from "../IdAllocator.ts";
++} from "/Users/smills/REPOS/test-rig/apps/server/src/orchestration-v2/ProviderAdapter.ts";
++import type { ProviderContinuationRequest } from "/Users/smills/REPOS/test-rig/apps/server/src/orchestration-v2/ProviderContinuationRequests.ts";
++import { makeProviderFailure } from "/Users/smills/REPOS/test-rig/apps/server/src/orchestration-v2/ProviderFailure.ts";
++import * as ClaudeAdapterV2 from "/Users/smills/REPOS/test-rig/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts";
++import * as IdAllocator from "/Users/smills/REPOS/test-rig/apps/server/src/orchestration-v2/IdAllocator.ts";
+ 
+ const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
+ const AUTO_COMPACT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({
+@@ -127,6 +127,7 @@
+   readonly text: string;
+   readonly attachments: ProviderAdapterV2TurnInput["message"]["attachments"];
+   readonly providerTurnOrdinal?: number;
++  readonly nativeThreadHasTurns?: boolean;
+   readonly messageCreatedBy?: ProviderAdapterV2TurnInput["message"]["createdBy"];
+   readonly messageCreationSource?: ProviderAdapterV2TurnInput["message"]["creationSource"];
+   readonly modelSelection?: ModelSelection;
+@@ -138,6 +139,7 @@
+     runId: RunId.make(`run-${input.attemptId}`),
+     runOrdinal: 1,
+     providerTurnOrdinal: input.providerTurnOrdinal ?? 1,
++    nativeThreadHasTurns: input.nativeThreadHasTurns,
+     attemptId: input.attemptId,
+     rootNodeId: NodeId.make(`node-${input.attemptId}`),
+     providerThread: input.providerThread,
+@@ -1778,7 +1780,7 @@
+ });
+ 
+ describe("ClaudeAdapterV2 native session identity", () => {
+-  const openTurnWithOrdinal = (providerTurnOrdinal: number, forked = false) =>
++  const openTurnWithOrdinal = (providerTurnOrdinal: number, forked = false, nativeThreadHasTurns?: boolean) =>
+     Effect.scoped(
+       Effect.gen(function* () {
+         const fileSystem = yield* FileSystem.FileSystem;
+@@ -1841,11 +1843,20 @@
+             text: "Respond with identity ok",
+             attachments: [],
+             providerTurnOrdinal,
++            nativeThreadHasTurns,
+           }),
+         );
+         return openedQueries;
+       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+     );
++
++  it.effect("AUDIT creates a fresh fallback native id despite prior app provider turns", () =>
++    Effect.gen(function* () {
++      const openedQueries = yield* openTurnWithOrdinal(4, false, false);
++      assert.equal(openedQueries[0]?.options.sessionId, "native-session-identity");
++      assert.equal(openedQueries[0]?.options.resume, undefined);
++    }),
++  );
+ 
+   it.effect("creates the native session on the first provider turn", () =>
+     Effect.gen(function* () {

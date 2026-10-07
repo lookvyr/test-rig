@@ -1,3 +1,4 @@
+import { RIGHT_PANEL_SHEET_LAYER } from "../rightPanelLayout";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
@@ -99,6 +100,7 @@ describe("browserSurfaceStore", () => {
             fittedSourceContent: null,
             fitSourceContent: false,
             cornerRadius: 0,
+            zIndex: 30,
             updatedAt: 1,
             owner: null,
           },
@@ -109,6 +111,7 @@ describe("browserSurfaceStore", () => {
             fittedSourceContent: null,
             fitSourceContent: false,
             cornerRadius: 0,
+            zIndex: 30,
             updatedAt: 2,
             owner: null,
           },
@@ -172,4 +175,16 @@ describe("browserSurfaceStore", () => {
       visible: false,
     });
   });
+});
+
+it("carries the active sheet layer through a surface lease and restores the inline layer", () => {
+  const lease = acquireBrowserSurface("sheet-browser");
+  const rect = { x: 400, y: 80, width: 450, height: 600 };
+  lease.present(rect, true, 0, RIGHT_PANEL_SHEET_LAYER + 1);
+  expect(useBrowserSurfaceStore.getState().byTabId["sheet-browser"]?.zIndex).toBe(
+    RIGHT_PANEL_SHEET_LAYER + 1,
+  );
+  lease.present(rect, true);
+  expect(useBrowserSurfaceStore.getState().byTabId["sheet-browser"]?.zIndex).toBe(30);
+  lease.release();
 });

@@ -1,0 +1,47 @@
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import { getSchema } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
+import { makeCatalogBackend } from "/Users/smills/REPOS/test-rig/apps/web/src/connection/storage";
+import { buildDocJson, serializeEditorDoc } from "/Users/smills/REPOS/test-rig/apps/web/src/composer-rich-text-doc";
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("Read-only audit reproductions at 2cd9bf40", () => {
+  it("a closed IndexedDB connection fails on consecutive accesses instead of recovering", async () => {
+    vi.stubGlobal("window", {});
+    const transaction = vi.fn(() => { throw new DOMException("connection is closed", "InvalidStateError"); });
+    const backend = makeCatalogBackend({ transaction } as unknown as IDBDatabase);
+    const first = await Effect.runPromiseExit(backend.read);
+    const second = await Effect.runPromiseExit(backend.read);
+    expect(first._tag).toBe("Failure");
+    expect(second._tag).toBe("Failure");
+    expect(transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("catalog writes never register an abort listener for an abort-only failed commit", async () => {
+    vi.stubGlobal("window", {});
+    const registered = new Set<string>();
+    const transaction = {
+      addEventListener: (name: string) => { registered.add(name); },
+      objectStore: () => ({ put: vi.fn() }),
+    };
+    const backend = makeCatalogBackend({ transaction: () => transaction } as unknown as IDBDatabase);
+    const fiber = Effect.runFork(backend.write("{}"));
+    await Effect.runPromise(Effect.yieldNow);
+    expect(registered).toEqual(new Set(["error", "complete"]));
+    expect(registered.has("abort")).toBe(false);
+    await Effect.runPromise(Fiber.interrupt(fiber));
+  });
+
+  it("typing at a pasted bold paragraph start inherits bold without an outside caret stop", () => {
+    const schema = getSchema([StarterKit.configure({ link: false, horizontalRule: false })]);
+    const document = schema.nodeFromJSON(buildDocJson("**bold**", (name) => ({ label: name, description: null })));
+    const state = EditorState.create({ schema, doc: document, selection: TextSelection.create(document, 1) });
+    expect(serializeEditorDoc(state.apply(state.tr.insertText("prefix ")).doc).value).toBe("**prefix bold**");
+    // An explicit mark reset gives the desired before-bold result; current key handling has no styled-edge stop.
+    expect(serializeEditorDoc(state.apply(state.tr.setStoredMarks([]).insertText("prefix ")).doc).value).toBe("prefix **bold**");
+  });
+});

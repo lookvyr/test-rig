@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { installDesktopPasteAsText } from "./lib/desktopPasteAsText";
 import { RouterProvider } from "@tanstack/react-router";
 
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
@@ -11,6 +13,7 @@ import type { AppRouter } from "./router";
  * share the same atom registry as routed UI.
  */
 export function AppRoot({ router }: { readonly router: AppRouter }) {
+  useEffect(() => installDesktopPasteAsText(window.desktopBridge, window), []);
   return (
     <AppAtomRegistryProvider>
       <RouterProvider router={router} />

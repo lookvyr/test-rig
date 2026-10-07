@@ -1,0 +1,6 @@
+import { it, expect } from "vite-plus/test";
+import { compileClaudeModelSelection } from "/Users/smills/REPOS/test-rig/apps/server/src/claudeModelOptions.ts";
+it("AUDIT omitted Normal and explicit Normal must share query identity", () => {
+ const base = { instanceId: "claudeAgent", model: "claude-opus-4-6" };
+ expect(compileClaudeModelSelection(base).queryIdentity).toBe(compileClaudeModelSelection({...base, options: [{id:"fastMode", value:false}]}).queryIdentity);
+});

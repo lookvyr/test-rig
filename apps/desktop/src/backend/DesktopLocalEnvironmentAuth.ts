@@ -1,4 +1,7 @@
 import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
+import type { RemoteEnvironmentRequestError } from "@t3tools/client-runtime/rpc";
+import * as Duration from "effect/Duration";
+import * as Schedule from "effect/Schedule";
 import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -10,6 +13,26 @@ import * as Semaphore from "effect/Semaphore";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
+
+// A loopback /oauth/token exchange can fail transiently while the backend
+// settles (a 502-504, a refused or reset connection, a timeout). Retry those
+// for as long as the renderer's own bootstrap does; a rejected credential or a
+// server error is final.
+const BOOTSTRAP_TRANSIENT_RETRY_TIMEOUT = Duration.seconds(15);
+const BOOTSTRAP_TRANSIENT_RETRY_INTERVAL = Duration.millis(500);
+const TRANSIENT_BOOTSTRAP_STATUS_CODES = new Set([502, 503, 504]);
+
+const isTransientBearerBootstrapError = (error: RemoteEnvironmentRequestError): boolean => {
+  switch (error._tag) {
+    case "RemoteEnvironmentAuthFetchError":
+    case "RemoteEnvironmentAuthTimeoutError":
+      return true;
+    case "RemoteEnvironmentAuthUndeclaredStatusError":
+      return TRANSIENT_BOOTSTRAP_STATUS_CODES.has(error.status);
+    default:
+      return false;
+  }
+};
 
 export class DesktopLocalEnvironmentAuthBackendNotConfiguredError extends Schema.TaggedError<DesktopLocalEnvironmentAuthBackendNotConfiguredError>()(
   "DesktopLocalEnvironmentAuthBackendNotConfiguredError",
@@ -76,6 +99,11 @@ export const make = Effect.gen(function* () {
           },
         }).pipe(
           Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.retry({
+            while: isTransientBearerBootstrapError,
+            schedule: Schedule.spaced(BOOTSTRAP_TRANSIENT_RETRY_INTERVAL),
+          }),
+          Effect.timeout(BOOTSTRAP_TRANSIENT_RETRY_TIMEOUT),
           Effect.mapError(
             (cause) =>
               new DesktopLocalEnvironmentAuthSessionBootstrapError({

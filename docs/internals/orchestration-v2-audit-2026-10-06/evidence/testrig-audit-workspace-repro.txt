@@ -1,0 +1,3 @@
+fixture=/private/tmp/testrig-workspace-audit-__p6klff
+Exact current prepareCommitContext command sequence: cached paths before='b.txt', after='a.txt'
+Exact generated namespace worktree add: exit=255, stderr="Preparing worktree (new branch 'test-rig/_worktree/1234abcd')\nfatal: cannot lock ref 'refs/heads/test-rig/_worktree/1234abcd': 'refs/heads/test-rig' exists; cannot create 'refs/heads/test-rig/_worktree/1234abcd'"

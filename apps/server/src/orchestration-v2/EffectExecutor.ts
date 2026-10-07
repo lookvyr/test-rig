@@ -20,6 +20,7 @@ import * as ThreadManagementService from "./ThreadManagementService.ts";
 import {
   OrchestrationEffectExecutorV2,
   OrchestrationEffectExecutionError,
+  isNonRetryableProviderTurnControlFailure,
 } from "./EffectWorker.ts";
 export const executorLayer: Layer.Layer<
   OrchestrationEffectExecutorV2,
@@ -81,6 +82,13 @@ export const executorLayer: Layer.Layer<
             }).pipe(
               Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
               Effect.provideService(ServerSettings.ServerSettingsService, settings),
+              Effect.tapError(() =>
+                willRetry
+                  ? Effect.void
+                  : effect.request.type === "provider-runtime.continue"
+                    ? threads.recoverDelegatedTask(effect.threadId, effect.request.sourceRunId)
+                    : Effect.void,
+              ),
               Effect.mapError(
                 (cause) =>
                   new OrchestrationEffectExecutionError({
@@ -132,6 +140,14 @@ export const executorLayer: Layer.Layer<
                 providerTurnId: effect.request.providerTurnId,
               })
               .pipe(
+                Effect.catch((cause) =>
+                  isNonRetryableProviderTurnControlFailure(
+                    effect.request.type,
+                    Cause.pretty(Cause.fail(cause)),
+                  )
+                    ? Effect.void
+                    : Effect.fail(cause),
+                ),
                 // The provider has stopped what it still ran and reported it.
                 // Whatever the thread still shows on that provider thread is
                 // work no process will report on, so the Stop ends it too.

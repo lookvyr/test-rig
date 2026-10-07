@@ -57,6 +57,8 @@ type DesktopWindowRuntimeServices =
   | ElectronWindow.ElectronWindow
   | PreviewManager.PreviewManager;
 
+export type MainWindowZoomDirection = "in" | "out" | "reset";
+
 export type DesktopWindowError =
   | ElectronWindow.ElectronWindowCreateError
   | PreviewManager.PreviewManagerError;
@@ -87,6 +89,7 @@ export class DesktopWindow extends Context.Service<
     readonly handleBackendNotReady: Effect.Effect<void>;
     readonly flushMainWindowBounds: Effect.Effect<void>;
     readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+    readonly zoomMain: (direction: MainWindowZoomDirection) => Effect.Effect<void>;
     readonly syncAppearance: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/window/DesktopWindow") {}
@@ -849,7 +852,7 @@ export const make = Effect.gen(function* () {
       const send = () => {
         if (targetWindow.isDestroyed()) return;
         targetWindow.webContents.send(MENU_ACTION_CHANNEL, action);
-        void runPromise(electronWindow.reveal(targetWindow));
+        if (action !== "paste-as-text") void runPromise(electronWindow.reveal(targetWindow));
       };
 
       if (targetWindow.webContents.isLoadingMainFrame()) {
@@ -858,6 +861,15 @@ export const make = Effect.gen(function* () {
       }
 
       send();
+    }),
+    zoomMain: Effect.fn("desktop.window.zoomMain")(function* (direction) {
+      const window = yield* focusedMainWindow;
+      if (Option.isNone(window) || window.value.isDestroyed()) return;
+      const contents = window.value.webContents;
+      contents.setZoomLevel(
+        direction === "reset" ? 0 : contents.getZoomLevel() + (direction === "in" ? 0.5 : -0.5),
+      );
+      yield* previewManager.reapplyZoom();
     }),
     syncAppearance: Effect.gen(function* () {
       const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;

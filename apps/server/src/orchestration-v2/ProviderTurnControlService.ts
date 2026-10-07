@@ -12,6 +12,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as EventSink from "./EventSink.ts";
 
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
@@ -72,12 +74,15 @@ export class ProviderTurnControlServiceV2 extends Context.Service<
 export const layer: Layer.Layer<
   ProviderTurnControlServiceV2,
   never,
-  ProjectionStore.ProjectionStoreV2 | ProviderSessionManager.ProviderSessionManagerV2
+  | ProjectionStore.ProjectionStoreV2
+  | ProviderSessionManager.ProviderSessionManagerV2
+  | EventSink.EventSinkV2
 > = Layer.effect(
   ProviderTurnControlServiceV2,
   Effect.gen(function* () {
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+    const events = yield* EventSink.EventSinkV2;
 
     const load = (input: {
       readonly threadId: ThreadId;
@@ -180,11 +185,36 @@ export const layer: Layer.Layer<
           // whether it still runs work for the thread, and each one either
           // stops it or reports there is nothing left to stop. Background work
           // the projection still shows is settled by the orchestrator after.
+          const afterSequence = yield* events.latestSequence({ threadId: input.threadId });
           yield* session.value.interruptTurn({
             providerThread: loaded.providerThread,
             providerTurnId: loaded.providerTurn.id,
             requestRuntimeRestart: true,
           });
+          const attemptId = loaded.providerTurn.runAttemptId;
+          if (loaded.providerTurn.status !== "running" || attemptId === null) return;
+          const current = yield* projections.getProviderControlContext(input.threadId, {
+            ...input,
+            attemptId,
+          });
+          if (current.providerTurn?.status !== "running" && current.attempt?.status !== "running")
+            return;
+          // Give the owning native terminal write its normal result. A missing receipt
+          // falls through to Stop's local repair; no projection polling is needed.
+          yield* events
+            .stream({ threadId: input.threadId, afterSequence, eventType: "run-attempt.updated" })
+            .pipe(
+              Stream.filter(
+                (stored) =>
+                  stored.event.type === "run-attempt.updated" &&
+                  stored.event.payload.id === attemptId &&
+                  stored.event.payload.status !== "running",
+              ),
+              Stream.take(1),
+              Stream.runDrain,
+              Effect.timeoutOption("2 seconds"),
+              Effect.asVoid,
+            );
         }).pipe(
           Effect.mapError((cause) =>
             isProviderTurnControlError(cause)

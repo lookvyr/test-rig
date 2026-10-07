@@ -3,9 +3,15 @@ import type {
   OrchestrationProjectShell,
   ServerProvider,
   ProviderDriverKind,
+  ProviderInstanceId,
+  OrchestrationV2Subagent,
 } from "@t3tools/contracts";
 import { fileBasename } from "@t3tools/client-runtime/markdown-links";
-import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
+import {
+  formatModelSlugName,
+  getModelSelectionStringOptionValue,
+  resolveSelectableModel,
+} from "@t3tools/shared/model";
 import { getTriggerDisplayModelName } from "./providerIconUtils";
 import type { ReactNode } from "react";
 import {
@@ -16,6 +22,7 @@ import {
   FolderIcon,
   GitBranchIcon,
   TerminalIcon,
+  ZapIcon,
 } from "lucide-react";
 import { ThreadHoverCard } from "../ThreadHoverCard";
 import { MiddleTruncate } from "../ui/middle-truncate";
@@ -27,12 +34,16 @@ import { cn } from "~/lib/utils";
 export function SubagentTooltipContent(props: {
   title: string;
   model: string | null;
+  providerInstanceId: ProviderInstanceId;
+  origin: OrchestrationV2Subagent["origin"];
   provider?: ServerProvider | undefined;
   providers?: ReadonlyArray<ServerProvider> | undefined;
   driver?: ProviderDriverKind | undefined;
   elapsed?: ReactNode;
   parentThread?: Pick<OrchestrationV2ThreadShell, "projectId" | "worktreePath"> | undefined;
-  childThread?: Pick<OrchestrationV2ThreadShell, "branch" | "worktreePath"> | undefined;
+  childThread?:
+    | Pick<OrchestrationV2ThreadShell, "branch" | "worktreePath" | "modelSelection">
+    | undefined;
   parentProject?: Pick<OrchestrationProjectShell, "workspaceRoot"> | undefined;
   childProject?: Pick<OrchestrationProjectShell, "id" | "title" | "workspaceRoot"> | undefined;
   status: string;
@@ -49,6 +60,38 @@ export function SubagentTooltipContent(props: {
     : model
       ? formatModelSlugName(model)
       : "Not reported";
+  const childSelection = props.childThread?.modelSelection;
+  const childModel = props.provider
+    ? resolveSelectableModel(props.provider.driver, childSelection?.model, props.provider.models)
+    : childSelection?.model.trim();
+  // Native children do not inherit the parent's saved traits. App-owned child
+  // settings describe this model only when both account and model match.
+  const matchingSelection =
+    props.origin === "app_owned" &&
+    childModel === (modelSlug ?? model) &&
+    childSelection?.instanceId === props.providerInstanceId
+      ? childSelection
+      : undefined;
+  const effort = ["reasoningEffort", "effort", "reasoning", "variant"]
+    .map((id) => getModelSelectionStringOptionValue(matchingSelection, id))
+    .find(Boolean);
+  const speedLabel = providerModel?.capabilities?.optionDescriptors
+    ?.map((descriptor) => {
+      const saved = matchingSelection?.options?.find((option) => option.id === descriptor.id);
+      if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
+        return saved?.value === true ? "Fast" : null;
+      }
+      if (
+        props.provider?.driver === "codex" &&
+        descriptor.id === "serviceTier" &&
+        descriptor.type === "select"
+      ) {
+        const option = descriptor.options.find((option) => option.id === saved?.value);
+        return option?.label === "Fast" || option?.label === "Ultrafast" ? option.label : null;
+      }
+      return null;
+    })
+    .find(Boolean);
   const currentWorkspace = props.parentThread?.worktreePath ?? props.parentProject?.workspaceRoot;
   const childWorkspace = props.childThread?.worktreePath ?? props.childProject?.workspaceRoot;
   const metadata = [
@@ -106,8 +149,22 @@ export function SubagentTooltipContent(props: {
         ) : (
           <BotIcon className="size-3 shrink-0" />
         )}
-        <span className="min-w-0 truncate text-foreground/75">
-          {showInstanceBadge ? `${modelLabel} · ${entry.displayName}` : modelLabel}
+        <span className="inline-flex min-w-0 items-center gap-1 text-foreground/75">
+          <span className="min-w-0 truncate">
+            {showInstanceBadge ? `${modelLabel} · ${entry.displayName}` : modelLabel}
+          </span>
+          {effort || speedLabel ? (
+            <span className="inline-flex shrink-0 items-center gap-1">
+              {effort ? " · " : null}
+              {speedLabel ? (
+                <span title={`${speedLabel} mode on`} className="inline-flex">
+                  <ZapIcon aria-hidden className="size-3 fill-current opacity-80" />
+                  <span className="sr-only">{speedLabel} mode on</span>
+                </span>
+              ) : null}
+              {effort}
+            </span>
+          ) : null}
         </span>
       </div>
       <div className="flex min-w-0 items-center justify-between gap-4">

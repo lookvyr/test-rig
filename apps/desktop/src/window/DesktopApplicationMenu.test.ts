@@ -60,6 +60,8 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     handleBackendNotReady: Effect.void,
     flushMainWindowBounds: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
+    zoomMain: (direction) =>
+      Deferred.succeed(selectedAction, `zoom-${direction}`).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindow["Service"]);
 
@@ -113,6 +115,23 @@ describe("DesktopApplicationMenu", () => {
 
       settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
+      const viewMenu = template.find((item) => item.label === "View");
+      if (!Array.isArray(viewMenu?.submenu)) throw new Error("Expected View menu");
+      assert.equal(
+        viewMenu.submenu.some((item) =>
+          ["resetZoom", "zoomIn", "zoomOut"].includes(item.role ?? ""),
+        ),
+        false,
+      );
+      for (const label of ["Actual Size", "Zoom In", "Zoom Out"])
+        assert.equal(
+          typeof viewMenu.submenu.find((item) => item.label === label)?.click,
+          "function",
+        );
+      const editMenu = template.find((item) => item.label === "Edit");
+      if (!Array.isArray(editMenu?.submenu)) throw new Error("Expected Edit menu");
+      const paste = editMenu.submenu.find((item) => item.label === "Paste as Text");
+      assert.equal(paste?.accelerator, "CmdOrCtrl+Shift+V");
     }),
   );
 });

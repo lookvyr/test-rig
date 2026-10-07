@@ -406,6 +406,8 @@ export interface ProviderAdapterV2TurnInput {
   readonly threadId: ThreadId;
   readonly runId: RunId;
   readonly runOrdinal: number;
+  /** Whether this native session has an accepted turn; omitted for older callers. */
+  readonly nativeThreadHasTurns?: boolean;
   readonly providerTurnOrdinal: number;
   readonly restartContinuationOfRunId?: RunId;
   /** Load a known child only when a fresh provider session encounters it again. */

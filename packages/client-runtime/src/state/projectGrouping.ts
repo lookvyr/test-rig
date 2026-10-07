@@ -1,3 +1,4 @@
+import { repositoryGroupingKeyOf, repositoryGroupingDisplayNameOf } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "../environment/scoped.ts";
 import type {
   EnvironmentId,
@@ -100,7 +101,9 @@ function deriveRepositoryScopedKey(
   project: Pick<EnvironmentProject, "workspaceRoot" | "repositoryIdentity">,
   groupingMode: SidebarProjectGroupingMode,
 ): string | null {
-  const canonicalKey = project.repositoryIdentity?.canonicalKey;
+  const canonicalKey = project.repositoryIdentity
+    ? repositoryGroupingKeyOf(project.repositoryIdentity)
+    : null;
   if (!canonicalKey) {
     return null;
   }
@@ -170,7 +173,9 @@ export function deriveProjectGroupLabel(input: {
   readonly members: ReadonlyArray<Pick<EnvironmentProject, "title" | "repositoryIdentity">>;
 }): string {
   const sharedDisplayNames = uniqueNonEmptyValues(
-    input.members.map((member) => member.repositoryIdentity?.displayName),
+    input.members.map((member) =>
+      member.repositoryIdentity ? repositoryGroupingDisplayNameOf(member.repositoryIdentity) : null,
+    ),
   );
   if (sharedDisplayNames.length === 1) {
     return sharedDisplayNames[0]!;

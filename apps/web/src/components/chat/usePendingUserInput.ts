@@ -40,6 +40,7 @@ export function usePendingUserInput(input: {
   ) => unknown;
 }) {
   const { request, composerRef, promptRef, onRespond } = input;
+  const canRespond = request !== null && request.responseCapability !== "not_resumable";
   const key = `${scopedThreadKey(input.threadRef)}:${request?.requestId ?? ""}`;
   const hasSecretQuestion = request?.questions.some((question) => question.isSecret) ?? false;
   useEffect(
@@ -104,6 +105,7 @@ export function usePendingUserInput(input: {
     activePendingProgress,
     activePendingResolvedAnswers,
     onSelectActivePendingUserInputOption(questionId: string, label: string) {
+      if (!canRespond) return;
       const question = request?.questions.find((entry) => entry.id === questionId);
       if (!question) return;
       update((current) => ({
@@ -127,7 +129,7 @@ export function usePendingUserInput(input: {
       expandedCursor = nextCursor,
       _cursorAdjacentToMention = false,
     ) {
-      if (!request) return;
+      if (!request || !canRespond) return;
       if (promptRef) promptRef.current = value;
       update((current) => ({
         ...current,
@@ -146,7 +148,7 @@ export function usePendingUserInput(input: {
       }
     },
     onAdvanceActivePendingUserInput() {
-      if (!request || !activePendingProgress) return;
+      if (!request || !canRespond || !activePendingProgress) return;
       if (activePendingProgress.isLastQuestion) {
         if (activePendingResolvedAnswers)
           void onRespond(request.requestId, activePendingResolvedAnswers);

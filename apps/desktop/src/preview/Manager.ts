@@ -82,6 +82,8 @@ export interface PreviewTabState {
   canGoForward: boolean;
   zoomFactor: number;
   pictureInPicture: boolean;
+  audioMuted: boolean;
+  audible: boolean;
   colorScheme: DesktopPreviewColorScheme;
   controller: "human" | "agent" | "none";
   updatedAt: string;
@@ -403,6 +405,7 @@ const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
   { key: "w", shift: false },
   // mod+T → new browser tab
   { key: "t", shift: false },
+  { key: "t", shift: true },
   { key: "arrowleft", shift: false, alt: true },
   { key: "arrowright", shift: false, alt: true },
 ]);
@@ -1165,6 +1168,46 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     return { kind: "Success", url, title };
   };
 
+  const assertTabAudioMuted = Effect.fn("PreviewManager.assertTabAudioMuted")(function* (
+    tabId: string,
+  ) {
+    const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+    if (!tab || tab.webContentsId == null) return;
+    const wc = webContents.fromId(tab.webContentsId);
+    if (!wc || wc.isDestroyed()) return;
+    yield* attempt({ operation: "setAudioMuted", tabId, webContentsId: wc.id }, () =>
+      wc.setAudioMuted(tab.audioMuted),
+    );
+  });
+
+  const syncTabAudible = Effect.fn("PreviewManager.syncTabAudible")(function* (
+    tabId: string,
+    wc: Electron.WebContents,
+    audible: boolean,
+  ) {
+    if (wc.isDestroyed()) return;
+    const updatedAt = yield* currentIso;
+    const next = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
+      const current = tabs.get(tabId);
+      if (
+        !current ||
+        current.webContentsId !== wc.id ||
+        webContents.fromId(wc.id) !== wc ||
+        current.audible === audible
+      )
+        return [Option.none<PreviewTabState>(), tabs] as const;
+      const state = { ...current, audible, updatedAt };
+      return [
+        Option.some(state),
+        replaceMap(tabs, (copy) => {
+          copy.set(tabId, state);
+        }),
+      ] as const;
+    });
+    if (Option.isSome(next) && (yield* SynchronizedRef.get(tabsRef)).get(tabId) === next.value)
+      yield* emit(tabId, next.value);
+  });
+
   const attachListeners = Effect.fn("PreviewManager.attachListeners")(function* (
     tabId: string,
     wc: Electron.WebContents,
@@ -1259,6 +1302,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         ],
       });
     });
+    const audioStateChanged = (
+      event: Electron.Event<Electron.WebContentsAudioStateChangedEventParams>,
+    ) => runFork(syncTabAudible(tabId, wc, event.audible));
     const beforeInput = (event: Electron.Event, input: Electron.Input): void => {
       if (isPreviewRefreshShortcut(input)) {
         event.preventDefault();
@@ -1281,6 +1327,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.off("did-stop-loading", sync);
         wc.off("did-fail-load", failed as never);
         wc.off("before-input-event", beforeInput);
+        wc.off("audio-state-changed", audioStateChanged);
       }).pipe(Effect.ignore),
     );
     const install = Effect.fn("PreviewManager.installWebContentsListeners")(function* () {
@@ -1300,6 +1347,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           return { action: "deny" };
         });
         wc.on("before-input-event", beforeInput);
+        wc.on("audio-state-changed", audioStateChanged);
       });
       yield* Ref.update(attachedRef, (attached) =>
         replaceMap(attached, (copy) => {
@@ -1341,6 +1389,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           canGoForward: false,
           zoomFactor: DEFAULT_ZOOM_FACTOR,
           pictureInPicture: false,
+          audioMuted: false,
+          audible: false,
           colorScheme: "system",
           controller: "none",
           updatedAt,
@@ -1404,6 +1454,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       canGoForward: false,
       zoomFactor: DEFAULT_ZOOM_FACTOR,
       pictureInPicture: false,
+      audioMuted: false,
+      audible: false,
       colorScheme: "system",
       controller: "none",
       updatedAt,
@@ -1496,6 +1548,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         : yield* attempt({ operation: "registerWebview.getZoomFactor", tabId, webContentsId }, () =>
             wc.getZoomFactor(),
           );
+    yield* attempt({ operation: "registerWebview.setAudioMuted", tabId, webContentsId }, () =>
+      wc.setAudioMuted(currentTab.audioMuted),
+    );
+    const audible = yield* attempt(
+      { operation: "registerWebview.isCurrentlyAudible", tabId, webContentsId },
+      () => wc.isCurrentlyAudible(),
+    );
     yield* attachListeners(tabId, wc);
     const registeredAt = yield* currentIso;
     const registration = yield* SynchronizedRef.modifyEffect(tabsRef, (tabs) =>
@@ -1519,6 +1578,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           canGoBack: wc.navigationHistory.canGoBack(),
           canGoForward: wc.navigationHistory.canGoForward(),
           zoomFactor,
+          audible,
           updatedAt: registeredAt,
         };
         return [
@@ -1542,6 +1602,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const { state: registered, pendingUrl } = registration.value;
     runFork(restoreControlSession(tabId, wc));
     yield* emit(tabId, registered);
+    yield* assertTabAudioMuted(tabId).pipe(Effect.ignore);
+    yield* syncTabAudible(tabId, wc, wc.isCurrentlyAudible()).pipe(Effect.ignore);
     yield* attempt({ operation: "registerWebview.sendTheme", tabId, webContentsId }, () =>
       wc.send(ANNOTATION_THEME_CHANNEL, annotationTheme),
     );
@@ -1590,6 +1652,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         canGoForward: current?.canGoForward ?? false,
         zoomFactor: current?.zoomFactor ?? DEFAULT_ZOOM_FACTOR,
         pictureInPicture: current?.pictureInPicture ?? false,
+        audioMuted: current?.audioMuted ?? false,
+        audible: current?.audible ?? false,
         colorScheme: current?.colorScheme ?? "system",
         controller: current?.controller ?? "none",
         updatedAt,
@@ -1891,6 +1955,35 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const wc = webContents.fromId(webContentsId);
     if (!wc || wc.isDestroyed()) return;
     yield* applyColorScheme(tabId, wc, colorScheme);
+  });
+
+  const setAudioMuted = Effect.fn("PreviewManager.setAudioMuted")(function* (
+    tabId: string,
+    audioMuted: boolean,
+  ) {
+    yield* withTabLifecycleLock(
+      tabId,
+      Effect.gen(function* () {
+        const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+        if (!tab) return yield* new PreviewTabNotFoundError({ tabId });
+        if (tab.audioMuted === audioMuted) return;
+        yield* update(tabId, { audioMuted });
+        yield* assertTabAudioMuted(tabId).pipe(
+          Effect.tapError(() => update(tabId, { audioMuted: tab.audioMuted })),
+        );
+      }),
+    );
+  });
+
+  const reapplyZoom = Effect.fn("PreviewManager.reapplyZoom")(function* () {
+    for (const tab of (yield* SynchronizedRef.get(tabsRef)).values()) {
+      if (tab.webContentsId == null) continue;
+      const wc = webContents.fromId(tab.webContentsId);
+      if (!wc || wc.isDestroyed()) continue;
+      yield* attempt({ operation: "reapplyZoom", tabId: tab.tabId, webContentsId: wc.id }, () =>
+        wc.setZoomFactor(tab.zoomFactor),
+      ).pipe(Effect.ignore);
+    }
   });
 
   const captureScreenshot = Effect.fn("PreviewManager.captureScreenshot")(function* (
@@ -3182,6 +3275,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     saveRecording,
     setAnnotationTheme,
     setColorScheme,
+    setAudioMuted,
+    reapplyZoom,
     setMainWindow,
     startRecording,
     closePictureInPicture,
@@ -3441,7 +3536,10 @@ export class PreviewManager extends Context.Service<
   PreviewManager,
   {
     readonly setMainWindow: (window: BrowserWindow) => Effect.Effect<void, PreviewManagerError>;
-    readonly getBrowserSession: (scope?: string) => Effect.Effect<Session, PreviewManagerError>;
+    readonly getBrowserSession: (
+      scope?: string,
+      profileId?: string,
+    ) => Effect.Effect<Session, PreviewManagerError>;
     readonly isBrowserPartition: (partition: string) => boolean;
     readonly createTab: (tabId: string) => Effect.Effect<PreviewTabState, PreviewManagerError>;
     readonly closeTab: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
@@ -3461,10 +3559,24 @@ export class PreviewManager extends Context.Service<
       tabId: string,
       colorScheme: DesktopPreviewColorScheme,
     ) => Effect.Effect<void, PreviewManagerError>;
+    readonly setAudioMuted: (
+      tabId: string,
+      audioMuted: boolean,
+    ) => Effect.Effect<void, PreviewManagerError>;
+    readonly reapplyZoom: () => Effect.Effect<void>;
     readonly openDevTools: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
-    readonly clearCookies: () => Effect.Effect<void, PreviewManagerError>;
-    readonly clearCache: () => Effect.Effect<void, PreviewManagerError>;
-    readonly getBrowserPartition: (scope?: string) => Effect.Effect<string, PreviewManagerError>;
+    readonly clearCookies: (
+      scope?: string,
+      profileId?: string,
+    ) => Effect.Effect<void, PreviewManagerError>;
+    readonly clearCache: (
+      scope?: string,
+      profileId?: string,
+    ) => Effect.Effect<void, PreviewManagerError>;
+    readonly getBrowserPartition: (
+      scope?: string,
+      profileId?: string,
+    ) => Effect.Effect<string, PreviewManagerError>;
     readonly setAnnotationTheme: (
       theme: DesktopPreviewAnnotationTheme,
     ) => Effect.Effect<void, PreviewManagerError>;
@@ -3536,9 +3648,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
 
   return PreviewManager.of({
     setMainWindow: operations.setMainWindow,
-    getBrowserSession: Effect.fn("PreviewManager.getBrowserSession")(function* (scope) {
+    getBrowserSession: Effect.fn("PreviewManager.getBrowserSession")(function* (scope, profileId) {
       return yield* browserSession
-        .getSession(scope)
+        .getSession(scope, profileId)
         .pipe(
           Effect.mapError(
             (cause) => new PreviewOperationError({ operation: "getBrowserSession", cause }),
@@ -3558,32 +3670,36 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     resetZoom: operations.resetZoom,
     hardReload: operations.hardReload,
     setColorScheme: operations.setColorScheme,
+    setAudioMuted: operations.setAudioMuted,
+    reapplyZoom: operations.reapplyZoom,
     openDevTools: operations.openDevTools,
-    clearCookies: Effect.fn("PreviewManager.clearCookies")(function* () {
+    clearCookies: Effect.fn("PreviewManager.clearCookies")(function* (scope, profileId) {
       yield* browserSession
-        .clearCookies()
+        .clearCookies(scope, profileId)
         .pipe(
           Effect.mapError(
             (cause) => new PreviewOperationError({ operation: "clearCookies", cause }),
           ),
         );
     }),
-    clearCache: Effect.fn("PreviewManager.clearCache")(function* () {
+    clearCache: Effect.fn("PreviewManager.clearCache")(function* (scope, profileId) {
       yield* browserSession
-        .clearCache()
+        .clearCache(scope, profileId)
         .pipe(
           Effect.mapError((cause) => new PreviewOperationError({ operation: "clearCache", cause })),
         );
     }),
-    getBrowserPartition: Effect.fn("PreviewManager.getBrowserPartition")(function* (scope) {
-      return yield* browserSession
-        .getPartition(scope)
-        .pipe(
-          Effect.mapError(
-            (cause) => new PreviewOperationError({ operation: "getBrowserPartition", cause }),
-          ),
-        );
-    }),
+    getBrowserPartition: Effect.fn("PreviewManager.getBrowserPartition")(
+      function* (scope, profileId) {
+        return yield* browserSession
+          .getPartition(scope, profileId)
+          .pipe(
+            Effect.mapError(
+              (cause) => new PreviewOperationError({ operation: "getBrowserPartition", cause }),
+            ),
+          );
+      },
+    ),
     setAnnotationTheme: operations.setAnnotationTheme,
     pickElement: operations.pickElement,
     cancelPickElement: operations.cancelPickElement,

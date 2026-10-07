@@ -12,7 +12,14 @@ export const TrimmedString = Schema.String.pipe(
     }),
   ),
 );
-export const TrimmedNonEmptyString = TrimmedString.check(Schema.isNonEmpty());
+// make/encode validate before trimming, so reject whitespace-only input there too.
+export const TrimmedNonEmptyString = TrimmedString.check(
+  Schema.makeFilter((value: string) => value.trim().length > 0, {
+    expected: "a non-blank string",
+    toJsonSchema: () => ({ minLength: 1 }),
+    arbitrary: { constraint: { minLength: 1 } },
+  }),
+);
 
 export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -22,28 +29,63 @@ export const IsoDateTime = Schema.String;
 export type IsoDateTime = typeof IsoDateTime.Type;
 
 /**
- * Wire codec for server→client arrays whose element unions grow over time
- * (new literal members, new struct variants). Decoding drops elements the
- * current build cannot decode instead of failing the whole payload — a client
- * has to keep decoding configs sent by servers newer than itself, and
- * rejecting the payload would take down the connection over data the client
- * couldn't act on anyway. Encoding is the plain array encoding.
+ * Decode explicit wire codecs and omit invalid elements on either side.
+ * Keep the unknown-array wire boundary: RPC Exit decoding validates that
+ * representation before the element decoder can discard newer members.
  */
-export const ForwardCompatibleArray = <Element extends Schema.Top>(element: Element) => {
-  const decodeElement = Schema.decodeUnknownOption(element as never);
-  return Schema.Array(Schema.Unknown).pipe(
+export const ForwardCompatibleArray = <Element extends Schema.Top>(element: Element) =>
+  Schema.Array(Schema.Unknown).pipe(
     Schema.decodeTo(
-      Schema.Array(element),
-      SchemaTransformation.transform<ReadonlyArray<Element["Encoded"]>, ReadonlyArray<unknown>>({
-        decode: (values) =>
-          values.filter((value) => Option.isSome(decodeElement(value))) as ReadonlyArray<
-            Element["Encoded"]
-          >,
-        encode: (values) => values,
-      }),
+      Schema.Array(
+        Schema.UndefinedOr(element).pipe(
+          // An element this build cannot read becomes a hole, filtered out below.
+          Schema.catchDecoding(() => Effect.succeedSome(undefined)),
+          // Likewise an element that cannot be encoded is sent as a hole, so one
+          // bad element costs only itself rather than the whole payload.
+          Schema.catchEncoding(() => Effect.succeedSome(undefined)),
+        ),
+      ).pipe(
+        Schema.decodeTo(
+          Schema.Array(
+            Schema.UndefinedOr(Schema.toType(element)).pipe(
+              Schema.catchEncoding(() => Effect.succeedSome(undefined)),
+            ),
+          ).check(
+            // The holes above are an encoding detail: a decoded value has none, so
+            // `Schema.is` and `make` still reject an array that does. Aborts, so a
+            // later check on the array never sees a hole.
+            Schema.makeFilter(
+              (values) => {
+                // Every index, not `every`, which skips the holes of a sparse array.
+                for (let index = 0; index < values.length; index++) {
+                  if (values[index] === undefined) return false;
+                }
+                return true;
+              },
+              { expected: "an array without holes" },
+              true,
+            ),
+          ),
+          SchemaTransformation.transform<
+            ReadonlyArray<Element["Type"]>,
+            ReadonlyArray<Element["Type"] | undefined>
+          >({
+            decode: (values) => values.filter((value) => value !== undefined),
+            // An element that fails its own checks is dropped before the wire, so
+            // a wrapper that reads the encoded array as JSON values never meets
+            // the hole it left.
+            encode: (values) => values.filter((value) => value !== undefined),
+          }),
+        ),
+      ),
     ),
-  );
-};
+  ) as unknown as ForwardCompatibleArray<Element>;
+export type ForwardCompatibleArray<Element extends Schema.Top> = Schema.Codec<
+  ReadonlyArray<Element["Type"]>,
+  ReadonlyArray<unknown>,
+  Element["DecodingServices"],
+  Element["EncodingServices"]
+>;
 
 /**
  * Construct a branded identifier. Enforces non-empty trimmed strings

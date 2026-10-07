@@ -48,6 +48,8 @@ import {
   type GitReviewScope,
 } from "../diffPanelStore";
 import { useOnTurnCompleted } from "../hooks/useOnTurnCompleted";
+import { useThreadWorkspaceMutationId } from "../hooks/useThreadWorkspaceMutationId";
+import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
 import { useTheme } from "../hooks/useTheme";
 import {
   buildFileDiffContentVersion,
@@ -374,6 +376,7 @@ export default function DiffPanel({
   );
   const activeThreadId = routeThreadRef?.threadId ?? null;
   const activeThread = useThread(routeThreadRef);
+  const workspaceMutationId = useThreadWorkspaceMutationId(routeThreadRef);
   const activeProjectId = activeThread?.projectId ?? null;
   const activeProject = useProject(
     activeThread && activeProjectId
@@ -772,6 +775,12 @@ export default function DiffPanel({
   }, [canRefreshReview, refreshBranchDiffPreview]);
   useOnTurnCompleted(routeThreadRef, () => {
     if (canRefreshReview) refreshBranchDiffPreview();
+  });
+  useWorkspaceMutationRefresh({
+    enabled: canRefreshGitDiff,
+    mutationId: workspaceMutationId,
+    refresh: refreshBranchDiffPreview,
+    resourceKey: JSON.stringify([routeThreadRef, activeCwd, selectedGitScope]),
   });
   // A query can be unresolved before its waiting flag flips. Only reveal known
   // data (or an error), never an intermediate "0 files" or missing stage actions.

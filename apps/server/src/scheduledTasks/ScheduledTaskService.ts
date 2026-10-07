@@ -598,6 +598,7 @@ export const layer = Layer.effect(
 
     // A due fixed-time run that is long past its slot (server was off or
     // asleep) is skipped and re-aimed at its next occurrence, not fired late.
+    // Only the snapshot still due may advance; intervening edits or replacements win.
     const rescheduleMissedRun = Effect.fn("ScheduledTaskService.rescheduleMissedRun")(function* (
       task: ScheduledTask,
       now: DateTime.DateTime,
@@ -613,6 +614,11 @@ export const layer = Layer.effect(
         SET next_run_at = ${next},
             updated_at = ${iso(now)}
         WHERE task_id = ${task.id}
+          AND enabled = 1
+          AND next_run_at = ${task.nextRunAt}
+          AND created_at = ${task.createdAt}
+          AND updated_at = ${task.updatedAt}
+          AND last_run_status <> 'running'
       `.pipe(
         Effect.mapError((cause) =>
           taskError("Could not reschedule missed schedule task run.", { taskId: task.id, cause }),

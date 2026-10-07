@@ -266,6 +266,9 @@ export function buildKeybindingCommandOptions(
 }
 
 export function commandLabel(command: KeybindingCommand): string {
+  if (command === "diff.toggle") return "Review: Toggle";
+  if (command === "threadPanel.toggle") return "Thread Details: Toggle";
+  if (command === "view.reopenClosed") return "Reopen Closed View";
   const raw = String(command);
   if (raw.startsWith("script.") && raw.endsWith(".run")) {
     return `Run Script: ${titleCaseCommandSegment(raw.slice("script.".length, -".run".length))}`;

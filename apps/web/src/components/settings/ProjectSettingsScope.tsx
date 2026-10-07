@@ -25,7 +25,7 @@ import {
   projectSettingSource,
   projectSettingsPatch,
   resolveProjectSettingsTargets,
-} from "./projectSettingsScope";
+} from "./projectSettingsScope.logic";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 
 function useProjectSettingsScopeValue(environmentId: EnvironmentId) {

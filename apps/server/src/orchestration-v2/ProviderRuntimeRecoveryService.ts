@@ -5,6 +5,7 @@ import {
   type ProviderThreadId,
   type OrchestrationV2RestartCancelledBackgroundWork,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2Subagent,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -93,6 +94,20 @@ function isNonterminalNodeStatus(status: string): boolean {
   return status === "pending" || status === "running" || status === "waiting";
 }
 
+/** App-owned children have their own recovered runs; the child reports its outcome. */
+function isAppOwnedDelegation(task: {
+  readonly origin: OrchestrationV2Subagent["origin"];
+  readonly childThreadId: ThreadId | null;
+}): boolean {
+  return task.origin === "app_owned" && task.childThreadId !== null;
+}
+
+function isAppOwnedDelegationItem(
+  item: OrchestrationV2ThreadProjection["turnItems"][number],
+): boolean {
+  return item.type === "subagent" && isAppOwnedDelegation(item);
+}
+
 function providerThreadHasPendingBackgroundTasks(
   providerThread: OrchestrationV2ThreadProjection["providerThreads"][number],
 ): boolean {
@@ -138,7 +153,11 @@ function providerThreadsWithOpenBackgroundWork(
 ): ReadonlySet<ProviderThreadId> {
   const ids = new Set<ProviderThreadId>();
   for (const item of projection.turnItems ?? []) {
-    if (!isBackgroundCapableTurnItemType(item.type) || !isNonterminalTurnItemStatus(item.status))
+    if (
+      !isBackgroundCapableTurnItemType(item.type) ||
+      !isNonterminalTurnItemStatus(item.status) ||
+      isAppOwnedDelegationItem(item)
+    )
       continue;
     const providerThreadId =
       item.providerThreadId ??
@@ -222,6 +241,12 @@ export const make = Effect.gen(function* () {
       const requests = projection.runtimeRequests.filter(
         (request) => request.status === "pending" && request.responseCapability.type !== "message",
       );
+      const delegatedTaskNodeIds = new Set([
+        ...(projection.subagents ?? []).filter(isAppOwnedDelegation).map((task) => task.id),
+        ...(projection.turnItems ?? []).flatMap((item) =>
+          item.type === "subagent" && isAppOwnedDelegation(item) ? [item.subagentId] : [],
+        ),
+      ]);
       const detail = `Cancelled because the server ${trigger === "startup" ? "restarted" : "shut down"} before the provider work completed.`;
       const commandId = CommandId.make(
         `command:runtime-reconcile:${trigger}:${projection.thread.id}:${DateTime.formatIso(now)}`,
@@ -333,6 +358,7 @@ export const make = Effect.gen(function* () {
           (candidate) =>
             candidate.runId === run.id &&
             !messageRequestNodeIds.has(candidate.id) &&
+            !delegatedTaskNodeIds.has(candidate.id) &&
             (candidate.status === "pending" ||
               candidate.status === "running" ||
               candidate.status === "waiting"),
@@ -351,6 +377,7 @@ export const make = Effect.gen(function* () {
         for (const subagent of projection.subagents.filter(
           (candidate) =>
             candidate.runId === run.id &&
+            !isAppOwnedDelegation(candidate) &&
             (candidate.status === "pending" ||
               candidate.status === "running" ||
               candidate.status === "waiting"),
@@ -404,6 +431,7 @@ export const make = Effect.gen(function* () {
           (candidate) =>
             candidate.runId === run.id &&
             (candidate.nodeId === null || !messageRequestNodeIds.has(candidate.nodeId)) &&
+            !isAppOwnedDelegationItem(candidate) &&
             (candidate.status === "pending" ||
               candidate.status === "running" ||
               candidate.status === "waiting"),
@@ -436,7 +464,7 @@ export const make = Effect.gen(function* () {
         if (!isBackgroundCapableTurnItemType(item.type)) {
           continue;
         }
-        if (!isNonterminalTurnItemStatus(item.status)) {
+        if (!isNonterminalTurnItemStatus(item.status) || isAppOwnedDelegationItem(item)) {
           continue;
         }
         const providerInstanceId = resolveStaleBackgroundItemProviderInstanceId(item, projection);

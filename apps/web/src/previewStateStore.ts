@@ -20,6 +20,8 @@ import { PREVIEW_RECENT_URL_LIMIT } from "./components/preview/previewConstants"
 import { appAtomRegistry } from "./rpc/atomRegistry";
 
 export interface DesktopPreviewOverlay {
+  audioMuted?: boolean;
+  audible?: boolean;
   hasWebContents: boolean;
   canGoBack: boolean;
   canGoForward: boolean;

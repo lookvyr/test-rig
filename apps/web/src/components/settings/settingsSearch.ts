@@ -39,6 +39,12 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * here once instead of separately in the panel and the index.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  {
+    id: "browser-profiles",
+    title: "Browser profiles, cookies and logins",
+    to: "/settings/general",
+    targetId: "browser-profiles",
+  },
   { id: "scheduled-tasks", title: "Scheduled tasks", to: "/settings/scheduled-tasks" },
   {
     id: "color-scheme",

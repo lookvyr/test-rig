@@ -12,6 +12,7 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import { useClosedViewStore } from "./closedViewStore";
 import { resolveStorage } from "./lib/storage";
 
 export const RIGHT_PANEL_KINDS = [
@@ -163,6 +164,30 @@ const updateThread = (
   if (next === current) return byThreadKey;
   return { ...byThreadKey, [threadKey]: next };
 };
+
+/** Only explicit user closes enter history; reconciliation and terminal exits do not. */
+const closeThread = (
+  byThreadKey: Record<string, ThreadRightPanelState>,
+  ref: ScopedThreadRef,
+  updater: (current: ThreadRightPanelState) => ThreadRightPanelState,
+) =>
+  updateThread(byThreadKey, scopedThreadKey(ref), (current) => {
+    const next = updater(current);
+    const removed = current.surfaces.filter(
+      (surface) => !next.surfaces.some((entry) => entry.id === surface.id),
+    );
+    for (const surface of removed.toSorted(
+      (a, b) => Number(a.id === current.activeSurfaceId) - Number(b.id === current.activeSurfaceId),
+    )) {
+      if (
+        surface.kind === "terminal" ||
+        (surface.kind === "preview" && surface.resourceId !== null)
+      )
+        continue;
+      useClosedViewStore.getState().remember({ kind: "panel-tab", threadRef: ref, surface });
+    }
+    return next;
+  });
 
 function normalizeRevealLine(line: number | undefined): number | null {
   if (line === undefined || !Number.isFinite(line)) return null;
@@ -403,7 +428,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         })),
       closeSurface: (ref, surfaceId) =>
         set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
+          byThreadKey: closeThread(state.byThreadKey, ref, (current) => {
             const index = current.surfaces.findIndex((surface) => surface.id === surfaceId);
             if (index < 0) return current;
             const surfaces = current.surfaces.filter((surface) => surface.id !== surfaceId);
@@ -421,7 +446,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         })),
       closeOtherSurfaces: (ref, surfaceId) =>
         set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
+          byThreadKey: closeThread(state.byThreadKey, ref, (current) => {
             const surface = current.surfaces.find((entry) => entry.id === surfaceId);
             if (!surface || current.surfaces.length === 1) return current;
             return {
@@ -434,7 +459,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         })),
       closeSurfacesToRight: (ref, surfaceId) =>
         set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
+          byThreadKey: closeThread(state.byThreadKey, ref, (current) => {
             const index = current.surfaces.findIndex((surface) => surface.id === surfaceId);
             if (index < 0 || index === current.surfaces.length - 1) return current;
             const surfaces = current.surfaces.slice(0, index + 1);
@@ -450,7 +475,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         })),
       closeAllSurfaces: (ref) =>
         set((state) => ({
-          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
+          byThreadKey: closeThread(state.byThreadKey, ref, (current) =>
             current.surfaces.length === 0
               ? current
               : { ...current, isOpen: false, surfaces: [], activeSurfaceId: null },

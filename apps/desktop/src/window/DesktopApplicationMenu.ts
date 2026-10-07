@@ -34,6 +34,13 @@ type DesktopApplicationMenuRuntimeServices = DesktopWindow.DesktopWindow;
 
 const { logError: logMenuError } = makeComponentLogger("desktop-menu");
 
+const zoomMainWindow = Effect.fn("desktop.menu.zoomMainWindow")(function* (
+  direction: DesktopWindow.MainWindowZoomDirection,
+) {
+  const window = yield* DesktopWindow.DesktopWindow;
+  yield* window.zoomMain(direction);
+});
+
 const dispatchMenuAction = Effect.fn("desktop.menu.dispatchMenuAction")(function* (
   action: string,
 ): Effect.fn.Return<void, DesktopWindow.DesktopWindowError, DesktopWindow.DesktopWindow> {
@@ -68,6 +75,16 @@ export const make = Effect.gen(function* () {
   const configure = Effect.gen(function* () {
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
+    };
+    const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () =>
+      runMenuEffect(`zoom-${direction}`, zoomMainWindow(direction));
+    const pasteAsTextClick = (
+      _item: Electron.MenuItem,
+      _window: Electron.BaseWindow | undefined,
+      event: Electron.KeyboardEvent,
+    ) => {
+      if (event.triggeredByAccelerator) return;
+      runMenuEffect("paste-as-text", dispatchMenuAction("paste-as-text"));
     };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
@@ -110,7 +127,30 @@ export const make = Effect.gen(function* () {
           { role: environment.platform === "darwin" ? "close" : "quit" },
         ],
       },
-      { role: "editMenu" },
+      {
+        label: "Edit",
+        submenu: [
+          { role: "undo" },
+          { role: "redo" },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          { label: "Paste as Text", accelerator: "CmdOrCtrl+Shift+V", click: pasteAsTextClick },
+          { role: "delete" },
+          { type: "separator" },
+          { role: "selectAll" },
+          ...(environment.platform === "darwin"
+            ? [
+                { type: "separator" as const },
+                {
+                  label: "Speech",
+                  submenu: [{ role: "startSpeaking" as const }, { role: "stopSpeaking" as const }],
+                },
+              ]
+            : []),
+        ],
+      },
       {
         label: "View",
         submenu: [
@@ -118,10 +158,15 @@ export const make = Effect.gen(function* () {
           { role: "forceReload" },
           { role: "toggleDevTools" },
           { type: "separator" },
-          { role: "resetZoom" },
-          { role: "zoomIn", accelerator: "CmdOrCtrl+=" },
-          { role: "zoomIn", accelerator: "CmdOrCtrl+Plus", visible: false },
-          { role: "zoomOut" },
+          { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: zoomClick("reset") },
+          { label: "Zoom In", accelerator: "CmdOrCtrl+=", click: zoomClick("in") },
+          {
+            label: "Zoom In",
+            accelerator: "CmdOrCtrl+Plus",
+            visible: false,
+            click: zoomClick("in"),
+          },
+          { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: zoomClick("out") },
           { type: "separator" },
           { role: "togglefullscreen" },
         ],

@@ -1,16 +1,17 @@
 import { useAtomValue } from "@effect/atom-react";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { type EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
+import { type DraftId } from "~/composerDraftStore";
 import { useScratchProject } from "~/hooks/useScratchProject";
-import { primaryServerKeybindingsAtom, primaryServerSettingsAtom } from "~/state/server";
+import { primaryServerKeybindingsAtom } from "~/state/server";
 import { shortcutLabelForCommand } from "~/keybindings";
 import { cn } from "~/lib/utils";
 import type { ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 
+import { resolveDraftProjectDefaults, retargetDraftProject } from "~/lib/draftProjectDefaults";
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
 import {
@@ -92,7 +93,6 @@ export function DraftHeroHeadline({
   const projectSortOrder = useClientSettings((settings) => settings.sidebarProjectSortOrder);
   const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const serverSettings = useAtomValue(primaryServerSettingsAtom);
   const targetKey = JSON.stringify([
     workspaceLockReason,
     draftId,
@@ -100,31 +100,44 @@ export function DraftHeroHeadline({
     activeProjectRef?.projectId,
   ]);
   const latestTarget = useRef<string | null>(targetKey);
-  useEffect(() => {
+  const selectionRequest = useRef(0);
+  const currentWorkspaceLock = useRef(workspaceLockReason);
+  useLayoutEffect(() => {
+    currentWorkspaceLock.current = workspaceLockReason;
     latestTarget.current = targetKey;
     return () => {
       latestTarget.current = null;
     };
-  }, [targetKey]);
-  const selectProject = (project: EnvironmentProject) => {
+  }, [targetKey, workspaceLockReason]);
+  const selectProject = async (project: EnvironmentProject) => {
     if (!draftId || workspaceLockReason !== null) return;
     const scratch = isScratchProject(project, scratchWorkspaceRootFor(project.environmentId));
-    const envMode = scratch ? "local" : serverSettings.defaultThreadEnvMode;
-    useComposerDraftStore
-      .getState()
-      .setLogicalProjectDraftThreadId(
-        deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
-        scopeProjectRef(project.environmentId, project.id),
-        draftId,
-        {
-          branch: null,
-          worktreePath: null,
-          envMode,
-          startFromOrigin: envMode === "worktree" && serverSettings.newWorktreesStartFromOrigin,
-        },
-      );
+    const request = ++selectionRequest.current;
+    const requestedTarget = latestTarget.current;
+    const projectRef = scopeProjectRef(project.environmentId, project.id);
+    const defaults = await resolveDraftProjectDefaults(projectRef);
+    if (
+      request !== selectionRequest.current ||
+      latestTarget.current !== requestedTarget ||
+      currentWorkspaceLock.current !== null
+    )
+      return;
+    retargetDraftProject({
+      draftId,
+      projectRef,
+      logicalProjectKey: deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
+      defaults,
+      scratch,
+    });
   };
-  const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
+  const openAddProject = useCallback(
+    () =>
+      openCommandPalette({
+        open: "new-project",
+        ...(activeProjectRef ? { environmentId: activeProjectRef.environmentId } : {}),
+      }),
+    [activeProjectRef],
+  );
 
   const environmentLabelById = useMemo(
     () =>

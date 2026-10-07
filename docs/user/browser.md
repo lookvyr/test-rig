@@ -41,3 +41,17 @@ The agent can request text-only snapshots when it does not need an image, or sav
 a screenshot as evidence. Saved screenshots can appear directly in the reply and
 remain available after the browser navigates or closes. They stay in Test Rig's
 local data directory; saving them does not add files to your repository.
+
+## Profiles and sound
+
+In the desktop app, create named browser profiles in **Settings → General →
+Browser profiles** to keep separate cookies and logins. Choose a profile when
+opening a browser from the panel's add menu. The Default profile keeps your
+existing browser session. Incognito uses temporary storage.
+
+Use a browser tab's context menu to **Mute tab** or **Unmute tab**. These controls
+change that tab's sound without muting the whole app.
+
+**Cmd+Shift+T** on macOS or **Ctrl+Shift+T** elsewhere reopens a closed browser view
+with its saved profile and viewport. Incognito tabs can reopen during the current session, but their closed-view
+history is not saved across reloads.

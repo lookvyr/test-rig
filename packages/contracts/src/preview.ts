@@ -11,6 +11,8 @@
 import { Schema } from "effect";
 import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
+import { BrowserProfileId } from "./browserProfile.ts";
+
 const Url = TrimmedNonEmptyString.check(Schema.isMaxLength(2048));
 const Title = Schema.String.check(Schema.isMaxLength(512));
 
@@ -138,6 +140,8 @@ export const PreviewSessionSnapshot = Schema.Struct({
   canGoForward: Schema.Boolean,
   /** Missing snapshots from older servers are treated as fill-panel mode. */
   viewport: Schema.optional(PreviewViewportSetting),
+  /** Cookie profile fixed when the desktop guest is first attached. */
+  profileId: Schema.optional(BrowserProfileId),
   updatedAt: Schema.String,
 });
 export type PreviewSessionSnapshot = typeof PreviewSessionSnapshot.Type;
@@ -146,6 +150,8 @@ export const PreviewOpenInput = Schema.Struct({
   threadId: ThreadId,
   /** Omit to create an empty (Idle) tab the user can type into. */
   url: Schema.optional(Url),
+  profileId: Schema.optional(BrowserProfileId),
+  viewport: Schema.optional(PreviewViewportSetting),
 });
 export type PreviewOpenInput = typeof PreviewOpenInput.Type;
 

@@ -1,3 +1,4 @@
+import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   CommandId,
   type RunId,
@@ -412,7 +413,10 @@ function latestTerminalResultRun(
         run.status !== "rolled_back" &&
         (run.id === delegatedRun?.id || run.startedAt !== null),
     )
-    .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+    .reduce<OrchestrationV2Run | undefined>(
+      (latest, run) => (latest === undefined || runRanAfter(run, latest) ? run : latest),
+      undefined,
+    );
 }
 
 function canExposeTaskRunResult(run: OrchestrationV2Run | undefined): run is OrchestrationV2Run {
@@ -905,6 +909,37 @@ const make = Effect.gen(function* () {
   const loadOrchestrationCapableInstanceIds = () =>
     providerAdapters.list().pipe(Effect.map((instanceIds) => new Set(instanceIds)));
 
+  /**
+   * Provider snapshots only re-probe while a client is in the foreground, so an
+   * unattended agent can see a provider as unavailable after it was fixed.
+   * Re-probe the requested instance once before refusing it.
+   */
+  const resolveTargetRechecking = (input: Parameters<typeof resolveTarget>[0]) => {
+    const instanceId =
+      input.target?.providerInstanceId ??
+      (input.target?.driverKind === undefined
+        ? input.parent.thread.modelSelection.instanceId
+        : undefined);
+    const resolved = resolveTarget(input);
+    if (
+      instanceId === undefined ||
+      input.providers.find((provider) => provider.instanceId === instanceId)?.enabled !== true
+    )
+      return resolved;
+    return resolved.pipe(
+      Effect.catchIf(
+        (error) => error.code === "provider_unavailable",
+        (error) =>
+          Effect.gen(function* () {
+            if (!(yield* loadOrchestrationCapableInstanceIds()).has(instanceId))
+              return yield* Effect.fail(error);
+            const providers = yield* providerRegistry.refreshInstance(instanceId);
+            return yield* resolveTarget({ ...input, providers });
+          }),
+      ),
+    );
+  };
+
   const resolveTarget = (input: {
     readonly parent: Pick<OrchestrationV2ThreadProjection, "thread">;
     readonly target: OrchestratorMcpTarget | undefined;
@@ -1078,7 +1113,14 @@ const make = Effect.gen(function* () {
         messages: [...childControls.messages, ...resultRecords.messages],
         turnItems: resultRecords.turnItems,
       };
-      const workState = task.result !== null ? "result_available" : progress.state;
+      const heldForRestart =
+        task.result === null &&
+        progress.state === "result_available" &&
+        (yield* threadManagement
+          .delegatedTaskResultPending(task.childThreadId)
+          .pipe(Effect.mapError(threadManagementFailure)));
+      const workState =
+        task.result !== null ? "result_available" : heldForRestart ? "working" : progress.state;
       const status =
         task.result !== null
           ? taskStatusForRun(
@@ -1382,7 +1424,10 @@ const make = Effect.gen(function* () {
         const parent = yield* loadProjection(scope.threadId);
         const parentRun = parent.runs
           .filter(ThreadManagementService.isActiveRun)
-          .toSorted((left, right) => right.ordinal - left.ordinal)[0];
+          .reduce<OrchestrationV2Run | undefined>(
+            (latest, run) => (latest === undefined || runRanAfter(run, latest) ? run : latest),
+            undefined,
+          );
         if (
           parentRun === undefined ||
           parentRun.rootNodeId === null ||
@@ -1394,7 +1439,7 @@ const make = Effect.gen(function* () {
           );
         }
         const providers = yield* loadProviders;
-        const target = yield* resolveTarget({
+        const target = yield* resolveTargetRechecking({
           parent,
           target: input.target,
           providers,
@@ -1605,7 +1650,7 @@ const make = Effect.gen(function* () {
           input.threads,
           (request, index) =>
             Effect.gen(function* () {
-              const target = yield* resolveTarget({
+              const target = yield* resolveTargetRechecking({
                 parent,
                 target: request.target,
                 providers,

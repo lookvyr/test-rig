@@ -16,6 +16,9 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -26,6 +29,7 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import type { ProviderAdapterV2SessionRuntime } from "./ProviderAdapter.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as EventSink from "./EventSink.ts";
 import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
 
 const driver = ProviderDriverKind.make("codex");
@@ -274,7 +278,16 @@ it.effect(
         }),
       );
       const controlLayer = ProviderTurnControlService.layer.pipe(
-        Layer.provide(Layer.merge(projectionLayer, sessionManagerLayer)),
+        Layer.provide(
+          Layer.mergeAll(
+            projectionLayer,
+            sessionManagerLayer,
+            Layer.mock(EventSink.EventSinkV2)({
+              latestSequence: () => Effect.succeed(0),
+              stream: () => Stream.empty,
+            }),
+          ),
+        ),
       );
 
       const [ordinaryInterrupt, unrelatedRestart] = yield* Effect.gen(function* () {
@@ -321,5 +334,83 @@ it.effect(
       assert.equal(interrupted?.providerSessionId, oldSessionId);
       assert.equal(interrupted?.id, providerThreadId);
       assert.equal(interrupted?.nativeThreadRef?.nativeId, "native-thread:restart-session");
+    }),
+);
+
+it.effect.each(["terminal-receipt", "missing-receipt"] as const)(
+  "Stop awaits the owning terminal receipt and repairs after %s",
+  (mode) =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:interrupt-receipt");
+      const sessionId = ProviderSessionId.make("session:interrupt-receipt");
+      const providerThreadId = ProviderThreadId.make("provider-thread:interrupt-receipt");
+      const providerTurnId = ProviderTurnId.make("provider-turn:interrupt-receipt");
+      const attemptId = RunAttemptId.make("attempt:interrupt-receipt");
+      const interrupted = yield* Deferred.make<void>();
+      const subscribed = yield* Deferred.make<void>();
+      const terminal = yield* Deferred.make<void>();
+      const context = {
+        providerThread: { id: providerThreadId, providerSessionId: sessionId },
+        providerTurn: {
+          id: providerTurnId,
+          providerThreadId,
+          runAttemptId: attemptId,
+          status: "running",
+        },
+        attempt: { id: attemptId, status: "running" },
+      };
+      const layer = ProviderTurnControlService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(ProjectionStore.ProjectionStoreV2)({
+              getProviderControlContext: () => Effect.succeed(context as never),
+            }),
+            Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+              get: () =>
+                Effect.succeed(
+                  Option.some({
+                    interruptTurn: () => Deferred.succeed(interrupted, undefined),
+                  } as never),
+                ),
+            }),
+            Layer.mock(EventSink.EventSinkV2)({
+              latestSequence: () => Effect.succeed(9),
+              stream: (input) =>
+                Stream.fromEffect(
+                  Effect.gen(function* () {
+                    assert.equal(input?.afterSequence, 9);
+                    yield* Deferred.succeed(subscribed, undefined);
+                    yield* Deferred.await(terminal);
+                    return {
+                      sequence: 10,
+                      event: {
+                        type: "run-attempt.updated",
+                        threadId,
+                        occurredAt: now,
+                        payload: { id: attemptId, status: "interrupted" },
+                      },
+                    } as never;
+                  }),
+                ),
+            }),
+          ),
+        ),
+      );
+      const stopped = yield* Effect.gen(function* () {
+        const control = yield* ProviderTurnControlService.ProviderTurnControlServiceV2;
+        return yield* control.interrupt({
+          threadId,
+          providerSessionId: sessionId,
+          providerThreadId,
+          providerTurnId,
+        });
+      }).pipe(Effect.provide(layer), Effect.forkChild);
+      yield* Deferred.await(interrupted);
+      yield* Deferred.await(subscribed);
+      assert.isUndefined(stopped.pollUnsafe());
+      if (mode === "terminal-receipt") yield* Deferred.succeed(terminal, undefined);
+      else yield* TestClock.adjust("2 seconds");
+      yield* Fiber.join(stopped);
     }),
 );

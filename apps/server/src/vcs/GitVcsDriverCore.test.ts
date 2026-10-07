@@ -1,3 +1,5 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, describe } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -127,6 +129,36 @@ const initRepoWithCommit = (
     const initialBranch = yield* git(cwd, ["branch", "--show-current"]);
     return { initialBranch };
   });
+
+it.effect("background status suppresses optional locks and leaves the real index unchanged", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const cwd = yield* makeTmpDir();
+      yield* initRepoWithCommit(cwd);
+      const index = `${cwd}/.git/index`;
+      const before = NodeFS.readFileSync(index);
+      const readme = `${cwd}/README.md`;
+      const stat = NodeFS.statSync(readme);
+      NodeFS.utimesSync(readme, stat.atimeMs / 1000, (stat.mtimeMs + 2_000) / 1000);
+      const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const commands: Array<{ args: ReadonlyArray<string>; locks: string | undefined }> = [];
+      const spawner = ChildProcessSpawner.make((command) => {
+        if (ChildProcess.isStandardCommand(command))
+          commands.push({ args: command.args, locks: command.options.env?.GIT_OPTIONAL_LOCKS });
+        return delegate.spawn(command);
+      });
+      const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provide(ServerConfigLayer),
+      );
+      const status = yield* driver.statusDetailsLocal(cwd, { includeDivergence: false });
+      assert.isFalse(status.hasWorkingTreeChanges);
+      assert.deepEqual(NodeFS.readFileSync(index), before);
+      assert.isTrue(commands.every(({ locks }) => locks === "0"));
+      assert.isTrue(commands.some(({ args }) => args[0] === "diff-index"));
+    }),
+  ).pipe(Effect.provide(TestLayer)),
+);
 
 it.effect("uses stable diagnostics for every parsed non-repository command", () => {
   const commands: Array<{ readonly args: ReadonlyArray<string>; readonly lcAll?: string }> = [];
@@ -1968,7 +2000,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("commit context", () => {
-    it.effect("stages selected files and commits only those files", () =>
+    it.effect("prepares selected files without staging and commits only those files", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         yield* initRepoWithCommit(cwd);
@@ -1980,8 +2012,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         const context = yield* driver.prepareCommitContext(cwd, ["a.txt"]);
         assert.include(context?.stagedSummary ?? "", "a.txt");
         assert.notInclude(context?.stagedSummary ?? "", "b.txt");
+        assert.equal(yield* git(cwd, ["diff", "--cached", "--name-only"]), "");
 
-        const commit = yield* driver.commit(cwd, "Add a", "");
+        const commit = yield* driver.commit(cwd, "Add a", "", { stage: { filePaths: ["a.txt"] } });
         assert.match(commit.commitSha, /^[a-f0-9]{40}$/);
         assert.equal(yield* git(cwd, ["log", "-1", "--pretty=%s"]), "Add a");
 
@@ -2000,12 +2033,94 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         yield* writeTextFile(cwd, "selected[1].txt", "literal\n");
         yield* writeTextFile(cwd, "selected1.txt", "pattern match\n");
 
-        yield* driver.prepareCommitContext(cwd, ["selected[1].txt"]);
+        const context = yield* driver.prepareCommitContext(cwd, ["selected[1].txt"]);
 
-        assert.equal(yield* git(cwd, ["diff", "--cached", "--name-only"]), "selected[1].txt");
+        assert.include(context?.stagedSummary ?? "", "selected[1].txt");
+        assert.notInclude(context?.stagedSummary ?? "", "selected1.txt");
+        assert.equal(yield* git(cwd, ["diff", "--cached", "--name-only"]), "");
+        yield* driver.commit(cwd, "Add literal path", "", {
+          stage: { filePaths: ["selected[1].txt"] },
+        });
+        assert.equal(
+          yield* git(cwd, ["show", "--pretty=", "--name-only", "HEAD"]),
+          "selected[1].txt",
+        );
 
         const status = yield* git(cwd, ["status", "--porcelain"]);
         assert.include(status, "?? selected1.txt");
+      }),
+    );
+
+    it.effect.each([false, true])(
+      "preserves partial staging and split-index files (split: %s)",
+      (split) =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          yield* initRepoWithCommit(cwd);
+          if (split) yield* git(cwd, ["config", "core.splitIndex", "true"]);
+          yield* writeTextFile(cwd, "README.md", "# test\nstaged\n");
+          yield* git(cwd, ["add", "README.md"]);
+          yield* writeTextFile(cwd, "README.md", "# test\nstaged\nunstaged\n");
+          yield* writeTextFile(cwd, "untracked.txt", "untracked\n");
+          yield* writeTextFile(cwd, ".gitignore", "ignored.txt\n");
+          yield* writeTextFile(cwd, "ignored.txt", "ignored\n");
+          const before = NodeFS.readFileSync(`${cwd}/.git/index`);
+          const shared = NodeFS.readdirSync(`${cwd}/.git`).filter((name) =>
+            name.startsWith("sharedindex."),
+          );
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          for (const paths of [undefined, ["README.md"]]) {
+            const context = yield* driver.prepareCommitContext(cwd, paths);
+            assert.include(context?.stagedPatch ?? "", "unstaged");
+            assert.notInclude(context?.stagedSummary ?? "", "ignored.txt");
+            assert.deepEqual(NodeFS.readFileSync(`${cwd}/.git/index`), before);
+            assert.deepEqual(
+              NodeFS.readdirSync(`${cwd}/.git`).filter((name) => name.startsWith("sharedindex.")),
+              shared,
+            );
+          }
+        }),
+    );
+
+    it.effect("prepares an unborn repository without creating a real index", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* driver.initRepo({ cwd });
+        yield* git(cwd, ["config", "user.email", "test@test.com"]);
+        yield* git(cwd, ["config", "user.name", "Test"]);
+        yield* writeTextFile(cwd, "initial.txt", "initial\n");
+        for (const paths of [undefined, ["initial.txt"]]) {
+          const context = yield* driver.prepareCommitContext(cwd, paths);
+          assert.include(context?.stagedSummary ?? "", "initial.txt");
+          assert.isFalse(NodeFS.existsSync(`${cwd}/.git/index`));
+        }
+        yield* driver.commit(cwd, "Initial", "", { stage: { filePaths: ["initial.txt"] } });
+        assert.equal(yield* git(cwd, ["show", "HEAD:initial.txt"]), "initial");
+      }),
+    );
+
+    it.effect("preserves merge metadata while preparing selected and all files", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        yield* git(cwd, ["checkout", "-b", "feature"]);
+        yield* writeTextFile(cwd, "feature.txt", "feature\n");
+        yield* git(cwd, ["add", "."]);
+        yield* git(cwd, ["commit", "-m", "Feature"]);
+        yield* git(cwd, ["checkout", initialBranch]);
+        yield* git(cwd, ["merge", "--no-commit", "--no-ff", "feature"]);
+        yield* writeTextFile(cwd, "README.md", "# test\nmerge edit\n");
+        const names = ["index", "MERGE_HEAD", "MERGE_MSG", "ORIG_HEAD"];
+        const before = names.map((name) => NodeFS.readFileSync(`${cwd}/.git/${name}`));
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        for (const paths of [undefined, ["README.md"]]) {
+          yield* driver.prepareCommitContext(cwd, paths);
+          assert.deepEqual(
+            names.map((name) => NodeFS.readFileSync(`${cwd}/.git/${name}`)),
+            before,
+          );
+        }
       }),
     );
   });
@@ -2117,7 +2232,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         });
         yield* writeTextFile(cwd, "feature.txt", "feature\n");
         yield* (yield* GitVcsDriver.GitVcsDriver).prepareCommitContext(cwd);
-        yield* (yield* GitVcsDriver.GitVcsDriver).commit(cwd, "Add feature", "");
+        yield* (yield* GitVcsDriver.GitVcsDriver).commit(cwd, "Add feature", "", { stage: {} });
 
         const pushed = yield* (yield* GitVcsDriver.GitVcsDriver).pushCurrentBranch(cwd, null);
         assert.deepInclude(pushed, {
@@ -2245,7 +2360,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         yield* git(cwd, ["checkout", "-b", "feature/x", "origin/dev"]);
         yield* writeTextFile(cwd, "feature.txt", "feature\n");
         yield* driver.prepareCommitContext(cwd);
-        yield* driver.commit(cwd, "Add feature", "");
+        yield* driver.commit(cwd, "Add feature", "", { stage: {} });
 
         const pushed = yield* driver.pushCurrentBranch(cwd, null);
 
@@ -2279,7 +2394,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         yield* git(cwd, ["config", "branch.feature/y.gh-merge-base", "release/v2"]);
         yield* writeTextFile(cwd, "feature.txt", "feature\n");
         yield* driver.prepareCommitContext(cwd);
-        yield* driver.commit(cwd, "Add feature", "");
+        yield* driver.commit(cwd, "Add feature", "", { stage: {} });
 
         const pushed = yield* driver.pushCurrentBranch(cwd, null);
 
@@ -2314,7 +2429,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         );
         yield* writeTextFile(cwd, "alias.txt", "alias\n");
         yield* driver.prepareCommitContext(cwd);
-        yield* driver.commit(cwd, "Add alias update", "");
+        yield* driver.commit(cwd, "Add alias update", "", { stage: {} });
 
         const pushed = yield* driver.pushCurrentBranch(cwd, null);
 
@@ -2354,7 +2469,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
             const baseSha = yield* git(baseRemote, ["rev-parse", "main"]);
             yield* writeTextFile(cwd, "feature.txt", "feature\n");
             yield* driver.prepareCommitContext(cwd);
-            yield* driver.commit(cwd, "Add requested feature", "");
+            yield* driver.commit(cwd, "Add requested feature", "", { stage: {} });
 
             const pushed = yield* driver.pushCurrentBranch(cwd, null, { remoteName: "publish" });
 
@@ -2391,7 +2506,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           yield* git(cwd, ["push", "-u", "origin", "main"]);
           yield* writeTextFile(cwd, "upstream.txt", "upstream\n");
           yield* driver.prepareCommitContext(cwd);
-          yield* driver.commit(cwd, "Add upstream update", "");
+          yield* driver.commit(cwd, "Add upstream update", "", { stage: {} });
 
           const pushed = yield* driver.pushCurrentBranch(cwd, null);
 

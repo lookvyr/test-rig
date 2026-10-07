@@ -1,0 +1,20 @@
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const require = createRequire('/Users/smills/REPOS/test-rig/apps/server/package.json');
+const moduleAt = async name => import(pathToFileURL(require.resolve(name)).href);
+const [Effect, Queue, Stream, Fiber, Schema, Rpc, RpcClient, RpcGroup, RpcServer] = await Promise.all(['effect/Effect','effect/Queue','effect/Stream','effect/Fiber','effect/Schema','effect/unstable/rpc/Rpc','effect/unstable/rpc/RpcClient','effect/unstable/rpc/RpcGroup','effect/unstable/rpc/RpcServer'].map(moduleAt));
+const group = RpcGroup.make(Rpc.make('subscribe',{success:Schema.Number,stream:true}),Rpc.make('boom',{success:Schema.Void}));
+await Effect.runPromise(Effect.scoped(Effect.gen(function*(){
+ const subscription = yield* Queue.unbounded();
+ let client;
+ const server = yield* RpcServer.makeNoSerialization(group,{disableTracing:true,disableFatalDefects:process.env.AUDIT_DISABLE_FATAL === "true",onFromServer: response=>client.write(response)}).pipe(Effect.provide(group.toLayer({subscribe:()=>Stream.fromQueue(subscription),boom:()=>Effect.die(new Error('handler bug'))})));
+ client = yield* RpcClient.makeNoSerialization(group,{supportsAck:true,onFromClient:({message})=>server.write(0,message)});
+ const received = yield* Queue.unbounded();
+ const sibling = yield* client.client.subscribe().pipe(Stream.runForEach(value=>Queue.offer(received,value)),Effect.forkScoped);
+ yield* Queue.offer(subscription,1);
+ const first = yield* Queue.take(received);
+ const boom = yield* Effect.exit(client.client.boom());
+ yield* Queue.offer(subscription,2);
+ const next = yield* Queue.take(received).pipe(Effect.raceFirst(Fiber.await(sibling).pipe(Effect.as('subscription ended'))));
+ console.log(JSON.stringify({first,boomExit:boom._tag,next}));
+})));

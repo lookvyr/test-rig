@@ -39,9 +39,17 @@ the child's conversation history or perform a Git merge. Shared-checkout edits
 are already present; changes made in a separate worktree need a separate Git
 integration step.
 
+For a Claude parent, automatic results wait for the current turn to finish so
+delivery does not interrupt its tools. You can still explicitly steer the parent
+while it works.
+
 Open the child from its task row in the conversation, or from the right panel's
 Agents tab. Completed children appear under Previous agents. Inside the child,
 use Open parent thread to return to the conversation that delegated the work.
+
+Completion updates identify the child and show its result preview. Open the
+update to visit that child. The update keeps its reported outcome and time even
+if the child starts more work.
 
 If a child receives a follow-up, it returns to the active agents list. Its status,
 elapsed time, and preview follow the new work instead of the original completed
@@ -55,6 +63,9 @@ with the original brief, prior findings, and any unresolved questions.
 When you configure multiple accounts for the same provider, agent hover cards
 name the account, and provider-managed subagent status bars show its badge.
 Configured account colors also appear in these indicators.
+For app-owned children, hover cards also show saved effort and fast speed when
+those settings match the child's model and account. Provider-native children
+do not inherit these labels from the parent's settings.
 
 ## Stopping delegated work
 

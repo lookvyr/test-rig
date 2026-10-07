@@ -645,6 +645,35 @@ describe("EnvironmentRegistry", () => {
     }),
   );
 
+  it.effect(
+    "preserves owned drafts and caches when the secondary credential resolver retains its registration",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness([]);
+        yield* Effect.gen(function* () {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+          const retained = new BearerConnectionRegistration({
+            target: BEARER_TARGET,
+            profile: BEARER_PROFILE,
+            credential: BEARER_CREDENTIAL,
+          });
+          yield* registry.reconcilePlatform([retained]);
+          yield* awaitConnectionState(
+            registry,
+            BEARER_TARGET.environmentId,
+            (state) => state.phase === "connected",
+          );
+          // A rejected bootstrap refresh must repeat this same live registration instead of omitting it.
+          yield* registry.reconcilePlatform([retained]);
+          expect(yield* Ref.get(harness.ownedDataClears)).toEqual([]);
+          expect(yield* Ref.get(harness.cacheClears)).toEqual([]);
+          expect(yield* Ref.get(harness.sessions)).toHaveLength(1);
+          yield* registry.reconcilePlatform([]);
+          expect(yield* Ref.get(harness.ownedDataClears)).toEqual([BEARER_TARGET.environmentId]);
+        }).pipe(Effect.provide(harness.layer), Effect.scoped);
+      }),
+  );
+
   it.effect("removes all owned SSH state only on explicit removal", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness(

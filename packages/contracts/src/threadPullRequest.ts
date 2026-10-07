@@ -106,9 +106,11 @@ export const ThreadPullRequestWatch = Schema.Struct({
   failedChecks: Schema.Array(TrimmedNonEmptyString),
   /** The agent was told the required checks on that commit passed. */
   passed: Schema.Boolean,
-  /** Remarks from others created up to this host time were reported. */
+  /** Names in the passing gate; absent from historical watch records. */
+  passedChecks: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  /** Remarks from others created or edited up to this host time were reported. */
   remarksThrough: IsoDateTime,
-  /** Remarks created exactly at `remarksThrough` that were reported, so a late one still counts. */
+  /** Remarks active exactly at `remarksThrough` that were reported, so a late one still counts. */
   remarkIds: Schema.Array(TrimmedNonEmptyString),
   conflicting: Schema.Boolean,
   /** Comment-only wakes in a row. Watching stops at a limit, so bots cannot loop it. */

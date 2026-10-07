@@ -1,3 +1,4 @@
+import { resumableThreadRunId } from "../ChatView.logic";
 import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
@@ -146,6 +147,8 @@ export function SideChatPanel(props: {
     requestId: RuntimeRequestId,
     answers: Record<string, unknown>,
   ) => {
+    const request = allPendingUserInputs.find((input) => input.requestId === requestId);
+    if (!request || request.responseCapability === "not_resumable") return;
     if (respondingInputIds.includes(requestId)) return;
     setRespondingInputIds((ids) => [...ids, requestId]);
     const result = await respondInput({
@@ -201,6 +204,59 @@ export function SideChatPanel(props: {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [preparing, props.focusRequest]);
+
+  const resumableRunId = resumableThreadRunId(projection, thread?.runtime?.lastErrorClass);
+  const sendStandaloneCommand = async (text: string, continuationOfRunId?: RunId) => {
+    const context = composerRef.current?.getSendContext();
+    if (
+      !thread ||
+      !context?.providerAvailable ||
+      preparing ||
+      failedFork ||
+      unavailable ||
+      sending.current ||
+      dispatch.isSendBusy ||
+      phase === "running" ||
+      pendingApprovals.length > 0 ||
+      pendingUserInputs.length > 0
+    )
+      return;
+    sending.current = true;
+    dispatch.beginLocalDispatch();
+    setError(null);
+    try {
+      const createdAt = new Date().toISOString();
+      const settingsResult = await persistSettings({
+        threadId: threadRef.threadId,
+        createdAt,
+        runtimeMode,
+        interactionMode,
+      });
+      if (settingsResult._tag === "Failure") throw squashAtomCommandFailure(settingsResult);
+      const result = await startTurn({
+        environmentId: threadRef.environmentId,
+        input: {
+          threadId: threadRef.threadId,
+          message: { messageId: newMessageId(), role: "user", text, attachments: [] },
+          modelSelection: context.selectedModelSelection,
+          runtimeMode,
+          interactionMode,
+          dispatchMode: "start",
+          createdAt,
+          ...(continuationOfRunId === undefined
+            ? {}
+            : { manualContinuationOfRunId: continuationOfRunId }),
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
+        throw squashAtomCommandFailure(result);
+    } catch (error) {
+      dispatch.resetLocalDispatch();
+      setError(error instanceof Error ? error.message : "Failed to start the turn.");
+    } finally {
+      sending.current = false;
+    }
+  };
 
   const send = async (event?: { preventDefault: () => void }) => {
     event?.preventDefault();
@@ -521,6 +577,7 @@ export function SideChatPanel(props: {
                   routeThreadRef={threadRef}
                   draftId={null}
                   activeThreadId={threadRef.threadId}
+                  promptHistoryMessages={selectThreadMessages(projection)}
                   activeThreadEnvironmentId={threadRef.environmentId}
                   activeThread={thread ?? undefined}
                   isServerThread
@@ -577,6 +634,12 @@ export function SideChatPanel(props: {
                   composerRef={composerRef}
                   onSend={(event) => void send(event)}
                   onInterrupt={() => void onInterrupt()}
+                  onCompactContext={() => void sendStandaloneCommand("/compact")}
+                  canResume={resumableRunId !== null && phase !== "running" && !dispatch.isSendBusy}
+                  onResume={() => {
+                    if (resumableRunId !== null)
+                      void sendStandaloneCommand("Continue where you left off.", resumableRunId);
+                  }}
                   onImplementPlanInNewThread={() => undefined}
                   onRespondToApproval={onRespondToApproval}
                   onProviderModelSelect={(instanceId, model) => {

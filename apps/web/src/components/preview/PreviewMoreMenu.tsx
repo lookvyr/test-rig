@@ -1,6 +1,6 @@
 "use client";
 
-import type { DesktopPreviewColorScheme } from "@t3tools/contracts";
+import type { DesktopPreviewColorScheme, EnvironmentId } from "@t3tools/contracts";
 import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
 
 import { Button } from "~/components/ui/button";
@@ -30,6 +30,8 @@ const COLOR_SCHEME_OPTIONS: ReadonlyArray<{
 ];
 
 interface Props {
+  environmentId: EnvironmentId;
+  profileId?: string | undefined;
   /** Active preview tab id. Tab-targeting actions are disabled without it. */
   tabId: string | null;
   /**
@@ -58,6 +60,8 @@ interface Props {
  * when the desktop bridge is present, so we can call it unconditionally.
  */
 export function PreviewMoreMenu({
+  environmentId,
+  profileId,
   tabId,
   hasWebContents,
   zoomFactor,
@@ -176,10 +180,14 @@ export function PreviewMoreMenu({
           </span>
         </MenuItem>
         <MenuSeparator />
-        <MenuItem onClick={() => void bridge.clearCookies().catch(() => undefined)}>
+        <MenuItem
+          onClick={() => void bridge.clearCookies(environmentId, profileId).catch(() => undefined)}
+        >
           Clear cookies
         </MenuItem>
-        <MenuItem onClick={() => void bridge.clearCache().catch(() => undefined)}>
+        <MenuItem
+          onClick={() => void bridge.clearCache(environmentId, profileId).catch(() => undefined)}
+        >
           Clear cache
         </MenuItem>
       </MenuPopup>

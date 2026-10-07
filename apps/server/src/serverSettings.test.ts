@@ -8,6 +8,11 @@ import {
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
+import * as TestClock from "effect/testing/TestClock";
 import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as FileSystem from "effect/FileSystem";
@@ -22,6 +27,7 @@ import * as ServerSettingsModule from "./serverSettings.ts";
 
 const encodeLegacySettings = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
+const decodeSavedServerSettings = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings));
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 
 const makeServerSettingsLayer = () =>
@@ -63,6 +69,74 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const saved = yield* fs.readFileString(config.settingsPath);
       assert.equal(saved.includes("newWorktreeBranchPrefix"), false);
     }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("preserves a shared settings symlink while saving its destination", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "test-rig-linked-settings-" });
+      const destination = `${directory}/settings.json`;
+      yield* fs.writeFileString(destination, '{"newWorktreesStartFromOrigin":false}');
+      yield* fs.remove(config.settingsPath, { force: true });
+      yield* fs.symlink(destination, config.settingsPath);
+      const settings = yield* ServerSettingsModule.ServerSettingsService;
+      yield* settings.updateSettings({ newWorktreesStartFromOrigin: true });
+      assert.equal(yield* fs.readLink(config.settingsPath), destination);
+      assert.equal(
+        (yield* decodeSavedServerSettings(yield* fs.readFileString(destination)))
+          .newWorktreesStartFromOrigin,
+        true,
+      );
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("reloads a symlink target on its own directory event", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const events = yield* PubSub.unbounded<FileSystem.WatchEvent>();
+      const targetSubscribed = yield* Deferred.make<void>();
+      let targetDirectory = "";
+      const watchedFileSystem = {
+        ...fs,
+        watch: (directory: string) =>
+          Stream.unwrap(
+            Effect.gen(function* () {
+              const subscription = yield* PubSub.subscribe(events);
+              if (directory === targetDirectory)
+                yield* Deferred.succeed(targetSubscribed, undefined);
+              return Stream.fromSubscription(subscription);
+            }),
+          ),
+      };
+      yield* Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        const settings = yield* ServerSettingsModule.ServerSettingsService;
+        targetDirectory = yield* fs.makeTempDirectoryScoped({
+          prefix: "test-rig-shared-settings-",
+        });
+        const destination = path.join(targetDirectory, "settings.json");
+        yield* fs.writeFileString(destination, '{"newWorktreesStartFromOrigin":false}');
+        yield* fs.remove(config.settingsPath, { force: true });
+        yield* fs.symlink(destination, config.settingsPath);
+        yield* settings.start;
+        yield* Deferred.await(targetSubscribed);
+        const changes = yield* settings.subscribeChanges;
+        const changed = yield* changes.pipe(Stream.runHead, Effect.forkChild);
+        yield* fs.writeFileString(destination, '{"newWorktreesStartFromOrigin":true}');
+        yield* PubSub.publish(events, { _tag: "Update", path: destination } as const);
+        yield* TestClock.adjust(Duration.millis(100));
+        const next = yield* Fiber.join(changed);
+        assert.equal(Option.getOrUndefined(next)?.newWorktreesStartFromOrigin, true);
+      }).pipe(
+        Effect.provide(
+          makeServerSettingsLayer().pipe(
+            Layer.provide(Layer.succeed(FileSystem.FileSystem, watchedFileSystem)),
+          ),
+        ),
+      );
+    }).pipe(Effect.scoped),
   );
 
   it.effect("preserves context when reading a provider environment secret fails", () => {

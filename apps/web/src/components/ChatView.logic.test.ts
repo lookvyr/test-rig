@@ -77,7 +77,7 @@ const readySession = {
 
 describe("composer permission mode defaults", () => {
   it.each(["codex", "claudeAgent"] as const)(
-    "starts a new %s draft in Auto even when it inherits Full access",
+    "uses the configured project mode for a new %s draft",
     (provider) => {
       expect(
         resolveComposerRuntimeMode({
@@ -85,8 +85,9 @@ describe("composer permission mode defaults", () => {
           provider: ProviderDriverKind.make(provider),
           composerRuntimeMode: null,
           threadRuntimeMode: "full-access",
+          projectRuntimeMode: "approval-required",
         }),
-      ).toBe("auto");
+      ).toBe("approval-required");
     },
   );
 

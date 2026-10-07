@@ -1,5 +1,5 @@
 diff --git a/dist/unstable/ai/McpServer.js b/dist/unstable/ai/McpServer.js
-index e8b9be4..9cffc5c 100644
+index e8b9be465ab495cf8264d5f6b7375b7b8ea63d48..97dfb522423e20bbe27140e2e3f30848804152e7 100644
 --- a/dist/unstable/ai/McpServer.js
 +++ b/dist/unstable/ai/McpServer.js
 @@ -450,6 +450,26 @@ const runWithProtocolState = /*#__PURE__*/Effect.fnUntraced(function* (options,
@@ -38,8 +38,19 @@ index e8b9be4..9cffc5c 100644
    return Layer.merge(layerWithProtocolState(options), routes).pipe(Layer.provide(layerMcpProtocolHttp(options)), Layer.provide(protocolState), Layer.provide(RpcSerialization.layerJsonRpc()));
  };
  const layerMcpProtocolHttp = options => Layer.effect(RpcServer.Protocol)(Effect.gen(function* () {
+@@ -1143,8 +1163,8 @@ export const registerToolkit = /*#__PURE__*/Effect.fnUntraced(function* (toolkit
+       annotations,
+       handle(payload) {
+         return built.handle(tool.name, payload ?? {}).pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption), Effect.map(result => new CallToolResult({
+-          isError: false,
+-          structuredContent: toStructuredContent(result.encodedResult),
++          isError: result.isFailure,
++          structuredContent: result.isFailure ? undefined : toStructuredContent(result.encodedResult),
+           content: result.encodedResult === undefined ? [] : [{
+             type: "text",
+             text: JSON.stringify(result.encodedResult)
 diff --git a/dist/unstable/http/HttpClientResponse.js b/dist/unstable/http/HttpClientResponse.js
-index 59a2b12..ef54250 100644
+index 59a2b12243df2304c5893a28f4723c673e96e5c1..ef542500492bb21203f5636fc0fd6215ce81806b 100644
 --- a/dist/unstable/http/HttpClientResponse.js
 +++ b/dist/unstable/http/HttpClientResponse.js
 @@ -180,7 +180,7 @@ class WebHttpClientResponse extends Inspectable.Class {
@@ -52,7 +63,7 @@ index 59a2b12..ef54250 100644
    get remoteAddress() {
      return Option.none();
 diff --git a/dist/unstable/rpc/RpcClient.d.ts b/dist/unstable/rpc/RpcClient.d.ts
-index 1a471aa..7233784 100644
+index 1a471aa9f39ee9d6fbb71915d745be08eba947af..72337840e679cb594e99543536592716ff5bf723 100644
 --- a/dist/unstable/rpc/RpcClient.d.ts
 +++ b/dist/unstable/rpc/RpcClient.d.ts
 @@ -2,6 +2,7 @@ import * as Cause from "../../Cause.ts";
@@ -105,7 +116,7 @@ index 1a471aa..7233784 100644
  /**
   * Represents optional client protocol hooks that run when a transport connects
 diff --git a/dist/unstable/rpc/RpcClient.js b/dist/unstable/rpc/RpcClient.js
-index c586c60..49886d8 100644
+index c586c60856508c8ecc2e0476d56f748420fad53a..cc22bea4f3e120b2ca41ef2bfbb2d0f99756a73d 100644
 --- a/dist/unstable/rpc/RpcClient.js
 +++ b/dist/unstable/rpc/RpcClient.js
 @@ -49,6 +49,7 @@ export const makeNoSerialization = /*#__PURE__*/Effect.fnUntraced(function* (gro
@@ -170,10 +181,10 @@ index c586c60..49886d8 100644
      yield* Scope.addFinalizerExit(scope, exit => {
 -      if (!entries.has(id)) return Effect.void;
 +      const entry = entries.get(id);
-+      if (!entry) return Effect.void;
++      if (!entry || entry._tag !== "Queue") return Effect.void;
        entries.delete(id);
 -      return sendInterrupt(id, Exit.isFailure(exit) ? Array.from(Cause.interruptors(exit.cause)) : [], context);
-+      return sendInterrupt(id, Exit.isFailure(exit) ? Array.from(Cause.interruptors(exit.cause)) : [], context, entry.rpc._tag);
++      return Effect.andThen(Queue.shutdown(entry.queue), sendInterrupt(id, Exit.isFailure(exit) ? Array.from(Cause.interruptors(exit.cause)) : [], context, entry.rpc._tag));
      });
      const queue = yield* Queue.bounded(streamBufferSize);
      entries.set(id, {
@@ -337,8 +348,23 @@ index c586c60..49886d8 100644
  /**
   * Represents optional client protocol hooks that run when a transport connects
   * and disconnects.
+diff --git a/src/unstable/ai/McpServer.ts b/src/unstable/ai/McpServer.ts
+index c7829a30921b7a108389d719fbd6b80cb5d17f1b..1b67a888826d82025a03c7647063baac90abd003 100644
+--- a/src/unstable/ai/McpServer.ts
++++ b/src/unstable/ai/McpServer.ts
+@@ -1577,8 +1577,8 @@ export const registerToolkit: <Tools extends Record<string, Tool.Any>>(
+           Effect.flatMap(Effect.fromOption),
+           Effect.map((result) =>
+             new CallToolResult({
+-              isError: false,
+-              structuredContent: toStructuredContent(result.encodedResult),
++              isError: result.isFailure,
++              structuredContent: result.isFailure ? undefined : toStructuredContent(result.encodedResult),
+               content: result.encodedResult === undefined ? [] : [{
+                 type: "text",
+                 text: JSON.stringify(result.encodedResult)
 diff --git a/src/unstable/http/HttpClientResponse.ts b/src/unstable/http/HttpClientResponse.ts
-index cbf047f..c7d5cc2 100644
+index cbf047f4c67b40eba3653e8a575212ae7bbe168f..c7d5cc25f6c94d42e89e3b954ec4300d2dc47bcc 100644
 --- a/src/unstable/http/HttpClientResponse.ts
 +++ b/src/unstable/http/HttpClientResponse.ts
 @@ -321,7 +321,7 @@ class WebHttpClientResponse extends Inspectable.Class implements HttpClientRespo
@@ -350,3 +376,26 @@ index cbf047f..c7d5cc2 100644
    }
  
    get remoteAddress(): Option.Option<string> {
+diff --git a/src/unstable/rpc/RpcClient.ts b/src/unstable/rpc/RpcClient.ts
+index 932706d4084f4b5cde5e2611300faaebe2a5b494..31f1ed304c5795234b4fe868de275c5c90212f59 100644
+--- a/src/unstable/rpc/RpcClient.ts
++++ b/src/unstable/rpc/RpcClient.ts
+@@ -450,14 +450,15 @@ export const makeNoSerialization: <Rpcs extends Rpc.Any, E, const Flatten extend
+     yield* Scope.addFinalizerExit(
+       scope,
+       (exit) => {
+-        if (!entries.has(id)) return Effect.void
++        const entry = entries.get(id)
++        if (!entry || entry._tag !== "Queue") return Effect.void
+         entries.delete(id)
+-        return sendInterrupt(
++        return Effect.andThen(Queue.shutdown(entry.queue), sendInterrupt(
+           id,
+           Exit.isFailure(exit) ?
+             Array.from(Cause.interruptors(exit.cause))
+             : [],
+           context
+-        )
++        ))
+       }
+     )

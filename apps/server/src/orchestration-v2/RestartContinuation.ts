@@ -1,3 +1,5 @@
+import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+import { isNativeMaintenanceCommand } from "./Orchestrator.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   CommandId,
@@ -31,7 +33,10 @@ export function restartContinuationRun(
 ): OrchestrationV2Run | undefined {
   if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) return;
   const run = projection.runs.reduce<OrchestrationV2Run | undefined>(
-    (latest, candidate) => (!latest || candidate.ordinal > latest.ordinal ? candidate : latest),
+    (latest, candidate) =>
+      candidate.status !== "queued" && (!latest || runRanAfter(candidate, latest))
+        ? candidate
+        : latest,
     undefined,
   );
   if (!run) return;
@@ -115,8 +120,32 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       source !== undefined && isRestartNoteSource(source, projection.providerTurns);
     if (!source || (source.status !== "cancelled" && !noteSource)) return;
     // A user submission after reconciliation takes precedence over an automatic prompt.
-    if (projection.runs.some((run) => run.ordinal > source.ordinal)) return;
+    if (
+      projection.runs.some(
+        (run) => run.id !== source.id && run.status !== "queued" && runRanAfter(run, source),
+      )
+    )
+      return;
     if (projection.thread.providerInstanceId !== source.providerInstanceId) return;
+    const sourceRecords = yield* threads.getThreadRecords(
+      input.threadId,
+      ["messages", "turnItems"],
+      {
+        messageIds: [source.userMessageId],
+        turnItemRunIds: [source.id],
+        turnItemTypes: ["run_interrupt_request"],
+      },
+    );
+    if (
+      sourceRecords.turnItems.some(
+        (item) => item.runId === source.id && item.type === "run_interrupt_request",
+      )
+    )
+      return;
+    const sourceMessage = sourceRecords.messages.find(
+      (message) => message.id === source.userMessageId,
+    );
+    if (sourceMessage !== undefined && isNativeMaintenanceCommand(sourceMessage)) return;
     yield* threads.dispatch({
       type: "message.dispatch",
       commandId: CommandId.make(`command:restart-continuation:${input.sourceRunId}`),
@@ -133,4 +162,13 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       restartContinuationOfRunId: input.sourceRunId,
     });
   },
+  (effect, input) =>
+    effect.pipe(
+      Effect.andThen(
+        Effect.gen(function* () {
+          const threads = yield* ThreadManagementService.ThreadManagementService;
+          yield* threads.recoverDelegatedTask(input.threadId, input.sourceRunId);
+        }),
+      ),
+    ),
 );

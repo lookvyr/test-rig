@@ -89,6 +89,7 @@ export function ElectronBrowserHost() {
             tabId={snapshot.tabId}
             runtimeTabId={runtimeTabId}
             initialUrl={url}
+            profileId={snapshot.profileId}
             viewport={snapshot.viewport ?? FILL_PREVIEW_VIEWPORT}
             zoomFactor={zoomFactor}
           />

@@ -1,6 +1,7 @@
 import { useEnvironmentQuery } from "../../state/query";
 import { vcsEnvironment } from "../../state/vcs";
 import { preloadDiffPanel } from "../diffPanelLoader";
+import { shortcutLabelForCommand } from "../../keybindings";
 import type {
   EditorId,
   ProjectScript,
@@ -21,6 +22,8 @@ import { shouldShowOpenInPicker } from "./ChatHeader";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
+import { ThreadPullRequestWatches } from "./ThreadPullRequestWatches";
 
 export function ThreadDetailsPanel(props: {
   threadRef: ScopedThreadRef;
@@ -54,8 +57,14 @@ export function ThreadDetailsPanel(props: {
     props.threadRef.environmentId,
     props.scripts ? props.openInCwd : null,
   );
+  const shortcutLabel = shortcutLabelForCommand(props.keybindings, "threadPanel.toggle");
   return (
-    <ThreadDetailsCard threadRef={props.threadRef} toggleContainer={props.toggleContainer}>
+    <ThreadDetailsCard
+      threadRef={props.threadRef}
+      toggleContainer={props.toggleContainer}
+      {...(shortcutLabel ? { shortcutLabel } : {})}
+      contentKey={`${Boolean(props.gitCwd)}:${props.scripts?.map((script) => script.id).join(",")}:${fileScripts.map((script) => script.name).join(",")}:${props.availableEditors.length}`}
+    >
       <ThreadDetailsSection
         title="Workspace"
         headingId="thread-details-workspace"
@@ -63,20 +72,24 @@ export function ThreadDetailsPanel(props: {
         showHeading={false}
       >
         {props.branchToolbar ? (
-          <BranchToolbar {...props.branchToolbar} layout="panel" panelSection="workspace" />
+          <div data-details-full>
+            <BranchToolbar {...props.branchToolbar} layout="panel" panelSection="workspace" />
+          </div>
         ) : null}
         {shouldShowOpenInPicker({
           activeProjectName: props.projectName,
           activeThreadEnvironmentId: props.threadRef.environmentId,
           primaryEnvironmentId,
         }) ? (
-          <OpenInPicker
-            displayMode="panel"
-            environmentId={props.threadRef.environmentId}
-            openInCwd={props.openInCwd}
-            keybindings={props.keybindings}
-            availableEditors={props.availableEditors}
-          />
+          <div data-details-secondary>
+            <OpenInPicker
+              displayMode="panel"
+              environmentId={props.threadRef.environmentId}
+              openInCwd={props.openInCwd}
+              keybindings={props.keybindings}
+              availableEditors={props.availableEditors}
+            />
+          </div>
         ) : null}
         {props.scripts ? (
           <ProjectScriptsControl
@@ -125,8 +138,13 @@ export function ThreadDetailsPanel(props: {
               Pull request details
             </ThreadDetailsControl>
           ) : null}
+          <ThreadPullRequestWatches threadRef={props.threadRef} />
         </ThreadDetailsSection>
       ) : null}
+      <ThreadAutomationsPanel
+        environmentId={props.threadRef.environmentId}
+        threadId={props.threadRef.threadId}
+      />
     </ThreadDetailsCard>
   );
 }

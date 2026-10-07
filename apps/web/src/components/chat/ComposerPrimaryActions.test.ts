@@ -128,20 +128,46 @@ describe("follow-up actions", () => {
     expect(html).not.toContain('type="submit"');
   });
 
-  it("shows Send beside Stop for a follow-up, including attachment-only drafts", () => {
+  it("shows Steer beside Stop for a follow-up, including attachment-only drafts", () => {
     for (const promptHasText of [true, false]) {
       const html = renderActions({ promptHasText });
       expect(html).toContain('aria-label="Stop generation"');
-      expect(html).toContain('aria-label="Send message"');
+      expect(html).toContain('aria-label="Steer message"');
       expect(html).not.toContain('disabled=""');
     }
   });
 
   it("disables Send without hiding Stop while steering is unavailable", () => {
-    const html = renderActions({ sendDisabledReason: "Send message" });
+    const html = renderActions({
+      sendDisabledReason: "Waiting for the provider to accept steering",
+    });
     expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
     expect(html).toMatch(/<button[^>]*type="button"[^>]*aria-label="Stop generation"/);
-    expect(html).not.toMatch(/<button[^>]*type="button"[^>]*disabled/);
+    expect(html).not.toMatch(/<button[^>]*type="button"[^>]*disabled=""/);
+  });
+
+  it("offers Resume for an empty stopped thread without changing a draft into a continuation", () => {
+    const resume = renderActions({ isRunning: false, canResume: true, hasSendableContent: false });
+    expect(resume).toContain('aria-label="Resume thread"');
+    expect(resume).not.toContain('type="submit"');
+    const draft = renderActions({ isRunning: false, canResume: true, hasSendableContent: true });
+    expect(draft).toContain('aria-label="Send message"');
+    expect(draft).not.toContain('aria-label="Resume thread"');
+  });
+
+  it("keeps Stop usable while an unavailable question cannot be submitted", () => {
+    const html = renderActions({
+      pendingAction: {
+        questionIndex: 0,
+        isLastQuestion: true,
+        canAdvance: true,
+        isResponding: false,
+        isComplete: true,
+        canRespond: false,
+      },
+    });
+    expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled=""/);
+    expect(html).not.toMatch(/<button[^>]*type="button"[^>]*disabled=""/);
   });
 
   it("keeps only Stop for an empty running composer and only Send when idle", () => {

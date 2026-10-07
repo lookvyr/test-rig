@@ -81,3 +81,17 @@ If no PR is detected, an already-open panel offers **Refresh Git status**.
 
 This workspace does not publish reviews or merge pull requests. Use the pull
 request link to open GitHub for those actions.
+
+## Watching a pull request
+
+When an agent starts watching a linked pull request, the conversation's details
+panel shows an eye beside it. Choose **Stop watching** to stop that monitor.
+The pull request stays linked to the conversation.
+Settling the conversation pauses its watch; the details panel shows that paused
+state and still lets you stop watching.
+
+An active watch reports comments and edits from other accounts, including replies
+in review threads. A newly added required check produces an update when it passes,
+even if the watch never saw it running. Incomplete comment reads wait for a complete
+read before advancing. Host rate limits delay reads until the retry window ends;
+the watch stays enabled and a requested refresh waits for that retry.

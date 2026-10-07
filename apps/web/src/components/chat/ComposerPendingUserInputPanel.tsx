@@ -5,7 +5,8 @@ import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { cn } from "~/lib/utils";
 
 interface PendingUserInputPanelProps {
@@ -67,8 +68,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   autoAdvance: boolean;
   globalShortcuts: boolean;
 }) {
+  const canRespond = prompt.responseCapability !== "not_resumable";
+  const responseDisabled = isResponding || !canRespond;
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
+  const [collapsedQuestionId, setCollapsedQuestionId] = useState<string | null>(null);
+  const isCollapsed = collapsedQuestionId !== null && collapsedQuestionId === activeQuestion?.id;
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const onAdvanceRef = useRef(onAdvance);
   const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
@@ -101,16 +106,27 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     progress.selectedOptionValues,
   ]);
 
-  // Clear auto-advance timer on unmount
   useEffect(() => {
+    if ((responseDisabled || isCollapsed) && autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+  }, [responseDisabled, isCollapsed]);
+
+  // A manual advance must not leave a timer that advances the next question.
+  const activeQuestionId = activeQuestion?.id;
+  useEffect(() => {
+    if (activeQuestionId === undefined) return;
     return () => {
       if (autoAdvanceTimerRef.current !== null) {
         window.clearTimeout(autoAdvanceTimerRef.current);
+        autoAdvanceTimerRef.current = null;
       }
     };
-  }, []);
+  }, [activeQuestionId]);
 
   const handleOptionSelection = useEffectEvent((questionId: string, optionValue: string) => {
+    if (responseDisabled || isCollapsed) return;
     if (activeQuestion?.multiSelect || !autoAdvance) {
       onToggleOption(questionId, optionValue);
       return;
@@ -130,7 +146,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // outside editable fields. Multi-select prompts toggle options in place; single-
   // select prompts keep the existing auto-advance behavior.
   useEffect(() => {
-    if (!activeQuestion || isResponding || !globalShortcuts) return;
+    if (!activeQuestion || responseDisabled || isCollapsed || !globalShortcuts) return;
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
@@ -154,7 +170,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isResponding, globalShortcuts]);
+  }, [activeQuestion, responseDisabled, isCollapsed, globalShortcuts]);
 
   if (!activeQuestion) {
     return null;
@@ -164,75 +180,103 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   return (
     <div className="px-4 py-3 sm:px-5">
-      <div className="mb-2 flex items-center gap-3">
-        <span className="text-secondary-label text-[11px] font-semibold tracking-widest uppercase">
-          {activeQuestion.header}
-        </span>
-        {prompt.questions.length > 1 ? (
-          <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-secondary-label text-[10px] font-medium tabular-nums">
-            {questionIndex + 1}/{prompt.questions.length}
+      <Collapsible
+        open={!isCollapsed}
+        onOpenChange={(open) => setCollapsedQuestionId(open ? null : activeQuestion.id)}
+      >
+        <CollapsibleTrigger
+          title={
+            isCollapsed ? "Show the question and its options" : "Hide the question and its options"
+          }
+          data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
+          className="flex w-full items-center gap-3 text-left"
+        >
+          <span className="text-secondary-label text-[11px] font-semibold tracking-widest uppercase">
+            {activeQuestion.header}
           </span>
+          {prompt.questions.length > 1 ? (
+            <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-secondary-label text-[10px] font-medium tabular-nums">
+              {questionIndex + 1}/{prompt.questions.length}
+            </span>
+          ) : null}
+          {isCollapsed ? (
+            <span className="min-w-0 flex-1 truncate text-xs text-secondary-label">
+              {activeQuestion.question}
+            </span>
+          ) : null}
+          <ChevronDownIcon
+            className={cn("ml-auto size-3.5 shrink-0", !isCollapsed && "rotate-180")}
+          />
+        </CollapsibleTrigger>
+        {!canRespond ? (
+          <p role="status" className="mt-2 text-xs text-secondary-label">
+            Provider process is gone — interrupt or restart the run to respond.
+          </p>
         ) : null}
-      </div>
-      <p className="text-sm text-foreground/90">{activeQuestion.question}</p>
-      {activeQuestion.multiSelect ? (
-        <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
-      ) : null}
-      <div className="mt-3 space-y-1.5">
-        {activeQuestion.options.map((option, index) => {
-          const isOptimisticallySelected =
-            optimisticSingleSelect?.questionId === activeQuestion.id &&
-            optimisticSingleSelect.optionValue === (option.value ?? option.label);
-          const isSelected =
-            isOptimisticallySelected ||
-            (!customAnswerActive &&
-              progress.selectedOptionValues.includes(option.value ?? option.label));
-          const shortcutKey = globalShortcuts && index < 9 ? index + 1 : null;
-          const className = cn(
-            "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
-            isSelected
-              ? "border-primary/30 bg-primary/8 text-foreground"
-              : "border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34",
-            isResponding && "opacity-50 cursor-not-allowed",
-            !isResponding && "cursor-pointer",
-          );
-          const content = (
-            <>
-              <div className="min-w-0 flex-1 flex flex-col gap-0.5">
-                <span className="text-sm font-medium">{option.label}</span>
-                {option.description && option.description !== option.label ? (
-                  <span className="text-secondary-label text-xs">{option.description}</span>
-                ) : null}
-              </div>
-              {isSelected ? (
-                <CheckIcon className="size-3.5 shrink-0 text-primary" />
-              ) : shortcutKey !== null ? (
-                <kbd
-                  className={cn(
-                    "flex size-5 shrink-0 items-center justify-center rounded border border-border/50 text-[11px] font-medium tabular-nums transition-colors duration-150",
-                    "bg-background/35 text-secondary-label group-hover:border-border/70 group-hover:text-foreground",
-                  )}
-                >
-                  {shortcutKey}
-                </kbd>
-              ) : null}
-            </>
-          );
-          return (
-            <button
-              key={`${activeQuestion.id}:${option.value ?? option.label}`}
-              type="button"
-              disabled={isResponding}
-              onClick={() => {
-                handleOptionSelection(activeQuestion.id, option.value ?? option.label);
-              }}
-              className={className}
-            >
-              {content}
-            </button>
-          );
-        })}
-      </div>
+        <CollapsiblePanel animate={false}>
+          <div className="mt-2 max-h-72 overflow-y-auto">
+            <p className="text-sm text-foreground/90">{activeQuestion.question}</p>
+            {activeQuestion.multiSelect ? (
+              <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
+            ) : null}
+            <div className="mt-3 space-y-1.5">
+              {activeQuestion.options.map((option, index) => {
+                const isOptimisticallySelected =
+                  optimisticSingleSelect?.questionId === activeQuestion.id &&
+                  optimisticSingleSelect.optionValue === (option.value ?? option.label);
+                const isSelected =
+                  isOptimisticallySelected ||
+                  (!customAnswerActive &&
+                    progress.selectedOptionValues.includes(option.value ?? option.label));
+                const shortcutKey = globalShortcuts && index < 9 ? index + 1 : null;
+                const className = cn(
+                  "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
+                  isSelected
+                    ? "border-primary/30 bg-primary/8 text-foreground"
+                    : "border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34",
+                  responseDisabled && "opacity-50 cursor-not-allowed",
+                  !responseDisabled && "cursor-pointer",
+                );
+                const content = (
+                  <>
+                    <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                      <span className="text-sm font-medium">{option.label}</span>
+                      {option.description && option.description !== option.label ? (
+                        <span className="text-secondary-label text-xs">{option.description}</span>
+                      ) : null}
+                    </div>
+                    {isSelected ? (
+                      <CheckIcon className="size-3.5 shrink-0 text-primary" />
+                    ) : shortcutKey !== null ? (
+                      <kbd
+                        className={cn(
+                          "flex size-5 shrink-0 items-center justify-center rounded border border-border/50 text-[11px] font-medium tabular-nums transition-colors duration-150",
+                          "bg-background/35 text-secondary-label group-hover:border-border/70 group-hover:text-foreground",
+                        )}
+                      >
+                        {shortcutKey}
+                      </kbd>
+                    ) : null}
+                  </>
+                );
+                return (
+                  <button
+                    key={`${activeQuestion.id}:${option.value ?? option.label}`}
+                    type="button"
+                    disabled={responseDisabled}
+                    onClick={() => {
+                      handleOptionSelection(activeQuestion.id, option.value ?? option.label);
+                    }}
+                    className={className}
+                  >
+                    {content}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </CollapsiblePanel>
+      </Collapsible>
     </div>
   );
 });

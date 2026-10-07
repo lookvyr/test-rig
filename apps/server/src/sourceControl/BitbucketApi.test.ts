@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import {
   HttpClient,
@@ -16,6 +17,7 @@ import {
 
 import { GitCommandError } from "@t3tools/contracts";
 import * as BitbucketApi from "./BitbucketApi.ts";
+const isBitbucketRepositoryLocatorError = Schema.is(BitbucketApi.BitbucketRepositoryLocatorError);
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
@@ -911,4 +913,45 @@ it.effect("cuts a response short rather than reading an unbounded diff into memo
       makeLayer({ response: () => new Response("1234567890", { status: 200 }) }).layer,
     ),
   ),
+);
+
+it.effect.each([false, true])(
+  "rejects invalid explicit repositories before fallback, context=%s",
+  (withContext) => {
+    const { execute, layer } = makeLayer({
+      response: () => Response.json(repositoryJson),
+    });
+
+    return Effect.gen(function* () {
+      const bitbucket = yield* BitbucketApi.BitbucketApi;
+      for (const repository of ["t3code", "", " \t "]) {
+        const error = yield* bitbucket
+          .getRepositoryCloneUrls({
+            cwd: "/repo",
+            repository,
+            ...(withContext
+              ? {
+                  context: {
+                    provider: {
+                      kind: "bitbucket" as const,
+                      name: "Bitbucket",
+                      baseUrl: "https://bitbucket.org",
+                    },
+                    remoteName: "origin",
+                    remoteUrl: "git@bitbucket.org:pingdotgg/t3code.git",
+                  },
+                }
+              : {}),
+          })
+          .pipe(Effect.match({ onFailure: (error) => error, onSuccess: () => null }));
+
+        assert.instanceOf(error, BitbucketApi.BitbucketRepositoryLocatorError);
+        assert.strictEqual(
+          isBitbucketRepositoryLocatorError(error) ? error.repository : null,
+          repository,
+        );
+        assert.strictEqual(execute.mock.calls.length, 0);
+      }
+    }).pipe(Effect.provide(layer));
+  },
 );

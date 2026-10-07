@@ -23,6 +23,7 @@ export function AsyncUserInputPanel({
   const progress = draft.activePendingProgress;
   if (!request || !progress?.activeQuestion) return null;
   const responding = respondingRequestIds.includes(request.requestId);
+  const responseDisabled = responding || request.responseCapability === "not_resumable";
   const question = progress.activeQuestion;
   return (
     <section
@@ -45,7 +46,7 @@ export function AsyncUserInputPanel({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (progress.canAdvance && !responding) draft.onAdvanceActivePendingUserInput();
+            if (progress.canAdvance && !responseDisabled) draft.onAdvanceActivePendingUserInput();
           }}
         >
           <ComposerPendingUserInputPanel
@@ -65,7 +66,7 @@ export function AsyncUserInputPanel({
                 question.options.length ? "Other — write your answer" : "Write your answer"
               }
               value={progress.customAnswer}
-              disabled={responding}
+              disabled={responseDisabled}
               onChange={(event) =>
                 draft.onChangeActivePendingUserInputCustomAnswer(question.id, event.target.value)
               }
@@ -77,7 +78,7 @@ export function AsyncUserInputPanel({
                   type="button"
                   variant="ghost"
                   onClick={draft.onPreviousActivePendingUserInputQuestion}
-                  disabled={responding}
+                  disabled={responseDisabled}
                 >
                   Back
                 </Button>
@@ -85,7 +86,7 @@ export function AsyncUserInputPanel({
               <Button
                 type="submit"
                 disabled={
-                  responding ||
+                  responseDisabled ||
                   !progress.canAdvance ||
                   (progress.isLastQuestion && !draft.activePendingResolvedAnswers)
                 }

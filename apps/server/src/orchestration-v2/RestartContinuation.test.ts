@@ -200,6 +200,7 @@ it.effect("prompts a settled thread's continuation with the note of its lost wor
       Effect.provide(
         Layer.merge(
           Layer.mock(ThreadManagementService.ThreadManagementService)({
+            recoverDelegatedTask: () => Effect.void,
             getThreadRecords: () => Effect.succeed(projection),
             dispatch: (command) => {
               commands.push(command);
@@ -245,6 +246,7 @@ it.effect("does not continue a failed run that lost background work", () =>
       Effect.provide(
         Layer.merge(
           Layer.mock(ThreadManagementService.ThreadManagementService)({
+            recoverDelegatedTask: () => Effect.void,
             getThreadRecords: () => Effect.succeed(projection),
             dispatch: (command) => {
               commands.push(command);
@@ -327,6 +329,7 @@ it.effect("does not duplicate delivery and yields to newer user work or opt-out"
       ThreadManagementService.ThreadManagementService["Service"]["dispatch"]
     >[0][] = [];
     const threads = Layer.mock(ThreadManagementService.ThreadManagementService)({
+      recoverDelegatedTask: () => Effect.void,
       getThreadRecords: () => Effect.succeed(projection),
       dispatch: (command) => {
         commands.push(command);
@@ -498,6 +501,7 @@ it.effect("does not cancel or resume a run that completes while shutdown intent 
         Layer.mergeAll(
           ServerSettings.layerTest({ continueThreadsAfterServerUpdate: true }),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
+            recoverDelegatedTask: () => Effect.void,
             getThreadRecords: () => Effect.succeed(projection),
             dispatch: () =>
               Effect.sync(() => {

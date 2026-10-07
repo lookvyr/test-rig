@@ -136,8 +136,19 @@ export function parseTemporaryWorktreeBranchPrefix(refName: string): string | nu
     return LEGACY_WORKTREE_BRANCH_PREFIX;
   }
 
-  const prefix = TEMP_WORKTREE_BRANCH_PATTERN.exec(trimmed)?.[1] ?? "";
+  const prefix =
+    TEMP_WORKTREE_BRANCH_PATTERN.exec(trimmed)?.[1] ??
+    /^(.+)-_worktree-([0-9a-f]{8})$/.exec(trimmed)?.[1] ??
+    "";
   return isNewWorktreeBranchPrefix(prefix) ? prefix : null;
+}
+
+/** Keep a server-generated worktree ref usable when its prefix is already a plain branch. */
+export function flattenTemporaryWorktreeBranchName(refName: string): string {
+  const prefix = parseTemporaryWorktreeBranchPrefix(refName);
+  return prefix === null
+    ? refName
+    : `${prefix.replaceAll("/", "-")}-_worktree-${refName.slice(-8)}`;
 }
 
 export function isTemporaryWorktreeBranch(refName: string): boolean {

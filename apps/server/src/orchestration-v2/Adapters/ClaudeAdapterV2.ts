@@ -199,6 +199,7 @@ export const ClaudeProviderCapabilitiesV2 = {
     emitsTurnCompleted: true,
     supportsInterrupt: true,
     supportsActiveSteering: true,
+    activeSteeringInterruptsTools: true,
     supportsSteeringByInterruptRestart: false,
     supportsQueuedMessages: true,
     terminalStatusQuality: "strong",
@@ -2144,6 +2145,24 @@ function claudeToolResultEntriesFromMessage(message: SDKMessage): ReadonlyArray<
   ];
 }
 
+// These wire fields are not yet declared by the SDK's SDKUserMessage type.
+const ClaudeToolResultMetadata = Schema.Struct({
+  tool_result_meta: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      non_execution_kind: Schema.optional(Schema.NullOr(Schema.String)),
+    }),
+  ),
+});
+const isClaudeToolResultMetadata = Schema.is(ClaudeToolResultMetadata);
+
+function claudeToolNonExecutionKind(message: SDKMessage, toolUseId: string) {
+  return isClaudeToolResultMetadata(message)
+    ? (message.tool_result_meta.find((meta) => meta.id === toolUseId)?.non_execution_kind ??
+        undefined)
+    : undefined;
+}
+
 function parentToolUseIdFromSdkMessage(message: SDKMessage): string | null {
   return message.type === "assistant" || message.type === "user"
     ? message.parent_tool_use_id
@@ -3676,11 +3695,12 @@ export function makeClaudeAdapterV2(
           readonly output: ClaudeNativeToolOutput;
           readonly status: Extract<
             OrchestrationV2TurnItem["status"],
-            "running" | "completed" | "failed"
+            "running" | "completed" | "failed" | "cancelled"
           >;
           readonly startedAt: DateTime.Utc;
           readonly updatedAt: DateTime.Utc;
           readonly presentation: ClaudeToolPresentation | undefined;
+          readonly toolNonExecutionKind?: string;
         }) => {
           const completedAt = input.status === "running" ? null : input.updatedAt;
           const nodeId = idAllocator.derive.nodeFromProviderItem({
@@ -3728,6 +3748,9 @@ export function makeClaudeAdapterV2(
               })
             : undefined;
           const itemBase = {
+            ...(input.toolNonExecutionKind === undefined
+              ? {}
+              : { toolNonExecutionKind: input.toolNonExecutionKind }),
             id: turnItemId,
             threadId: input.threadId,
             runId: input.runId,
@@ -6029,6 +6052,10 @@ export function makeClaudeAdapterV2(
                 parentToolUseId,
               }));
             const completedAt = yield* DateTime.now;
+            const toolNonExecutionKind = claudeToolNonExecutionKind(
+              message,
+              toolResult.tool_use_id,
+            );
             const artifacts = buildToolCallArtifacts({
               context,
               nativeItemId: toolCall.nativeItemId,
@@ -6041,7 +6068,13 @@ export function makeClaudeAdapterV2(
               parentNodeId: toolCall.parentNodeId,
               ordinal: toolCall.ordinal,
               output,
-              status: isClaudeToolResultError(toolResult) ? "failed" : "completed",
+              status:
+                toolNonExecutionKind === "cancelled"
+                  ? "cancelled"
+                  : isClaudeToolResultError(toolResult)
+                    ? "failed"
+                    : "completed",
+              ...(toolNonExecutionKind === undefined ? {} : { toolNonExecutionKind }),
               startedAt: toolCall.startedAt,
               updatedAt: completedAt,
               presentation: toolCall.presentation,
@@ -6883,16 +6916,14 @@ export function makeClaudeAdapterV2(
 
           const openedWithResume = (yield* Ref.get(openedNativeThreads)).has(nativeThreadId);
           // openedNativeThreads is per session instance and is lost when the
-          // provider session is idle-released. A prior persisted provider turn
-          // or a fork proves the native session already exists, so the query
-          // must resume it; reopening with a fixed session id makes the CLI fail fast with
-          // "Session ID ... is already in use".
-          const hasPersistedProviderTurn = turnInput.providerTurnOrdinal > 1;
+          // provider session is idle-released. Accepted history on the current
+          // native id requires resume. A fresh fallback keeps durable turn
+          // ordinals but must create its replacement native session first.
+          const hasPersistedProviderTurn =
+            turnInput.nativeThreadHasTurns ??
+            (turnInput.providerTurnOrdinal > 1 || turnInput.providerThread.forkedFrom !== null);
           const shouldResume =
-            resumeSessionAt !== undefined ||
-            openedWithResume ||
-            hasPersistedProviderTurn ||
-            turnInput.providerThread.forkedFrom !== null;
+            resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
           const querySession = yield* queryRunner
             .open({
               threadId: turnInput.threadId,

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { resolveThreadDetailsCardLayout } from "./threadDetailsCardLayout";
+import {
+  resolveThreadDetailsCardDensity,
+  resolveThreadDetailsCardLayout,
+} from "./threadDetailsCardLayout";
 
 const lane = { padding: 20, minChatWidth: 640 };
 const resolve = (width: number, height: number, previewY: number | null = null) =>
@@ -55,5 +58,15 @@ describe("card height beside a resized preview", () => {
         frame: { x: 1260, y: 183, width: 240, height: 793 },
       }),
     ).toBeNull();
+  });
+});
+
+describe("thread details density", () => {
+  it("measures full and compact before folding, and restores full as the canvas grows", () => {
+    expect(resolveThreadDetailsCardDensity(200, { full: 0, compact: 0 })).toBe("full");
+    expect(resolveThreadDetailsCardDensity(200, { full: 350, compact: 0 })).toBe("compact");
+    expect(resolveThreadDetailsCardDensity(200, { full: 350, compact: 250 })).toBe("essential");
+    expect(resolveThreadDetailsCardDensity(300, { full: 350, compact: 250 })).toBe("compact");
+    expect(resolveThreadDetailsCardDensity(400, { full: 350, compact: 250 })).toBe("full");
   });
 });

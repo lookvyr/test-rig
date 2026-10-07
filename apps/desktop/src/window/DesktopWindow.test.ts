@@ -64,6 +64,8 @@ function makeFakeBrowserWindow() {
   const windowListeners = new Map<string, (...args: readonly unknown[]) => void>();
   const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>();
   const webContents = {
+    getZoomLevel: vi.fn(() => 0),
+    setZoomLevel: vi.fn(),
     copyImageAt: vi.fn(),
     focus: vi.fn(),
     isDestroyed: vi.fn(() => false),
@@ -187,6 +189,7 @@ function makeTestLayer(input: {
     bounds: DesktopAppSettings.DesktopWindowBounds,
   ) => Effect.Effect<void>;
   readonly openedExternalUrls?: unknown[];
+  readonly onReapplyZoom?: () => Effect.Effect<void>;
   readonly onCopyText?: (text: string) => Effect.Effect<void>;
   readonly onPopupTemplate?: (input: ElectronMenu.ElectronMenuTemplateInput) => Effect.Effect<void>;
 }) {
@@ -268,6 +271,7 @@ function makeTestLayer(input: {
         Layer.mock(PreviewManager.PreviewManager)({
           getBrowserSession: () => Effect.succeed({} as Electron.Session),
           setMainWindow: () => Effect.void,
+          reapplyZoom: input.onReapplyZoom ?? (() => Effect.void),
           isBrowserPartition: (partition) => partition.startsWith("persist:test-rig-preview-"),
           getBrowserPartition: () => Effect.succeed("persist:test-rig-preview-test"),
         }),
@@ -373,6 +377,38 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
   });
 
 describe("DesktopWindow", () => {
+  it.effect("zooms the application renderer and reapplies independent guest zoom", () =>
+    Effect.gen(function* () {
+      const host = makeFakeBrowserWindow();
+      let level = 0;
+      const guestZoom = yield* Ref.make(0);
+      vi.mocked(host.window.webContents.getZoomLevel).mockImplementation(() => level);
+      vi.mocked(host.window.webContents.setZoomLevel).mockImplementation((next: number) => {
+        level = next;
+      });
+      const layer = makeTestLayer({
+        window: host.window,
+        createCount: yield* Ref.make(0),
+        mainWindow: yield* Ref.make(Option.some(host.window)),
+        onReapplyZoom: () => Ref.update(guestZoom, (count) => count + 1),
+      });
+      yield* Effect.gen(function* () {
+        const desktop = yield* DesktopWindow.DesktopWindow;
+        yield* desktop.zoomMain("in");
+        yield* desktop.zoomMain("out");
+        yield* desktop.zoomMain("out");
+        yield* desktop.zoomMain("reset");
+        assert.deepEqual(vi.mocked(host.window.webContents.setZoomLevel).mock.calls, [
+          [0.5],
+          [0],
+          [-0.5],
+          [0],
+        ]);
+        assert.equal(yield* Ref.get(guestZoom), 4);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("shows native context menus for browser guests and the main renderer", () =>
     Effect.gen(function* () {
       const host = makeFakeBrowserWindow();

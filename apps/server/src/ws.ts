@@ -11,12 +11,14 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as OrchestrationV2Rpc from "./orchestration-v2/Rpc.ts";
 import * as ThreadManagementV2 from "./orchestration-v2/ThreadManagementService.ts";
 import * as ProjectServiceV2 from "./project/ProjectService.ts";
+import { makeNamedProjectFolders } from "./project/NamedProjectFolders.ts";
 import { makePrepareScratchWorkspace } from "./orchestration/ScratchWorkspace.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
+import * as DefectReporter from "./observability/DefectReporter.ts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -134,6 +136,12 @@ function projectEntriesFailureContext(error: WorkspaceEntries.WorkspaceEntriesEr
   readonly detail?: string;
 } {
   switch (error._tag) {
+    case "WorkspaceEntriesReadDirectoryError":
+      return {
+        failure: "directory_list_failed",
+        ...(error.cwd ? { normalizedCwd: error.cwd } : {}),
+        detail: error.parentPath,
+      };
     case "WorkspaceRootNotExistsError":
       return {
         failure: "workspace_root_not_found",
@@ -470,6 +478,7 @@ const makeWsRpcLayer = (
       );
 
       const fileSystem = yield* FileSystem.FileSystem;
+      const namedProjectFolders = yield* makeNamedProjectFolders;
       const prepareScratchWorkspace = yield* makePrepareScratchWorkspace;
       // Resolve early for drafts and bootstrap setup; engine dispatch also prepares
       // direct creates from HTTP and internal callers using the same policy.
@@ -554,6 +563,7 @@ const makeWsRpcLayer = (
           environment,
           auth,
           cwd: config.cwd,
+          newProjectsRoot: namedProjectFolders.namedProjectsRoot,
           ...(scratchWorkspaceRoot === undefined ? {} : { scratchWorkspaceRoot }),
           keybindingsConfigPath: config.keybindingsConfigPath,
           keybindings: keybindingsConfig.keybindings,
@@ -868,6 +878,19 @@ const makeWsRpcLayer = (
               ),
             ),
             { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsCreateNew]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsCreateNew,
+            namedProjectFolders
+              .createNamedProject(input)
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationDispatchCommandError({ message: cause.message, cause }),
+                ),
+              ),
+            { "rpc.aggregate": "orchestration" },
           ),
         [WS_METHODS.projectsEnsureScratch]: (input) =>
           observeRpcEffect(
@@ -1371,6 +1394,12 @@ const makeWsRpcLayer = (
     }),
   );
 
+/** Contain handler defects to their request instead of ending sibling subscriptions. */
+export const WS_RPC_SERVER_OPTIONS = {
+  disableTracing: true,
+  disableFatalDefects: true,
+} as const;
+
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
@@ -1404,32 +1433,36 @@ export const websocketRpcRouteLayer = Layer.unwrap(
             failEnvironmentInternal("internal_error", error),
           ),
         );
-        const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
-          disableTracing: true,
-        }).pipe(
+        const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(
+          WsRpcGroup,
+          WS_RPC_SERVER_OPTIONS,
+        ).pipe(
           Effect.provide(
-            makeWsRpcLayer(session, previewAutomationBroker).pipe(
-              Layer.provideMerge(RpcSerialization.layerJson),
-              Layer.provide(ProviderMaintenanceRunner.layer),
-              Layer.provide(
-                SourceControlDiscovery.layer.pipe(
-                  Layer.provide(
-                    SourceControlProviderRegistry.layer.pipe(
-                      Layer.provide(
-                        Layer.mergeAll(
-                          AzureDevOpsCli.layer,
-                          BitbucketApi.layer,
-                          GitHubCli.layer,
-                          GitLabCli.layer,
+            Layer.mergeAll(
+              DefectReporter.layer,
+              makeWsRpcLayer(session, previewAutomationBroker).pipe(
+                Layer.provideMerge(RpcSerialization.layerJson),
+                Layer.provide(ProviderMaintenanceRunner.layer),
+                Layer.provide(
+                  SourceControlDiscovery.layer.pipe(
+                    Layer.provide(
+                      SourceControlProviderRegistry.layer.pipe(
+                        Layer.provide(
+                          Layer.mergeAll(
+                            AzureDevOpsCli.layer,
+                            BitbucketApi.layer,
+                            GitHubCli.layer,
+                            GitLabCli.layer,
+                          ),
+                        ),
+                        Layer.provideMerge(GitVcsDriver.layer),
+                        Layer.provide(
+                          VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
                         ),
                       ),
-                      Layer.provideMerge(GitVcsDriver.layer),
-                      Layer.provide(
-                        VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
-                      ),
                     ),
+                    Layer.provide(VcsProcess.layer),
                   ),
-                  Layer.provide(VcsProcess.layer),
                 ),
               ),
             ),

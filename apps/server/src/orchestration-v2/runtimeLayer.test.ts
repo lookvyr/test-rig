@@ -24,6 +24,7 @@ import {
   ProviderSessionId,
   ProviderTurnId,
   RunId,
+  RunAttemptId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -294,6 +295,7 @@ it.effect(
         const cwd = yield* fs.makeTempDirectoryScoped({ prefix: "test-rig-branch-refresh-" });
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const execution = yield* RunExecutionService.RunExecutionServiceV2;
+        const eventSink = yield* EventSink.EventSinkV2;
         const finalization = yield* RunFinalizationService.RunFinalizationService;
         const threadId = ThreadId.make("runtime-branch-refresh");
         const projectId = ProjectId.make("runtime-branch-refresh-project");
@@ -324,12 +326,70 @@ it.effect(
           dispatchMode: { type: "start_immediately" },
         });
         const projection = yield* orchestrator.getThreadProjection(threadId);
-        const run = projection.runs[0]!;
-        const attempt = projection.attempts[0]!;
-        const rootNode = projection.nodes.find((node) => node.id === run.rootNodeId)!;
-        const checkpointScope = projection.checkpointScopes[0]!;
-        const providerThread = projection.providerThreads[0]!;
+        const startingRun = projection.runs[0]!;
+        assert.equal(startingRun.status, "starting");
+        const startedAt = yield* DateTime.now;
+        const run = { ...startingRun, status: "running" as const, startedAt };
         const providerTurnId = ProviderTurnId.make("runtime-branch-refresh-provider-turn");
+        const attempt = {
+          ...projection.attempts[0]!,
+          status: "running" as const,
+          startedAt,
+          providerTurnId,
+        };
+        const rootNode = {
+          ...projection.nodes.find((node) => node.id === run.rootNodeId)!,
+          status: "running" as const,
+          startedAt,
+        };
+        const checkpointScope = projection.checkpointScopes[0]!;
+        const providerThread = {
+          ...projection.providerThreads[0]!,
+          status: "active" as const,
+          lastRunOrdinal: run.ordinal,
+        };
+        // This fixture calls execution directly; mirror the admission normally
+        // committed by ProviderTurnStartService before its terminal writes.
+        const admitted = yield* eventSink.writeIfRunCurrent({
+          threadId,
+          runId: run.id,
+          activeAttemptId: attempt.id,
+          expectedStatus: "starting",
+          events: [
+            {
+              id: EventId.make("runtime-branch-refresh-running"),
+              type: "run.updated",
+              threadId,
+              runId: run.id,
+              occurredAt: startedAt,
+              payload: run,
+            },
+            {
+              id: EventId.make("runtime-branch-refresh-attempt-running"),
+              type: "run-attempt.updated",
+              threadId,
+              runId: run.id,
+              occurredAt: startedAt,
+              payload: attempt,
+            },
+            {
+              id: EventId.make("runtime-branch-refresh-node-running"),
+              type: "node.updated",
+              threadId,
+              runId: run.id,
+              occurredAt: startedAt,
+              payload: rootNode,
+            },
+            {
+              id: EventId.make("runtime-branch-refresh-provider-active"),
+              type: "provider-thread.updated",
+              threadId,
+              occurredAt: startedAt,
+              payload: providerThread,
+            },
+          ],
+        });
+        assert.isTrue(admitted.committed);
         yield* execution.startRootRun({
           commandId: CommandId.make("runtime-branch-refresh-execute"),
           appThread: projection.thread,
@@ -410,7 +470,11 @@ it.effect(
         });
         yield* Deferred.await(turnRefreshed);
         yield* Deferred.await(ingestionDone);
+        const terminal = yield* orchestrator.getThreadProjection(threadId);
+        assert.equal(terminal.runs.find((row) => row.id === run.id)?.status, "waiting");
         yield* finalization.finalize({ threadId, runId: run.id, scopeId: checkpointScope.id });
+        const finalized = yield* orchestrator.getThreadProjection(threadId);
+        assert.equal(finalized.runs.find((row) => row.id === run.id)?.status, "completed");
         assert.deepEqual(projectRefreshes, [projectId]);
         assert.deepEqual(workspaceRefreshes, [cwd]);
         assert.deepEqual(localRefreshes, [
@@ -4834,3 +4898,148 @@ it.layer(TestLayer)("usage-limit recovery", (it) => {
     }),
   );
 });
+
+it.effect.each(["missing-session", "terminal-provider-turn", "superseded-attempt"] as const)(
+  "Stop repairs only its owning stalled run after %s",
+  (scenario) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const sink = yield* EventSink.EventSinkV2;
+      const threadId = ThreadId.make("audit:stalled-stop");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("audit:create"),
+        threadId,
+        projectId: ProjectId.make("audit:project"),
+        title: "Audit",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: process.cwd(),
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("audit:message"),
+        threadId,
+        messageId: MessageId.make("audit:message"),
+        text: "Work",
+        attachments: [],
+        modelSelection,
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const before = yield* orchestrator.getThreadProjection(threadId);
+      const run = before.runs[0]!;
+      const attempt = before.attempts[0]!;
+      const root = before.nodes.find((n) => n.id === run.rootNodeId)!;
+      const pt = before.providerThreads[0]!;
+      const now = yield* DateTime.now;
+      const providerTurnId = ProviderTurnId.make("audit:turn");
+      yield* sink.write({
+        events: [
+          {
+            id: EventId.make("audit:run-running"),
+            type: "run.updated",
+            threadId,
+            occurredAt: now,
+            payload: { ...run, status: "running" },
+          },
+          {
+            id: EventId.make("audit:attempt-running"),
+            type: "run-attempt.updated",
+            threadId,
+            occurredAt: now,
+            payload: { ...attempt, status: "running", providerTurnId },
+          },
+          {
+            id: EventId.make("audit:root-running"),
+            type: "node.updated",
+            threadId,
+            occurredAt: now,
+            payload: { ...root, status: "running" },
+          },
+          {
+            id: EventId.make("audit:thread-active"),
+            type: "provider-thread.updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              ...pt,
+              status: "active",
+              providerSessionId: ProviderSessionId.make("audit:lost-session"),
+            },
+          },
+          {
+            id: EventId.make("audit:turn-running"),
+            type: "provider-turn.updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              id: providerTurnId,
+              providerThreadId: pt.id,
+              nodeId: root.id,
+              runAttemptId: attempt.id,
+              nativeTurnRef: null,
+              ordinal: 1,
+              status: scenario === "terminal-provider-turn" ? "completed" : "running",
+              startedAt: now,
+              completedAt: scenario === "terminal-provider-turn" ? now : null,
+            },
+          },
+        ],
+      });
+      if (scenario === "superseded-attempt") {
+        yield* sink.write({
+          events: [
+            {
+              id: EventId.make("audit:replacement-attempt"),
+              type: "run.updated",
+              threadId,
+              occurredAt: now,
+              payload: {
+                ...run,
+                status: "running",
+                activeAttemptId: RunAttemptId.make("audit:new-attempt"),
+              },
+            },
+          ],
+        });
+      } else {
+        yield* orchestrator.dispatch({
+          type: "run.interrupt",
+          commandId: CommandId.make("audit:stop"),
+          threadId,
+          runId: run.id,
+          holdQueue: true,
+        });
+      }
+      yield* orchestrator.dispatch({
+        type: "thread.background-work.settle",
+        commandId: CommandId.make("audit:settle"),
+        threadId,
+        providerThreadId: pt.id,
+        providerTurnId,
+      });
+      const after = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(
+        after.runs[0]?.status,
+        scenario === "superseded-attempt" ? "running" : "interrupted",
+      );
+      assert.equal(
+        after.attempts[0]?.status,
+        scenario === "superseded-attempt" ? "running" : "interrupted",
+      );
+      assert.equal(
+        after.providerTurns[0]?.status,
+        scenario === "terminal-provider-turn"
+          ? "completed"
+          : scenario === "superseded-attempt"
+            ? "running"
+            : "interrupted",
+      );
+    }).pipe(Effect.provide(TestLayer)),
+);

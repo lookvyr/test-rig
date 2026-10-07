@@ -1,15 +1,14 @@
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentServerConfigsAtom } from "../state/server";
-import { useAtomValue } from "@effect/atom-react";
 import {
   scopedProjectKey,
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef } from "@t3tools/contracts";
+import { type ScopedProjectRef } from "@t3tools/contracts";
 import { useParams, useRouter } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import {
   markPromotedDraftThreadByRef,
   type DraftThreadEnvMode,
@@ -24,19 +23,18 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { readProject, readThreadShell, useProjects, useThread } from "../state/entities";
-import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
-import { primaryServerSettingsAtom } from "../state/server";
+import {
+  hasExplicitComposerModelSelection,
+  resolveNewDraftStartFromOrigin,
+  resolveNewThreadModelSelectionOverride,
+} from "../lib/chatThreadActions";
+import { resolveDraftProjectDefaults } from "../lib/draftProjectDefaults";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
 export function useNewThreadHandler() {
-  // New-thread defaults are a user preference, and the settings UI only ever
-  // edits the primary environment's settings.json. Reading the target
-  // environment's own settings here would silently reset remote projects to
-  // the decoded defaults ("local" mode, current branch), since nothing can
-  // set those values on a remote server.
-  const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
+  const newThreadRequest = useRef(0);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const router = useRouter();
   const getCurrentRouteTarget = useCallback(() => {
@@ -45,7 +43,7 @@ export function useNewThreadHandler() {
   }, [router]);
 
   return useCallback(
-    (
+    async (
       projectRef: ScopedProjectRef,
       inputOptions?: {
         branch?: string | null;
@@ -55,6 +53,14 @@ export function useNewThreadHandler() {
         replace?: boolean;
       },
     ): Promise<void> => {
+      const request = ++newThreadRequest.current;
+      const requestingRouteHref = router.state.location?.href;
+      const projectDefaults = await resolveDraftProjectDefaults(projectRef);
+      if (
+        request !== newThreadRequest.current ||
+        router.state.location?.href !== requestingRouteHref
+      )
+        return;
       const {
         getComposerDraft,
         getDraftSessionByLogicalProjectKey,
@@ -64,16 +70,11 @@ export function useNewThreadHandler() {
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
         setModelSelection,
-        setRuntimeMode,
       } = useComposerDraftStore.getState();
       const currentRouteTarget = getCurrentRouteTarget();
-      // A new thread carries the user's *working mode* from the thread being
-      // viewed: model (including options like reasoning effort and context
-      // window), permission mode, and interaction mode. The composer applies
-      // provider defaults over the carried permission mode for new Claude and
-      // Codex drafts, unless the user explicitly selects a mode in that draft.
-      // Branch, worktree, and env mode never carry implicitly — they use the configured
-      // defaults unless the caller passes them explicitly.
+      // Model and interaction choices can carry from the viewed thread.
+      // The destination project's model and permissions take precedence;
+      // workspace choices use its defaults unless explicitly supplied.
       const carrySourceShell =
         currentRouteTarget?.kind === "server"
           ? readThreadShell(currentRouteTarget.threadRef)
@@ -95,11 +96,6 @@ export function useNewThreadHandler() {
         : null;
       const carryModelSelection =
         composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
-      const carryRuntimeMode =
-        carrySourceComposer?.runtimeMode ??
-        carrySourceShell?.runtimeMode ??
-        carrySourceDraft?.runtimeMode ??
-        null;
       const carryInteractionMode =
         carrySourceComposer?.interactionMode ??
         carrySourceShell?.interactionMode ??
@@ -152,7 +148,9 @@ export function useNewThreadHandler() {
         return (async () => {
           const isDraftAlreadyOpen =
             currentRouteTarget?.kind === "draft" &&
-            currentRouteTarget.draftId === reusableStoredDraftThread.draftId;
+            currentRouteTarget.draftId === reusableStoredDraftThread.draftId &&
+            reusableStoredDraftThread.environmentId === projectRef.environmentId &&
+            reusableStoredDraftThread.projectId === projectRef.projectId;
           const hasExplicitWorkspaceOption =
             hasBranchOption ||
             hasWorktreePathOption ||
@@ -166,7 +164,7 @@ export function useNewThreadHandler() {
           // preserved. When the draft is already open and no options were
           // passed, leave it alone entirely — the user may have just picked a
           // branch in the composer.
-          const defaultEnvMode = primaryServerSettings.defaultThreadEnvMode;
+          const defaultEnvMode = projectDefaults.defaultThreadEnvMode;
           const workspaceContext = hasExplicitWorkspaceOption
             ? {
                 ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
@@ -182,26 +180,32 @@ export function useNewThreadHandler() {
                   envMode: defaultEnvMode,
                   startFromOrigin: resolveNewDraftStartFromOrigin({
                     envMode: defaultEnvMode,
-                    newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
+                    newWorktreesStartFromOrigin: projectDefaults.newWorktreesStartFromOrigin,
                   }),
                 };
           if (workspaceContext) {
-            if (!isDraftAlreadyOpen) {
-              // A new-thread action reuses the draft's text, but starts its
-              // permission selection over so an old override cannot mask
-              // the provider default or the newly carried mode.
-              setRuntimeMode(reusableStoredDraftThread.draftId, null);
-            }
             setDraftThreadContext(reusableStoredDraftThread.draftId, {
               ...workspaceContext,
-              ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
+              runtimeMode: projectDefaults.defaultRuntimeMode,
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
-            if (carryModelSelection) {
+            const modelSelectionOverride = resolveNewThreadModelSelectionOverride({
+              projectDefaultSelection: projectDefaults.defaultModelSelection ?? null,
+              carrySelection: carryModelSelection,
+              carrySourceDraftId:
+                currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+              destinationDraftId: reusableStoredDraftThread.draftId,
+            });
+            if (
+              modelSelectionOverride &&
+              !hasExplicitComposerModelSelection(
+                getComposerDraft(reusableStoredDraftThread.draftId),
+              )
+            ) {
               // The carried selection is a complete snapshot of the viewed
               // thread's model state: absent options mean "no options", not
               // "keep the stale draft's options".
-              setModelSelection(reusableStoredDraftThread.draftId, carryModelSelection, {
+              setModelSelection(reusableStoredDraftThread.draftId, modelSelectionOverride, {
                 replaceOptions: true,
               });
             }
@@ -217,7 +221,7 @@ export function useNewThreadHandler() {
             {
               threadId: reusableStoredDraftThread.threadId,
               ...workspaceContext,
-              ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
+              runtimeMode: projectDefaults.defaultRuntimeMode,
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
           );
@@ -270,7 +274,7 @@ export function useNewThreadHandler() {
       const draftId = newDraftId();
       const threadId = newThreadId();
       const createdAt = new Date().toISOString();
-      const initialEnvMode = options?.envMode ?? primaryServerSettings.defaultThreadEnvMode;
+      const initialEnvMode = options?.envMode ?? projectDefaults.defaultThreadEnvMode;
       return (async () => {
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
           threadId,
@@ -282,19 +286,26 @@ export function useNewThreadHandler() {
             options?.startFromOrigin ??
             resolveNewDraftStartFromOrigin({
               envMode: initialEnvMode,
-              newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
+              newWorktreesStartFromOrigin: projectDefaults.newWorktreesStartFromOrigin,
             }),
-          runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
+          runtimeMode: projectDefaults.defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
         });
         applyStickyState(draftId);
-        if (carryModelSelection) {
+        const modelSelectionOverride = resolveNewThreadModelSelectionOverride({
+          projectDefaultSelection: projectDefaults.defaultModelSelection ?? null,
+          carrySelection: carryModelSelection,
+          carrySourceDraftId:
+            currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+          destinationDraftId: draftId,
+        });
+        if (modelSelectionOverride) {
           // After sticky state so the viewed thread's exact selection
           // (model + options like effort and context window) wins over the
           // globally sticky one. replaceOptions: the carried selection is a
           // complete snapshot — absent options mean "no options", not "keep
           // whatever sticky state just wrote".
-          setModelSelection(draftId, carryModelSelection, { replaceOptions: true });
+          setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
         }
 
         await router.navigate({
@@ -304,7 +315,7 @@ export function useNewThreadHandler() {
         });
       })();
     },
-    [getCurrentRouteTarget, primaryServerSettings, projectGroupingSettings, router],
+    [getCurrentRouteTarget, projectGroupingSettings, router],
   );
 }
 

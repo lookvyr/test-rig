@@ -3,6 +3,9 @@ import {
   CommandId,
   MessageId,
   type OrchestrationV2Notification,
+  type PullRequestActivity,
+  type PullRequestComment,
+  type PullRequestRef,
   type ThreadPullRequestLink,
   type ThreadPullRequestWatch,
 } from "@t3tools/contracts";
@@ -25,8 +28,9 @@ import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import { evaluatePullRequestWatch, pullRequestWatchMessage } from "./pullRequestWatch.ts";
+import { pullRequestRateLimitFailure } from "./pullRequestRateLimit.ts";
 
-/** Passes in a row that could not read a pull request before its watch ends (one a minute). */
+/** Failed reads, excluding host rate-limit pauses, before a watch ends. */
 const READ_FAILURE_LIMIT = 15;
 
 const logFailure =
@@ -51,6 +55,7 @@ function watchesEqual(left: ThreadPullRequestWatch, right: ThreadPullRequestWatc
     left.headSha === right.headSha &&
     left.failedChecks.join("\n") === right.failedChecks.join("\n") &&
     left.passed === right.passed &&
+    (left.passedChecks ?? []).join("\n") === (right.passedChecks ?? []).join("\n") &&
     left.remarksThrough === right.remarksThrough &&
     left.remarkIds.join("\n") === right.remarkIds.join("\n") &&
     left.conflicting === right.conflicting &&
@@ -118,13 +123,63 @@ export const make = Effect.gen(function* () {
   // "Watching" while it learns nothing.
   const giveUp = (target: WatchTarget) =>
     record(target, null, {
-      text: `T3 Code stopped watching pull request #${target.link.number} (${target.link.url}) because it could not read it from the host for ${READ_FAILURE_LIMIT} minutes. Check it yourself, and call watch_pull_request to watch it again.`,
+      text: `T3 Code stopped watching pull request #${target.link.number} (${target.link.url}) because it failed to read it from the host ${READ_FAILURE_LIMIT} times in a row. Check it yourself, and call watch_pull_request to watch it again.`,
       notification: {
         source: { kind: "monitor" },
         outcome: "failed",
         summary: `#${target.link.number}: stopped watching, could not read it`,
       },
     }).pipe(Effect.catch(() => record(target, null)));
+
+  const readRemarks = Effect.fn("PullRequestWatchReactor.readRemarks")(
+    function* (reference: PullRequestRef, activity: PullRequestActivity) {
+      // Reply cursors cannot account for review threads omitted by a degraded read.
+      if (activity.commentsTruncated && activity.reviewThreadsTruncated !== false) return null;
+      const remarks = new Map<string, PullRequestComment>(
+        activity.comments.map((comment) => [comment.id, comment]),
+      );
+      for (const thread of activity.reviewThreads) {
+        let cursor = thread.nextCommentsCursor ?? null;
+        const cursors = new Set<string>();
+        const threadIds = new Set(thread.comments.map((comment) => comment.id));
+        for (const comment of thread.comments) {
+          remarks.set(comment.id, {
+            ...comment,
+            kind: "review-comment",
+            path: thread.path,
+            reviewState: null,
+          });
+        }
+        // Re-read every tail: bots can edit a reply without changing the thread's count.
+        while (cursor !== null) {
+          if (cursors.has(cursor)) return null;
+          cursors.add(cursor);
+          const page = yield* pullRequests.threadComments({
+            ...reference,
+            threadId: thread.id,
+            cursor,
+          });
+          for (const comment of page.comments) {
+            threadIds.add(comment.id);
+            remarks.set(comment.id, {
+              ...comment,
+              kind: "review-comment",
+              path: thread.path,
+              reviewState: null,
+            });
+          }
+          cursor = page.nextCursor;
+        }
+        if (threadIds.size < (thread.commentCount ?? 0)) return null;
+      }
+      return [...remarks.values()];
+    },
+    Effect.catch((error) =>
+      Effect.logWarning("pull request watch comment pagination failed", { error }).pipe(
+        Effect.as(null),
+      ),
+    ),
+  );
 
   const check = Effect.fn("PullRequestWatchReactor.check")(function* (target: WatchTarget) {
     const { thread, link, watch } = target;
@@ -148,6 +203,8 @@ export const make = Effect.gen(function* () {
     const key = failureKey(target);
     if (Exit.isFailure(read)) {
       if (Cause.hasInterruptsOnly(read.cause)) return yield* Effect.failCause(read.cause);
+      // PullRequestService owns reset-aware host backoff. Its pauses do not spend failure budget.
+      if (pullRequestRateLimitFailure(read.cause) !== null) return;
       const failures = (readFailures.get(key) ?? 0) + 1;
       readFailures.set(key, failures);
       // The count stays until the stop lands, so a failed stop is tried again next pass.
@@ -161,13 +218,8 @@ export const make = Effect.gen(function* () {
     const [detail, activity] = read.value;
     if (detail.state !== "open") return yield* record(target, null);
 
-    // A degraded read (GitHub's review thread query failed) is truncated with no long thread to
-    // explain it, and would skip review comments, so remarks wait for a later pass. Replies past
-    // the first ten of a long review thread are not read.
-    const degraded =
-      activity.commentsTruncated &&
-      !activity.reviewThreads.some((reviewThread) => reviewThread.nextCommentsCursor !== undefined);
-    const report = evaluatePullRequestWatch(watch, detail, degraded ? null : activity.comments);
+    const remarks = yield* readRemarks(reference, activity);
+    const report = evaluatePullRequestWatch(watch, detail, remarks);
     if (report.changes.length > 0) {
       return yield* record(
         target,

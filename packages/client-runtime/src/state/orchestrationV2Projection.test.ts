@@ -5,6 +5,7 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
   MessageId,
+  EventId,
   ProjectId,
   ProviderInstanceId,
   ProviderDriverKind,
@@ -390,10 +391,10 @@ describe("provider thread activation", () => {
     },
   };
   const update = {
-    id: "event-provider-active",
+    id: EventId.make("event-provider-active"),
     type: "provider-thread.updated",
     threadId,
-    driver: "opencode",
+    driver: ProviderDriverKind.make("opencode"),
     occurredAt: now,
     payload: nativeThread,
   } as OrchestrationV2DomainEvent;

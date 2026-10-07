@@ -18,6 +18,13 @@ conversation. Both paths use the same saved tasks, and the list updates live.
 Editing a task bound to a conversation preserves its binding; its workspace and
 permissions come from that conversation.
 
+## Tasks attached to a conversation
+
+Open the conversation's details panel to see its bound automations. From there
+you can edit a task, run it now, pause or resume it, or open Scheduled Tasks.
+A **Sent by automation** label on a message links to the task that sent it.
+Tasks that create a new conversation for every run remain managed in Settings.
+
 ## When a task runs
 
 A scheduled prompt sent to an existing conversation waits behind its current
@@ -51,6 +58,9 @@ Fixed-time schedules use the timezone of the machine running Test Rig's server.
 That may differ from the timezone of a browser connected to it. A fixed-time run
 up to ten minutes late can still run; a later one is skipped until the next
 scheduled occurrence.
+
+Editing, pausing, or deleting a task while a missed occurrence is being skipped
+keeps your saved changes. A replacement task keeps its own schedule.
 
 Intervals have a one-minute minimum. An overdue interval runs once when the
 scheduler resumes, rather than replaying every missed occurrence. The next

@@ -99,6 +99,7 @@ const RawNoteSchema = Schema.Struct({
   body: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.optional(Schema.NullOr(RawUserSchema)),
   created_at: Schema.String,
+  updated_at: Schema.optional(Schema.NullOr(Schema.String)),
   /** True for notes GitLab writes itself ("assigned to…"), which are events, not comments. */
   system: Schema.optional(Schema.Boolean),
   type: Schema.optional(Schema.NullOr(Schema.String)),
@@ -122,6 +123,7 @@ const RawDiscussionNoteSchema = Schema.Struct({
   body: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.optional(Schema.NullOr(RawUserSchema)),
   created_at: Schema.String,
+  updated_at: Schema.optional(Schema.NullOr(Schema.String)),
   system: Schema.optional(Schema.Boolean),
   resolvable: Schema.optional(Schema.Boolean),
   resolved: Schema.optional(Schema.NullOr(Schema.Boolean)),
@@ -577,6 +579,7 @@ export function decodeDiscussionsJson(
         author: toActor(note.author),
         body: note.body ?? "",
         createdAt: note.created_at,
+        ...(note.updated_at ? { editedAt: note.updated_at } : {}),
         url: null,
       })),
     });
@@ -620,6 +623,7 @@ export function decodeNotesJson(
       author: toActor(value.author),
       body,
       createdAt: value.created_at,
+      ...(value.updated_at ? { editedAt: value.updated_at } : {}),
       url: null,
       path: trimmed(value.position?.new_path) ?? trimmed(value.position?.old_path),
       reviewState: null,

@@ -215,6 +215,8 @@ export const OrchestrationV2TurnCapabilities = Schema.Struct({
   emitsTurnCompleted: Schema.Boolean,
   supportsInterrupt: Schema.Boolean,
   supportsActiveSteering: Schema.Boolean,
+  /** Native steering may cancel pending tools before consuming the message. */
+  activeSteeringInterruptsTools: Schema.optional(Schema.Boolean),
   supportsSteeringByInterruptRestart: Schema.Boolean,
   supportsQueuedMessages: Schema.Boolean,
   terminalStatusQuality: Schema.Literals(["strong", "weak", "none"]),
@@ -1268,6 +1270,7 @@ export type OrchestrationV2UserMessageInputIntent =
   typeof OrchestrationV2UserMessageInputIntent.Type;
 
 const OrchestrationV2TurnItemBaseFields = {
+  toolNonExecutionKind: Schema.optional(Schema.String),
   /** Native child attribution retained when the provider does not expose a child transcript. */
   agentId: Schema.optional(TrimmedNonEmptyString),
   parentToolUseId: Schema.optional(TrimmedNonEmptyString),

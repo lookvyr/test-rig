@@ -1,6 +1,9 @@
 import { cn } from "~/lib/utils";
 import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Minimize2Icon } from "lucide-react";
+import { Button } from "../ui/button";
+import { composerFloatingLayerProps } from "./composerEventScope";
 
 function formatPercentage(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -15,6 +18,9 @@ function formatPercentage(value: number | null): string | null {
 export function ContextWindowMeter(props: {
   usage: ContextWindowSnapshot;
   providerDisplayName?: string | null;
+  onCompact?: (() => void) | undefined;
+  compactDisabled?: boolean;
+  compactDisabledReason?: string | null;
 }) {
   const { usage, providerDisplayName } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
@@ -81,6 +87,7 @@ export function ContextWindowMeter(props: {
         }
       />
       <PopoverPopup
+        {...composerFloatingLayerProps}
         tooltipStyle
         side="top"
         align="end"
@@ -132,6 +139,26 @@ export function ContextWindowMeter(props: {
             <div className="mt-1 text-pretty text-secondary-label text-[11px] font-medium">
               {providerDisplayName ?? "It"} automatically compacts its context when needed.
             </div>
+          ) : null}
+          {props.onCompact ? (
+            <>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                className="mt-1 w-full justify-center"
+                disabled={props.compactDisabled}
+                onClick={props.onCompact}
+              >
+                <Minimize2Icon aria-hidden="true" />
+                Compact context
+              </Button>
+              {props.compactDisabled && props.compactDisabledReason ? (
+                <div className="text-pretty text-secondary-label text-[11px]">
+                  {props.compactDisabledReason}
+                </div>
+              ) : null}
+            </>
           ) : null}
         </div>
       </PopoverPopup>

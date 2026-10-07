@@ -1,3 +1,4 @@
+import { DesktopPreviewClearDataInputSchema } from "./ipc.ts";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -35,4 +36,14 @@ describe("DesktopEnvironmentBootstrapSchema", () => {
       }).runningDistro,
     ).toBeNull();
   });
+});
+
+it("preserves scoped preview data-clear payloads instead of coercing them to void", () => {
+  const decode = Schema.decodeUnknownSync(DesktopPreviewClearDataInputSchema);
+  expect(decode({ environmentId: "local", profileId: "work" })).toEqual({
+    environmentId: "local",
+    profileId: "work",
+  });
+  expect(decode(undefined)).toBeUndefined();
+  expect(() => decode({ profileId: "work" })).toThrow();
 });

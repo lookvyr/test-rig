@@ -38,7 +38,7 @@ is no longer available.
 ## Follow-up messages
 
 While the agent is working, sending a follow-up steers its current turn. Type
-your message to show Send beside Stop. Enter and the Send button do the same
+your message to show **Steer message** beside Stop. Enter and the button do the same
 thing. Follow-ups are not saved as a queue of future turns.
 
 Send stays disabled while the turn is starting or cannot accept steering. Your
@@ -46,12 +46,19 @@ draft stays in the composer until you send it. Once the agent finishes, sending
 starts a new turn. This also applies to side chats.
 
 Stop is available while an interruptible turn is preparing or starting, as well
-as while the agent is working.
+as while the agent is working. After an interrupted turn, **Resume thread** can
+continue where the agent left off when the composer is empty and the provider
+supports continuation. You can also send your own follow-up.
 
 ## Plans and attachments
 
 When legacy plan mode is enabled, text feedback can refine a proposed plan.
-Adding an image sends your feedback and image together as a new message.
+Adding an image sends your feedback and image together as a new message. Use
+**Attach images** to choose images from your computer, or paste them into the composer.
+
+A structured question can be collapsed while you read the conversation. Expand
+it to answer. If its provider process can no longer accept an answer, the
+controls explain that it cannot resume instead of offering an unusable submission.
 
 ## Context compaction
 
@@ -59,6 +66,10 @@ The work log distinguishes compaction in progress, completed compaction, a
 stopped compaction and a failed compaction. Stopping or interrupting compaction
 does not count as successful completion. The context-window indicator shows
 the current context usage, which is separate from cumulative token usage.
+
+For a provider that supports compaction, choose **Compact context** in that
+indicator, or select **/compact** from the command suggestions. The indicator
+action keeps your unsent draft and attachments in place while compaction runs.
 
 ## Agent-prepared attachments
 
@@ -126,6 +137,9 @@ speed. Reopen it to change another option. This also applies to model options in
 Settings.
 
 ## Drafts and stashes
+
+With an empty composer, press **Up Arrow** to recall your most recent sent prompt.
+This prepares an editable draft; it does not change the earlier message.
 
 The new-thread heading gives longer project names more room and adapts to the
 space left by open sidebars. Hover over a shortened name to see the full name.

@@ -30,6 +30,7 @@ import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts
 import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
 import * as EffectWorker from "./orchestration-v2/EffectWorker.ts";
 import * as LegacyV1ThreadImporter from "./orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
+import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProviderRuntimeRecovery from "./orchestration-v2/ProviderRuntimeRecoveryService.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -282,6 +283,7 @@ export const make = (options?: StartupOptions) =>
     const keybindings = yield* Keybindings.Keybindings;
     const legacyImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
     const recovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -358,6 +360,10 @@ export const make = (options?: StartupOptions) =>
         }),
       );
       yield* runStartupPhase("orchestration-v2.recovery", recovery.recover);
+      yield* runStartupPhase(
+        "orchestration-v2.delegated-tasks.recover",
+        orchestrator.recoverDelegatedTasks,
+      );
       yield* EffectWorker.runDaemon.pipe(Effect.forkIn(workerScope));
       yield* (yield* WorktreeCleanup).start().pipe(Effect.provideService(Scope.Scope, workerScope));
       const bootstrapTargets = yield* resolveAutoBootstrapWelcomeTargets;

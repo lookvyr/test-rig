@@ -6,6 +6,7 @@ import {
   formatGeneratedBranchName,
   buildGeneratedWorktreeBranchName,
   buildTemporaryWorktreeBranchName,
+  flattenTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseTemporaryWorktreeBranchPrefix,
@@ -57,6 +58,15 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
 });
 
 describe("isTemporaryWorktreeBranch", () => {
+  it("keeps a flattened automatic ref identifiable without rewriting explicit branches", () => {
+    const flattened = flattenTemporaryWorktreeBranchName("test-rig/_worktree/deadbeef");
+    expect(flattened).toBe("test-rig-_worktree-deadbeef");
+    expect(parseTemporaryWorktreeBranchPrefix(flattened)).toBe("test-rig");
+    expect(isTemporaryWorktreeBranch(flattened)).toBe(true);
+    expect(flattenTemporaryWorktreeBranchName("test-rig/explicit-name")).toBe(
+      "test-rig/explicit-name",
+    );
+  });
   it("matches the generated temporary worktree refName format", () => {
     expect(
       isTemporaryWorktreeBranch(

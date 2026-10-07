@@ -11,21 +11,48 @@ import * as GitWorkflowService from "./GitWorkflowService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
-function makeLayer(input: {
-  readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
-}) {
+function makeLayer(
+  input: {
+    readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
+    readonly resolve?: VcsDriverRegistry.VcsDriverRegistry["Service"]["resolve"];
+  },
+  manager: Partial<GitManager.GitManager["Service"]> = {},
+) {
   return GitWorkflowService.layer.pipe(
     Layer.provide(
       Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
         detect: input.detect,
+        ...(input.resolve ? { resolve: input.resolve } : {}),
       }),
     ),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
-    Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    Layer.provide(Layer.mock(GitManager.GitManager)(manager)),
   );
 }
 
 describe("GitWorkflowService", () => {
+  it.effect("routes generic worktree creation through the settings-owning manager", () => {
+    const createWorktree = vi.fn<GitManager.GitManager["Service"]["createWorktree"]>(() =>
+      Effect.succeed({ worktree: { path: "/worktree", refName: "feature" } }),
+    );
+    const input = { cwd: "/repo", refName: "main", newRefName: "feature", path: null };
+    return Effect.gen(function* () {
+      yield* (yield* GitWorkflowService.GitWorkflowService).createWorktree(input, {
+        submodules: "none",
+      });
+      expect(createWorktree).toHaveBeenCalledExactlyOnceWith(input, { submodules: "none" });
+    }).pipe(
+      Effect.provide(
+        makeLayer(
+          {
+            detect: () => Effect.succeed({ kind: "git" } as VcsDriverRegistry.VcsDriverHandle),
+            resolve: () => Effect.succeed({ kind: "git" } as VcsDriverRegistry.VcsDriverHandle),
+          },
+          { createWorktree },
+        ),
+      ),
+    );
+  });
   it.effect("reports a non-Git VCS repository as not a Git repository", () =>
     Effect.gen(function* () {
       const workflow = yield* GitWorkflowService.GitWorkflowService;

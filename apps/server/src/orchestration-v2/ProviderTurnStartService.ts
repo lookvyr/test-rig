@@ -173,6 +173,56 @@ export const layer: Layer.Layer<
       };
     };
 
+    // Each loader closes over only the provider id, never startup transcript history.
+    const makeSubagentLoader =
+      (providerInstanceId: OrchestrationV2Run["providerInstanceId"]) =>
+      (parentThreadId: ThreadId, childThreadId: ThreadId) =>
+        Effect.gen(function* () {
+          const parent = yield* projectionStore.getThreadRecords(
+            parentThreadId,
+            ["subagents", "turnItems"],
+            { turnItemTypes: ["subagent"] },
+          );
+          const task = parent.subagents.find(
+            (candidate) =>
+              candidate.childThreadId === childThreadId &&
+              candidate.providerInstanceId === providerInstanceId,
+          );
+          const turnItem = parent.turnItems.find(
+            (item) => item.type === "subagent" && item.subagentId === task?.id,
+          );
+          if (task === undefined || turnItem === undefined) return undefined;
+          const child = yield* projectionStore.getThreadRecords(childThreadId, [
+            "providerThreads",
+            "providerTurns",
+          ]);
+          const providerThread = child.providerThreads.find(
+            (thread) => thread.id === task.providerThreadId,
+          );
+          if (providerThread === undefined) return undefined;
+          return {
+            task,
+            turnItem,
+            childThread: child.thread,
+            providerThread,
+            nextProviderTurnOrdinal:
+              Math.max(
+                0,
+                ...child.providerTurns
+                  .filter((turn) => turn.providerThreadId === providerThread.id)
+                  .map((turn) => turn.ordinal),
+              ) + 1,
+          };
+        }).pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning("Failed to read persisted subagent", {
+              parentThreadId,
+              childThreadId,
+              cause,
+            }).pipe(Effect.as(undefined)),
+          ),
+        );
+
     const makeDeliverySession = (
       session: ProviderAdapterV2SessionRuntime,
       startWithHandoffs: (
@@ -1183,52 +1233,7 @@ export const layer: Layer.Layer<
         attempt: runningAttempt,
         attemptId: attempt.id,
         loadInheritedBackgroundTurnItems: runControls.loadInheritedBackgroundTurnItems,
-        loadSubagent: (parentThreadId, childThreadId) =>
-          Effect.gen(function* () {
-            const parent = yield* projectionStore.getThreadRecords(
-              parentThreadId,
-              ["subagents", "turnItems"],
-              { turnItemTypes: ["subagent"] },
-            );
-            const task = parent.subagents.find(
-              (candidate) =>
-                candidate.childThreadId === childThreadId &&
-                candidate.providerInstanceId === run.providerInstanceId,
-            );
-            const turnItem = parent.turnItems.find(
-              (item) => item.type === "subagent" && item.subagentId === task?.id,
-            );
-            if (task === undefined || turnItem === undefined) return undefined;
-            const child = yield* projectionStore.getThreadRecords(childThreadId, [
-              "providerThreads",
-              "providerTurns",
-            ]);
-            const providerThread = child.providerThreads.find(
-              (thread) => thread.id === task.providerThreadId,
-            );
-            if (providerThread === undefined) return undefined;
-            return {
-              task,
-              turnItem,
-              childThread: child.thread,
-              providerThread,
-              nextProviderTurnOrdinal:
-                Math.max(
-                  0,
-                  ...child.providerTurns
-                    .filter((turn) => turn.providerThreadId === providerThread.id)
-                    .map((turn) => turn.ordinal),
-                ) + 1,
-            };
-          }).pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("Failed to read persisted subagent", {
-                parentThreadId,
-                childThreadId,
-                cause,
-              }).pipe(Effect.as(undefined)),
-            ),
-          ),
+        loadSubagent: makeSubagentLoader(run.providerInstanceId),
         relatedThreadIds: routableSubagents.flatMap((subagent) =>
           subagent.childThreadId === null ? [] : [subagent.childThreadId],
         ),
@@ -1242,6 +1247,16 @@ export const layer: Layer.Layer<
               .filter((turn) => turn.providerThreadId === providerThread.id)
               .map((turn) => turn.ordinal),
           ) + 1,
+        // Legacy accepted attempts have no native id. They count only before
+        // a replacement, while no accepted attempt records a native identity.
+        nativeThreadHasTurns:
+          nativeInputRunIds.size > 0 ||
+          (sameNativeThread &&
+            providerThread.forkedFrom !== null &&
+            providerThread.nativeThreadRef !== null) ||
+          (legacyInputRunIds.size > 0 &&
+            sameNativeThread &&
+            !acceptedAttempts.some((source) => source.nativeThreadId !== undefined)),
         shouldStartProviderTurn: runControls.shouldStartProviderTurn,
         shouldFinalizeRun: runControls.shouldFinalizeRun,
         hasUnpairedRunInterruptRequest: runControls.hasUnpairedRunInterruptRequest,

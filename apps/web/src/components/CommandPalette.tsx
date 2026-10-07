@@ -1,5 +1,7 @@
 "use client";
 
+import { NewProjectForm } from "./NewProjectForm";
+
 import { useScratchProject } from "../hooks/useScratchProject";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 
@@ -42,6 +44,7 @@ import {
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
+  PanelRightIcon,
   SettingsIcon,
   SquarePenIcon,
   TextSearchIcon,
@@ -88,9 +91,10 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
-import { onOpenCommandPalette } from "../commandPaletteBus";
+import { openCommandPalette, onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { useThreadDetailsStore } from "../threadDetailsStore";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import { cn, isMacPlatform, isWindowsPlatform, newProjectId } from "../lib/utils";
@@ -392,6 +396,11 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     (mode: SearchOverlayMode) => dispatch({ _tag: "ToggleMode", mode }),
     [],
   );
+  const openNewProject = useCallback(
+    (environmentId?: EnvironmentId) =>
+      dispatch({ _tag: "OpenNewProject", ...(environmentId ? { environmentId } : {}) }),
+    [],
+  );
   const openAddProject = useCallback(() => dispatch({ _tag: "OpenAddProject" }), []);
   const openNewThreadIn = useCallback(() => dispatch({ _tag: "OpenNewThreadIn" }), []);
   const clearOpenIntent = useCallback(() => dispatch({ _tag: "ClearOpenIntent" }), []);
@@ -483,13 +492,15 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       onOpenCommandPalette((detail) => {
         if (detail.open === "new-thread-in") {
           openNewThreadIn();
+        } else if (detail.open === "new-project") {
+          openNewProject(detail.environmentId);
         } else if (detail.open === "add-project") {
           openAddProject();
         } else {
           setOpen(true);
         }
       }),
-    [openAddProject, openNewThreadIn, setOpen],
+    [openAddProject, openNewProject, openNewThreadIn, setOpen],
   );
 
   return (
@@ -558,6 +569,14 @@ function CommandPaletteDialog(props: {
         <ProjectFilePicker setOpen={props.setOpen} />
       ) : props.mode === "content" ? (
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
+      ) : props.openIntent?.kind === "new-project" ? (
+        <NewProjectForm
+          key={props.openIntent.environmentId ?? "default"}
+          {...(props.openIntent.environmentId
+            ? { initialEnvironmentId: props.openIntent.environmentId }
+            : {})}
+          onCreated={() => props.setOpen(false)}
+        />
       ) : (
         <OpenCommandPaletteDialog
           openIntent={props.openIntent}
@@ -1199,6 +1218,21 @@ function OpenCommandPaletteDialog(props: {
           ?.serverConfig?.settings.sourceControlProviders ??
         DEFAULT_SERVER_SETTINGS.sourceControlProviders;
       const sourceItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [
+        ...(environments.find((environment) => environment.environmentId === environmentId)
+          ?.serverConfig?.newProjectsRoot
+          ? [
+              {
+                kind: "action" as const,
+                value: `action:add-project:${environmentId}:new`,
+                searchTerms: ["new project", "create", "empty", "git init"],
+                title: "New project",
+                description: "Create a local Git repository from a name",
+                icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+                keepOpen: true,
+                run: async () => openCommandPalette({ open: "new-project", environmentId }),
+              },
+            ]
+          : []),
         {
           kind: "action",
           value: `action:add-project:${environmentId}:local`,
@@ -1515,6 +1549,20 @@ function OpenCommandPaletteDialog(props: {
 
   actionItems.push({
     kind: "action",
+    value: "action:new-project",
+    searchTerms: ["new project", "create project", "empty", "repository", "git init"],
+    title: "New project",
+    icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+    keepOpen: true,
+    disabled: !environments.some(
+      (environment) =>
+        environment.connection.phase === "connected" && environment.serverConfig?.newProjectsRoot,
+    ),
+    run: async () => openCommandPalette({ open: "new-project" }),
+  });
+
+  actionItems.push({
+    kind: "action",
     value: "action:add-project",
     searchTerms: [
       "add project",
@@ -1583,6 +1631,22 @@ function OpenCommandPaletteDialog(props: {
     icon: <GitPullRequestIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/pull-requests" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:thread-details",
+    searchTerms: ["thread details", "toggle details", "panel", "sidebar"],
+    title: "Toggle thread details",
+    shortcutCommand: "threadPanel.toggle",
+    disabled: !activeThread && !activeDraftThread,
+    icon: <PanelRightIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      const thread = activeThread ?? activeDraftThread;
+      const threadId = activeThread?.id ?? activeDraftThread?.threadId;
+      if (thread && threadId)
+        useThreadDetailsStore.getState().toggle(scopeThreadRef(thread.environmentId, threadId));
     },
   });
 

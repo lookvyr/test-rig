@@ -650,3 +650,27 @@ describe("what az devops invoke answers with", () => {
     ).toEqual({ contents: "# T3Demo\n", isBinary: false });
   });
 });
+
+it("uses content edit time rather than other comment metadata changes", () => {
+  const comments = expectSuccess(
+    decodeThreadsJson(
+      asJson({
+        value: [
+          {
+            id: 1,
+            comments: [
+              {
+                id: 2,
+                content: "Updated findings",
+                publishedDate: "2026-07-01T00:00:00Z",
+                lastContentUpdatedDate: "2026-07-02T00:00:00Z",
+                lastUpdatedDate: "2026-07-03T00:00:00Z",
+              },
+            ],
+          },
+        ],
+      }),
+    ),
+  );
+  expect(comments[0]?.editedAt).toBe("2026-07-02T00:00:00Z");
+});

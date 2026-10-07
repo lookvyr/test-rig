@@ -1943,3 +1943,30 @@ describe("thread reference drafts", () => {
     expect(draftFor(ref.threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
   });
 });
+
+describe("deliberate draft model choices", () => {
+  beforeEach(resetComposerDraftStore);
+  it("persists explicit choices across reload and distinguishes later automatic defaults", () => {
+    const draftId = DraftId.make("explicit-model");
+    const store = useComposerDraftStore.getState();
+    store.setModelSelection(
+      draftId,
+      { instanceId: CODEX_INSTANCE, model: "selected" },
+      { explicit: true },
+    );
+    const options = useComposerDraftStore.persist.getOptions();
+    const persisted = options.partialize!(useComposerDraftStore.getState());
+    resetComposerDraftStore();
+    useComposerDraftStore.setState(options.merge!(persisted, useComposerDraftStore.getState()));
+    expect(useComposerDraftStore.getState().getComposerDraft(draftId)).toMatchObject({
+      modelSelectionExplicit: true,
+      activeProvider: CODEX_INSTANCE,
+    });
+    useComposerDraftStore
+      .getState()
+      .setModelSelection(draftId, { instanceId: CODEX_INSTANCE, model: "selected" });
+    expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.modelSelectionExplicit).toBe(
+      false,
+    );
+  });
+});

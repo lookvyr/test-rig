@@ -9,6 +9,7 @@ import {
   decodeMergeRequestDiffsJson,
   decodeMergeRequestListJson,
   decodeNotesJson,
+  decodeDiscussionsJson,
   decodeOwnAwardIdJson,
   decodeViewerJson,
   gitLabAwardName,
@@ -800,4 +801,42 @@ describe("decodeRepositoryBlobsJson", () => {
     expect(Result.isSuccess(decodeRepositoryBlobsJson("not json"))).toBe(false);
     expect(Result.isSuccess(decodeRepositoryBlobsJson(JSON.stringify({ errors: [] })))).toBe(false);
   });
+});
+
+it("keeps note edit timestamps for PR watchers", () => {
+  const notes = expectSuccess(
+    decodeNotesJson(
+      JSON.stringify([
+        {
+          id: 7,
+          body: "Updated findings",
+          created_at: "2026-07-01T00:00:00Z",
+          updated_at: "2026-07-02T00:00:00Z",
+        },
+      ]),
+    ),
+  );
+  expect(notes.comments[0]?.editedAt).toBe("2026-07-02T00:00:00Z");
+});
+
+it("keeps discussion reply edit timestamps for PR watchers", () => {
+  const discussions = expectSuccess(
+    decodeDiscussionsJson(
+      JSON.stringify([
+        {
+          id: "discussion",
+          notes: [
+            {
+              id: 7,
+              body: "Updated findings",
+              created_at: "2026-07-01T00:00:00Z",
+              updated_at: "2026-07-02T00:00:00Z",
+              position: { position_type: "text", new_path: "src/index.ts", new_line: 1 },
+            },
+          ],
+        },
+      ]),
+    ),
+  );
+  expect(discussions.threads[0]?.comments[0]?.editedAt).toBe("2026-07-02T00:00:00Z");
 });

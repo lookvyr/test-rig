@@ -1,0 +1,102 @@
+import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as NodeUtil from "node:util";
+
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import { assert, it } from "@effect/vitest";
+import {
+  ScheduledTaskError,
+  ScheduledTaskId,
+  ProviderInstanceId,
+  ModelSelection,
+  OrchestrationV2ThreadLaunchWorkspaceStrategy,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+import * as Fiber from "effect/Fiber";
+import * as Deferred from "effect/Deferred";
+import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
+
+import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import { V2SqlitePersistenceMemory as SqlitePersistenceMemory } from "../persistence/Layers/V2Sqlite.ts";
+import * as ScheduledTaskService from "./ScheduledTaskService.ts";
+
+const isScheduledTaskError = Schema.is(ScheduledTaskError);
+const encodeModelSelection = Schema.encodeEffect(Schema.fromJsonString(ModelSelection));
+const encodeWorkspaceStrategy = Schema.encodeEffect(
+  Schema.fromJsonString(OrchestrationV2ThreadLaunchWorkspaceStrategy),
+);
+
+const insertRow = (
+  sql: SqlClient.SqlClient,
+  row: {
+    id: string | null;
+    next: string | null;
+    enabled: number;
+    status: string;
+    scheduleJson?: string;
+    prompt?: string;
+  },
+  now: string,
+) =>
+  sql`INSERT INTO scheduled_tasks ${sql.insert({
+    task_id: row.id,
+    title: "task",
+    prompt: row.prompt ?? "Run task",
+    enabled: row.enabled,
+    schedule_json: row.scheduleJson ?? '{"type":"interval","everyMs":60000}',
+    project_id: "project:test",
+    thread_id: null,
+    workspace_strategy_json: '{"type":"root"}',
+    model_selection_json: '{"instanceId":"codex","model":"gpt-5"}',
+    runtime_mode: "full-access",
+    interaction_mode: "default",
+    created_by: "user",
+    creation_source: "web",
+    created_at: now,
+    updated_at: now,
+    next_run_at: row.next,
+    last_run_at: null,
+    last_run_status: row.status,
+    last_run_error: null,
+    run_count: 0,
+  })}`;
+
+it.effect("audit proof: editing a missed fixed-time task while an earlier dispatch blocks keeps its new due time", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const now = "2026-10-06T12:00:00.000Z";
+    yield* TestClock.setTime(Date.parse(now));
+    yield* insertRow(sql, { id: "audit-a-block", next: "2026-10-06T10:00:00.000Z", enabled: 1, status: "never" }, now);
+    yield* insertRow(sql, { id: "audit-b-missed", next: "2026-10-06T11:00:00.000Z", enabled: 1, status: "never", scheduleJson: '{"type":"fixed_time","timeOfDay":"11:00"}' }, now);
+    yield* insertRow(sql, { id: "audit-c-drain", next: now, enabled: 1, status: "never" }, now);
+    const blocked = yield* Deferred.make<void>();
+    const release = yield* Deferred.make<void>();
+    const drained = yield* Deferred.make<void>();
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      yield* Deferred.await(blocked);
+      const before = (yield* service.list()).tasks.find(t => t.id === "audit-b-missed")!;
+      const changed = yield* service.upsert({ ...before, requireExisting: true, schedule: { type: "interval", everyMs: 120_000 } });
+      assert.equal(changed.task.nextRunAt, "2026-10-06T12:02:00.000Z");
+      yield* Deferred.succeed(release, undefined);
+      yield* Deferred.await(drained);
+      const after = (yield* service.list()).tasks.find(t => t.id === "audit-b-missed")!;
+      assert.equal(after.schedule.type, "interval");
+      assert.equal(after.nextRunAt, "2026-10-06T12:02:00.000Z");
+    }).pipe(
+      Effect.provide(ScheduledTaskService.layer.pipe(Layer.provide(Layer.mergeAll(
+        Layer.mock(ThreadLaunchService.ThreadLaunchService)({ launch: input => input.initialMessage?.scheduledTaskId === "audit-a-block"
+          ? Deferred.succeed(blocked, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as({} as never))
+          : Deferred.succeed(drained, undefined).pipe(Effect.andThen(Effect.never)) }),
+        Layer.mock(ThreadManagementService.ThreadManagementService)({}), NodeCrypto.layer, Scheduler.layer
+      )))), Effect.scoped
+    );
+  }).pipe(Effect.provide(SqlitePersistenceMemory))
+);

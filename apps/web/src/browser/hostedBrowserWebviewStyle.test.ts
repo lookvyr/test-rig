@@ -1,3 +1,4 @@
+import { RIGHT_PANEL_SHEET_LAYER } from "../rightPanelLayout";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -57,4 +58,25 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
       visibility: "visible",
     });
   });
+});
+
+it("presents a sheet-hosted guest above the sheet and below ordinary dialogs", () => {
+  const style = resolveHostedBrowserWebviewWrapperStyle({
+    active: true,
+    zIndex: RIGHT_PANEL_SHEET_LAYER + 1,
+    rect: { x: 400, y: 80, width: 450, height: 600 },
+    hiddenSize: { width: 1280, height: 800 },
+  });
+  expect(style.zIndex).toBeGreaterThan(RIGHT_PANEL_SHEET_LAYER);
+  expect(style.zIndex).toBeLessThan(50);
+  expect(style.left).toBe(400);
+  expect(style.top).toBe(80);
+  expect(
+    resolveHostedBrowserWebviewWrapperStyle({
+      active: false,
+      zIndex: RIGHT_PANEL_SHEET_LAYER + 1,
+      rect: null,
+      hiddenSize: { width: 1280, height: 800 },
+    }).zIndex,
+  ).toBe(-1);
 });

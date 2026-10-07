@@ -68,14 +68,12 @@ and integrated-browser focus retain their own keyboard handling.
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.
 
-Note that `chat.new` and `chat.newLocal` both create a thread through the same path. A new thread
-inherits the project you were in, along with model and interaction mode selections. New Claude
-and Codex threads start in Auto permission mode; OpenCode inherits the viewed thread's permission
-mode. Branch, worktree, and environment mode always come from your configured defaults, not from
-the thread you were looking
-at. To keep a worktree, use the explicit "new thread in this worktree" action in the branch
-toolbar. The only difference between the two commands: with the current sidebar and more than one
-project, `chat.new` opens a project chooser first.
+`chat.new` and `chat.newLocal` create a draft using the destination environment's
+and project's model, permissions, and workspace defaults. When the project has
+no configured model, the viewed conversation's model can carry into the draft.
+Interaction mode can also carry forward. To keep a worktree, use the explicit
+**New thread in this worktree** action in the branch toolbar. With the current
+sidebar and more than one project, `chat.new` opens a project chooser first.
 
 `thread.stop` interrupts the running turn in the active conversation. It has no default
 shortcut; assign one in **Settings** → **Keybindings**.
@@ -105,6 +103,15 @@ select the first nine pull requests in the filtered, displayed order. Hold those
 modifiers to see the row badges. The sidebar's `mod+1` through `mod+9` thread
 shortcuts remain available; releasing Alt/Option switches the badges back to them.
 
+**Cmd+Option+D** on macOS or **Ctrl+Alt+D** elsewhere toggles thread details
+(`threadPanel.toggle`). **Cmd+Shift+T** or **Ctrl+Shift+T** reopens the most recently
+closed eligible panel view (`view.reopenClosed`). Closed terminal sessions are
+not restored.
+
+With the empty right-panel launcher focused outside an editor or dialog, use
+**B**, **T**, **F**, or **D** for Browser, Terminal, Files, or Review. Arrow keys
+and Enter also select a launcher item.
+
 ## Copying terminal output
 
 Select terminal output and press `cmd+c` on macOS or `ctrl+shift+c` on Windows/Linux.
@@ -112,6 +119,11 @@ You can also choose **Copy** from the selection menu or right-click the selected
 On desktop, **Edit** → **Copy** copies the focused terminal's selection.
 To copy a link without selecting text first, right-click it and choose **Copy Link**.
 `ctrl+c` still interrupts the running terminal command.
+
+Right-click anywhere in a terminal and choose **Paste** to send clipboard text
+to that terminal. Closing an individual terminal asks for confirmation; Cancel keeps it
+running. Bulk tab-close actions and automatic cleanup after a session exits do
+not ask.
 
 ## `when` Conditions
 

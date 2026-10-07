@@ -165,14 +165,14 @@ export const PreviewAnnotationContextRecord = Schema.Struct({
   targetSummary: ShortString,
   styleChanges: Schema.Array(ShortString).check(Schema.isMaxLength(200)),
   /** Picked elements inside the annotation, with the detail the agent needs to find them. */
-  elements: Schema.optional(Schema.Array(ElementContextDetails).check(Schema.isMaxLength(50))),
+  elements: Schema.optionalKey(Schema.Array(ElementContextDetails).check(Schema.isMaxLength(50))),
   /** Original target ids and edits allow pasted annotations to retain exact style changes. */
-  elementIds: Schema.optional(Schema.Array(ShortString).check(Schema.isMaxLength(50))),
+  elementIds: Schema.optionalKey(Schema.Array(ShortString).check(Schema.isMaxLength(50))),
   /** Region and stroke geometry is lossy on purpose, but their counts feed the target summary,
       so a pasted annotation still says what it marked. */
-  regionCount: Schema.optional(NonNegativeInt),
-  strokeCount: Schema.optional(NonNegativeInt),
-  styleChangeDetails: Schema.optional(
+  regionCount: Schema.optionalKey(NonNegativeInt),
+  strokeCount: Schema.optionalKey(NonNegativeInt),
+  styleChangeDetails: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
         targetId: ShortString,
@@ -184,7 +184,7 @@ export const PreviewAnnotationContextRecord = Schema.Struct({
     ).check(Schema.isMaxLength(200)),
   ),
   /** The screenshot travels as its own image record; this links the two. */
-  screenshotContextId: Schema.optional(ComposerContextId),
+  screenshotContextId: Schema.optionalKey(ComposerContextId),
 });
 export type PreviewAnnotationContextRecord = typeof PreviewAnnotationContextRecord.Type;
 
@@ -199,8 +199,8 @@ export const ReviewCommentContextRecord = Schema.Struct({
   rangeLabel: ShortString,
   text: BoundedString(COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS),
   diff: BoundedString(COMPOSER_CONTEXT_REVIEW_DIFF_MAX_CHARS),
-  fenceLanguage: Schema.optional(BoundedString(64)),
-  pullRequest: Schema.optional(PullRequestContextMetadata),
+  fenceLanguage: Schema.optionalKey(BoundedString(64)),
+  pullRequest: Schema.optionalKey(PullRequestContextMetadata),
 }).check(Schema.makeFilter((record) => record.endIndex >= record.startIndex));
 export type ReviewCommentContextRecord = typeof ReviewCommentContextRecord.Type;
 
@@ -236,6 +236,8 @@ export type ThreadContextRecord = typeof ThreadContextRecord.Type;
  * malformed known record fails its own schema instead of sliding through unchecked.
  * Mirrors `ChatUnknownAttachment`.
  */
+const isJson = Schema.is(Schema.Json);
+
 export const UnknownContextRecord = Schema.Struct({
   ...recordBase,
   kind: ComposerContextKind.check(Schema.isPattern(KNOWN_KIND_PATTERN)),
@@ -243,7 +245,7 @@ export const UnknownContextRecord = Schema.Struct({
     Schema.makeFilter((payload) => {
       try {
         const encoded = JSON.stringify(payload);
-        return encoded !== undefined && encoded.length <= 64_000;
+        return encoded !== undefined && encoded.length <= 64_000 && isJson(payload);
       } catch {
         return false;
       }

@@ -11,6 +11,7 @@ import {
   BearerConnectionRegistration,
   BearerConnectionTarget,
   ConnectionBlockedError,
+  type ConnectionAttemptError,
   ConnectionTransientError,
   Connectivity,
   mapRemoteEnvironmentError,
@@ -347,6 +348,7 @@ interface CachedPlatformRegistration {
   readonly registration: PlatformConnectionRegistration;
   readonly expiresAtEpochMs?: number;
   readonly refreshAtEpochMs?: number;
+  readonly bootstrapToken?: string;
 }
 
 export type PrimaryEnvironmentTargetRead =
@@ -399,6 +401,52 @@ export function canRetainCachedPlatformRegistrationAfterRefreshFailure(
   );
 }
 
+const REJECTED_BOOTSTRAP_RETRY_INITIAL_MS = 60_000;
+const REJECTED_BOOTSTRAP_RETRY_MAX_MS = 30 * 60_000;
+
+/** A bootstrap token a backend rejected, and when the poll may try it again. */
+export interface RejectedSecondaryBootstrap {
+  readonly signature: string;
+  readonly retryAtEpochMs: number;
+  readonly delayMs: number;
+}
+
+/**
+ * A backend that rejected a bootstrap token will usually keep rejecting it, so
+ * the poll backs off on that exact signature instead of re-presenting a dead
+ * credential every few seconds. It still retries on a capped backoff: a
+ * backend that restarts on the same port seeds a fresh grant for the same
+ * token, and nothing in the topology says it restarted. A new token or
+ * endpoint retries at once.
+ */
+export function isRejectedSecondaryBootstrap(
+  rejected: RejectedSecondaryBootstrap | undefined,
+  signature: string,
+  nowEpochMs: number,
+): rejected is RejectedSecondaryBootstrap {
+  return (
+    rejected !== undefined &&
+    rejected.signature === signature &&
+    nowEpochMs < rejected.retryAtEpochMs
+  );
+}
+
+export function nextRejectedSecondaryBootstrap(
+  previous: RejectedSecondaryBootstrap | undefined,
+  signature: string,
+  nowEpochMs: number,
+): RejectedSecondaryBootstrap {
+  const delayMs =
+    previous?.signature === signature
+      ? Math.min(previous.delayMs * 2, REJECTED_BOOTSTRAP_RETRY_MAX_MS)
+      : REJECTED_BOOTSTRAP_RETRY_INITIAL_MS;
+  return { signature, retryAtEpochMs: nowEpochMs + delayMs, delayMs };
+}
+
+export function isRejectedBootstrapCredentialError(error: ConnectionAttemptError): boolean {
+  return error._tag === "ConnectionBlockedError" && error.reason === "authentication";
+}
+
 export function secondaryRegistrationsToRetainAfterTopologyRead(
   previous: ReadonlyMap<string, CachedPlatformRegistration>,
   topologyRead: DesktopSecondaryBootstrapsRead,
@@ -414,10 +462,133 @@ export function secondaryRegistrationsToRetainAfterTopologyRead(
   );
 }
 
+/** Reconcile only secondary desktop backends; unchanged live credentials keep their owned client data. */
+export const resolveDesktopSecondaryRegistrations = Effect.fn(
+  "web.connectionPlatform.resolveSecondaries",
+)(function* (
+  input: {
+    previous: ReadonlyMap<string, CachedPlatformRegistration>;
+    rejected: ReadonlyMap<string, RejectedSecondaryBootstrap>;
+    topologyRead: DesktopSecondaryBootstrapsRead;
+    nowEpochMs: number;
+  },
+  load: typeof loadSecondaryConnectionRegistration = loadSecondaryConnectionRegistration,
+) {
+  const { previous, rejected, topologyRead, nowEpochMs } = input;
+  const next = new Map<string, CachedPlatformRegistration>();
+  const registrations: PlatformConnectionRegistration[] = [];
+  for (const [id, cached] of secondaryRegistrationsToRetainAfterTopologyRead(
+    previous,
+    topologyRead,
+    nowEpochMs,
+  )) {
+    next.set(id, cached);
+    registrations.push(cached.registration);
+  }
+
+  if (topologyRead._tag === "Failure") {
+    yield* Effect.logWarning("Could not read the desktop-local backend topology.", {
+      cause: topologyRead.cause,
+    });
+  } else {
+    const nextRejected = new Map<string, RejectedSecondaryBootstrap>();
+    for (const bootstrap of topologyRead.bootstraps) {
+      // The cached bearer belongs to the endpoint, not to the bootstrap
+      // token it was exchanged for: a new token must not drop a live
+      // session (its removal also clears the environment's drafts). The
+      // token only decides whether a rejected exchange is retried.
+      const endpointSignature = `${bootstrap.httpBaseUrl}|${bootstrap.wsBaseUrl}`;
+      const signature = `${endpointSignature}|${bootstrap.bootstrapToken ?? ""}`;
+      const cached = previous.get(bootstrap.id);
+      // A new token from the desktop means something changed (rotation, a
+      // restarted backend): exchange it rather than reusing a bearer that
+      // may be dead. The old bearer stays registered if that exchange fails.
+      if (
+        cached !== undefined &&
+        cached.bootstrapToken === bootstrap.bootstrapToken &&
+        canReuseCachedPlatformRegistration(cached, endpointSignature, nowEpochMs)
+      ) {
+        next.set(bootstrap.id, cached);
+        registrations.push(cached.registration);
+        continue;
+      }
+      const previouslyRejected = rejected.get(bootstrap.id);
+      if (isRejectedSecondaryBootstrap(previouslyRejected, signature, nowEpochMs)) {
+        nextRejected.set(bootstrap.id, previouslyRejected);
+        // The bearer minted before the token died is still good until it expires.
+        if (
+          cached !== undefined &&
+          canRetainCachedPlatformRegistrationAfterRefreshFailure(
+            cached,
+            endpointSignature,
+            nowEpochMs,
+          )
+        ) {
+          next.set(bootstrap.id, cached);
+          registrations.push(cached.registration);
+        }
+        continue;
+      }
+      const built = yield* load(bootstrap).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("Could not connect a desktop-local backend.", {
+            id: bootstrap.id,
+            error,
+          }),
+        ),
+        Effect.tapError((error) =>
+          isRejectedBootstrapCredentialError(error)
+            ? // Back off from when the rejection arrived; the exchanges in
+              // this poll can take longer than the first backoff step.
+              Clock.currentTimeMillis.pipe(
+                Effect.map((rejectedAtEpochMs) =>
+                  nextRejected.set(
+                    bootstrap.id,
+                    nextRejectedSecondaryBootstrap(
+                      previouslyRejected,
+                      signature,
+                      rejectedAtEpochMs,
+                    ),
+                  ),
+                ),
+              )
+            : Effect.void,
+        ),
+        Effect.option,
+      );
+      if (Option.isSome(built)) {
+        const cacheEntry = {
+          signature: endpointSignature,
+          ...(bootstrap.bootstrapToken === undefined
+            ? {}
+            : { bootstrapToken: bootstrap.bootstrapToken }),
+          ...built.value,
+        };
+        next.set(bootstrap.id, cacheEntry);
+        registrations.push(built.value.registration);
+      } else if (
+        cached !== undefined &&
+        canRetainCachedPlatformRegistrationAfterRefreshFailure(
+          cached,
+          endpointSignature,
+          nowEpochMs,
+        )
+      ) {
+        next.set(bootstrap.id, cached);
+        registrations.push(cached.registration);
+      }
+    }
+    return { cache: next, rejected: nextRejected, registrations };
+  }
+
+  return { cache: next, rejected, registrations };
+});
+
 const platformConnectionSourceLayer = Layer.effect(
   PlatformConnectionSource,
   Effect.gen(function* () {
     const cacheRef = yield* Ref.make(new Map<string, CachedPlatformRegistration>());
+    const rejectedRef = yield* Ref.make(new Map<string, RejectedSecondaryBootstrap>());
 
     // Resolve the full set of platform-managed environments the host currently
     // reports: the primary (same-origin cookie auth) plus any desktop-local
@@ -468,54 +639,15 @@ const platformConnectionSourceLayer = Layer.effect(
         }
       }
 
-      const topologyRead = readDesktopSecondaryBootstrapsResult();
-      for (const [id, cached] of secondaryRegistrationsToRetainAfterTopologyRead(
+      const secondary = yield* resolveDesktopSecondaryRegistrations({
         previous,
-        topologyRead,
+        rejected: yield* Ref.get(rejectedRef),
+        topologyRead: readDesktopSecondaryBootstrapsResult(),
         nowEpochMs,
-      )) {
-        next.set(id, cached);
-        registrations.push(cached.registration);
-      }
-
-      if (topologyRead._tag === "Failure") {
-        yield* Effect.logWarning("Could not read the desktop-local backend topology.", {
-          cause: topologyRead.cause,
-        });
-      } else {
-        for (const bootstrap of topologyRead.bootstraps) {
-          const signature = `${bootstrap.httpBaseUrl}|${bootstrap.wsBaseUrl}|${bootstrap.bootstrapToken ?? ""}`;
-          const cached = previous.get(bootstrap.id);
-          if (
-            cached !== undefined &&
-            canReuseCachedPlatformRegistration(cached, signature, nowEpochMs)
-          ) {
-            next.set(bootstrap.id, cached);
-            registrations.push(cached.registration);
-            continue;
-          }
-          const built = yield* loadSecondaryConnectionRegistration(bootstrap).pipe(
-            Effect.tapError((error) =>
-              Effect.logWarning("Could not connect a desktop-local backend.", {
-                id: bootstrap.id,
-                error,
-              }),
-            ),
-            Effect.option,
-          );
-          if (Option.isSome(built)) {
-            const cacheEntry = { signature, ...built.value };
-            next.set(bootstrap.id, cacheEntry);
-            registrations.push(built.value.registration);
-          } else if (
-            cached !== undefined &&
-            canRetainCachedPlatformRegistrationAfterRefreshFailure(cached, signature, nowEpochMs)
-          ) {
-            next.set(bootstrap.id, cached);
-            registrations.push(cached.registration);
-          }
-        }
-      }
+      });
+      for (const [id, cached] of secondary.cache) next.set(id, cached);
+      registrations.push(...secondary.registrations);
+      yield* Ref.set(rejectedRef, new Map(secondary.rejected));
 
       yield* Ref.set(cacheRef, next);
       return registrations as ReadonlyArray<PlatformConnectionRegistration>;

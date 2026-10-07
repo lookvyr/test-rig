@@ -1,6 +1,9 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
+  ORCHESTRATION_PROTOCOL_QUERY_PARAM,
+  ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+  ORCHESTRATION_PROTOCOL_VERSION,
   ServerConfig,
   type ServerConfig as ServerConfigType,
   WS_METHODS,
@@ -8,6 +11,10 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Deferred from "effect/Deferred";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
@@ -38,10 +45,12 @@ class TestWebSocket {
   readyState = TestWebSocket.CONNECTING;
   readonly sent: string[] = [];
   readonly url: string;
+  readonly sentMessages: Queue.Queue<string>;
   private readonly listeners = new Map<SocketEventType, Set<SocketListener>>();
 
-  constructor(url: string) {
+  constructor(url: string, sentMessages: Queue.Queue<string>) {
     this.url = url;
+    this.sentMessages = sentMessages;
   }
 
   addEventListener(type: SocketEventType, listener: SocketListener) {
@@ -56,6 +65,7 @@ class TestWebSocket {
 
   send(data: string) {
     this.sent.push(data);
+    Queue.offerUnsafe(this.sentMessages, data);
   }
 
   close(code = 1000, reason = "") {
@@ -108,6 +118,7 @@ const SERVER_CONFIG: ServerConfigType = {
     },
     serverVersion: "0.0.0-test",
     capabilities: {
+      orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
       repositoryIdentity: true,
       connectionProbe: true,
     },
@@ -140,6 +151,7 @@ const RpcRequest = Schema.TaggedStruct("Request", {
 });
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const decodeRpcRequest = Schema.decodeUnknownSync(RpcRequest);
+const decodeRpcRequestOption = Schema.decodeUnknownOption(RpcRequest);
 const encodeJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const encodeServerConfig = Schema.encodeSync(ServerConfig);
 const ENCODED_SERVER_CONFIG = encodeServerConfig(SERVER_CONFIG);
@@ -148,6 +160,7 @@ const LEGACY_SERVER_CONFIG = {
   environment: {
     ...ENCODED_SERVER_CONFIG.environment,
     capabilities: {
+      orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
       repositoryIdentity: true,
     },
   },
@@ -155,8 +168,9 @@ const LEGACY_SERVER_CONFIG = {
 
 const makeFactory = Effect.fn("TestRpcSessionFactory.make")(function* () {
   const sockets: TestWebSocket[] = [];
+  const sentMessages = yield* Queue.unbounded<string>();
   const constructorLayer = Layer.succeed(Socket.WebSocketConstructor, (url) => {
-    const socket = new TestWebSocket(url);
+    const socket = new TestWebSocket(url, sentMessages);
     sockets.push(socket);
     return socket as unknown as globalThis.WebSocket;
   });
@@ -215,6 +229,56 @@ const completeInitialConfig = Effect.fn("TestRpcSessionFactory.completeInitialCo
 });
 
 describe("RpcSessionFactory", () => {
+  it.effect("keeps reading replies after closing a stream with a full buffer", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { factory, sockets } = yield* makeFactory();
+        const session = yield* factory.connect(PREPARED);
+        const ready = yield* session.ready.pipe(Effect.forkChild);
+        const socket = yield* awaitSocket(sockets);
+        socket.open();
+        yield* completeInitialConfig(socket);
+        yield* Fiber.join(ready);
+        yield* Queue.take(socket.sentMessages);
+        const nextRequest = Effect.gen(function* () {
+          while (true) {
+            const message = yield* Queue.take(socket.sentMessages);
+            const request = decodeRpcRequestOption(decodeJson(message));
+            if (Option.isSome(request)) return request.value;
+          }
+        });
+        const consuming = yield* Deferred.make<void>();
+        const stream = yield* session.client[WS_METHODS.subscribeServerConfig]({}).pipe(
+          Stream.runForEach(() =>
+            Deferred.succeed(consuming, undefined).pipe(Effect.andThen(Effect.never)),
+          ),
+          Effect.forkChild,
+        );
+        const streamRequest = yield* nextRequest;
+        socket.serverMessage(
+          encodeJson({
+            _tag: "Chunk",
+            requestId: streamRequest.id,
+            values: Array.from({ length: 64 }, () => ({
+              version: 1,
+              type: "snapshot",
+              config: ENCODED_SERVER_CONFIG,
+            })),
+          }),
+        );
+        yield* Deferred.await(consuming);
+        yield* Fiber.interrupt(stream);
+        const probe = yield* session.probe.pipe(Effect.forkChild);
+        const request = yield* nextRequest;
+        expect(request.tag).toBe(WS_METHODS.serverProbe);
+        socket.serverMessage(
+          encodeJson({ _tag: "Exit", requestId: request.id, exit: { _tag: "Success", value: {} } }),
+        );
+        yield* Fiber.join(probe);
+        expect(socket.readyState).toBe(TestWebSocket.OPEN);
+      }),
+    ),
+  );
   it.effect("owns one scoped websocket attempt and exposes readiness and closure", () =>
     Effect.gen(function* () {
       const { factory, sockets } = yield* makeFactory();
@@ -222,7 +286,12 @@ describe("RpcSessionFactory", () => {
       const readyFiber = yield* Effect.forkChild(session.ready);
       const socket = yield* awaitSocket(sockets);
 
-      expect(socket.url).toBe(PREPARED.socketUrl);
+      const expectedSocketUrl = new URL(PREPARED.socketUrl);
+      expectedSocketUrl.searchParams.set(
+        ORCHESTRATION_PROTOCOL_QUERY_PARAM,
+        ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+      );
+      expect(socket.url).toBe(expectedSocketUrl.toString());
       socket.open();
       yield* completeInitialConfig(socket);
       yield* Fiber.join(readyFiber);

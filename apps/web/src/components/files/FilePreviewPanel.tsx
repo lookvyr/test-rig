@@ -4,7 +4,12 @@ import type {
   ResolvedKeybindingsConfig,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
+import {
+  isWorkspaceImagePreviewPath,
+  isWorkspaceAudioPreviewPath,
+  isWorkspaceVideoPreviewPath,
+} from "@t3tools/shared/filePreview";
+import { filePreviewDelimiter } from "@t3tools/shared/delimitedPreview";
 import { VirtualizedFile, type SelectedLineRange } from "@pierre/diffs";
 import { Editor } from "@pierre/diffs/editor";
 import { EditProvider, File, type FileOptions, Virtualizer } from "@pierre/diffs/react";
@@ -12,17 +17,15 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle } from "lucide-react";
+import { ChevronRight, Code2, Eye, Table2, FolderTree, Globe2, LoaderCircle } from "lucide-react";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
-import { useAssetUrlState } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { useClientSettings } from "~/hooks/useSettings";
 import { useOnTurnCompleted } from "~/hooks/useOnTurnCompleted";
-import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { useTheme } from "~/hooks/useTheme";
 import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
 import { DIFF_SURFACE_THEME_UNSAFE_CSS, resolveDiffThemeName } from "~/lib/diffRendering";
@@ -41,6 +44,11 @@ import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
+import { useThreadWorkspaceMutationId } from "~/hooks/useThreadWorkspaceMutationId";
+import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
+import { WorkspaceMediaPreview } from "./WorkspaceMediaPreview";
+import { DelimitedTablePreview } from "./DelimitedTablePreview";
+import { FileSurfaceFailure, FileSurfaceNotice } from "./fileSurfaceChrome";
 import FileBrowserPanel from "./FileBrowserPanel";
 import {
   type FileCommentAnnotationEntry,
@@ -65,7 +73,6 @@ import {
 import { useFileSaveCoordinator } from "./useFileSaveCoordinator";
 import {
   getOptimisticProjectFileQueryData,
-  getProjectEntriesQueryAtom,
   setProjectFileQueryData,
   useProjectFileQuery,
 } from "./projectFilesQueryState";
@@ -83,10 +90,12 @@ interface FilePreviewPanelProps {
   revealRequestId: number;
   onOpenFile: (relativePath: string) => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
+  selectedFilePending: boolean;
 }
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
 const RENDER_MARKDOWN_STORAGE_KEY = "t3code.renderMarkdown";
+const RENDER_TABLE_STORAGE_KEY = "t3code.renderTable";
 const FILE_LINK_REVEAL_ATTRIBUTE = "data-file-link-reveal";
 const FILE_LINK_REVEAL_UNSAFE_CSS = `
   ${DIFF_SURFACE_THEME_UNSAFE_CSS}
@@ -131,43 +140,6 @@ const FILE_LINK_REVEAL_UNSAFE_CSS = `
   }
 `;
 type FilePostRender = NonNullable<FileOptions<unknown>["onPostRender"]>;
-
-function WorkspaceImagePreview(props: {
-  readonly environmentId: EnvironmentId;
-  readonly threadRef: ScopedThreadRef;
-  readonly absolutePath: string;
-  readonly alt: string;
-}) {
-  const assetUrl = useAssetUrlState(props.environmentId, {
-    _tag: "workspace-file",
-    threadId: props.threadRef.threadId,
-    path: props.absolutePath,
-  });
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-
-  if (assetUrl._tag === "Failure" || (assetUrl._tag === "Success" && failedUrl === assetUrl.url)) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
-        Unable to load workspace image.
-      </div>
-    );
-  }
-
-  return assetUrl._tag === "Success" ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
-      <img
-        className="max-h-full max-w-full object-contain"
-        src={assetUrl.url}
-        alt={props.alt}
-        onError={() => setFailedUrl(assetUrl.url)}
-      />
-    </div>
-  ) : (
-    <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
-      <LoaderCircle className="size-5 animate-spin" />
-    </div>
-  );
-}
 
 function clampFileLine(contents: string, requestedLine: number): number {
   let lineCount = 1;
@@ -757,6 +729,7 @@ export default function FilePreviewPanel({
   revealRequestId,
   onOpenFile,
   onPendingChange,
+  selectedFilePending,
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
@@ -769,14 +742,34 @@ export default function FilePreviewPanel({
     reportFailure: false,
   });
   const isImage = relativePath !== null && isWorkspaceImagePreviewPath(relativePath);
-  const file = useProjectFileQuery(environmentId, cwd, relativePath, !isImage);
+  const isVideo = relativePath !== null && isWorkspaceVideoPreviewPath(relativePath);
+  const isAudio = relativePath !== null && isWorkspaceAudioPreviewPath(relativePath);
+  const isMedia = isImage || isVideo || isAudio;
+  const file = useProjectFileQuery(environmentId, cwd, relativePath, !isMedia);
+  const isDirectory = file.isNotFile;
+  const workspaceMutationId = useThreadWorkspaceMutationId(threadRef);
+  const [manualRefresh, setManualRefresh] = useState(0);
+  const mediaRevision =
+    workspaceMutationId === null && manualRefresh === 0
+      ? null
+      : JSON.stringify([workspaceMutationId, manualRefresh]);
   const refreshSelectedFile = () => {
-    if (relativePath && !isImage) file.refresh();
+    setManualRefresh((value) => value + 1);
   };
+  useWorkspaceMutationRefresh({
+    enabled: relativePath !== null && !isMedia && !selectedFilePending,
+    mutationId: mediaRevision,
+    refresh: file.refresh,
+    resourceKey: JSON.stringify([environmentId, cwd, relativePath]),
+  });
   useOnTurnCompleted(threadRef, () => {
-    appAtomRegistry.refresh(getProjectEntriesQueryAtom(environmentId, cwd));
     refreshSelectedFile();
   });
+  const [renderTablePreferred, setRenderTablePreferred] = useLocalStorage(
+    RENDER_TABLE_STORAGE_KEY,
+    true,
+    Schema.Boolean,
+  );
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   // Reading markdown rendered is a preference, not a property of one file. Keeping
   // it on the panel meant a thread switch dropped it and forced source back.
@@ -799,6 +792,13 @@ export default function FilePreviewPanel({
     renderMarkdownPreferred &&
     (revealLine === null ||
       (handledReveal?.path === relativePath && handledReveal.requestId === revealRequestId));
+  const tableDelimiter = relativePath ? filePreviewDelimiter({ name: relativePath }) : null;
+  const renderTable =
+    tableDelimiter !== null &&
+    renderTablePreferred &&
+    (revealLine === null ||
+      (handledReveal?.path === relativePath && handledReveal.requestId === revealRequestId));
+  const rendered = tableDelimiter !== null ? renderTable : renderMarkdown;
   const canOpenInBrowser =
     relativePath !== null && isPreviewSupportedInRuntime() && isBrowserPreviewFile(relativePath);
   const absolutePath = relativePath ? resolvePathLinkTarget(relativePath, cwd) : null;
@@ -897,31 +897,52 @@ export default function FilePreviewPanel({
               enableShortcut={false}
             />
           ) : null}
-          {isMarkdown ? (
+          {isMarkdown || tableDelimiter !== null ? (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Toggle
                     className="shrink-0"
-                    pressed={renderMarkdown}
+                    pressed={rendered}
                     onPressedChange={(pressed) => {
-                      setRenderMarkdownPreferred(pressed);
+                      if (tableDelimiter !== null) setRenderTablePreferred(pressed);
+                      else setRenderMarkdownPreferred(pressed);
                       setHandledReveal(
                         pressed && relativePath !== null
                           ? { path: relativePath, requestId: revealRequestId }
                           : null,
                       );
                     }}
-                    aria-label={renderMarkdown ? "Show markdown source" : "Show rendered markdown"}
+                    aria-label={
+                      tableDelimiter !== null
+                        ? renderTable
+                          ? "Show source"
+                          : "Show table"
+                        : renderMarkdown
+                          ? "Show markdown source"
+                          : "Show rendered markdown"
+                    }
                     variant="ghost"
                     size="sm"
                   >
-                    {renderMarkdown ? <Code2 className="size-3.5" /> : <Eye className="size-3.5" />}
+                    {rendered ? (
+                      <Code2 className="size-3.5" />
+                    ) : tableDelimiter !== null ? (
+                      <Table2 className="size-3.5" />
+                    ) : (
+                      <Eye className="size-3.5" />
+                    )}
                   </Toggle>
                 }
               />
               <TooltipPopup>
-                {renderMarkdown ? "Show markdown source" : "Show rendered markdown"}
+                {tableDelimiter !== null
+                  ? renderTable
+                    ? "Show source"
+                    : "Show table"
+                  : renderMarkdown
+                    ? "Show markdown source"
+                    : "Show rendered markdown"}
               </TooltipPopup>
             </Tooltip>
           ) : null}
@@ -965,30 +986,38 @@ export default function FilePreviewPanel({
           </Tooltip>
         </div>
       ) : null}
-      {relativePath && file.data?.truncated ? (
+      {relativePath && !isMedia && file.data?.truncated ? (
         <div className="shrink-0 border-b border-warning/20 bg-warning-surface px-3 py-1.5 text-[11px] text-warning-foreground">
           Preview limited to the first 1 MB of a {file.data.byteLength.toLocaleString()} byte file.
         </div>
+      ) : null}
+      {file.error && file.data !== null && !isMedia && !isDirectory ? (
+        <FileSurfaceNotice>
+          <button type="button" onClick={refreshSelectedFile}>
+            {file.error} Click to retry.
+          </button>
+        </FileSurfaceNotice>
       ) : null}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div
           className={cn(
             "min-w-0 flex-1 flex-col overflow-hidden",
-            relativePath ? "flex" : "hidden",
+            relativePath && !isDirectory ? "flex" : "hidden",
           )}
         >
-          {relativePath && isImage && absolutePath ? (
-            <WorkspaceImagePreview
-              key={absolutePath}
+          {relativePath && isMedia && absolutePath ? (
+            <WorkspaceMediaPreview
+              key={`${environmentId}:${absolutePath}`}
               environmentId={environmentId}
               threadRef={threadRef}
               absolutePath={absolutePath}
-              alt={relativePath}
+              workspaceRoot={cwd}
+              name={relativePath}
+              kind={isVideo ? "video" : isAudio ? "audio" : "image"}
+              revision={mediaRevision}
             />
           ) : relativePath && file.error && file.data === null ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
-              {file.error}
-            </div>
+            <FileSurfaceFailure message={file.error} onRetry={refreshSelectedFile} />
           ) : relativePath && file.data === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
               <LoaderCircle className="size-5 animate-spin" />
@@ -1002,6 +1031,12 @@ export default function FilePreviewPanel({
                 threadRef={threadRef}
                 contents={file.data.contents}
                 onPendingChange={onPendingChange}
+              />
+            ) : tableDelimiter !== null && renderTable ? (
+              <DelimitedTablePreview
+                name={relativePath}
+                text={file.data.contents}
+                delimiter={tableDelimiter}
               />
             ) : file.data.truncated ? (
               <Virtualizer
@@ -1046,11 +1081,11 @@ export default function FilePreviewPanel({
             )
           ) : null}
         </div>
-        {explorerOpen || relativePath === null ? (
+        {explorerOpen || relativePath === null || isDirectory ? (
           <aside
             className={cn(
               "flex min-h-0 shrink-0 bg-background",
-              relativePath
+              relativePath && !isDirectory
                 ? "w-[min(22rem,46%)] min-w-64 border-l border-border/60"
                 : "min-w-0 flex-1",
             )}
@@ -1064,6 +1099,7 @@ export default function FilePreviewPanel({
               selectedPathRevealId={revealRequestId}
               onOpenFile={onOpenFile}
               onRefreshSelectedFile={refreshSelectedFile}
+              workspaceMutationId={workspaceMutationId}
             />
           </aside>
         ) : null}

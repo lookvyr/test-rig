@@ -1377,6 +1377,35 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
           (row) => row.sourceItemId === interruptResultId,
         ),
       );
+      yield* sql`
+        UPDATE orchestration_v2_projection_turn_items
+        SET payload_json = json_set(payload_json, '$.createdBy', 'agent')
+        WHERE thread_id = ${threadId} AND type = 'user_message'
+      `;
+      const agentPromptId = TurnItemId.make("turn-item:bounded-sql-history:interrupt-filler:1281");
+      yield* sql`
+        UPDATE orchestration_v2_projection_turn_items
+        SET type = 'user_message',
+          payload_json = json_set(payload_json,
+            '$.type', 'user_message', '$.inputIntent', 'turn_start',
+            '$.createdBy', 'agent', '$.creationSource', 'provider',
+            '$.messageId', 'message:bounded-sql-history:agent-prompt',
+            '$.text', 'Continue the child task', '$.attachments', json('[]'))
+        WHERE turn_item_id = ${agentPromptId}
+      `;
+      const agentWindow = yield* projectionStore.getThreadSnapshotWindow(threadId, {
+        rowLimit: sqlPageLimit,
+        userTurnLimit: THREAD_HISTORY_PAGE_POLICY.maxUserTurns,
+      });
+      assert.lengthOf(
+        agentWindow.projection.visibleTurnItems.filter(
+          (row) => row.item.type !== "run_interrupt_request",
+        ),
+        sqlPageLimit,
+      );
+      assert.isTrue(
+        agentWindow.projection.visibleTurnItems.some((row) => row.sourceItemId === agentPromptId),
+      );
     }),
   );
 
@@ -4375,3 +4404,99 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
     }),
   );
 });
+
+it.effect("memory history pages bound agent-only turns and retain their first prompt", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const now = yield* DateTime.now;
+    const threadId = ThreadId.make("thread:agent-memory-pages");
+    yield* store.apply({
+      id: EventId.make("agent-memory:create"),
+      type: "thread.created",
+      threadId,
+      occurredAt: now,
+      payload: {
+        id: threadId,
+        projectId: ProjectId.make("project:agent-memory-pages"),
+        title: "Child",
+        providerInstanceId,
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+        forkedFrom: null,
+        createdBy: "agent",
+        creationSource: "server",
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+        deletedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        lastVisitedAt: null,
+      },
+    });
+    for (let index = 0; index < 91; index++) {
+      const base = {
+        id: TurnItemId.make(`agent-memory:item:${index}`),
+        threadId,
+        runId: null,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: index + 1,
+        status: "completed" as const,
+        title: null,
+        startedAt: now,
+        completedAt: now,
+        updatedAt: now,
+      };
+      yield* store.apply({
+        id: EventId.make(`agent-memory:event:${index}`),
+        type: "turn-item.updated",
+        threadId,
+        occurredAt: now,
+        payload:
+          index === 0
+            ? {
+                ...base,
+                type: "user_message",
+                createdBy: "agent",
+                creationSource: "provider",
+                inputIntent: "turn_start",
+                messageId: MessageId.make("agent-memory:prompt"),
+                text: "Inspect the project",
+                attachments: [],
+              }
+            : { ...base, type: "command_execution", input: "echo test", output: "ok", exitCode: 0 },
+      });
+    }
+    const recent = yield* store.getThreadSnapshotWindow(threadId, {
+      rowLimit: 77,
+      userTurnLimit: 10,
+    });
+    assert.lengthOf(recent.projection.visibleTurnItems, 77);
+    const bounded = buildBoundedThreadProjection(recent);
+    assert.lengthOf(bounded.projection.visibleTurnItems, 75);
+    assert.isTrue(bounded.hasMoreHistory);
+    const cursor = bounded.historyCursor!;
+    const anchor = decodeThreadHistoryCursor(cursor);
+    const olderWindow = yield* store.getThreadSnapshotWindow(threadId, {
+      rowLimit: 77,
+      userTurnLimit: 20,
+      anchorItemId: TurnItemId.make(anchor.si),
+    });
+    const older = selectHistoryPageFromCursor({
+      items: olderWindow.projection.visibleTurnItems,
+      cursor,
+      snapshotSequence: olderWindow.snapshotSequence,
+    });
+    assert.equal(older.items[0]?.item.type, "user_message");
+    assert.equal(older.items.length + bounded.projection.visibleTurnItems.length, 91);
+  }).pipe(Effect.provide(ProjectionStore.layerMemory)),
+);

@@ -9,6 +9,9 @@ import {
 } from "~/previewStateStore";
 import { selectThreadRightPanelState, useRightPanelStore } from "~/rightPanelStore";
 
+import { __setClientSettingsForTests } from "~/hooks/useSettings";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
+
 import { addBrowserSurface } from "./addBrowserSurface";
 
 const threadRef = {
@@ -27,6 +30,7 @@ const snapshot = (tabId: string): PreviewSessionSnapshot => ({
 
 beforeEach(() => {
   resetPreviewStateForTests();
+  __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS);
   useRightPanelStore.setState({ byThreadKey: {} });
 });
 
@@ -40,7 +44,7 @@ describe("addBrowserSurface", () => {
 
     await addBrowserSurface({ threadRef, openPreview: ({ input }) => openPreview(input) });
 
-    expect(openPreview).toHaveBeenCalledWith({ threadId: "thread-1" });
+    expect(openPreview).toHaveBeenCalledWith({ threadId: "thread-1", profileId: "default" });
     expect(Object.keys(readThreadPreviewState(threadRef).sessions)).toEqual(["tab-1", "tab-2"]);
     expect(
       selectThreadRightPanelState(
