@@ -1,0 +1,14 @@
+note: You are running `vp test` as a Vite+ built-in command. If you meant to run the test npm script, use `vpr test` instead.
+
+ RUN  v5.0.1 /Users/smills/REPOS/test-rig
+
+
+ Test Files  44 passed (44)
+      Tests  571 passed (571)
+   Start at  21:05:59
+   Duration  4.65s (transform 53%, import 36%, tests 11%)
+
+  Transform  transforming modules took 20.07s · 53% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

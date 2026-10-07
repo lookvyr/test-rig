@@ -4,6 +4,8 @@ This follow-up addresses the confirmed reliability findings left outside the ear
 
 **Complete for the confirmed audit repair scope, October 7.** All 34 findings (R01–R34) are fixed and closed by the independent correctness/simplification review. All three failures recorded at the pause are resolved, and no known failing check remains in the affected suite.
 
+The user subsequently requested a commit and push before CLI maintenance. The implementation is published on `codex/orchestration-v2` as `0fc7fc5e7`; the linked verification logs are retained with this report. The original validation and scope statements below describe the pre-commit repair pass.
+
 ## Repair inventory
 
 The independent review split the audit's broad repair bundles into 33 concrete failure boundaries (R01–R33), with separate dispositions for stale/missing fixtures and optional features. Restoring the memory tests exposed an additional real bug: a provider child-history loader retained startup transcript payloads. That closure retention was repaired at its owning factory.

@@ -1,0 +1,12 @@
+note: You are running `vp test` as a Vite+ built-in command. If you meant to run the test npm script, use `vpr test` instead.
+
+ RUN  v5.0.1 /Users/smills/REPOS/test-rig
+
+(node:43839) ExperimentalWarning: v8.queryObjects() is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  55 passed (55)
+      Tests  1575 passed (1575)
+   Start at  07:06:37
+   Duration  51.58s (tests 79%, transform 10%, import 10%)
+
