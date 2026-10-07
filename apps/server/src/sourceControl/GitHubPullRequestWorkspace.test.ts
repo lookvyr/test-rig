@@ -1,8 +1,8 @@
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
-import { GitHubCli } from "./GitHubCli.ts";
+import { GitHubApi } from "./GitHubApi.ts";
 import { SourceControlProviderRegistry } from "./SourceControlProviderRegistry.ts";
 import { SourceControlProvider } from "./SourceControlProvider.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -55,15 +55,32 @@ function fixture(
   let discoveries = 0;
   const workspace = make.pipe(
     Effect.provide([
-      Layer.mock(GitHubCli)({
-        execute: ({ args }) => {
+      Layer.mock(GitHubApi)({
+        graphql: (input) => {
+          const args = [JSON.stringify(input.variables)];
+          calls.push(args);
+          const connection = {
+            nodes: [{ ...summary, labels: { nodes: [] } }],
+            pageInfo: { hasNextPage: false },
+          };
+          return Effect.succeed(
+            options.response?.(args) ??
+              JSON.stringify({
+                data: input.variables?.query
+                  ? { search: connection }
+                  : { repository: { pullRequests: connection } },
+              }),
+          );
+        },
+        rest: (input) => {
+          const args = ["api", input.path];
           calls.push(args);
           return Effect.succeed({
-            stdout: options.response?.(args) ?? JSON.stringify([summary]),
-            stderr: "",
-            exitCode: ChildProcessSpawner.ExitCode(0),
-            stdoutTruncated: options.truncated ?? false,
-            stderrTruncated: false,
+            status: 200,
+            headers: {},
+            body: options.response?.(args) ?? JSON.stringify(raw),
+            truncated: options.truncated ?? false,
+            invalidUtf8: false,
           });
         },
       }),
@@ -132,7 +149,18 @@ it.effect("forwards filters and detects a truncated list", () =>
   Effect.gen(function* () {
     for (const involvement of ["all", "authored", "review-requested"] as const) {
       const f = fixture({
-        response: () => JSON.stringify(Array.from({ length: 101 }, () => summary)),
+        response: () => {
+          const connection = {
+            nodes: Array.from({ length: 100 }, () => ({ ...summary, labels: { nodes: [] } })),
+            pageInfo: { hasNextPage: true },
+          };
+          return JSON.stringify({
+            data:
+              involvement === "all"
+                ? { repository: { pullRequests: connection } }
+                : { search: connection },
+          });
+        },
       });
       const service = yield* f.workspace;
       const result = yield* service.listPullRequests({
@@ -143,9 +171,10 @@ it.effect("forwards filters and detects a truncated list", () =>
       assert.equal(result.repository, "https://github.com/owner/repo");
       assert.equal(result.pullRequests.length, 100);
       assert.isTrue(result.truncated);
-      assert.include(f.calls[0]!, "merged");
-      if (involvement === "authored") assert.include(f.calls[0]!, "--author");
-      if (involvement === "review-requested") assert.include(f.calls[0]!, "review-requested:@me");
+      assert.include(f.calls[0]!.join(), involvement === "all" ? "MERGED" : "is:merged");
+      if (involvement === "authored") assert.include(f.calls[0]!.join(), "author:@me");
+      if (involvement === "review-requested")
+        assert.include(f.calls[0]!.join(), "review-requested:@me");
     }
   }),
 );
@@ -157,7 +186,7 @@ it.effect("rejects malformed and byte-truncated responses with safe errors", () 
     ]) {
       const service = yield* f.workspace;
       const error = yield* Effect.flip(
-        service.listPullRequests({ cwd: "/repo", state: "all", involvement: "all" }),
+        service.getPullRequestDetails({ cwd: "/repo", reference: "7" }),
       );
       assert.notInclude(error.message, "private secret");
     }

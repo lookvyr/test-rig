@@ -7,7 +7,7 @@ import {
   type GitGetPullRequestDetailsResult,
   type GitPullRequestSummary,
 } from "@t3tools/contracts";
-import { GitHubCli } from "./GitHubCli.ts";
+import { GitHubApi } from "./GitHubApi.ts";
 import { SourceControlProviderRegistry } from "./SourceControlProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 
@@ -29,7 +29,7 @@ const RawSummary = Schema.Struct({
   additions: Schema.Int,
   deletions: Schema.Int,
   changedFiles: Schema.Int,
-  labels: Schema.Array(Label),
+  labels: Schema.Struct({ nodes: Schema.Array(Label) }),
 });
 const RawPullRequest = Schema.Struct({
   number: Schema.Int,
@@ -78,8 +78,18 @@ const RawStatuses = Schema.Struct({
     }),
   ),
 });
-const fields =
-  "number,title,url,state,isDraft,author,baseRefName,headRefName,headRefOid,createdAt,updatedAt,additions,deletions,changedFiles,labels";
+const SUMMARY_FIELDS = `number title url state isDraft author { login } baseRefName headRefName
+  headRefOid createdAt updatedAt additions deletions changedFiles labels(first: 100) { nodes { name } }`;
+const SummaryConnection = Schema.Struct({
+  nodes: Schema.Array(RawSummary),
+  pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+});
+const ListResponse = Schema.Struct({
+  data: Schema.Struct({
+    repository: Schema.Struct({ pullRequests: SummaryConnection }),
+  }),
+});
+const SearchResponse = Schema.Struct({ data: Schema.Struct({ search: SummaryConnection }) });
 const failure = (message: string) => new GitPullRequestWorkspaceError({ message });
 const author = (user: typeof User.Type) => user?.login ?? "deleted user";
 
@@ -96,7 +106,7 @@ export class GitHubPullRequestWorkspace extends Context.Service<
 >()("t3/sourceControl/GitHubPullRequestWorkspace") {}
 
 export const make = Effect.gen(function* () {
-  const gh = yield* GitHubCli;
+  const github = yield* GitHubApi;
   const registry = yield* SourceControlProviderRegistry;
   const settings = yield* ServerSettingsService;
   const repositoryFor = Effect.fn("GitHubPullRequestWorkspace.repositoryFor")(function* (
@@ -134,69 +144,104 @@ export const make = Effect.gen(function* () {
     const host = new URL(handle.context.provider.baseUrl).host;
     return { name, host, url: `https://${host}/${name}` };
   });
-  const json = <A>(cwd: string, args: ReadonlyArray<string>, schema: Schema.Codec<A>) =>
-    gh.execute({ cwd, args }).pipe(
-      Effect.mapError((error) => failure(error.detail)),
-      Effect.flatMap((result) =>
-        result.stdoutTruncated
-          ? Effect.fail(
-              failure(
-                "GitHub response exceeded the size limit. Open this pull request on GitHub to see the complete content.",
-              ),
-            )
-          : Schema.decodeEffect(Schema.fromJsonString(schema))(result.stdout).pipe(
-              Effect.mapError(() =>
-                failure(
-                  "GitHub returned an invalid response. Refresh to retry, or update GitHub CLI.",
-                ),
-              ),
-            ),
-      ),
+  const decode = <A>(raw: string, schema: Schema.Codec<A>) =>
+    Schema.decodeEffect(Schema.fromJsonString(schema))(raw).pipe(
+      Effect.mapError(() => failure("GitHub returned an invalid response. Refresh to retry.")),
     );
   const api = <A>(
-    cwd: string,
     repo: { name: string; host: string },
     endpoint: string,
     schema: Schema.Codec<A>,
-  ) => json(cwd, ["api", "--hostname", repo.host, `repos/${repo.name}/${endpoint}`], schema);
+  ) =>
+    github
+      .rest({
+        host: repo.host,
+        operation: "getPullRequestDetails",
+        path: `repos/${repo.name}/${endpoint}`,
+      })
+      .pipe(
+        Effect.mapError((error) => failure(error.message)),
+        Effect.flatMap((result) =>
+          result.truncated
+            ? Effect.fail(
+                failure(
+                  "GitHub response exceeded the size limit. Open this pull request on GitHub to see the complete content.",
+                ),
+              )
+            : decode(result.body, schema),
+        ),
+      );
 
   const listPullRequests = Effect.fn("GitHubPullRequestWorkspace.listPullRequests")(function* (
     input: GitListPullRequestsInput,
   ) {
     const repo = yield* repositoryFor(input.cwd);
-    const rows = yield* json(
-      input.cwd,
-      [
-        "pr",
-        "list",
-        "--repo",
-        repo.url,
-        "--state",
-        input.state,
-        "--limit",
-        String(LIMIT + 1),
-        "--json",
-        fields,
-        ...(input.involvement === "authored"
-          ? ["--author", "@me"]
-          : input.involvement === "review-requested"
-            ? ["--search", "review-requested:@me"]
-            : []),
-      ],
-      Schema.Array(RawSummary),
-    );
+    const [owner, name] = repo.name.split("/");
+    const request =
+      input.involvement === "all"
+        ? github
+            .graphql({
+              host: repo.host,
+              operation: "listPullRequests",
+              query: `query($owner: String!, $name: String!, $states: [PullRequestState!]) {
+            repository(owner: $owner, name: $name) {
+              pullRequests(first: 100, states: $states, orderBy: {field: CREATED_AT, direction: DESC}) {
+                nodes { ${SUMMARY_FIELDS} } pageInfo { hasNextPage }
+              }
+            }
+          }`,
+              variables: {
+                owner,
+                name,
+                states:
+                  input.state === "all"
+                    ? ["OPEN", "CLOSED", "MERGED"]
+                    : [input.state.toUpperCase()],
+              },
+            })
+            .pipe(
+              Effect.flatMap((raw) => decode(raw, ListResponse)),
+              Effect.map((data) => data.data.repository.pullRequests),
+            )
+        : github
+            .graphql({
+              host: repo.host,
+              operation: "listPullRequests",
+              query: `query($query: String!) {
+            search(query: $query, type: ISSUE, first: 100) {
+              nodes { ... on PullRequest { ${SUMMARY_FIELDS} } } pageInfo { hasNextPage }
+            }
+          }`,
+              variables: {
+                query: [
+                  `repo:${repo.name}`,
+                  "is:pr",
+                  "sort:created-desc",
+                  ...(input.state === "all"
+                    ? []
+                    : input.state === "closed"
+                      ? ["is:closed", "is:unmerged"]
+                      : [`is:${input.state}`]),
+                  input.involvement === "authored" ? "author:@me" : "review-requested:@me",
+                ].join(" "),
+              },
+            })
+            .pipe(
+              Effect.flatMap((raw) => decode(raw, SearchResponse)),
+              Effect.map((data) => data.data.search),
+            );
+    const result = yield* request.pipe(Effect.mapError((error) => failure(error.message)));
+    const rows = result.nodes;
     return {
       repository: repo.url,
-      truncated: rows.length > LIMIT,
-      pullRequests: rows.slice(0, LIMIT).map(
-        (row): GitPullRequestSummary => ({
-          ...row,
-          state: row.state === "OPEN" ? "open" : row.state === "MERGED" ? "merged" : "closed",
-          author: author(row.author),
-          headSha: row.headRefOid,
-          labels: row.labels.map((label) => label.name),
-        }),
-      ),
+      truncated: result.pageInfo.hasNextPage,
+      pullRequests: rows.slice(0, LIMIT).map((row): GitPullRequestSummary => ({
+        ...row,
+        state: row.state === "OPEN" ? "open" : row.state === "MERGED" ? "merged" : "closed",
+        author: author(row.author),
+        headSha: row.headRefOid,
+        labels: row.labels.nodes.map((label) => label.name),
+      })),
     };
   });
   const getPullRequestDetails = Effect.fn("GitHubPullRequestWorkspace.getPullRequestDetails")(
@@ -223,17 +268,17 @@ export const make = Effect.gen(function* () {
       }
       if (!Number.isSafeInteger(Number(reference)) || Number(reference) < 1)
         return yield* failure("Enter a valid pull request number.");
-      const raw = yield* api(input.cwd, repo, `pulls/${reference}`, RawPullRequest);
+      const raw = yield* api(repo, `pulls/${reference}`, RawPullRequest);
       // Collection requests are bounded; omitted files and check results are reported below.
       const [files, checks, statuses] = yield* Effect.all(
         [
-          api(input.cwd, repo, `pulls/${reference}/files?per_page=${LIMIT}`, Schema.Array(RawFile)),
-          api(input.cwd, repo, `commits/${raw.head.sha}/check-runs?per_page=${LIMIT}`, RawChecks),
-          api(input.cwd, repo, `commits/${raw.head.sha}/status?per_page=${LIMIT}`, RawStatuses),
+          api(repo, `pulls/${reference}/files?per_page=${LIMIT}`, Schema.Array(RawFile)),
+          api(repo, `commits/${raw.head.sha}/check-runs?per_page=${LIMIT}`, RawChecks),
+          api(repo, `commits/${raw.head.sha}/status?per_page=${LIMIT}`, RawStatuses),
         ],
         { concurrency: 4 },
       );
-      const latest = yield* api(input.cwd, repo, `pulls/${reference}`, RawPullRequest);
+      const latest = yield* api(repo, `pulls/${reference}`, RawPullRequest);
       if (latest.head.sha !== raw.head.sha || latest.base.sha !== raw.base.sha)
         return yield* failure(
           "The pull request changed while loading. Refresh to load its latest revision.",

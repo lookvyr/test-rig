@@ -1,21 +1,17 @@
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as Schema from "effect/Schema";
+import * as GitHubApi from "./GitHubApi.ts";
+import { environmentToken } from "./GitHubCredentials.ts";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Result from "effect/Result";
-import {
-  SourceControlProviderError,
-  type ChangeRequest,
-  type ChangeRequestState,
-} from "@t3tools/contracts";
+import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
 
 import * as GitHubCli from "./GitHubCli.ts";
 import { findAuthenticatedGitHubAccount, parseGitHubAuthStatus } from "./gitHubAuthStatus.ts";
-import {
-  decodeGitHubPullRequestListJson,
-  type NormalizedGitHubPullRequestRecord,
-} from "./gitHubPullRequests.ts";
+import { type NormalizedGitHubPullRequestRecord } from "./gitHubPullRequests.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import {
   combinedAuthOutput,
@@ -23,6 +19,7 @@ import {
   providerAuth,
   type SourceControlAuthProbeInput,
   type SourceControlCliDiscoverySpec,
+  type SourceControlApiDiscoverySpec,
 } from "./SourceControlProviderDiscovery.ts";
 
 function toChangeRequest(
@@ -120,6 +117,45 @@ export const discovery = {
     "Install the GitHub command-line tool (`gh`) via https://cli.github.com/ or your package manager (for example `brew install gh`).",
 } satisfies SourceControlCliDiscoverySpec;
 
+const decodeViewer = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Struct({ login: Schema.String })),
+);
+
+/** Environment-only credentials work even when the optional gh credential helper is absent. */
+export const makeDiscovery = Effect.gen(function* () {
+  const environment = yield* HostProcessEnvironment;
+  const api = yield* GitHubApi.GitHubApi;
+  const host = environment.GH_HOST?.trim().toLowerCase() || "github.com";
+  if (environmentToken(host, environment) === null) return discovery;
+  return {
+    type: "api",
+    kind: "github",
+    label: "GitHub",
+    installHint: "Set GH_TOKEN on the server, or sign in with gh auth login.",
+    probeAuth: api.rest({ host, operation: "probeAuth", path: "user" }).pipe(
+      Effect.flatMap((response) => decodeViewer(response.body)),
+      Effect.map((viewer) =>
+        providerAuth({ status: "authenticated", host, account: viewer.login }),
+      ),
+      Effect.catch((error) =>
+        Effect.succeed(
+          providerAuth({
+            status:
+              error._tag === "GitHubApiAuthenticationError" ||
+              error._tag === "GitHubNotSignedInError" ||
+              error._tag === "GitHubCliMissingError" ||
+              error._tag === "GitHubHostDisabledError"
+                ? "unauthenticated"
+                : "unknown",
+            host,
+            detail: error.message,
+          }),
+        ),
+      ),
+    ),
+  } satisfies SourceControlApiDiscoverySpec;
+});
+
 export const make = Effect.gen(function* () {
   const github = yield* GitHubCli.GitHubCli;
 
@@ -151,48 +187,20 @@ export const make = Effect.gen(function* () {
           );
       }
 
-      const stateArg: ChangeRequestState | "all" = input.state;
       return github
-        .execute({
+        .listPullRequestsByHead({
           cwd: input.cwd,
-          args: [
-            "pr",
-            "list",
-            "--head",
-            input.headSelector,
-            "--state",
-            stateArg,
-            "--limit",
-            String(input.limit ?? 20),
-            "--json",
-            "number,title,url,baseRefName,headRefName,state,isDraft,mergedAt,closedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
-          ],
+          headSelector: input.headSelector,
+          state: input.state,
+          limit: input.limit ?? 20,
         })
         .pipe(
-          Effect.flatMap((result) => {
-            const raw = result.stdout.trim();
-            if (raw.length === 0) {
-              return Effect.succeed([]);
-            }
-            return Effect.sync(() => decodeGitHubPullRequestListJson(raw)).pipe(
-              Effect.flatMap((decoded) =>
-                Result.isSuccess(decoded)
-                  ? Effect.succeed(
-                      decoded.success.map((item) => ({
-                        ...toChangeRequest(item),
-                        updatedAt: item.updatedAt,
-                      })),
-                    )
-                  : Effect.fail(
-                      new GitHubCli.GitHubChangeRequestListDecodeError({
-                        command: "gh",
-                        cwd: input.cwd,
-                        cause: decoded.failure,
-                      }),
-                    ),
-              ),
-            );
-          }),
+          Effect.map((items) =>
+            items.map((item) => ({
+              ...toChangeRequest(item),
+              updatedAt: item.updatedAt,
+            })),
+          ),
           Effect.mapError(
             (error) =>
               new SourceControlProviderError({

@@ -15,9 +15,10 @@ or switch away from the app to hide them. On Windows and Linux, use **Ctrl** in
 place of Command and **Alt** in place of Option. These bindings can be changed in
 **Settings → Keybindings**.
 
-The workspace supports GitHub using the GitHub CLI connection on the project's
-environment. Enable GitHub in Settings → Source Control and authenticate the CLI
-if prompted. A remote environment uses its own connection and repository paths.
+The workspace uses GitHub’s APIs with credentials from the project's environment.
+Enable GitHub in Settings → Source Control and sign in with GitHub CLI, or provide
+a server environment token. A remote environment uses its own credentials and
+repository paths.
 
 Filter the queue by project, state, or your involvement, and search the loaded
 results by title, number, author, repository, or URL. Use **Refresh** to fetch

@@ -1,3 +1,5 @@
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as GitHubApi from "./GitHubApi.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -38,6 +40,8 @@ const sourceControlProviderRegistryTestLayer = (input: {
         Layer.mock(AzureDevOpsCli.AzureDevOpsCli)({}),
         Layer.mock(BitbucketApi.BitbucketApi)(input.bitbucket),
         Layer.mock(GitHubCli.GitHubCli)({}),
+        Layer.mock(GitHubApi.GitHubApi)({}),
+        Layer.succeed(HostProcessEnvironment, {}),
         Layer.mock(GitLabCli.GitLabCli)({}),
         ServerSettings.ServerSettingsService.layerTest({
           sourceControlProviders:

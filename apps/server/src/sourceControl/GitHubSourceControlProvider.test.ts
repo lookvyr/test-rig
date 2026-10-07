@@ -1,5 +1,6 @@
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as GitHubApi from "./GitHubApi.ts";
 import { assert, it } from "@effect/vitest";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -157,72 +158,25 @@ it.effect("adds safe request context while retaining GitHub CLI causes", () =>
   }),
 );
 
-it.effect("uses gh json listing for non-open change request state queries", () =>
+it.effect("forwards non-open state filters to the API adapter", () =>
   Effect.gen(function* () {
-    let executeArgs: ReadonlyArray<string> = [];
+    let received;
     const provider = yield* makeProvider({
-      execute: (input) => {
-        executeArgs = input.args;
-        return Effect.succeed(
-          processResult(
-            JSON.stringify([
-              {
-                number: 7,
-                title: "Merged work",
-                url: "https://github.com/pingdotgg/t3code/pull/7",
-                baseRefName: "main",
-                headRefName: "feature/merged",
-                state: "merged",
-                updatedAt: "2026-01-02T00:00:00.000Z",
-              },
-            ]),
-          ),
-        );
+      listPullRequestsByHead: (input) => {
+        received = input;
+        return Effect.succeed([]);
       },
     });
-
-    const changeRequests = yield* provider.listChangeRequests({
-      cwd: "/repo",
-      headSelector: "feature/merged",
-      state: "all",
-      limit: 10,
-    });
-
-    assert.deepStrictEqual(executeArgs, [
-      "pr",
-      "list",
-      "--head",
-      "feature/merged",
-      "--state",
-      "all",
-      "--limit",
-      "10",
-      "--json",
-      "number,title,url,baseRefName,headRefName,state,isDraft,mergedAt,closedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
-    ]);
-    assert.strictEqual(changeRequests[0]?.provider, "github");
-    assert.strictEqual(changeRequests[0]?.state, "merged");
-    assert.deepStrictEqual(
-      changeRequests[0]?.updatedAt,
-      Option.some(DateTime.makeUnsafe("2026-01-02T00:00:00.000Z")),
+    assert.deepEqual(
+      yield* provider.listChangeRequests({
+        cwd: "/repo",
+        headSelector: "feature",
+        state: "all",
+        limit: 10,
+      }),
+      [],
     );
-  }),
-);
-
-it.effect("treats empty non-open change request listing output as no results", () =>
-  Effect.gen(function* () {
-    const provider = yield* makeProvider({
-      execute: () => Effect.succeed(processResult("")),
-    });
-
-    const changeRequests = yield* provider.listChangeRequests({
-      cwd: "/repo",
-      headSelector: "feature/empty",
-      state: "all",
-      limit: 10,
-    });
-
-    assert.deepStrictEqual(changeRequests, []);
+    assert.deepEqual(received, { cwd: "/repo", headSelector: "feature", state: "all", limit: 10 });
   }),
 );
 
@@ -444,3 +398,36 @@ it("reports an update hint instead of unauthenticated when gh predates --json", 
     /2\.81\.0/,
   );
 });
+
+it.effect("environment discovery works without gh and distinguishes transient failures", () =>
+  Effect.gen(function* () {
+    for (const failed of [false, true]) {
+      const discovery = yield* GitHubSourceControlProvider.makeDiscovery.pipe(
+        Effect.provideService(HostProcessEnvironment, { GH_TOKEN: "test-token" }),
+        Effect.provide(
+          Layer.mock(GitHubApi.GitHubApi)({
+            rest: () =>
+              failed
+                ? Effect.fail(
+                    new GitHubApi.GitHubApiRateLimitError({
+                      host: "github.com",
+                      operation: "probeAuth",
+                    }),
+                  )
+                : Effect.succeed({
+                    status: 200,
+                    headers: {},
+                    body: '{"login":"alice"}',
+                    truncated: false,
+                    invalidUtf8: false,
+                  }),
+          }),
+        ),
+      );
+      assert.equal(discovery.type, "api");
+      if (discovery.type !== "api") throw new Error("Expected API discovery");
+      const auth = yield* discovery.probeAuth;
+      assert.equal(auth.status, failed ? "unknown" : "authenticated");
+    }
+  }),
+);

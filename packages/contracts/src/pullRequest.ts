@@ -1272,7 +1272,7 @@ const PROVIDER_REQUIREMENT: Partial<
 > = {
   github: {
     missing:
-      "GitHub CLI (`gh`) is required to browse change requests on this host. Install it from https://cli.github.com/ and reload.",
+      "Set a GitHub token on the server (GH_TOKEN, or GH_ENTERPRISE_TOKEN with GH_HOST), or install GitHub CLI from https://cli.github.com/ and sign in with gh auth login.",
     unauthenticated: "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
   },
   gitlab: {

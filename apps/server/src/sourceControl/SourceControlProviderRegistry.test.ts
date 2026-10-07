@@ -1,3 +1,5 @@
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as GitHubApi from "./GitHubApi.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as DateTime from "effect/DateTime";
@@ -106,6 +108,8 @@ function makeRegistry(input: {
         Layer.mock(AzureDevOpsCli.AzureDevOpsCli)({}),
         Layer.mock(BitbucketApi.BitbucketApi)({}),
         Layer.mock(GitHubCli.GitHubCli)({}),
+        Layer.mock(GitHubApi.GitHubApi)({}),
+        Layer.succeed(HostProcessEnvironment, {}),
         Layer.mock(GitLabCli.GitLabCli)({}),
         input.getSettings === undefined
           ? ServerSettings.ServerSettingsService.layerTest({

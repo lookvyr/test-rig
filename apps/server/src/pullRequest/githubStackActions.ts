@@ -8,7 +8,7 @@ import * as Clock from "effect/Clock";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
-import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import * as GitHubApi from "../sourceControl/GitHubApi.ts";
 import { decodePullRequestStacksJson } from "./gitHubPullRequestJson.ts";
 
 const stackErrorIdentity = {
@@ -194,7 +194,7 @@ export const runGitHubStackAction = Effect.fn("runGitHubStackAction")(function* 
   action: PullRequestAction;
   mergeMethod?: PullRequestMergeMethod;
 }) {
-  const github = yield* GitHubCli.GitHubCli;
+  const api = yield* GitHubApi.GitHubApi;
   const identity = {
     repository: input.repository,
     number: input.number,
@@ -203,11 +203,12 @@ export const runGitHubStackAction = Effect.fn("runGitHubStackAction")(function* 
   if (input.action !== "merge" && input.action !== "update-branch")
     return yield* new GitHubStackUnsupportedError({ ...identity });
   const endpoint = `repos/${input.repository}`;
-  const read = yield* github.execute({
-    cwd: input.cwd,
-    args: ["api", "--hostname", input.host, `${endpoint}/stacks?pull_request=${input.number}`],
+  const read = yield* api.rest({
+    host: input.host,
+    operation: "readStack",
+    path: `${endpoint}/stacks?pull_request=${input.number}`,
   });
-  const decoded = decodePullRequestStacksJson(read.stdout);
+  const decoded = decodePullRequestStacksJson(read.body);
   if (Result.isFailure(decoded))
     return yield* new GitHubStackResponseInvalidError({ ...identity, cause: decoded.failure });
   const stack = decoded.success;
@@ -243,27 +244,13 @@ export const runGitHubStackAction = Effect.fn("runGitHubStackAction")(function* 
     return yield* new GitHubStackUnsupportedError({ ...identity });
   if (input.action === "update-branch") {
     const [owner, name] = input.repository.split("/");
-    const permissions = yield* github.execute({
-      cwd: input.cwd,
-      args: [
-        "api",
-        "--hostname",
-        input.host,
-        "graphql",
-        "-f",
-        `owner=${owner}`,
-        "-f",
-        `name=${name}`,
-        "-f",
-        `query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${open
-          .map(
-            (layer) =>
-              `pr${layer.number}:pullRequest(number:${layer.number}){headRepository{viewerPermission} maintainerCanModify}`,
-          )
-          .join(" ")}}}`,
-      ],
+    const permissions = yield* api.graphql({
+      host: input.host,
+      operation: "stackPermissions",
+      variables: { owner, name },
+      query: `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){${open.map((layer) => `pr${layer.number}:pullRequest(number:${layer.number}){headRepository{viewerPermission} maintainerCanModify}`).join(" ")}}}`,
     });
-    const access = yield* decodeBranchAccess(permissions.stdout).pipe(
+    const access = yield* decodeBranchAccess(permissions).pipe(
       Effect.mapError((cause) => new GitHubStackResponseInvalidError({ ...identity, cause })),
     );
     // viewerCanUpdateBranch is false for an already-current layer, even if rebasing its parent
@@ -282,35 +269,18 @@ export const runGitHubStackAction = Effect.fn("runGitHubStackAction")(function* 
     const processed: Array<{ id: string; number: number; headSha: string }> = [];
     for (const [index, layer] of open.entries()) {
       yield* Effect.gen(function* () {
-        const read = yield* github.execute({
-          cwd: input.cwd,
-          args: [
-            "api",
-            "--hostname",
-            input.host,
-            "graphql",
-            "-f",
-            `owner=${owner}`,
-            "-f",
-            `name=${name}`,
-            "-F",
-            `number=${layer.number}`,
-            "-f",
-            `sha=${layer.headSha}`,
-            "-f",
-            `query=query($owner:String!,$name:String!,$number:Int!,$sha:String!){${
-              processed.length === 0
-                ? ""
-                : `processed:nodes(ids:${encodeNodeIds(processed.map((head) => head.id))}){... on PullRequest{headRefOid}}`
-            } repository(owner:$owner,name:$name){pullRequest(number:$number){id headRefOid baseRef{compare(headRef:$sha){behindBy}}}}}`,
-          ],
+        const read = yield* api.graphql({
+          host: input.host,
+          operation: "stackRebaseHead",
+          variables: { owner, name, number: layer.number, sha: layer.headSha },
+          query: `query($owner:String!,$name:String!,$number:Int!,$sha:String!){${processed.length === 0 ? "" : `processed:nodes(ids:${encodeNodeIds(processed.map((head) => head.id))}){... on PullRequest{headRefOid}}`} repository(owner:$owner,name:$name){pullRequest(number:$number){id headRefOid baseRef{compare(headRef:$sha){behindBy}}}}}`,
         });
         const {
           data: {
             processed: observed,
             repository: { pullRequest: pr },
           },
-        } = yield* decodeRebaseBranch(read.stdout);
+        } = yield* decodeRebaseBranch(read);
         // A push to an earlier layer must not silently become the next layer's new base.
         const changed = processed.find(
           (head, index) => observed?.[index]?.headRefOid !== head.headSha,
@@ -332,22 +302,14 @@ export const runGitHubStackAction = Effect.fn("runGitHubStackAction")(function* 
           return;
         }
         // Pass the reviewed revision to GitHub, including when a push races this read.
-        const updated = yield* github.execute({
-          cwd: input.cwd,
-          args: [
-            "api",
-            "--hostname",
-            input.host,
-            "graphql",
-            "-f",
-            `id=${pr.id}`,
-            "-f",
-            `sha=${layer.headSha}`,
-            "-f",
-            "query=mutation($id:ID!,$sha:GitObjectID!){updatePullRequestBranch(input:{pullRequestId:$id,expectedHeadOid:$sha,updateMethod:REBASE}){pullRequest{headRefOid}}}",
-          ],
+        const updated = yield* api.graphql({
+          host: input.host,
+          operation: "stackRebase",
+          variables: { id: pr.id, sha: layer.headSha },
+          query:
+            "mutation($id:ID!,$sha:GitObjectID!){updatePullRequestBranch(input:{pullRequestId:$id,expectedHeadOid:$sha,updateMethod:REBASE}){pullRequest{headRefOid}}}",
         });
-        const response = yield* decodeRebaseResponse(updated.stdout);
+        const response = yield* decodeRebaseResponse(updated);
         processed.push({
           id: pr.id,
           number: layer.number,
@@ -374,24 +336,18 @@ export const runGitHubStackAction = Effect.fn("runGitHubStackAction")(function* 
     decodeMergeResponse(raw).pipe(
       Effect.mapError((cause) => new GitHubStackResponseInvalidError({ ...identity, cause })),
     );
-  const request = yield* github.execute({
-    cwd: input.cwd,
-    args: [
-      "api",
-      "--hostname",
-      input.host,
-      "--method",
-      "PUT",
-      `${endpoint}/pulls/${input.number}/merge-async`,
-      "-f",
-      `merge_method=${input.mergeMethod ?? "merge"}`,
-      "-f",
-      "merge_action=default",
-      "-f",
-      `sha=${target.headSha}`,
-    ],
+  const request = yield* api.rest({
+    host: input.host,
+    operation: "mergeStack",
+    method: "PUT",
+    path: `${endpoint}/pulls/${input.number}/merge-async`,
+    body: {
+      merge_method: input.mergeMethod ?? "merge",
+      merge_action: "default",
+      sha: target.headSha,
+    },
   });
-  let result = yield* decode(request.stdout);
+  let result = yield* decode(request.body);
   const deadline = (yield* Clock.currentTimeMillis) + 5 * 60_000;
   for (
     let attempt = 0;
@@ -401,16 +357,12 @@ export const runGitHubStackAction = Effect.fn("runGitHubStackAction")(function* 
     const uuid = result.details.uuid;
     if (!uuid) return yield* new GitHubStackResponseInvalidError({ ...identity });
     yield* Effect.sleep(Math.min(1_000 * 2 ** attempt, 10_000));
-    const poll = yield* github.execute({
-      cwd: input.cwd,
-      args: [
-        "api",
-        "--hostname",
-        input.host,
-        `${endpoint}/pulls/${input.number}/merge-async/${encodeURIComponent(uuid)}`,
-      ],
+    const poll = yield* api.rest({
+      host: input.host,
+      operation: "pollStackMerge",
+      path: `${endpoint}/pulls/${input.number}/merge-async/${encodeURIComponent(uuid)}`,
     });
-    result = yield* decode(poll.stdout);
+    result = yield* decode(poll.body);
   }
   if (result.status === "pending") return yield* new GitHubStackMergePendingError({ ...identity });
   if (result.status === "failed")

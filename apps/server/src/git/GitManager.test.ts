@@ -382,7 +382,10 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
   );
   const ghCalls: string[] = [];
 
-  const execute: GitHubCli.GitHubCli["Service"]["execute"] = (input) => {
+  const execute: (input: {
+    cwd: string;
+    args: ReadonlyArray<string>;
+  }) => Effect.Effect<VcsProcess.VcsProcessOutput, GitHubCli.GitHubCliError> = (input) => {
     const args = [...input.args];
     ghCalls.push(args.join(" "));
 
@@ -517,7 +520,6 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
 
   return {
     service: {
-      execute,
       // The fake answers the CLI shape, so batched lookups read it the way the fallback does.
       listPullRequestsByHead: (input) =>
         execute({
@@ -2748,8 +2750,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         provider: "github",
         providerOperation: "listChangeRequests",
         providerCommand: "gh",
-        errorDetail:
-          "GitHub API rate limit exceeded. Run `gh api rate_limit` to inspect the quota and reset time.",
+        errorDetail: "GitHub API rate limit exceeded. Requests resume when the limit resets.",
       });
       const loggedText = [
         warning?.message ?? "",
@@ -4732,7 +4733,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         Effect.flip,
         Effect.map((error) => error.message),
       );
-      expect(errorMessage).toContain("GitHub CLI (`gh`) is required");
+      expect(errorMessage).toContain("No GitHub credential on the server");
     }),
   );
 

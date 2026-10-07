@@ -26,7 +26,7 @@ Open **Settings** → **Source Control** to enable or disable each hosting integ
 
 | Provider     | Default  | Authentication                        |
 | ------------ | -------- | ------------------------------------- |
-| GitHub       | Enabled  | GitHub CLI                            |
+| GitHub       | Enabled  | Environment token or GitHub CLI login |
 | GitLab       | Disabled | GitLab CLI                            |
 | Azure DevOps | Disabled | Azure CLI with the DevOps extension   |
 | Bitbucket    | Disabled | Access token, or email plus API token |
@@ -200,12 +200,18 @@ You can always clone by pasting a full Git URL. This uses Git directly rather th
 
 ## Set up GitHub
 
-Install GitHub CLI 2.81.0 or newer and sign in on the machine running the Test Rig environment:
+Test Rig uses GitHub’s GraphQL and REST APIs directly. It can reuse a GitHub CLI login or use a token from the server environment.
+
+To reuse a login, install GitHub CLI 2.81.0 or newer and sign in on the machine running the Test Rig environment:
 
 ```bash
 brew install gh
 gh auth login
 ```
+
+Alternatively, start the environment with `GH_TOKEN` (or `GITHUB_TOKEN`) set. This does not require GitHub CLI. For GitHub Enterprise Server, set `GH_HOST` to your GitHub hostname and use `GH_ENTERPRISE_TOKEN` (or `GITHUB_ENTERPRISE_TOKEN`). Tokens need permission to access the repositories and actions you use.
+
+Existing CLI credentials are cached for up to five minutes; a changed CLI login takes effect after that cache expires. Restarting the environment applies new environment variables.
 
 GitHub is enabled by default. Open **Settings** → **Source Control** to check its status or turn it off.
 
