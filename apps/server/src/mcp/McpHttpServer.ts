@@ -13,9 +13,11 @@ import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
 import { EnvironmentHandlersLive } from "./toolkits/environment/handlers.ts";
 import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import { ProjectHandlersLive } from "./toolkits/project/handlers.ts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
-import { HtmlRenderToolkit } from "./toolkits/html/tools.ts";
-import { HtmlRenderHandlersLive } from "./toolkits/html/handlers.ts";
+import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
+import { HtmlPreviewHandlersLive, HtmlRenderHandlersLive } from "./toolkits/html/handlers.ts";
 import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
 import { AttachmentHandlersLive } from "./toolkits/attachment/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
@@ -272,10 +274,86 @@ const ProjectRegistrationLive = McpServer.toolkit(ProjectToolkit).pipe(
   Layer.provide(ProjectHandlersLive),
 );
 
-const HtmlRenderRegistrationLive = McpServer.toolkit(HtmlRenderToolkit).pipe(
-  Layer.provide(HtmlRenderHandlersLive),
-  Layer.provide(HtmlRender.layer),
+// MCP images belong in image content, never base64 inside the text metadata.
+const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(function* () {
+  const server = yield* McpServer.McpServer;
+  const services = yield* Effect.context<
+    HtmlRender.HtmlRender | ThreadManagementService.ThreadManagementService
+  >();
+  const built = yield* HtmlPreviewToolkit;
+  const tool = HtmlPreviewTool;
+  yield* server.addTool({
+    tool: new McpSchema.Tool({
+      name: tool.name,
+      description: Tool.getDescription(tool),
+      inputSchema: Tool.getJsonSchema(tool),
+      annotations: {
+        title: "Preview HTML",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    }),
+    annotations: tool.annotations,
+    handle: (payload) =>
+      Effect.withFiber((fiber) => {
+        const invocation = Context.getUnsafe(
+          fiber.context,
+          McpInvocationContext.McpInvocationContext,
+        );
+        return built.handle("html_preview", payload).pipe(
+          Stream.unwrap,
+          Stream.run(Sink.last()),
+          Effect.flatMap(Effect.fromOption),
+          Effect.provide(services),
+          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+          Effect.map(({ encodedResult }) => {
+            const { screenshot, ...metadata } = encodedResult as Tool.Success<
+              typeof HtmlPreviewTool
+            >;
+            return new McpSchema.CallToolResult({
+              isError: false,
+              structuredContent: metadata,
+              content: [
+                { type: "text", text: encodeJsonText(metadata) },
+                {
+                  type: "image",
+                  data: new Uint8Array(Buffer.from(screenshot.data, "base64")),
+                  mimeType: screenshot.mimeType,
+                },
+              ],
+            });
+          }),
+          Effect.catch((error) =>
+            Effect.succeed(
+              new McpSchema.CallToolResult({
+                isError: true,
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      error._tag === "OrchestratorMcpFailure"
+                        ? error.message
+                        : "HTML preview failed: invalid input or tool response.",
+                  },
+                ],
+              }),
+            ),
+          ),
+        );
+      }),
+  });
+});
+
+export const HtmlPreviewRegistrationLive = Layer.effectDiscard(registerHtmlPreview()).pipe(
+  Layer.provide(HtmlPreviewHandlersLive),
 );
+
+const HtmlRenderRegistrationLive = Layer.mergeAll(
+  McpServer.toolkit(HtmlRenderToolkit).pipe(Layer.provide(HtmlRenderHandlersLive)),
+  HtmlPreviewRegistrationLive,
+).pipe(Layer.provide(HtmlRender.layer), Layer.provide(PreviewBrowser.layer));
 
 const AttachmentRegistrationLive = McpServer.toolkit(AttachmentToolkit).pipe(
   Layer.provide(AttachmentHandlersLive),

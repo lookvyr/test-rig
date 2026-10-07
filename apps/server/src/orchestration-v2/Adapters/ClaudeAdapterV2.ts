@@ -904,6 +904,7 @@ export const CLAUDE_T3_MCP_TOOL_WILDCARD = "mcp__test_rig__*";
 // Must stay in sync with the Tool.Readonly annotations on OrchestratorToolkit;
 // ClaudeAdapterV2.test.ts cross-checks this list against the toolkit.
 export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
+  "mcp__test_rig__html_preview",
   "mcp__test_rig__html_render",
   "mcp__test_rig__orchestrator_capabilities",
   "mcp__test_rig__list_scheduled_tasks",

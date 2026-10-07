@@ -1,3 +1,17 @@
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { htmlRenderTheme, htmlRenderThemeFragment } from "@t3tools/shared/htmlRender";
+import {
+  T3_CODE_DARK_THEME_COLORS,
+  T3_CODE_LIGHT_THEME_COLORS,
+  type ThemeAppearance,
+} from "@t3tools/shared/themePalettes";
+import type * as Path from "effect/Path";
+import * as Semaphore from "effect/Semaphore";
+import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import { resolveRootCliCommand } from "../cli/invocation.ts";
+import * as HeadlessChrome from "./headlessChrome.ts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 import type { ThreadId } from "@t3tools/contracts";
 import {
   clampHtmlRenderHeight,
@@ -63,6 +77,18 @@ export type HtmlRenderPrepareError =
   | HtmlRenderImageTooLargeError
   | HtmlRenderPageTooLargeError;
 
+export interface HtmlPreview {
+  /** Base64 PNG of the top `capturedHeight` pixels. */
+  readonly png: string;
+  readonly width: number;
+  /** Height the page needs to show without scrolling. */
+  readonly contentHeight: number;
+  readonly capturedHeight: number;
+  readonly consoleMessages: ReadonlyArray<HeadlessChrome.ConsoleMessage>;
+  /** Local image paths that could not be read; they show as broken images. */
+  readonly missingImages?: ReadonlyArray<string>;
+}
+
 export class HtmlRender extends Context.Service<
   HtmlRender,
   {
@@ -75,6 +101,20 @@ export class HtmlRender extends Context.Service<
       readonly title: string;
       readonly height: number;
     }) => Effect.Effect<HtmlRenderReference, HtmlRenderPrepareError | HtmlRenderStoreError>;
+    /** Screenshots a page in headless Chrome, tolerating unreadable local images. */
+    readonly preview: (input: {
+      readonly html: string;
+      readonly width?: number | undefined;
+      readonly appearance?: ThemeAppearance | undefined;
+    }) => Effect.Effect<
+      HtmlPreview,
+      | Exclude<HtmlRenderPrepareError, HtmlRenderImagesNotFoundError>
+      | PreviewBrowser.PreviewBrowserInstallError
+      | PreviewBrowser.PreviewBrowserInstallingError
+      | PreviewBrowser.PreviewBrowserUnsupportedError
+      | PreviewBrowserHost.PreviewBrowserHostError
+      | HeadlessChrome.HtmlRenderBrowserError
+    >;
   }
 >()("t3/htmlRender/HtmlRender") {}
 
@@ -271,9 +311,49 @@ const inlineLocalImages = Effect.fn("HtmlRender.inlineLocalImages")(function* (h
   };
 });
 
+const MIN_PREVIEW_WIDTH = 240;
+const MAX_PREVIEW_WIDTH = 1600;
+const MAX_CONCURRENT_BROWSERS = 2;
+
 const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const config = yield* ServerConfig.ServerConfig;
+  const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
+  const services = yield* Effect.context<
+    FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+  >();
+  const browsers = yield* Semaphore.make(MAX_CONCURRENT_BROWSERS);
+  // Chrome's sandbox stays on unless the operator explicitly turns it off.
+  // Chrome also refuses it as root, where that opt-out is the only way to run.
+  const noSandbox = PreviewBrowserHost.sandboxDisabled(yield* HostProcessEnvironment);
+  const setupCommand = yield* resolveRootCliCommand(
+    PreviewBrowserHost.SETUP_SUBCOMMAND,
+    config.baseDir,
+  );
+
+  /** Runs one browser launch; a host that cannot start it gets setup steps instead. */
+  const launching = <A>(
+    executable: string,
+    run: (noSandbox: boolean) => Effect.Effect<A, HeadlessChrome.HtmlRenderBrowserError>,
+  ) =>
+    browsers.withPermits(1)(
+      run(noSandbox).pipe(
+        Effect.catchTags({
+          HtmlRenderBrowserError: (error) =>
+            error.output === undefined
+              ? Effect.fail(error)
+              : PreviewBrowserHost.diagnoseLaunchFailure({
+                  executable,
+                  setupCommand,
+                  output: error.output,
+                }).pipe(
+                  Effect.provideContext(services),
+                  Effect.flatMap((hostError) => Effect.fail(hostError ?? error)),
+                ),
+        }),
+      ),
+    );
+
   // The bootstrap goes in first so its head scan never runs over inlined image data.
   const inline = (html: string) =>
     inlineLocalImages(injectHtmlRenderBootstrap(html)).pipe(
@@ -320,7 +400,40 @@ const make = Effect.gen(function* () {
     } satisfies HtmlRenderReference;
   });
 
-  return HtmlRender.of({ prepare, publish });
+  const preview = Effect.fn("HtmlRender.preview")(function* (input: {
+    readonly html: string;
+    readonly width?: number | undefined;
+    readonly appearance?: ThemeAppearance | undefined;
+  }) {
+    const width = Math.min(
+      MAX_PREVIEW_WIDTH,
+      Math.max(MIN_PREVIEW_WIDTH, Math.round(input.width ?? 728)),
+    );
+    const appearance = input.appearance ?? "dark";
+    const inlined = yield* inline(input.html);
+    const executable = yield* previewBrowser.executable;
+    const theme = htmlRenderTheme(
+      appearance === "light" ? T3_CODE_LIGHT_THEME_COLORS : T3_CODE_DARK_THEME_COLORS,
+      appearance,
+      { sans: "Arial, Helvetica, sans-serif", mono: "Consolas, monospace" },
+    );
+    const screenshot = yield* launching(executable, (noSandbox) =>
+      HeadlessChrome.captureHtmlScreenshot({
+        executable,
+        noSandbox,
+        html: inlined.html,
+        width,
+        urlFragment: htmlRenderThemeFragment(theme),
+      }).pipe(Effect.provideContext(services)),
+    );
+    return {
+      ...screenshot,
+      width,
+      ...(inlined.missing.length === 0 ? {} : { missingImages: inlined.missing }),
+    } satisfies HtmlPreview;
+  });
+
+  return HtmlRender.of({ prepare, publish, preview });
 });
 
 export const layer = Layer.effect(HtmlRender, make);

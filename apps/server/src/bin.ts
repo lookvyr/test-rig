@@ -6,6 +6,7 @@ import { Command } from "effect/unstable/cli";
 
 import * as NetService from "@t3tools/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
+import { browserCommand } from "./cli/browser.ts";
 import { authCommand } from "./cli/auth.ts";
 import { pairCommand } from "./cli/pair.ts";
 import { sharedServerCommandFlags } from "./cli/config.ts";
@@ -18,7 +19,14 @@ export const makeCli = () =>
   Command.make("test-rig", { ...sharedServerCommandFlags }).pipe(
     Command.withDescription("Run the Test Rig server."),
     Command.withHandler((flags) => runServerCommand(flags)),
-    Command.withSubcommands([startCommand, serveCommand, pairCommand, authCommand, projectCommand]),
+    Command.withSubcommands([
+      startCommand,
+      serveCommand,
+      pairCommand,
+      authCommand,
+      projectCommand,
+      browserCommand,
+    ]),
   );
 
 export const cli = makeCli();

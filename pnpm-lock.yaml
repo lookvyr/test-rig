@@ -171,6 +171,9 @@ importers:
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
+      yauzl:
+        specifier: ^3.4.0
+        version: 3.4.0
     devDependencies:
       '@effect/vitest':
         specifier: 4.0.0-rc.115
@@ -190,6 +193,9 @@ importers:
       '@types/node':
         specifier: 24.12.4
         version: 24.12.4
+      '@types/yauzl':
+        specifier: ^3.4.0
+        version: 3.4.0
       effect-codex-app-server:
         specifier: workspace:*
         version: link:../../packages/effect-codex-app-server
@@ -5568,6 +5574,13 @@ packages:
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
+  '@types/yauzl@3.4.0':
+    resolution: {integrity: sha512-NRPn5w6h8dhcnmx3YIRQcqMywY/+nND/uOkJessedcrowO3C0AssHp3tMJpxKAwOhFOo0OV1y9VtsC5hbKKBAw==}
+
+  yauzl@3.4.0:
+    resolution: {integrity: sha512-jIH9yLR9wqr0wOS0TpBvo/g/2UgZH5qePVbjgRliiF0BYvOZyaBknKsF+x9Iht0O6sqgnB93rCICdOZFecJuDw==}
+    engines: {node: '>=12'}
+
 snapshots:
 
   '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.288':
@@ -10751,3 +10764,11 @@ snapshots:
       use-sync-external-store: 1.6.0(react@19.2.6)
 
   zwitch@2.0.4: {}
+
+  '@types/yauzl@3.4.0':
+    dependencies:
+      '@types/node': 24.12.4
+
+  yauzl@3.4.0:
+    dependencies:
+      pend: 1.2.0

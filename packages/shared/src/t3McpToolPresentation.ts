@@ -58,6 +58,7 @@ export type T3McpToolSummaryAction =
   | "watch-pr"
   | "unwatch-pr"
   | "browser"
+  | "html-preview"
   | "html-render"
   | "device";
 
@@ -81,6 +82,7 @@ const T3_MCP_SERVER_ALIASES = new Set(["t3-code", "t3_code", "t3code", "test_rig
 
 // Cards, activity rows, summaries, and provider identity recovery share this inventory.
 const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
+  html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
   link_pull_request: tool(
     ["Link", "Linking", "Linked", "a pull request"],

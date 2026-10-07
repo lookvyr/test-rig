@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as Effect from "effect/Effect";
 
 import * as FileSystem from "effect/FileSystem";
@@ -10,6 +11,11 @@ import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as HtmlRender from "./HtmlRender.ts";
 const layerTest = HtmlRender.layer.pipe(
+  Layer.provide(
+    Layer.mock(PreviewBrowser.PreviewBrowser)({
+      executable: Effect.die("Publishing must not launch a browser"),
+    }),
+  ),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "test-rig-html-render-" })),
   Layer.provideMerge(NodeServices.layer),
 );
