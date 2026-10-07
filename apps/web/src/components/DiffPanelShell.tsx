@@ -97,7 +97,7 @@ function DiffCodeLineSkeleton({ contentClassName }: { contentClassName: string }
 export function DiffPanelLoadingState(props: { label: string }) {
   return (
     <div
-      className="min-h-0 flex-1 overflow-hidden bg-background"
+      className="diff-panel-placeholder min-h-0 flex-1 overflow-hidden bg-background"
       role="status"
       aria-live="polite"
       aria-label={props.label}

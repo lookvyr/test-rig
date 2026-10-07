@@ -131,7 +131,7 @@ export function FileSurfaceLoading(props: { readonly className?: string }) {
       data-file-loading
       className={cn("min-h-0 flex-1 overflow-hidden bg-background p-4", props.className)}
     >
-      <div aria-hidden className="space-y-3">
+      <div aria-hidden className="surface-loading-pulse space-y-3">
         <div className="h-3 w-2/5 max-w-60 rounded-sm bg-muted-foreground/15" />
         <div className="h-2.5 w-3/5 max-w-96 rounded-sm bg-muted-foreground/15" />
         <div className="h-2.5 w-1/2 max-w-80 rounded-sm bg-muted-foreground/15" />

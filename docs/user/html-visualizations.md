@@ -12,4 +12,4 @@ Previews run on the server, so they work without an open desktop window. The fir
 
 A preview uses a fresh browser profile, with no app cookies or saved logins. It can load public resources but cannot read arbitrary local files or contact services on your private network. Referenced local images are embedded before rendering. Preview screenshots are feedback for the agent; the published visualization remains interactive.
 
-Opening a visualization uses a quiet placeholder followed by a short fade-in. When switching to HTML source, the rendered page stays visible while the source loads. Reduced-motion preferences disable the fade.
+Opening a visualization uses a gently pulsing placeholder followed by a short fade-in. When switching to HTML source, the rendered page stays visible while the source loads. Reduced-motion preferences disable the pulse and fade.
