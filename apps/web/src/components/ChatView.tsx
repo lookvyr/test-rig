@@ -1,3 +1,4 @@
+import { AttachmentFilePreview } from "./files/AttachmentFilePreview";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useThreadDetailsStore } from "../threadDetailsStore";
 import { useClosedViewStore } from "../closedViewStore";
@@ -6393,6 +6394,16 @@ function ChatViewContent(props: ChatViewProps) {
           threadId={activeThreadRef.threadId}
         />
       ) : null
+    ) : activeRightPanelSurface?.kind === "file" && activeRightPanelSurface.attachment ? (
+      <AttachmentFilePreview
+        key={activeRightPanelSurface.attachment.id}
+        {...activeRightPanelSurface.attachment}
+        asset={{
+          environmentId: activeThreadRef.environmentId,
+          attachmentId: activeRightPanelSurface.attachment.id,
+        }}
+        origin="Attachment"
+      />
     ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
       activeProject &&
       activeWorkspaceRoot ? (
@@ -6532,6 +6543,10 @@ function ChatViewContent(props: ChatViewProps) {
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
+                onFileOpen={(attachment) => {
+                  if (activeThreadRef)
+                    useRightPanelStore.getState().openAttachment(activeThreadRef, attachment);
+                }}
                 findRequest={
                   threadFindRequest.threadKey === routeThreadKey ? threadFindRequest.request : 0
                 }

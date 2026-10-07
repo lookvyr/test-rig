@@ -58,6 +58,7 @@ export type T3McpToolSummaryAction =
   | "watch-pr"
   | "unwatch-pr"
   | "browser"
+  | "html-render"
   | "device";
 
 export interface T3McpToolDefinition {
@@ -80,6 +81,7 @@ const T3_MCP_SERVER_ALIASES = new Set(["t3-code", "t3_code", "t3code", "test_rig
 
 // Cards, activity rows, summaries, and provider identity recovery share this inventory.
 const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
+  html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
   link_pull_request: tool(
     ["Link", "Linking", "Linked", "a pull request"],
     "link-pr",
@@ -331,6 +333,12 @@ function resolveT3McpToolName(value: string): string | null {
   const prefixed = /^(?:mcp[-_]{1,2})?t3[-_ ]?code(?:__|[-_.:/ ])(?<tool>.+)$/i.exec(label);
   const candidate = prefixed?.groups?.tool ?? label;
   return Object.hasOwn(T3_MCP_TOOLS, candidate) ? candidate : null;
+}
+
+/** The bare T3 tool name (`html_render`) for any provider's spelling of it. */
+export function resolveT3McpToolId(toolName: string | null | undefined): string | null {
+  const name = toolName == null ? null : resolveT3McpToolName(toolName);
+  return name !== null && Object.hasOwn(T3_MCP_TOOLS, name) ? name : null;
 }
 
 export function resolveT3McpToolDefinition(

@@ -389,6 +389,9 @@ export function summarizeT3ToolCalls(
         `linked pull requests${selected.length === 1 ? "" : ` ${times}`}`,
       );
       break;
+    case "html-render":
+      label = phrase("Rendered", "render", "an HTML page");
+      break;
     case "browser":
       label = phrase("Used", "use", `browser ${times}`);
       break;

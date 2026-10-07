@@ -48,6 +48,7 @@ export interface ChatImageAttachment extends ContractChatImageAttachment {
 }
 
 export interface ChatFileAttachment extends ContractChatFileAttachment {
+  readonly htmlRender?: boolean;
   readonly previewUrl?: string;
   readonly downloadable?: boolean;
 }

@@ -479,7 +479,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       if (surfaceIndex < 0) return;
 
       const items: ContextMenuItem<TabContextMenuAction>[] = [];
-      if (surface.kind === "file") {
+      if (surface.kind === "file" && !surface.attachment) {
         items.push({ id: "copy-path", label: "Copy path" });
       }
       if (surface.kind === "preview" && surface.resourceId && props.onSetBrowserMuted) {
@@ -513,7 +513,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             props.onSetBrowserMuted?.(surface.resourceId, action === "mute");
           break;
         case "copy-path":
-          if (surface.kind === "file") props.onCopyFilePath(surface.relativePath);
+          if (surface.kind === "file" && !surface.attachment)
+            props.onCopyFilePath(surface.relativePath);
           break;
         case "close":
           props.onCloseSurface(surface);

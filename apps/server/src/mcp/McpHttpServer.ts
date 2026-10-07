@@ -13,6 +13,9 @@ import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
 import { EnvironmentHandlersLive } from "./toolkits/environment/handlers.ts";
 import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import { ProjectHandlersLive } from "./toolkits/project/handlers.ts";
+import * as HtmlRender from "../htmlRender/HtmlRender.ts";
+import { HtmlRenderToolkit } from "./toolkits/html/tools.ts";
+import { HtmlRenderHandlersLive } from "./toolkits/html/handlers.ts";
 import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
 import { AttachmentHandlersLive } from "./toolkits/attachment/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
@@ -269,6 +272,11 @@ const ProjectRegistrationLive = McpServer.toolkit(ProjectToolkit).pipe(
   Layer.provide(ProjectHandlersLive),
 );
 
+const HtmlRenderRegistrationLive = McpServer.toolkit(HtmlRenderToolkit).pipe(
+  Layer.provide(HtmlRenderHandlersLive),
+  Layer.provide(HtmlRender.layer),
+);
+
 const AttachmentRegistrationLive = McpServer.toolkit(AttachmentToolkit).pipe(
   Layer.provide(AttachmentHandlersLive),
 );
@@ -293,5 +301,6 @@ export const layer = Layer.mergeAll(
   EnvironmentRegistrationLive,
   ProjectRegistrationLive,
   AttachmentRegistrationLive,
+  HtmlRenderRegistrationLive,
   PullRequestsToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

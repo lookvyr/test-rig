@@ -610,3 +610,30 @@ describe("rightPanelStore", () => {
     ).toEqual(["terminal:term-1", "browser:tab-b", "browser:tab-c"]);
   });
 });
+
+it("keeps attachment tab order on reopen and preserves attachments without a workspace", () => {
+  const store = useRightPanelStore.getState();
+  const attachment = {
+    type: "file" as const,
+    id: "chart-id",
+    name: "Chart.html",
+    mimeType: "text/html",
+    sizeBytes: 0,
+    htmlRender: true,
+  };
+  store.openAttachment(refA, attachment);
+  store.openFile(refA, "src/main.ts");
+  store.open(refA, "diff");
+  store.openAttachment(refA, attachment);
+  const read = () => selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA);
+  expect(read().surfaces.map((surface) => surface.id)).toEqual([
+    "attachment:chart-id",
+    "file:src/main.ts",
+    "diff",
+  ]);
+  store.reconcileFileSurfaces(refA, false);
+  expect(read().surfaces.map((surface) => surface.id)).toEqual(["attachment:chart-id", "diff"]);
+  expect(read().activeSurfaceId).toBe("attachment:chart-id");
+  store.closeSurface(refA, "attachment:chart-id");
+  expect(read().activeSurfaceId).toBe("diff");
+});

@@ -65,6 +65,7 @@ export function AttachmentFilePreview(props: {
   name: string;
   mimeType: string;
   sizeBytes: number;
+  htmlRender?: boolean;
   file?: Blob | null;
   asset?: { environmentId: EnvironmentId; attachmentId: string };
   /** First crumb: where the file comes from. */
@@ -251,7 +252,12 @@ export function AttachmentFilePreview(props: {
       <ReadOnlySourcePreview name={props.name} text={content.text} />
     )
   ) : kind === "pdf" || kind === "html" ? (
-    <BrowserDocumentFrame src={url} title={props.name} pdf={kind === "pdf"} />
+    <BrowserDocumentFrame
+      src={url}
+      title={props.name}
+      pdf={kind === "pdf"}
+      htmlRender={props.htmlRender === true}
+    />
   ) : kind === "audio" ? (
     <AudioPreview src={url} name={props.name} onError={() => setError("Unable to load audio.")} />
   ) : kind === "video" ? (
@@ -295,9 +301,11 @@ export function AttachmentFilePreview(props: {
           <span aria-current="page" className="min-w-0 truncate px-0.5 font-medium text-foreground">
             {props.name}
           </span>
-          <span className="ml-2 shrink-0 text-muted-foreground">
-            {formatAttachmentSize(props.sizeBytes)}
-          </span>
+          {props.htmlRender !== true || props.sizeBytes > 0 ? (
+            <span className="ml-2 shrink-0 text-muted-foreground">
+              {formatAttachmentSize(props.sizeBytes)}
+            </span>
+          ) : null}
         </div>
         {renderedMode ? (
           <FileSurfaceAction

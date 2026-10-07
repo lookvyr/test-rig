@@ -1,3 +1,10 @@
+import {
+  HTML_RENDER_TOOL_NAME,
+  readHtmlRenderReference,
+  type HtmlRenderReference,
+} from "./htmlRender.ts";
+import { resolveT3McpToolId } from "./t3McpToolPresentation.ts";
+
 import * as Predicate from "effect/Predicate";
 
 const MAX_PARSED_BYTES = 16_384;
@@ -21,6 +28,7 @@ interface ResultEnvelope {
 }
 
 interface CompactToolOutput {
+  htmlRender?: HtmlRenderReference;
   isError?: true;
   threadId?: string;
   messageId?: string;
@@ -94,7 +102,7 @@ function boundedId(value: unknown): string | undefined {
   return Array.from(value).join("");
 }
 
-/** Keeps only IDs and failure metadata used by T3's grouped tool summaries. */
+/** Keeps only render references, IDs and failure metadata used by T3's grouped tool summaries. */
 export function compactDynamicToolOutput(value: unknown): CompactToolOutput | undefined {
   const budget: ResultReadBudget = {
     remainingBytes: MAX_PARSED_BYTES,
@@ -105,6 +113,8 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
   const output: CompactToolOutput = result.failed ? { isError: true } : {};
   const data = budget.exceeded ? undefined : result.data;
   if (data !== undefined) {
+    const htmlRender = readHtmlRenderReference(data.htmlRender);
+    if (htmlRender !== undefined) output.htmlRender = htmlRender;
     for (const key of ["threadId", "messageId", "taskId", "scheduledTaskId"] as const) {
       const id = boundedId(data[key]);
       if (id !== undefined) output[key] = id;
@@ -151,6 +161,15 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
     delete output.status;
   }
   return Object.keys(output).length === 0 ? undefined : output;
+}
+
+export function htmlRenderFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly output?: unknown;
+}): HtmlRenderReference | undefined {
+  if (resolveT3McpToolId(item.toolName) !== HTML_RENDER_TOOL_NAME) return undefined;
+  const output = compactDynamicToolOutput(item.output);
+  return output?.isError ? undefined : output?.htmlRender;
 }
 
 /** Some providers report completion even when command output describes a failure. */
