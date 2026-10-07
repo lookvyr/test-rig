@@ -60,12 +60,34 @@ function ProjectPullRequests({
 }) {
   const { selection, panelOpen, select, clearSelection } = usePullRequestQueueStore();
   const openPrLink = useOpenPrLink();
+  const statsAtoms = useMemo(() => {
+    const rows = query.data?.pullRequests ?? [];
+    return Array.from({ length: Math.ceil(rows.length / 25) }, (_, index) =>
+      gitEnvironment.pullRequestStats({
+        environmentId: project.environmentId,
+        input: {
+          cwd: project.workspaceRoot,
+          pullRequests: rows
+            .slice(index * 25, (index + 1) * 25)
+            .map(({ number, headSha, updatedAt }) => ({ number, headSha, updatedAt })),
+        },
+      }),
+    );
+  }, [project.environmentId, project.workspaceRoot, query.data]);
+  const statsQueries = useEnvironmentQueries(statsAtoms);
+  const statsByNumber = new Map(
+    statsQueries.flatMap((statsQuery) =>
+      (statsQuery.data?.pullRequests ?? []).map((stats) => [stats.number, stats] as const),
+    ),
+  );
+  const refreshList = query.refresh;
   const lastRefresh = useRef(refreshVersion);
   useEffect(() => {
     if (lastRefresh.current === refreshVersion) return;
     lastRefresh.current = refreshVersion;
-    query.refresh();
-  }, [refreshVersion, query.refresh]);
+    refreshList();
+    for (const statsQuery of statsQueries) statsQuery.refresh();
+  }, [refreshVersion, refreshList, statsQueries]);
   useEffect(() => {
     if (!selection || query.isPending || query.error || !query.data) return;
     if (selection.environmentId !== project.environmentId || selection.projectId !== project.id)
@@ -73,7 +95,6 @@ function ProjectPullRequests({
     if (!items.some((pr) => pr.url === selection.reference)) clearSelection();
   }, [
     items,
-    panelOpen,
     project.environmentId,
     project.id,
     query.data,
@@ -104,6 +125,17 @@ function ProjectPullRequests({
         </div>
       )}
       {items.map((pr, index) => {
+        const stats = statsByNumber.get(pr.number);
+        const matchingStats = stats?.headSha === pr.headSha ? stats : undefined;
+        const batchIndex = Math.floor(
+          (query.data?.pullRequests.findIndex((row) => row.number === pr.number) ?? -1) / 25,
+        );
+        const statsQuery = statsQueries[batchIndex];
+        const statsLoading =
+          !matchingStats &&
+          !!statsQuery &&
+          !statsQuery.error &&
+          (!statsQuery.data || statsQuery.isPending);
         const jumpIndex = startIndex + index;
         const jumpLabel = jumpLabels[jumpIndex];
         return (
@@ -147,11 +179,36 @@ function ProjectPullRequests({
                 <span className="capitalize">
                   {pr.state === "open" && pr.isDraft ? "Draft" : pr.state}
                 </span>
-                <span className="text-emerald-600 dark:text-emerald-400">+{pr.additions}</span>
-                <span className="text-red-600 dark:text-red-400">−{pr.deletions}</span>
-                <span>
-                  {pr.changedFiles} {pr.changedFiles === 1 ? "file" : "files"}
-                </span>
+                {matchingStats ? (
+                  <span className="pr-counts-reveal inline-flex gap-3" data-pr-counts="ready">
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                      +{matchingStats.additions}
+                    </span>
+                    <span className="text-red-600 dark:text-red-400">
+                      −{matchingStats.deletions}
+                    </span>
+                    <span>
+                      {matchingStats.changedFiles}{" "}
+                      {matchingStats.changedFiles === 1 ? "file" : "files"}
+                    </span>
+                  </span>
+                ) : statsLoading ? (
+                  <span data-pr-counts="loading" className="inline-flex items-center gap-3">
+                    <span className="sr-only">Loading change counts</span>
+                    <span
+                      aria-hidden
+                      className="surface-loading-pulse inline-flex items-center gap-3"
+                    >
+                      <span className="h-2 w-7 rounded bg-muted-foreground/15" />
+                      <span className="h-2 w-7 rounded bg-muted-foreground/15" />
+                      <span className="h-2 w-10 rounded bg-muted-foreground/15" />
+                    </span>
+                  </span>
+                ) : (
+                  <span title="Refresh pull requests to retry" data-pr-counts="unavailable">
+                    Counts unavailable
+                  </span>
+                )}
               </span>
             </button>
             <StartPullRequestThreadButton

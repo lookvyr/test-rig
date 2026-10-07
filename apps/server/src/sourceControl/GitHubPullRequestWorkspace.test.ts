@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 
-import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, GitGetPullRequestStatsInput } from "@t3tools/contracts";
 import { GitHubApi } from "./GitHubApi.ts";
 import { SourceControlProviderRegistry } from "./SourceControlProviderRegistry.ts";
 import { SourceControlProvider } from "./SourceControlProvider.ts";
@@ -52,11 +52,13 @@ function fixture(
   } = {},
 ) {
   const calls: ReadonlyArray<string>[] = [];
+  const queries: string[] = [];
   let discoveries = 0;
   const workspace = make.pipe(
     Effect.provide([
       Layer.mock(GitHubApi)({
         graphql: (input) => {
+          queries.push(input.query);
           const args = [JSON.stringify(input.variables)];
           calls.push(args);
           const connection = {
@@ -115,9 +117,9 @@ function fixture(
       }),
     ]),
   );
-  return { workspace, calls, discoveries: () => discoveries };
+  return { workspace, calls, queries, discoveries: () => discoveries };
 }
-it.effect("disabled GitHub fails before discovery or gh execution for both methods", () =>
+it.effect("disabled GitHub fails before discovery or gh execution for workspace reads", () =>
   Effect.gen(function* () {
     const f = fixture({ enabled: false });
     const service = yield* f.workspace;
@@ -129,6 +131,13 @@ it.effect("disabled GitHub fails before discovery or gh execution for both metho
     );
     assert.include(listError.message, "disabled");
     assert.include(detailError.message, "disabled");
+    const statsError = yield* Effect.flip(
+      service.getPullRequestStats({
+        cwd: "/repo",
+        pullRequests: [{ number: 7, headSha: "abc", updatedAt: "now" }],
+      }),
+    );
+    assert.include(statsError.message, "disabled");
     assert.deepEqual(f.calls, []);
     assert.equal(f.discoveries(), 0);
   }),
@@ -275,3 +284,68 @@ for (const revision of ["head", "base"] as const) {
     }),
   );
 }
+
+it.effect("lists metadata without waiting for GitHub diff statistics", () =>
+  Effect.gen(function* () {
+    const f = fixture();
+    const service = yield* f.workspace;
+    for (const involvement of ["all", "authored", "review-requested"] as const) {
+      const result = yield* service.listPullRequests({ cwd: "/repo", state: "all", involvement });
+      assert.equal(result.pullRequests[0]?.headSha, "abc");
+      assert.notProperty(result.pullRequests[0], "additions");
+    }
+    for (const query of f.queries) {
+      assert.notMatch(query, /additions|deletions|changedFiles/);
+    }
+  }),
+);
+it.effect("loads a batch of counts and omits unavailable PRs without inventing zeroes", () =>
+  Effect.gen(function* () {
+    const f = fixture({
+      response: () =>
+        JSON.stringify({
+          data: {
+            repository: {
+              pr0: {
+                number: 7,
+                headRefOid: "new-head",
+                additions: 42,
+                deletions: 0,
+                changedFiles: 3,
+              },
+              pr1: null,
+            },
+          },
+        }),
+    });
+    const service = yield* f.workspace;
+    const result = yield* service.getPullRequestStats({
+      cwd: "/repo",
+      pullRequests: [7, 8].map((number) => ({ number, headSha: "old-head", updatedAt: "now" })),
+    });
+    assert.deepEqual(result.pullRequests, [
+      { number: 7, headSha: "new-head", additions: 42, deletions: 0, changedFiles: 3 },
+    ]);
+    assert.deepEqual(
+      yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(f.calls[0]![0]!),
+      {
+        owner: "owner",
+        name: "repo",
+        n0: 7,
+        n1: 8,
+      },
+    );
+    assert.lengthOf(f.calls, 1);
+  }),
+);
+it("bounds count requests to 1–25 positive PR numbers", () => {
+  const decode = Schema.decodeUnknownSync(GitGetPullRequestStatsInput);
+  const input = (numbers: number[]) => ({
+    cwd: "/repo",
+    pullRequests: numbers.map((number) => ({ number, headSha: "head", updatedAt: "now" })),
+  });
+  for (const numbers of [[], [0], [-1], [1.5], Array.from({ length: 26 }, (_, i) => i + 1)]) {
+    assert.throws(() => decode(input(numbers)));
+  }
+  assert.lengthOf(decode(input(Array.from({ length: 25 }, (_, i) => i + 1))).pullRequests, 25);
+});

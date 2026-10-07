@@ -49,6 +49,8 @@ import {
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 import { ThreadId, MessageId } from "./baseSchemas.ts";
 import {
+  GitGetPullRequestStatsInput,
+  GitGetPullRequestStatsResult,
   GitListPullRequestsInput,
   GitListPullRequestsResult,
   GitGetPullRequestDetailsInput,
@@ -238,6 +240,7 @@ export const WS_METHODS = {
 
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
+  gitGetPullRequestStats: "git.getPullRequestStats",
   gitListPullRequests: "git.listPullRequests",
   gitGetPullRequestDetails: "git.getPullRequestDetails",
   gitResolvePullRequest: "git.resolvePullRequest",
@@ -570,6 +573,11 @@ export const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction,
   stream: true,
 });
 
+export const WsGitGetPullRequestStatsRpc = Rpc.make(WS_METHODS.gitGetPullRequestStats, {
+  payload: GitGetPullRequestStatsInput,
+  success: GitGetPullRequestStatsResult,
+  error: Schema.Union([GitPullRequestWorkspaceError, EnvironmentAuthorizationError]),
+});
 export const WsGitListPullRequestsRpc = Rpc.make(WS_METHODS.gitListPullRequests, {
   payload: GitListPullRequestsInput,
   success: GitListPullRequestsResult,
@@ -1014,6 +1022,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
+  WsGitGetPullRequestStatsRpc,
   WsGitListPullRequestsRpc,
   WsGitGetPullRequestDetailsRpc,
   WsGitResolvePullRequestRpc,

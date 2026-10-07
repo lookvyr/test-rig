@@ -9,6 +9,10 @@ export function createGitEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
+    pullRequestStats: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:pull-request-stats",
+      tag: WS_METHODS.gitGetPullRequestStats,
+    }),
     pullRequests: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:git:pull-requests",
       tag: WS_METHODS.gitListPullRequests,

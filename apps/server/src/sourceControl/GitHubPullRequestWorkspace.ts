@@ -5,7 +5,9 @@ import {
   type GitListPullRequestsResult,
   type GitGetPullRequestDetailsInput,
   type GitGetPullRequestDetailsResult,
-  type GitPullRequestSummary,
+  type GitPullRequestListItem,
+  type GitGetPullRequestStatsInput,
+  type GitGetPullRequestStatsResult,
 } from "@t3tools/contracts";
 import { GitHubApi } from "./GitHubApi.ts";
 import { SourceControlProviderRegistry } from "./SourceControlProviderRegistry.ts";
@@ -26,9 +28,6 @@ const RawSummary = Schema.Struct({
   headRefOid: Schema.String,
   createdAt: Schema.String,
   updatedAt: Schema.String,
-  additions: Schema.Int,
-  deletions: Schema.Int,
-  changedFiles: Schema.Int,
   labels: Schema.Struct({ nodes: Schema.Array(Label) }),
 });
 const RawPullRequest = Schema.Struct({
@@ -79,7 +78,7 @@ const RawStatuses = Schema.Struct({
   ),
 });
 const SUMMARY_FIELDS = `number title url state isDraft author { login } baseRefName headRefName
-  headRefOid createdAt updatedAt additions deletions changedFiles labels(first: 100) { nodes { name } }`;
+  headRefOid createdAt updatedAt labels(first: 100) { nodes { name } }`;
 const SummaryConnection = Schema.Struct({
   nodes: Schema.Array(RawSummary),
   pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
@@ -96,6 +95,9 @@ const author = (user: typeof User.Type) => user?.login ?? "deleted user";
 export class GitHubPullRequestWorkspace extends Context.Service<
   GitHubPullRequestWorkspace,
   {
+    readonly getPullRequestStats: (
+      input: GitGetPullRequestStatsInput,
+    ) => Effect.Effect<GitGetPullRequestStatsResult, GitPullRequestWorkspaceError>;
     readonly listPullRequests: (
       input: GitListPullRequestsInput,
     ) => Effect.Effect<GitListPullRequestsResult, GitPullRequestWorkspaceError>;
@@ -235,7 +237,7 @@ export const make = Effect.gen(function* () {
     return {
       repository: repo.url,
       truncated: result.pageInfo.hasNextPage,
-      pullRequests: rows.slice(0, LIMIT).map((row): GitPullRequestSummary => ({
+      pullRequests: rows.slice(0, LIMIT).map((row): GitPullRequestListItem => ({
         ...row,
         state: row.state === "OPEN" ? "open" : row.state === "MERGED" ? "merged" : "closed",
         author: author(row.author),
@@ -244,6 +246,66 @@ export const make = Effect.gen(function* () {
       })),
     };
   });
+  const getPullRequestStats = Effect.fn("GitHubPullRequestWorkspace.getPullRequestStats")(
+    function* (input: GitGetPullRequestStatsInput) {
+      const repo = yield* repositoryFor(input.cwd);
+      const [owner, name] = repo.name.split("/");
+      const fields = input.pullRequests
+        .map(
+          (_, index) =>
+            `pr${index}: pullRequest(number: $n${index}) { number headRefOid additions deletions changedFiles }`,
+        )
+        .join("\n");
+      const raw = yield* github
+        .graphql({
+          host: repo.host,
+          operation: "getPullRequestStats",
+          query: `query($owner: String!, $name: String!, ${input.pullRequests.map((_, index) => `$n${index}: Int!`).join(", ")}) { repository(owner: $owner, name: $name) { ${fields} } }`,
+          variables: {
+            owner,
+            name,
+            ...Object.fromEntries(
+              input.pullRequests.map(({ number }, index) => [`n${index}`, number]),
+            ),
+          },
+        })
+        .pipe(Effect.mapError((error) => failure(error.message)));
+      const result = yield* decode(
+        raw,
+        Schema.Struct({
+          data: Schema.Struct({
+            repository: Schema.Record(
+              Schema.String,
+              Schema.NullOr(
+                Schema.Struct({
+                  number: Schema.Int,
+                  headRefOid: Schema.String,
+                  additions: Schema.Int,
+                  deletions: Schema.Int,
+                  changedFiles: Schema.Int,
+                }),
+              ),
+            ),
+          }),
+        }),
+      );
+      return {
+        pullRequests: Object.values(result.data.repository).flatMap((row) =>
+          row
+            ? [
+                {
+                  number: row.number,
+                  headSha: row.headRefOid,
+                  additions: row.additions,
+                  deletions: row.deletions,
+                  changedFiles: row.changedFiles,
+                },
+              ]
+            : [],
+        ),
+      };
+    },
+  );
   const getPullRequestDetails = Effect.fn("GitHubPullRequestWorkspace.getPullRequestDetails")(
     function* (input: GitGetPullRequestDetailsInput) {
       const repo = yield* repositoryFor(input.cwd);
@@ -334,6 +396,10 @@ export const make = Effect.gen(function* () {
       } satisfies GitGetPullRequestDetailsResult;
     },
   );
-  return GitHubPullRequestWorkspace.of({ listPullRequests, getPullRequestDetails });
+  return GitHubPullRequestWorkspace.of({
+    listPullRequests,
+    getPullRequestStats,
+    getPullRequestDetails,
+  });
 });
 export const layer = Layer.effect(GitHubPullRequestWorkspace, make);

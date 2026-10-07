@@ -2428,6 +2428,7 @@ label:has(> select#reasoning-effort) select {
     opacity: 1;
   }
 }
+.pr-counts-reveal,
 .diff-panel-reveal,
 .file-surface-reveal,
 .file-surface-content > :not([data-file-loading], .file-surface-document, [role="status"]) {
@@ -2456,6 +2457,7 @@ label:has(> select#reasoning-effort) select {
   animation: surface-reveal 180ms ease-out 600ms both;
 }
 @media (prefers-reduced-motion: reduce) {
+  .pr-counts-reveal,
   .diff-panel-reveal,
   .diff-panel-loading-label,
   .file-surface-reveal,

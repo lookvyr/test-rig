@@ -4,12 +4,18 @@ import {
   ProjectId,
   type GitGetPullRequestDetailsResult,
   type GitListPullRequestsResult,
+  type GitGetPullRequestStatsResult,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 
 const state = vi.hoisted(() => ({
   refresh: vi.fn(),
+  statsRefresh: vi.fn(),
+  statsData: null as GitGetPullRequestStatsResult | null,
+  statsPending: true,
+  statsError: null as string | null,
+  statsInputs: [] as { input: { pullRequests: unknown[] } }[],
   version: 0,
   ref: null as { current: number } | null,
   data: null as GitGetPullRequestDetailsResult | null,
@@ -46,13 +52,17 @@ vi.mock("react/compiler-runtime", () => ({
   c: (size: number) => Array.from({ length: size }, () => Symbol.for("react.memo_cache_sentinel")),
 }));
 vi.mock("../../state/query", () => ({
-  useEnvironmentQueries: (targets: unknown[]) =>
-    targets.map(() => ({
-      data: state.listData,
-      error: null,
-      isPending: false,
-      refresh: state.refresh,
-    })),
+  useEnvironmentQueries: (targets: { kind: string }[]) =>
+    targets.map((target) =>
+      target.kind === "stats"
+        ? {
+            data: state.statsData,
+            error: state.statsError,
+            isPending: state.statsPending,
+            refresh: state.statsRefresh,
+          }
+        : { data: state.listData, error: null, isPending: false, refresh: state.refresh },
+    ),
   useEnvironmentQuery: (target: { kind: string }) => ({
     data: target.kind === "list" ? state.listData : state.data,
     error: state.detailsError,
@@ -71,6 +81,10 @@ vi.mock("../../shortcutModifierState", () => ({
 }));
 vi.mock("../../state/git", () => ({
   gitEnvironment: {
+    pullRequestStats: (input: { input: { pullRequests: unknown[] } }) => {
+      state.statsInputs.push(input);
+      return { kind: "stats" };
+    },
     pullRequests: () => ({ kind: "list" }),
     pullRequestDetails: () => ({ kind: "detail" }),
   },
@@ -138,6 +152,11 @@ beforeEach(() => {
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("navigator", { platform: "MacIntel" });
   state.refresh.mockClear();
+  state.statsRefresh.mockClear();
+  state.statsData = null;
+  state.statsPending = true;
+  state.statsError = null;
+  state.statsInputs = [];
   state.version = 0;
   state.ref = null;
   state.data = details("before");
@@ -294,5 +313,78 @@ describe("pull request refresh lifecycle", () => {
         (element) => element.props.children === "closed",
       ),
     ).toBe(true);
+  });
+});
+
+function renderProject() {
+  const queue = elements(PullRequestWorkspace()).find(
+    (element) => element.props.project !== undefined,
+  )!;
+  return elements((queue.type as (props: typeof queue.props) => ReactNode)(queue.props));
+}
+describe("progressive pull request counts", () => {
+  beforeEach(() => {
+    state.listData = {
+      repository: "repo",
+      pullRequests: [details("head").pullRequest],
+      truncated: false,
+    };
+  });
+  it("keeps the row actionable while counts load, then reveals actual zero counts", () => {
+    const loading = renderProject();
+    expect(loading.some((e) => e.props["data-pr-counts"] === "loading")).toBe(true);
+    expect(loading.some((e) => e.type === StartPullRequestThreadButton)).toBe(true);
+    state.statsData = {
+      pullRequests: [{ number: 1, headSha: "head", additions: 0, deletions: 0, changedFiles: 0 }],
+    };
+    state.statsPending = false;
+    expect(renderProject().some((e) => e.props["data-pr-counts"] === "ready")).toBe(true);
+  });
+  it.each(["failure", "missing", "changed-head"])(
+    "settles %s counts without misleading zeroes or endless loading",
+    (status) => {
+      state.statsPending = false;
+      state.statsError = status === "failure" ? "Unavailable" : null;
+      state.statsData =
+        status === "failure"
+          ? null
+          : {
+              pullRequests:
+                status === "missing"
+                  ? []
+                  : [
+                      {
+                        number: 1,
+                        headSha: "different",
+                        additions: 5,
+                        deletions: 1,
+                        changedFiles: 2,
+                      },
+                    ],
+            };
+      const rows = renderProject();
+      expect(rows.some((e) => e.props["data-pr-counts"] === "unavailable")).toBe(true);
+      expect(rows.some((e) => e.props["data-pr-counts"] === "loading")).toBe(false);
+    },
+  );
+  it("batches 26 rows as 25 plus 1 and refreshes counts with the list", () => {
+    state.listData = {
+      ...state.listData!,
+      pullRequests: Array.from({ length: 26 }, (_, i) => ({
+        ...details("head").pullRequest,
+        number: i + 1,
+        url: `https://github.com/owner/repo/pull/${i + 1}`,
+      })),
+    };
+    const queue = elements(PullRequestWorkspace()).find(
+      (element) => element.props.project !== undefined,
+    )!;
+    const renderQueue = queue.type as (props: typeof queue.props) => ReactNode;
+    state.ref = null;
+    renderQueue(queue.props);
+    expect(state.statsInputs.map((target) => target.input.pullRequests.length)).toEqual([25, 1]);
+    renderQueue({ ...queue.props, refreshVersion: 1 });
+    expect(state.refresh).toHaveBeenCalledOnce();
+    expect(state.statsRefresh).toHaveBeenCalledTimes(2);
   });
 });

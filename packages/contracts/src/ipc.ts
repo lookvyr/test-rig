@@ -1,5 +1,7 @@
 import { BrowserProfileId } from "./browserProfile.ts";
 import type {
+  GitGetPullRequestStatsInput,
+  GitGetPullRequestStatsResult,
   GitListPullRequestsInput,
   GitListPullRequestsResult,
   GitGetPullRequestDetailsInput,
@@ -1151,6 +1153,9 @@ export interface EnvironmentApi {
     ) => () => void;
   };
   git: {
+    getPullRequestStats: (
+      input: GitGetPullRequestStatsInput,
+    ) => Promise<GitGetPullRequestStatsResult>;
     listPullRequests: (input: GitListPullRequestsInput) => Promise<GitListPullRequestsResult>;
     getPullRequestDetails: (
       input: GitGetPullRequestDetailsInput,

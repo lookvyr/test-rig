@@ -3539,6 +3539,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 truncated: false,
               });
             },
+            getPullRequestStats: (input) => {
+              assert.equal(input.pullRequests[0]?.number, 7);
+              return Effect.succeed({
+                pullRequests: [
+                  { number: 7, headSha: "head", additions: 2, deletions: 1, changedFiles: 1 },
+                ],
+              });
+            },
             getPullRequestDetails: () =>
               Effect.fail(
                 new GitPullRequestWorkspaceError({ message: "GitHub integration is disabled." }),
@@ -3557,6 +3565,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.equal(result.repository, "https://github.com/owner/repo");
+      const stats = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitGetPullRequestStats]({
+            cwd: "/repo",
+            pullRequests: [{ number: 7, headSha: "head", updatedAt: "now" }],
+          }),
+        ),
+      );
+      assert.equal(stats.pullRequests[0]?.additions, 2);
       const error = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           client[WS_METHODS.gitGetPullRequestDetails]({ cwd: "/repo", reference: "7" }).pipe(

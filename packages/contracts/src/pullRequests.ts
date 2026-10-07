@@ -30,9 +30,38 @@ export const GitPullRequestSummary = Schema.Struct({
   labels: Schema.Array(Schema.String),
 });
 export type GitPullRequestSummary = typeof GitPullRequestSummary.Type;
+export const GitPullRequestListItem = GitPullRequestSummary.mapFields(
+  ({ additions: _additions, deletions: _deletions, changedFiles: _changedFiles, ...fields }) =>
+    fields,
+);
+export type GitPullRequestListItem = typeof GitPullRequestListItem.Type;
+export const GitGetPullRequestStatsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  pullRequests: Schema.Array(
+    Schema.Struct({
+      number: Schema.Int.check(Schema.isGreaterThan(0)),
+      // Revisions keep client query caches fresh when list metadata changes.
+      headSha: TrimmedNonEmptyString,
+      updatedAt: Schema.String,
+    }),
+  ).check(Schema.isMinLength(1), Schema.isMaxLength(25)),
+});
+export type GitGetPullRequestStatsInput = typeof GitGetPullRequestStatsInput.Type;
+export const GitGetPullRequestStatsResult = Schema.Struct({
+  pullRequests: Schema.Array(
+    Schema.Struct({
+      number: Schema.Int,
+      headSha: Schema.String,
+      additions: Schema.Int,
+      deletions: Schema.Int,
+      changedFiles: Schema.Int,
+    }),
+  ),
+});
+export type GitGetPullRequestStatsResult = typeof GitGetPullRequestStatsResult.Type;
 export const GitListPullRequestsResult = Schema.Struct({
   repository: Schema.String,
-  pullRequests: Schema.Array(GitPullRequestSummary),
+  pullRequests: Schema.Array(GitPullRequestListItem),
   truncated: Schema.Boolean,
 });
 export type GitListPullRequestsResult = typeof GitListPullRequestsResult.Type;

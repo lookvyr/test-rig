@@ -1056,6 +1056,12 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "vcs" },
           ),
+        [WS_METHODS.gitGetPullRequestStats]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.gitGetPullRequestStats,
+            pullRequestWorkspace.getPullRequestStats(input),
+            { "rpc.aggregate": "git" },
+          ),
         [WS_METHODS.gitListPullRequests]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitListPullRequests,

@@ -26,6 +26,10 @@ current information. Either refresh button in the workspace updates both the
 queue and the selected review, including check results and changed files. The
 workspace tells you when results are incomplete.
 
+The queue appears before change counts finish loading, so you can open a review
+right away. Small placeholders pulse gently while additions, deletions, and file
+counts load. If counts are unavailable, the rows stay usable; use **Refresh** to retry.
+
 Use the external-link button at the right of a pull request row to open it directly
 in GitHub in your browser. Selecting the rest of the row opens its review in Test Rig.
 
