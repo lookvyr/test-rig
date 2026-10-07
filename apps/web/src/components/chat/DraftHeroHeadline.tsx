@@ -42,7 +42,7 @@ import {
   PopoverDescription,
 } from "../ui/popover";
 
-type WorkspaceLockReason = "loading" | "terminals";
+type WorkspaceLockReason = "loading" | "terminals" | "review-worktree";
 
 function WorkspaceLockNotice({
   reason,
@@ -63,9 +63,11 @@ function WorkspaceLockNotice({
       <PopoverPopup tooltipStyle side="top" className="max-w-64">
         <PopoverTitle className="sr-only">Change project</PopoverTitle>
         <PopoverDescription className="text-xs">
-          {reason === "loading"
-            ? "Checking this draft’s terminals. Try again in a moment."
-            : "Close this draft’s terminals before changing project."}
+          {reason === "review-worktree"
+            ? "Finish preparing the review worktree before changing projects."
+            : reason === "loading"
+              ? "Checking this draft’s terminals. Try again in a moment."
+              : "Close this draft’s terminals before changing project."}
         </PopoverDescription>
       </PopoverPopup>
     </Popover>

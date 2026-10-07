@@ -19,6 +19,7 @@ import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type { OrchestrationMessageContext } from "@t3tools/contracts";
 import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
+import { usePullRequestDraftWorkspace } from "../hooks/usePullRequestDraftWorkspace";
 import { useScratchDraftWorkspace } from "../hooks/useScratchDraftWorkspace";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
@@ -1497,8 +1498,10 @@ function ChatViewContent(props: ChatViewProps) {
   const activeServerConfig = activeThread
     ? (activeEnvironment?.serverConfig ?? null)
     : (primaryEnvironment?.serverConfig ?? null);
+  const reviewWorkspacePending = Boolean(isLocalDraftThread && draftThread?.pullRequestReference);
   const canCheckoutPullRequestIntoThread =
     isLocalDraftThread &&
+    !reviewWorkspacePending &&
     Object.values(activeServerConfig?.settings.sourceControlProviders ?? {}).some(Boolean);
   const activeThreadId = activeThread?.id ?? null;
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -1662,7 +1665,13 @@ function ChatViewContent(props: ChatViewProps) {
     draftTerminalMetadata.data != null,
     allocatableActiveTerminalIds.length > 0,
   );
-  const activeProject = scratchWorkspace.pending ? null : resolvedProject;
+  const reviewWorkspace = usePullRequestDraftWorkspace(
+    draftId,
+    isLocalDraftThread ? draftThread : null,
+    resolvedProject,
+    activeEnvironment?.connection.phase === "connected",
+  );
+  const activeProject = scratchWorkspace.pending || reviewWorkspacePending ? null : resolvedProject;
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
@@ -1916,7 +1925,7 @@ function ChatViewContent(props: ChatViewProps) {
   const selectedProviderByThreadId = composerActiveProvider ?? null;
   const threadProvider =
     activeThread?.modelSelection.instanceId ??
-    activeProject?.defaultModelSelection?.instanceId ??
+    resolvedProject?.defaultModelSelection?.instanceId ??
     null;
   // Once a thread selects an environment, never substitute the primary
   // environment's config while the selected environment is still loading.
@@ -2563,7 +2572,7 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProviderInstanceId ??
     activeThread?.runtime?.providerInstanceId ??
     activeThread?.modelSelection.instanceId ??
-    activeProject?.defaultModelSelection?.instanceId ??
+    resolvedProject?.defaultModelSelection?.instanceId ??
     null;
   const activeProviderStatus = useMemo(() => {
     if (activeProviderInstanceId) {
@@ -2646,8 +2655,9 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThreadRef, diffOpen, isServerThread, onDiffPanelOpen]);
 
   const envLocked = Boolean(
-    activeThread &&
-    (activeThreadMessages.length > 0 || activeThread.activeProviderThreadId !== null),
+    reviewWorkspacePending ||
+    (activeThread &&
+      (activeThreadMessages.length > 0 || activeThread.activeProviderThreadId !== null)),
   );
 
   // Handle environment change for draft threads.  When the user picks a
@@ -2819,13 +2829,13 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const setTerminalOpen = useCallback(
     (open: boolean) => {
-      if (!activeThreadRef) return;
+      if (!activeThreadRef || (open && reviewWorkspacePending)) return;
       storeSetTerminalOpen(activeThreadRef, open);
     },
-    [activeThreadRef, storeSetTerminalOpen],
+    [activeThreadRef, reviewWorkspacePending, storeSetTerminalOpen],
   );
   const toggleTerminalVisibility = useCallback(() => {
-    if (!activeThreadRef) return;
+    if (!activeThreadRef || reviewWorkspacePending) return;
     const nextOpen = !terminalUiState.terminalOpen;
     if (nextOpen && terminalUiState.terminalIds.length === 0) {
       if (!activeThreadId || !activeProject) {
@@ -2854,6 +2864,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
     setTerminalOpen(nextOpen);
   }, [
+    reviewWorkspacePending,
     activeProject,
     activeThreadId,
     activeThreadRef,
@@ -5125,6 +5136,7 @@ function ChatViewContent(props: ChatViewProps) {
       !isServerThread ||
       threadDetailLoading ||
       isWorking ||
+      reviewWorkspacePending ||
       worktreeSetupBlocksSend ||
       activeEnvironmentUnavailable ||
       sendInFlightRef.current ||
@@ -5225,6 +5237,7 @@ function ChatViewContent(props: ChatViewProps) {
     if (
       !activeThread ||
       isSendBusy ||
+      reviewWorkspacePending ||
       worktreeSetupBlocksSend ||
       isConnecting ||
       threadDetailLoading ||
@@ -6518,7 +6531,7 @@ function ChatViewContent(props: ChatViewProps) {
             activeThreadTitle={activeThread.title}
             isServerThread={isServerThread}
             changeRequestState={activeThreadPr?.state ?? null}
-            activeProjectName={activeProject?.title}
+            activeProjectName={resolvedProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
             onNewThreadInProject={handleNewThreadInActiveProject}
           />
@@ -6684,13 +6697,15 @@ function ChatViewContent(props: ChatViewProps) {
                             <DraftHeroHeadline
                               draftId={draftId}
                               activeProjectRef={activeProjectRef}
-                              activeProjectTitle={activeProject?.title ?? null}
+                              activeProjectTitle={resolvedProject?.title ?? null}
                               workspaceLockReason={
-                                allocatableActiveTerminalIds.length > 0
-                                  ? "terminals"
-                                  : draftTerminalMetadata.data == null
-                                    ? "loading"
-                                    : null
+                                reviewWorkspacePending
+                                  ? "review-worktree"
+                                  : allocatableActiveTerminalIds.length > 0
+                                    ? "terminals"
+                                    : draftTerminalMetadata.data == null
+                                      ? "loading"
+                                      : null
                               }
                             />
                           </div>
@@ -6710,6 +6725,30 @@ function ChatViewContent(props: ChatViewProps) {
                           respondingRequestIds={respondingUserInputRequestIds}
                           onRespond={onRespondToUserInput}
                         />
+                      )}
+                      {reviewWorkspacePending && (
+                        <div
+                          className="mx-auto mb-3 flex max-w-3xl items-center gap-2 px-2 text-xs text-muted-foreground"
+                          role={reviewWorkspace.error ? "alert" : "status"}
+                        >
+                          {reviewWorkspace.error ? (
+                            <>
+                              <span>
+                                Could not prepare the review worktree: {reviewWorkspace.error} Your
+                                prompt is saved.
+                              </span>
+                              <button
+                                type="button"
+                                className="shrink-0 underline"
+                                onClick={reviewWorkspace.retry}
+                              >
+                                Retry
+                              </button>
+                            </>
+                          ) : (
+                            <span>Preparing review worktree… You can write your prompt now.</span>
+                          )}
+                        </div>
                       )}
                       {threadSyncPhase && !activeEnvironmentUnavailable ? (
                         <ThreadSyncStatusPill phase={threadSyncPhase} />
@@ -6747,17 +6786,21 @@ function ChatViewContent(props: ChatViewProps) {
                                   forceExpandedMobileComposer && isDraftHeroState
                                 }
                                 projectSelectionRequired={
-                                  isLocalDraftThread && activeProject === null
+                                  isLocalDraftThread && resolvedProject === null
                                 }
                                 phase={phase}
                                 isConnecting={isConnecting}
                                 isSendBusy={isSendBusy}
                                 sendDisabledReason={
-                                  threadDetailLoading
-                                    ? "Messages loading"
-                                    : worktreeSetupBlocksSend
-                                      ? "Preparing workspace"
-                                      : null
+                                  reviewWorkspacePending
+                                    ? reviewWorkspace.error
+                                      ? "Review worktree unavailable"
+                                      : "Preparing review worktree"
+                                    : threadDetailLoading
+                                      ? "Messages loading"
+                                      : worktreeSetupBlocksSend
+                                        ? "Preparing workspace"
+                                        : null
                                 }
                                 isPreparingWorktree={isPreparingWorktree}
                                 environmentUnavailable={activeEnvironmentUnavailableState}
@@ -6777,7 +6820,7 @@ function ChatViewContent(props: ChatViewProps) {
                                 lockedProvider={null}
                                 providerStatuses={providerStatuses as ServerProvider[]}
                                 activeProjectDefaultModelSelection={
-                                  activeProject?.defaultModelSelection
+                                  resolvedProject?.defaultModelSelection
                                 }
                                 activeThreadModelSelection={activeThread?.modelSelection}
                                 activeThreadProjection={threadProjection}

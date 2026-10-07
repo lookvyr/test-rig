@@ -2434,15 +2434,15 @@ export const make = Effect.gen(function* () {
 
       const ensureExistingWorktreeUpstream = Effect.fn("ensureExistingWorktreeUpstream")(function* (
         worktreePath: string,
+        branch: string,
       ) {
-        const details = yield* gitCore.statusDetails(worktreePath);
         yield* configurePullRequestHeadUpstream(
           worktreePath,
           {
             ...pullRequest,
             ...toPullRequestHeadRemoteInfo(pullRequestSummary),
           },
-          details.branch ?? pullRequest.headBranch,
+          branch,
         );
       });
 
@@ -2466,7 +2466,7 @@ export const make = Effect.gen(function* () {
           // findLocalHeadBranch also accepts a branch that merely shares the head's bare name —
           // a fork PR opened from "main" matches the user's own local main. That checkout is
           // somebody else's work, so it keeps its tracking config and nothing else.
-          yield* ensureExistingWorktreeUpstream(worktreePath);
+          yield* ensureExistingWorktreeUpstream(worktreePath, checkedOutBranch);
           return {
             pullRequest,
             branch: localPullRequestBranch,
@@ -2485,7 +2485,7 @@ export const make = Effect.gen(function* () {
             Effect.orElseSucceed(() => null),
           );
 
-        yield* ensureExistingWorktreeUpstream(worktreePath);
+        yield* ensureExistingWorktreeUpstream(worktreePath, checkedOutBranch);
 
         const refreshed = yield* gitCore
           // The pull request's own ref, because it is the only thing that certainly names its
@@ -2639,7 +2639,7 @@ export const make = Effect.gen(function* () {
           ),
         },
       );
-      yield* ensureExistingWorktreeUpstream(worktree.worktree.path);
+      yield* ensureExistingWorktreeUpstream(worktree.worktree.path, worktree.worktree.refName);
       yield* maybeRunSetupScript(worktree.worktree.path);
 
       return {

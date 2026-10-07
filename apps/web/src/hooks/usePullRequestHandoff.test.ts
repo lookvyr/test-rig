@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
-import { preparePullRequestDraft } from "./usePullRequestHandoff";
+import { createPullRequestDraft } from "./usePullRequestHandoff";
+import { preparePullRequestDraft } from "./usePullRequestDraftWorkspace";
 
 const environmentId = EnvironmentId.make("local");
 const projectId = ProjectId.make("project");
@@ -12,7 +13,16 @@ const input = {
   cwd: "/repo",
   reference: "https://github.com/owner/repo/pull/42",
 };
-
+const checkout = { branch: "fix", worktreePath: "/worktrees/fix" };
+const store = () => useComposerDraftStore.getState();
+function restore() {
+  const options = useComposerDraftStore.persist.getOptions();
+  const serialized = JSON.stringify(options.partialize!(store()));
+  useComposerDraftStore.setState(
+    options.merge!(JSON.parse(serialized), useComposerDraftStore.getInitialState()),
+    true,
+  );
+}
 beforeEach(() => {
   useComposerDraftStore.setState({
     draftsByThreadKey: {},
@@ -24,117 +34,138 @@ beforeEach(() => {
 });
 
 describe("PR review draft", () => {
-  it("waits for preparation, then creates a URL-only draft with the prepared checkout", async () => {
-    let finish!: (result: { branch: string; worktreePath: string }) => void;
-    const prepare = vi.fn<Parameters<typeof preparePullRequestDraft>[1]>(
+  it("opens immediately and preserves text typed while preparation is pending", async () => {
+    const draftId = createPullRequestDraft(input);
+    let finish!: (value: typeof checkout) => void;
+    const prepare = vi.fn(
       () =>
-        new Promise<{ branch: string; worktreePath: string }>((resolve) => {
+        new Promise<typeof checkout>((resolve) => {
           finish = resolve;
         }),
     );
-    const operation = preparePullRequestDraft(input, prepare);
-    expect(useComposerDraftStore.getState().draftThreadsByThreadKey).toEqual({});
-    expect(useComposerDraftStore.getState().draftsByThreadKey).toEqual({});
-    finish({ branch: "fix", worktreePath: "/worktrees/fix" });
-    const draftId = await operation;
-    const composer = useComposerDraftStore.getState();
-    expect(prepare).toHaveBeenCalledOnce();
-    expect(composer.getDraftSession(draftId)).toMatchObject({
+    const operation = preparePullRequestDraft(draftId, prepare);
+    expect(store().getDraftSession(draftId)).toMatchObject({
       environmentId,
       projectId,
-      threadId: prepare.mock.calls[0]![0],
-      branch: "fix",
-      worktreePath: "/worktrees/fix",
+      worktreePath: null,
+      pullRequestReference: input.reference,
+      envMode: "worktree",
+    });
+    expect(store().getComposerDraft(draftId)?.prompt).toBe(input.reference);
+    store().setPrompt(draftId, "My review instructions typed while loading");
+    finish(checkout);
+    await operation;
+    expect(store().getDraftSession(draftId)).toMatchObject({
+      ...checkout,
+      pullRequestReference: null,
       envMode: "worktree",
       startFromOrigin: false,
     });
-    expect(composer.getComposerDraft(draftId)?.prompt).toBe(input.reference);
+    expect(store().getComposerDraft(draftId)?.prompt).toBe(
+      "My review instructions typed while loading",
+    );
+    expect(prepare).toHaveBeenCalledOnce();
   });
-
-  it("preserves unrelated project drafts when starting a review", async () => {
-    const composer = useComposerDraftStore.getState();
-    const unrelated = DraftId.make("unrelated");
-    composer.setProjectDraftThreadId(scopeProjectRef(environmentId, projectId), unrelated);
-    composer.setPrompt(unrelated, "Keep my unrelated work");
-    const prepare = vi.fn().mockResolvedValue({ branch: "fix", worktreePath: "/worktrees/fix" });
-    const review = await preparePullRequestDraft(input, prepare);
-    expect(review).not.toBe(unrelated);
-    expect(composer.getComposerDraft(unrelated)?.prompt).toBe("Keep my unrelated work");
-    expect(composer.getDraftSession(unrelated)).not.toBeNull();
+  it("joins an in-flight preparation when a route remounts", async () => {
+    const draftId = createPullRequestDraft(input);
+    let finish!: (value: typeof checkout) => void;
+    const prepare = vi.fn(
+      () =>
+        new Promise<typeof checkout>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const first = preparePullRequestDraft(draftId, prepare);
+    const second = preparePullRequestDraft(draftId, prepare);
+    expect(second).toBe(first);
+    finish(checkout);
+    await second;
+    expect(prepare).toHaveBeenCalledOnce();
   });
-
-  it("creates no draft or composer content when checkout preparation fails", async () => {
+  it("keeps the prompt and PR target after failure and retries the same draft", async () => {
+    const draftId = createPullRequestDraft(input);
+    store().setPrompt(draftId, "Keep these instructions");
     await expect(
-      preparePullRequestDraft(input, async () => {
+      preparePullRequestDraft(draftId, async () => {
         throw new Error("fetch failed");
       }),
     ).rejects.toThrow("fetch failed");
-    expect(useComposerDraftStore.getState().draftThreadsByThreadKey).toEqual({});
-    expect(useComposerDraftStore.getState().draftsByThreadKey).toEqual({});
+    expect(store().getDraftSession(draftId)?.pullRequestReference).toBe(input.reference);
+    expect(store().getComposerDraft(draftId)?.prompt).toBe("Keep these instructions");
+    restore();
+    expect(store().getDraftSession(draftId)?.pullRequestReference).toBe(input.reference);
+    await preparePullRequestDraft(draftId, async () => checkout);
+    expect(store().getDraftSession(draftId)?.pullRequestReference).toBeNull();
+    expect(store().getComposerDraft(draftId)?.prompt).toBe("Keep these instructions");
   });
-
-  it("keeps independent unsent drafts when the same PR worktree is reused", async () => {
-    const prepare = vi.fn().mockResolvedValue({ branch: "fix", worktreePath: "/worktrees/fix" });
-    const first = await preparePullRequestDraft(input, prepare);
-    useComposerDraftStore.getState().setPrompt(first, "Keep my unsent PR review");
-    const next = await preparePullRequestDraft(input, prepare);
-    const composer = useComposerDraftStore.getState();
-    expect(next).not.toBe(first);
-    expect(composer.getDraftSession(next)?.threadId).not.toBe(
-      composer.getDraftSession(first)?.threadId,
-    );
-    expect(composer.getDraftSession(next)?.worktreePath).toBe(
-      composer.getDraftSession(first)?.worktreePath,
-    );
-    expect(composer.getComposerDraft(first)?.prompt).toBe("Keep my unsent PR review");
-    expect(composer.getComposerDraft(next)?.prompt).toBe(input.reference);
+  it("does not unlock Send when the server did not return a worktree", async () => {
+    const draftId = createPullRequestDraft(input);
+    await expect(
+      preparePullRequestDraft(draftId, async () => ({ branch: "fix", worktreePath: null })),
+    ).rejects.toThrow("worktree could not be prepared");
+    expect(store().getDraftSession(draftId)?.pullRequestReference).toBe(input.reference);
   });
-
-  it("restores an unsent review and checkout through normal draft persistence", async () => {
-    const draftId = await preparePullRequestDraft(input, async () => ({
-      branch: "fix",
-      worktreePath: "/worktrees/fix",
-    }));
-    const composer = useComposerDraftStore.getState();
-    const prompt = `${input.reference}\n\nReview cancellation handling.`;
-    composer.setPrompt(draftId, prompt);
-    const options = useComposerDraftStore.persist.getOptions();
-    const serialized = JSON.stringify(options.partialize!(useComposerDraftStore.getState()));
-    useComposerDraftStore.setState(
-      options.merge!(JSON.parse(serialized), useComposerDraftStore.getInitialState()),
-      true,
-    );
-    expect(useComposerDraftStore.getState().getDraftSession(draftId)).toMatchObject({
-      environmentId,
-      projectId,
-      branch: "fix",
-      worktreePath: "/worktrees/fix",
-    });
-    expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.prompt).toBe(prompt);
-  });
-
-  it("keeps overlapping preparations separate when they finish out of order", async () => {
-    let finishFirst!: (result: { branch: string; worktreePath: string }) => void;
-    const firstPending = preparePullRequestDraft(
-      input,
+  it("does not resurrect a discarded draft when preparation finishes", async () => {
+    const draftId = createPullRequestDraft(input);
+    let finish!: (value: typeof checkout) => void;
+    const pending = preparePullRequestDraft(
+      draftId,
       () =>
         new Promise((resolve) => {
-          finishFirst = resolve;
+          finish = resolve;
         }),
     );
-    const secondInput = { ...input, reference: "https://github.com/owner/repo/pull/43" };
-    const second = await preparePullRequestDraft(secondInput, async () => ({
-      branch: "second",
-      worktreePath: "/worktrees/second",
-    }));
-    useComposerDraftStore.getState().setPrompt(second, "Keep the second review draft");
-    finishFirst({ branch: "first", worktreePath: "/worktrees/first" });
-    const first = await firstPending;
-    const composer = useComposerDraftStore.getState();
+    store().clearDraftThread(draftId);
+    finish(checkout);
+    await pending;
+    expect(store().getDraftSession(draftId)).toBeNull();
+  });
+  it("does not apply a late result after the draft changes projects", async () => {
+    const draftId = createPullRequestDraft(input);
+    let finish!: (value: typeof checkout) => void;
+    const pending = preparePullRequestDraft(
+      draftId,
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    store().setDraftThreadContext(draftId, {
+      projectRef: scopeProjectRef(environmentId, ProjectId.make("other")),
+    });
+    finish(checkout);
+    await pending;
+    expect(store().getDraftSession(draftId)?.worktreePath).toBeNull();
+    expect(store().getDraftSession(draftId)?.pullRequestReference).toBeNull();
+  });
+  it("preserves unrelated drafts and independent reviews sharing a worktree", async () => {
+    const unrelated = DraftId.make("unrelated");
+    store().setProjectDraftThreadId(scopeProjectRef(environmentId, projectId), unrelated);
+    store().setPrompt(unrelated, "Unrelated work");
+    const first = createPullRequestDraft(input);
+    const second = createPullRequestDraft(input);
+    store().setPrompt(first, "First review");
+    await preparePullRequestDraft(second, async () => checkout);
+    await preparePullRequestDraft(first, async () => checkout);
     expect(first).not.toBe(second);
-    expect(composer.getComposerDraft(first)?.prompt).toBe(input.reference);
-    expect(composer.getDraftSession(first)?.worktreePath).toBe("/worktrees/first");
-    expect(composer.getComposerDraft(second)?.prompt).toBe("Keep the second review draft");
-    expect(composer.getDraftSession(second)?.worktreePath).toBe("/worktrees/second");
+    expect(store().getDraftSession(first)?.threadId).not.toBe(
+      store().getDraftSession(second)?.threadId,
+    );
+    expect(store().getComposerDraft(first)?.prompt).toBe("First review");
+    expect(store().getComposerDraft(second)?.prompt).toBe(input.reference);
+    expect(store().getComposerDraft(unrelated)?.prompt).toBe("Unrelated work");
+  });
+  it("restores both pending and prepared reviews without losing typed content", async () => {
+    const draftId = createPullRequestDraft(input);
+    store().setPrompt(draftId, "Review cancellation handling");
+    restore();
+    expect(store().getDraftSession(draftId)?.pullRequestReference).toBe(input.reference);
+    await preparePullRequestDraft(draftId, async () => checkout);
+    restore();
+    expect(store().getDraftSession(draftId)).toMatchObject({
+      ...checkout,
+      pullRequestReference: null,
+    });
+    expect(store().getComposerDraft(draftId)?.prompt).toBe("Review cancellation handling");
   });
 });

@@ -672,6 +672,7 @@ function makeManager(input?: {
   serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
   gitConfigReads?: string[];
+  statusDetailsCalls?: string[];
   /** Seeds the V2 stores the per-project settings lookup reads. */
   seed?: Effect.Effect<
     void,
@@ -687,30 +688,35 @@ function makeManager(input?: {
 
   const serverSettingsLayer = ServerSettings.ServerSettingsService.layerTest(input?.serverSettings);
 
-  const vcsDriverLayer = input?.gitConfigReads
-    ? Layer.effect(
-        GitVcsDriver.GitVcsDriver,
-        GitVcsDriver.make.pipe(
-          Effect.map((service) =>
-            GitVcsDriver.GitVcsDriver.of({
-              ...service,
-              readConfigValue: (cwd, key) =>
-                Effect.sync(() => input.gitConfigReads?.push(key)).pipe(
-                  Effect.andThen(service.readConfigValue(cwd, key)),
-                ),
-            }),
+  const vcsDriverLayer =
+    input?.gitConfigReads || input?.statusDetailsCalls
+      ? Layer.effect(
+          GitVcsDriver.GitVcsDriver,
+          GitVcsDriver.make.pipe(
+            Effect.map((service) =>
+              GitVcsDriver.GitVcsDriver.of({
+                ...service,
+                statusDetails: (cwd) =>
+                  Effect.sync(() => input.statusDetailsCalls?.push(cwd)).pipe(
+                    Effect.andThen(service.statusDetails(cwd)),
+                  ),
+                readConfigValue: (cwd, key) =>
+                  Effect.sync(() => input.gitConfigReads?.push(key)).pipe(
+                    Effect.andThen(service.readConfigValue(cwd, key)),
+                  ),
+              }),
+            ),
           ),
-        ),
-      ).pipe(
-        Layer.provideMerge(VcsProcess.layer),
-        Layer.provideMerge(NodeServices.layer),
-        Layer.provideMerge(serverConfigLayer),
-      )
-    : GitVcsDriver.layer.pipe(
-        Layer.provideMerge(VcsProcess.layer),
-        Layer.provideMerge(NodeServices.layer),
-        Layer.provideMerge(serverConfigLayer),
-      );
+        ).pipe(
+          Layer.provideMerge(VcsProcess.layer),
+          Layer.provideMerge(NodeServices.layer),
+          Layer.provideMerge(serverConfigLayer),
+        )
+      : GitVcsDriver.layer.pipe(
+          Layer.provideMerge(VcsProcess.layer),
+          Layer.provideMerge(NodeServices.layer),
+          Layer.provideMerge(serverConfigLayer),
+        );
   const sourceControlRegistryLayer = Layer.effect(
     SourceControlProviderRegistry.SourceControlProviderRegistry,
     (input?.sourceControlProvider === undefined
@@ -4960,7 +4966,9 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* runGit(repoDir, ["push", "origin", "HEAD:refs/pull/77/head"]);
       yield* runGit(repoDir, ["checkout", "main"]);
 
+      const statusDetailsCalls: string[] = [];
       const { manager } = yield* makeManager({
+        statusDetailsCalls,
         ghScenario: {
           pullRequest: {
             number: 77,
@@ -4987,6 +4995,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         "--show-current",
       ])).stdout.trim();
       expect(worktreeBranch).toBe("feature/pr-worktree");
+      expect(statusDetailsCalls).toEqual([]);
     }),
   );
 

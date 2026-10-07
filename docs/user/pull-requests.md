@@ -52,17 +52,20 @@ Images appear as **View image** links that you can open explicitly.
 Use **Open in GitHub** to view the complete diff, commits, comments, and reviews.
 
 Choose **Review** beside the GitHub link on a pull request row to prepare a worktree on its
-branch and open a new thread draft containing only the PR link. An existing
-worktree for that PR branch is reused when available. Add your instructions and
-send when ready. Starting a thread does not wait for the details panel to load
-and does not automatically open that panel.
+branch and immediately open a new thread draft containing the PR link. Start
+writing your instructions while the worktree prepares. Send and workspace actions
+become available once the checkout is ready. If preparation fails, your prompt
+stays saved and you can retry; reloading also preserves your text and resumes
+preparation. An existing worktree for that PR branch is reused when available.
+Starting a thread does not wait for the details panel to load and does not
+automatically open that panel.
 
 Return to your review through the normal thread list. Each new review gets its
 own draft; the PR page does not designate a linked review thread.
 
 Reviews of the same PR can share a worktree, so file changes are visible to every
-thread using it. Reusing a worktree preserves local edits; it does not pull newer
-PR commits or rerun project setup. If the PR branch is checked out in the main
+thread using it. Reusing a worktree preserves local edits and local commits. A clean checkout can advance to
+the latest PR head; project setup reruns only when that checkout moves. If the PR branch is checked out in the main
 project checkout, switch that checkout to another branch before choosing **Review**.
 
 When a thread's checkout has a detected GitHub PR, **Show PR details** in the
