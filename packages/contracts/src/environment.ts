@@ -26,6 +26,7 @@ export const ExecutionEnvironmentPlatform = Schema.Struct({
 export type ExecutionEnvironmentPlatform = typeof ExecutionEnvironmentPlatform.Type;
 
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
+  serverBrowser: Schema.optionalKey(Schema.Boolean),
   orchestrationProtocolVersion: Schema.optionalKey(Schema.Int),
   repositoryIdentity: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   connectionProbe: Schema.optionalKey(Schema.Boolean),

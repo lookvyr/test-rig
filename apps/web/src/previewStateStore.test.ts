@@ -61,6 +61,20 @@ beforeEach(() => {
 });
 
 describe("previewStateStore (single-tab)", () => {
+  it("waits for a full list before treating event-driven tab state as ready", () => {
+    const snapshot = makeSnapshot();
+    applyPreviewServerEvent(ref, {
+      type: "opened",
+      threadId: snapshot.threadId,
+      tabId: snapshot.tabId,
+      createdAt: snapshot.updatedAt,
+      snapshot,
+    });
+    expect(readThreadPreviewState(ref).hasLoadedSessions).toBe(false);
+    reconcilePreviewServerSessions(ref, { sessions: [snapshot], serverEpoch, revision: 1 });
+    expect(readThreadPreviewState(ref).hasLoadedSessions).toBe(true);
+  });
+
   it("keeps independent state atoms for each thread", () => {
     expect(previewStateAtom(scopedThreadKey(ref))).toBe(previewStateAtom(scopedThreadKey(ref)));
     expect(previewStateAtom(scopedThreadKey(ref))).not.toBe(

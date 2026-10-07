@@ -268,3 +268,10 @@ export function findThreadRef(threadId: ThreadId): ScopedThreadRef | null {
       .find((ref) => ref.threadId === threadId) ?? null
   );
 }
+
+export function readEnvironmentSupportsServerBrowser(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .serverBrowser === true
+  );
+}

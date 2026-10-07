@@ -44,6 +44,7 @@ const previewSessionSyncAtom = Atom.family((threadKey: string) => {
     const reconcileSessions = (result: Atom.Type<typeof sessionsAtom>) => {
       if (!AsyncResult.isSuccess(result)) return;
       reconcilePreviewServerSessions(threadRef, result.value);
+      if (!readThreadPreviewState(threadRef).hasLoadedSessions) get.refresh(sessionsAtom);
     };
 
     const applyLatestEvent = (result: Atom.Type<typeof eventsAtom>) => {
@@ -60,9 +61,7 @@ const previewSessionSyncAtom = Atom.family((threadKey: string) => {
       disposed = true;
     });
     const initialEvent = get.once(eventsAtom);
-    get.subscribe(sessionsAtom, (result) => {
-      reconcileSessions(result);
-    });
+    get.subscribe(sessionsAtom, reconcileSessions, { immediate: true });
     get.subscribe(eventsAtom, (result) => {
       eventsVersion += 1;
       applyLatestEvent(result);

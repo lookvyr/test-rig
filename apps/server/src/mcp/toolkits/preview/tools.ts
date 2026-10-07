@@ -1,4 +1,10 @@
 import {
+  PreviewAutomationDialogInput,
+  PreviewAutomationHoverInput,
+  PreviewAutomationSelectInput,
+  PreviewAutomationDragInput,
+  PreviewAutomationUploadInput,
+  PreviewAutomationSelectResult,
   PreviewAutomationClickInput,
   PreviewAutomationError,
   PreviewAutomationEvaluateInput,
@@ -209,7 +215,79 @@ export const PreviewRecordingStopTool = safeBrowserTool(
   }).annotate(Tool.Title, "Stop browser recording"),
 );
 
+const PreviewDialogTool = browserTool(
+  Tool.make("preview_dialog", {
+    description:
+      "Accept or dismiss the server browser dialog reported by preview_status. For a prompt, supply promptText when accepting. Requires this agent to own the tab. Desktop hosts may not support this operation.",
+    parameters: PreviewAutomationDialogInput,
+    success: PreviewAutomationStatus,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Resolve browser dialog"),
+);
+
+const PreviewHoverTool = safeBrowserTool(
+  Tool.make("preview_hover", {
+    description:
+      "Move the mouse over exactly one target in the tab selected by tabId, or this agent session's current tab when omitted, to reveal hover menus and tooltips. Server browser tabs only.",
+    parameters: PreviewAutomationHoverInput,
+    success: Schema.Null,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Hover preview page"),
+);
+
+const PreviewSelectTool = browserTool(
+  Tool.make("preview_select", {
+    description:
+      "Choose options in one native <select> in the tab selected by tabId, or this agent session's current tab when omitted, by option value or visible label. Custom dropdowns are not <select>; click them open and click the option instead. Server browser tabs only.",
+    parameters: PreviewAutomationSelectInput,
+    success: PreviewAutomationSelectResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Select preview option"),
+);
+
+const PreviewDragTool = browserTool(
+  Tool.make("preview_drag", {
+    description:
+      "Drag one element onto another in the tab selected by tabId, or this agent session's current tab when omitted. Server browser tabs only.",
+    parameters: PreviewAutomationDragInput,
+    success: Schema.Null,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Drag in preview page"),
+);
+
+const PreviewUploadTool = browserTool(
+  Tool.make("preview_upload", {
+    description:
+      "Give files on the environment to the page in the tab selected by tabId, or this agent session's current tab when omitted. After clicking an upload control, preview_status reports the open fileChooser; call this with absolute paths to answer it, or with an empty list to cancel. Pass a locator for an <input type=file> to set its files without a picker. Server browser tabs only.",
+    parameters: PreviewAutomationUploadInput,
+    success: Schema.Null,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Upload files to preview page"),
+);
+
+const PreviewCloseTool = browserTool(
+  Tool.make("preview_close", {
+    description:
+      "Close a server browser tab owned by this agent session. Pass tabId when multiple tabs are open.",
+    parameters: PreviewAutomationTabTargetInput,
+    success: Schema.Null,
+    failure: PreviewAutomationError,
+    dependencies,
+  }),
+);
+
 export const PreviewToolkit = Toolkit.make(
+  PreviewDialogTool,
+  PreviewHoverTool,
+  PreviewSelectTool,
+  PreviewDragTool,
+  PreviewUploadTool,
+  PreviewCloseTool,
   PreviewStatusTool,
   PreviewOpenTool,
   PreviewNavigateTool,
@@ -227,6 +305,12 @@ export const PreviewToolkit = Toolkit.make(
 );
 
 export const PreviewStandardToolkit = Toolkit.make(
+  PreviewDialogTool,
+  PreviewHoverTool,
+  PreviewSelectTool,
+  PreviewDragTool,
+  PreviewUploadTool,
+  PreviewCloseTool,
   PreviewStatusTool,
   PreviewOpenTool,
   PreviewNavigateTool,

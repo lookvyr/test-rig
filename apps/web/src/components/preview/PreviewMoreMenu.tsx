@@ -29,7 +29,19 @@ const COLOR_SCHEME_OPTIONS: ReadonlyArray<{
   { value: "dark", label: "Dark" },
 ];
 
+type BrowserMenuActions = Pick<
+  NonNullable<typeof previewBridge>,
+  | "hardReload"
+  | "zoomIn"
+  | "zoomOut"
+  | "resetZoom"
+  | "setColorScheme"
+  | "clearCookies"
+  | "clearCache"
+>;
 interface Props {
+  serverActions?: BrowserMenuActions | undefined;
+  onClearProfile?: (() => void) | undefined;
   environmentId: EnvironmentId;
   profileId?: string | undefined;
   /** Active preview tab id. Tab-targeting actions are disabled without it. */
@@ -61,6 +73,8 @@ interface Props {
  */
 export function PreviewMoreMenu({
   environmentId,
+  serverActions,
+  onClearProfile,
   profileId,
   tabId,
   hasWebContents,
@@ -71,8 +85,8 @@ export function PreviewMoreMenu({
   nativePictureInPicture,
   onNativePictureInPicture,
 }: Props) {
-  if (!previewBridge) return null;
-  const bridge = previewBridge;
+  const bridge = serverActions ?? previewBridge;
+  if (!bridge) return null;
   const tabDisabled = !tabId || !hasWebContents;
   const callTab = (op: (tabId: string) => Promise<void>) => () => {
     if (!tabId) return;
@@ -100,14 +114,18 @@ export function PreviewMoreMenu({
         <MenuItem onClick={callTab(bridge.hardReload)} disabled={tabDisabled}>
           Hard reload
         </MenuItem>
-        <MenuItem onClick={callTab(bridge.openDevTools)} disabled={tabDisabled}>
-          Open DevTools
-        </MenuItem>
-        <MenuItem onClick={onNativePictureInPicture} disabled={tabDisabled}>
-          {nativePictureInPicture
-            ? "Close separate preview window"
-            : "Open separate preview window"}
-        </MenuItem>
+        {!serverActions && previewBridge ? (
+          <>
+            <MenuItem onClick={callTab(previewBridge!.openDevTools)} disabled={tabDisabled}>
+              Open DevTools
+            </MenuItem>
+            <MenuItem onClick={onNativePictureInPicture} disabled={tabDisabled}>
+              {nativePictureInPicture
+                ? "Close separate preview window"
+                : "Open separate preview window"}
+            </MenuItem>
+          </>
+        ) : null}
         <MenuItem onClick={onToggleDeviceToolbar} disabled={tabDisabled}>
           {deviceToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
         </MenuItem>
@@ -190,6 +208,11 @@ export function PreviewMoreMenu({
         >
           Clear cache
         </MenuItem>
+        {onClearProfile ? (
+          <MenuItem onClick={onClearProfile} disabled={tabDisabled}>
+            Clear profile data
+          </MenuItem>
+        ) : null}
       </MenuPopup>
     </Menu>
   );

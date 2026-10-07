@@ -1,3 +1,4 @@
+import { previewRuntimeFor } from "~/browser/previewRuntime";
 import type {
   EnvironmentId,
   PreviewOpenInput,
@@ -31,6 +32,7 @@ export async function openPreviewSession<E>(
     environmentId: input.threadRef.environmentId,
     input: {
       threadId: input.threadRef.threadId,
+      runtime: previewRuntimeFor(input.threadRef.environmentId),
       profileId: input.profileId ?? browserDefaultOpenProfileId(),
       ...(input.viewport === undefined ? {} : { viewport: input.viewport }),
       ...(input.url === undefined ? {} : { url: input.url }),

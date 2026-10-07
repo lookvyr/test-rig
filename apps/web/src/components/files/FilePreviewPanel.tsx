@@ -800,7 +800,9 @@ export default function FilePreviewPanel({
       (handledReveal?.path === relativePath && handledReveal.requestId === revealRequestId));
   const rendered = tableDelimiter !== null ? renderTable : renderMarkdown;
   const canOpenInBrowser =
-    relativePath !== null && isPreviewSupportedInRuntime() && isBrowserPreviewFile(relativePath);
+    relativePath !== null &&
+    isPreviewSupportedInRuntime(threadRef.environmentId) &&
+    isBrowserPreviewFile(relativePath);
   const absolutePath = relativePath ? resolvePathLinkTarget(relativePath, cwd) : null;
   const breadcrumbs = useMemo(
     () => (relativePath ? fileBreadcrumbs(projectName, relativePath) : []),

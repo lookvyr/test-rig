@@ -1,3 +1,4 @@
+import { ServerBrowserSessions } from "./browser/ServerBrowserSessions";
 import { useEffect } from "react";
 import { installDesktopPasteAsText } from "./lib/desktopPasteAsText";
 import { RouterProvider } from "@tanstack/react-router";
@@ -19,6 +20,7 @@ export function AppRoot({ router }: { readonly router: AppRouter }) {
       <RouterProvider router={router} />
       <PreviewAutomationHosts />
       <ElectronBrowserHost />
+      <ServerBrowserSessions />
     </AppAtomRegistryProvider>
   );
 }

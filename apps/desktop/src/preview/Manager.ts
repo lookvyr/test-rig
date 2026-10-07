@@ -2822,14 +2822,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     yield* send("Input.dispatchMouseEvent", {
       type: "mousePressed",
       ...point,
-      button: "left",
-      clickCount: 1,
+      button: input.button ?? "left",
+      clickCount: input.clickCount ?? 1,
     });
     yield* send("Input.dispatchMouseEvent", {
       type: "mouseReleased",
       ...point,
-      button: "left",
-      clickCount: 1,
+      button: input.button ?? "left",
+      clickCount: input.clickCount ?? 1,
     });
   });
 

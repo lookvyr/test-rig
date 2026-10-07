@@ -1,3 +1,4 @@
+import { previewRuntimeFor } from "~/browser/previewRuntime";
 import type { LocalApi, ScopedThreadRef } from "@t3tools/contracts";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import { isPreviewableUrl } from "@t3tools/shared/preview";
@@ -46,7 +47,7 @@ export async function openTerminalLinkInPreview<E>(
 ): Promise<void> {
   const supportsPreview =
     isPreviewableUrl(input.url) &&
-    isPreviewSupportedInRuntime() &&
+    isPreviewSupportedInRuntime(input.threadRef.environmentId) &&
     input.threadRef.threadId.length > 0;
 
   if (!supportsPreview) {
@@ -83,7 +84,11 @@ export async function openTerminalLinkInPreview<E>(
   if (choice === "open-in-preview") {
     const result = await input.openPreview({
       environmentId: input.threadRef.environmentId,
-      input: { threadId: input.threadRef.threadId, url: input.url },
+      input: {
+        threadId: input.threadRef.threadId,
+        runtime: previewRuntimeFor(input.threadRef.environmentId),
+        url: input.url,
+      },
     });
     if (result._tag === "Failure") {
       if (isAtomCommandInterrupted(result)) {

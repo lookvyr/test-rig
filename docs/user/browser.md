@@ -26,6 +26,22 @@ and spelling suggestions for misspelled words in editable text.
 Clipboard and spelling actions apply to the clicked page, including embedded
 frames.
 
+## Browsing from the web app
+
+Browser tabs in the web app run on the connected environment. A `localhost`
+address reaches a service on that environment, and the page keeps running when
+you reload or disconnect the web app. Reconnecting resumes the same page.
+Closing its browser tab ends the page.
+
+Click, type, scroll, navigate, and answer page dialogs from the right panel.
+The browser menu includes zoom, appearance, device sizes, and storage controls.
+When a page downloads a file, choose **Save** in the notification to save it to
+your device. File pickers send the files you select to the environment's page.
+
+Server browser views currently stream images without sound. Native desktop
+browser tabs retain their sound, context menus, DevTools, and separate preview
+windows.
+
 ## Agent inspection and screenshots
 
 The agent cursor shows where the agent is interacting with the page, without
@@ -42,14 +58,25 @@ a screenshot as evidence. Saved screenshots can appear directly in the reply and
 remain available after the browser navigates or closes. They stay in Test Rig's
 local data directory; saving them does not add files to your repository.
 
+When no desktop browser is available, agents can use the environment's server
+browser without an open web client. Agent sessions use isolated browser storage;
+they do not inherit your named profile's logins. A session stays on its assigned
+browser when another client connects. You can interact with an agent's revealed
+page while its actions run in order with yours.
+
 ## Profiles and sound
 
-In the desktop app, create named browser profiles in **Settings → General →
+Create named browser profiles in **Settings → General →
 Browser profiles** to keep separate cookies and logins. Choose a profile when
 opening a browser from the panel's add menu. The Default profile keeps your
-existing browser session. Incognito uses temporary storage.
+existing browser session. Incognito uses temporary storage. Server profiles are
+stored on their environment, separately from desktop profiles. Server profile
+logins survive server restarts; open pages do not.
 
-Use a browser tab's context menu to **Mute tab** or **Unmute tab**. These controls
+**Clear profile data** in a server browser's menu closes that profile's tabs and
+removes its saved storage. It is unavailable for isolated agent and Incognito tabs.
+
+Use a native desktop browser tab's context menu to **Mute tab** or **Unmute tab**. These controls
 change that tab's sound without muting the whole app.
 
 **Cmd+Shift+T** on macOS or **Ctrl+Shift+T** elsewhere reopens a closed browser view

@@ -47,6 +47,9 @@ import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
+import * as ServerBrowser from "./preview/ServerBrowser.ts";
+import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
+import * as PreviewBrowser from "./preview/PreviewBrowser.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
@@ -432,9 +435,11 @@ export const makeRoutesLayer = Layer.mergeAll(
     attachmentUploadRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
+    ServerBrowserStream.routeLayer,
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
 ).pipe(
+  Layer.provide(ServerBrowser.layer.pipe(Layer.provide(PreviewBrowser.layer))),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(commandReadinessLayer),
   Layer.provide(browserApiCorsLayer),

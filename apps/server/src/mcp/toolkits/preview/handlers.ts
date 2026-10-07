@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import type {
+  PreviewAutomationSelectResult,
   PreviewAutomationOperation,
   PreviewAutomationOpenInput,
   PreviewAutomationRecordingArtifact,
@@ -61,6 +62,16 @@ const invokeTargeted = <A>(
 };
 
 const handlers = {
+  preview_close: (input) => invokeTargeted<void>("close", input ?? {}).pipe(Effect.as(null)),
+  preview_dialog: (input) => invokeTargeted<PreviewAutomationStatus>("dialog", input),
+  preview_hover: (input) =>
+    invokeTargeted<void>("hover", input, input.timeoutMs).pipe(Effect.as(null)),
+  preview_select: (input) =>
+    invokeTargeted<PreviewAutomationSelectResult>("select", input, input.timeoutMs),
+  preview_drag: (input) =>
+    invokeTargeted<void>("drag", input, input.timeoutMs).pipe(Effect.as(null)),
+  preview_upload: (input) =>
+    invokeTargeted<void>("upload", input, input.timeoutMs).pipe(Effect.as(null)),
   preview_status: (input) => invokeTargeted<PreviewAutomationStatus>("status", input ?? {}),
   preview_open: (input) =>
     invokeTargeted<PreviewAutomationStatus>("open", normalizePreviewOpenInput(input)),

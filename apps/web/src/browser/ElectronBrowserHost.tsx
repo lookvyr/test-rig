@@ -21,16 +21,18 @@ export function ElectronBrowserHost() {
       Object.entries(previewByThreadKey).flatMap(([threadKey, previewState]) => {
         const threadRef = parseScopedThreadKey(threadKey);
         return threadRef
-          ? Object.values(previewState.sessions).map((snapshot) => ({
-              threadRef,
-              snapshot,
-              runtimeTabId: previewRuntimeTabId(
+          ? Object.values(previewState.sessions)
+              .filter((snapshot) => snapshot.runtime !== "server")
+              .map((snapshot) => ({
                 threadRef,
-                previewState.serverEpoch,
-                snapshot.tabId,
-              ),
-              zoomFactor: previewState.desktopByTabId[snapshot.tabId]?.zoomFactor ?? 1,
-            }))
+                snapshot,
+                runtimeTabId: previewRuntimeTabId(
+                  threadRef,
+                  previewState.serverEpoch,
+                  snapshot.tabId,
+                ),
+                zoomFactor: previewState.desktopByTabId[snapshot.tabId]?.zoomFactor ?? 1,
+              }))
           : [];
       }),
     [previewByThreadKey],

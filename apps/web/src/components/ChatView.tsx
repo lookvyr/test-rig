@@ -23,6 +23,7 @@ import { usePullRequestDraftWorkspace } from "../hooks/usePullRequestDraftWorksp
 import { useScratchDraftWorkspace } from "../hooks/useScratchDraftWorkspace";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
+import { usePreviewSession } from "./preview/usePreviewSession";
 import {
   type RuntimeRequestId,
   DEFAULT_MODEL,
@@ -1125,6 +1126,7 @@ function ChatViewContent(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
+  usePreviewSession(routeThreadRef);
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
@@ -1581,7 +1583,9 @@ function ChatViewContent(props: ChatViewProps) {
     () => [...new Set([...activeKnownTerminalIds, ...panelTerminalIds])],
     [activeKnownTerminalIds, panelTerminalIds],
   );
-  const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
+  const previewPanelOpen =
+    activeRightPanelKind === "preview" &&
+    isPreviewSupportedInRuntime(activeThreadRef?.environmentId);
   const rightPanelOpen = rightPanelState.isOpen;
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
@@ -1589,11 +1593,11 @@ function ChatViewContent(props: ChatViewProps) {
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUseRightPanelSheet;
 
   useEffect(() => {
-    if (!activeThreadRef) return;
+    if (!activeThreadRef || !activePreviewState.hasLoadedSessions) return;
     useRightPanelStore
       .getState()
       .reconcileBrowserSurfaces(activeThreadRef, Object.keys(activePreviewState.sessions));
-  }, [activePreviewState.sessions, activeThreadRef]);
+  }, [activePreviewState.sessions, activePreviewState.hasLoadedSessions, activeThreadRef]);
 
   useEffect(() => {
     if (!activeThreadRef || !activePreviewMiniPlayer) return;
@@ -3294,11 +3298,11 @@ function ChatViewContent(props: ChatViewProps) {
   const createBrowserSurface = useCallback(
     (profileId?: string) => {
       if (!activeThreadRef) return;
-      if (!isPreviewSupportedInRuntime()) {
+      if (!isPreviewSupportedInRuntime(activeThreadRef?.environmentId)) {
         toastManager.add({
           type: "info",
-          title: "Browser is desktop-only",
-          description: "Open Test Rig in the desktop app to use the integrated browser.",
+          title: "Browser unavailable",
+          description: "This environment does not support the integrated browser.",
         });
         return;
       }
@@ -3427,7 +3431,7 @@ function ChatViewContent(props: ChatViewProps) {
     [activeProject, activeThreadRef],
   );
   const togglePreviewPanel = useCallback(() => {
-    if (!activeThreadRef || !isPreviewSupportedInRuntime()) return;
+    if (!activeThreadRef || !isPreviewSupportedInRuntime(activeThreadRef?.environmentId)) return;
     if (previewPanelOpen) {
       useRightPanelStore.getState().close(activeThreadRef);
       return;
@@ -7023,7 +7027,7 @@ function ChatViewContent(props: ChatViewProps) {
           }
           onAddSideChat={sideChatAvailable ? () => void addSideChatSurface() : undefined}
           sideChatAvailable={sideChatAvailable}
-          browserAvailable={isPreviewSupportedInRuntime()}
+          browserAvailable={isPreviewSupportedInRuntime(activeThreadRef?.environmentId)}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
         >
@@ -7034,7 +7038,12 @@ function ChatViewContent(props: ChatViewProps) {
         <RightPanelSheet
           open
           onClose={closePreviewPanel}
-          modal={!(activeRightPanelKind === "preview" && isPreviewSupportedInRuntime())}
+          modal={
+            !(
+              activeRightPanelKind === "preview" &&
+              isPreviewSupportedInRuntime(activeThreadRef?.environmentId)
+            )
+          }
         >
           <RightPanelTabs
             mode="sheet"
@@ -7065,7 +7074,7 @@ function ChatViewContent(props: ChatViewProps) {
             }
             onAddSideChat={sideChatAvailable ? () => void addSideChatSurface() : undefined}
             sideChatAvailable={sideChatAvailable}
-            browserAvailable={isPreviewSupportedInRuntime()}
+            browserAvailable={isPreviewSupportedInRuntime(activeThreadRef?.environmentId)}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
           >

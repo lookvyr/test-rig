@@ -2,6 +2,8 @@ import {
   PREVIEW_AUTOMATION_V1_OPERATIONS,
   PreviewAutomationClientDisconnectedError,
   PreviewAutomationControlInterruptedError,
+  PreviewAutomationControlReason,
+  SERVER_BROWSER_AUTOMATION_CLIENT_ID,
   PreviewAutomationExecutionError,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
@@ -47,6 +49,7 @@ export class PreviewAutomationBroker extends Context.Service<
   {
     readonly connect: (
       host: PreviewAutomationHost,
+      options?: { readonly fallback?: boolean },
     ) => Effect.Effect<Stream.Stream<PreviewAutomationStreamEvent>>;
     readonly focusHost: (host: PreviewAutomationHostFocus) => Effect.Effect<void>;
     readonly respond: (
@@ -59,6 +62,7 @@ export class PreviewAutomationBroker extends Context.Service<
 >()("t3/mcp/PreviewAutomationBroker") {}
 
 interface ClientConnection {
+  readonly fallback: boolean;
   readonly clientId: string;
   readonly connectionId: string;
   readonly environmentId: PreviewAutomationHost["environmentId"];
@@ -154,6 +158,7 @@ const hostAssignmentKey = (scope: McpInvocationContext.McpInvocationScope): stri
   `${scope.environmentId}\u0000${scope.providerSessionId}`;
 
 const isPreviewTabId = Schema.is(PreviewTabId);
+const decodeControlReason = Schema.decodeUnknownOption(PreviewAutomationControlReason);
 
 const readResultTabId = (result: unknown): PreviewTabId | null | undefined => {
   if (typeof result !== "object" || result === null || !("tabId" in result)) return undefined;
@@ -214,13 +219,22 @@ const classifyResponseError = (
         ...context,
         ...remoteDiagnostics,
       });
-    case "PreviewAutomationControlInterruptedError":
+    case "PreviewAutomationControlInterruptedError": {
+      const reason = decodeControlReason(error.detail);
       return new PreviewAutomationControlInterruptedError({
         ...context,
         ...remoteDiagnostics,
+        ...(Option.isSome(reason) ? { reason: reason.value } : {}),
       });
+    }
     case "PreviewAutomationInvalidSelectorError": {
+      const staleRef =
+        typeof error.detail === "object" &&
+        error.detail !== null &&
+        "staleRef" in error.detail &&
+        error.detail.staleRef === true;
       return new PreviewAutomationInvalidSelectorError({
+        ...(staleRef ? { staleRef } : {}),
         ...context,
         ...remoteDiagnostics,
       });
@@ -279,6 +293,9 @@ const classifyResponseError = (
       });
     default:
       return new PreviewAutomationExecutionError({
+        ...(context.clientId === SERVER_BROWSER_AUTOMATION_CLIENT_ID
+          ? { reason: error.message }
+          : {}),
         ...context,
         ...remoteDiagnostics,
       });
@@ -321,12 +338,14 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
 
   const acquireConnection = Effect.fn("PreviewAutomationBroker.acquireConnection")(function* (
     host: PreviewAutomationHost,
+    fallback = false,
   ) {
     const clientId = host.clientId;
     const queue = yield* Queue.unbounded<PreviewAutomationStreamEvent>();
     const connectionId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
     yield* Queue.offer(queue, { type: "connected", connectionId });
     const connection: ClientConnection = {
+      fallback,
       clientId,
       connectionId,
       environmentId: host.environmentId,
@@ -361,10 +380,10 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
 
   const connect: PreviewAutomationBroker["Service"]["connect"] = Effect.fn(
     "PreviewAutomationBroker.connect",
-  )((host) =>
+  )((host, options) =>
     Effect.succeed(
       Stream.unwrap(
-        Effect.acquireRelease(acquireConnection(host), (connection) =>
+        Effect.acquireRelease(acquireConnection(host, options?.fallback), (connection) =>
           disconnect(connection.clientId, connection.queue),
         ).pipe(Effect.map((connection) => Stream.fromQueue(connection.queue))),
       ),
@@ -426,7 +445,6 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   const invoke = Effect.fn("PreviewAutomationBroker.invoke")(function* <A = unknown>(
     input: Parameters<PreviewAutomationBroker["Service"]["invoke"]>[0],
   ): Effect.fn.Return<A, PreviewAutomationError> {
-    const timeoutMs = input.timeoutMs ?? 15_000;
     const deferred = yield* Deferred.make<unknown, PreviewAutomationError>();
     const route = yield* SynchronizedRef.modify(state, (current) => {
       const assignments = new Map(
@@ -461,6 +479,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
                 )
                 .sort(
                   (left, right) =>
+                    Number(left.fallback) - Number(right.fallback) ||
                     right.supportedOperations.size - left.supportedOperations.size ||
                     Number(right.focused) - Number(left.focused) ||
                     right.focusOrder - left.focusOrder,
@@ -487,6 +506,9 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       const requestId = `preview-${requestSequence}`;
       const tabId = input.tabId ?? (canReuseAssignedTab ? assigned.tabId : undefined);
       const selectorDiagnostics = selectorDiagnosticsFromInput(input.input);
+      // A server's first open may spend up to 45 seconds waiting for Chromium installation.
+      const timeoutMs =
+        input.timeoutMs ?? (connection.fallback && input.operation === "open" ? 60_000 : 15_000);
       const context: PreviewAutomationRequestErrorContext = {
         operation: input.operation,
         environmentId: input.scope.environmentId,
@@ -517,6 +539,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       });
     }
     const { connection, requestId, requestContext, requestSequence } = route;
+    const timeoutMs = requestContext.timeoutMs;
     const removePending = SynchronizedRef.update(state, (next) => {
       if (!next.pending.has(requestId)) return next;
       const pending = new Map(next.pending);
@@ -529,6 +552,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         connectionId: connection.connectionId,
         request: {
           requestId,
+          agentSessionId: hostAssignmentKey(input.scope),
           threadId: input.scope.threadId,
           tabId: requestContext.tabId,
           tabIdExplicit: input.tabId !== undefined,

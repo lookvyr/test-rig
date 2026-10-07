@@ -7,12 +7,11 @@ import {
   resolveBrowserProfiles,
 } from "@t3tools/contracts";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
-import { isElectron } from "~/env";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SettingsSection } from "./settingsLayout";
 
-/** Named desktop cookie profiles; removing a name keeps existing tabs signed in. */
+/** Named browser cookie profiles; removing a name keeps existing tabs signed in. */
 export function BrowserProfilesSettings() {
   const settings = useClientSettings();
   const update = useUpdateClientSettings();
@@ -22,7 +21,6 @@ export function BrowserProfilesSettings() {
     profiles.find(
       (profile) => profile.id === settings.browserDefaultProfileId && profile.kind === "persistent",
     )?.id ?? DEFAULT_BROWSER_PROFILE_ID;
-  if (!isElectron) return null;
   return (
     <SettingsSection id="browser-profiles" title="Browser profiles">
       <p className="text-sm text-muted-foreground">

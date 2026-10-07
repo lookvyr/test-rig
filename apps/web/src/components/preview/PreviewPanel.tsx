@@ -30,12 +30,12 @@ export function PreviewPanel({
   browserZIndex = 30,
   onSendAnnotation,
 }: Props) {
-  if (!isPreviewSupportedInRuntime()) {
+  if (!isPreviewSupportedInRuntime(threadRef.environmentId)) {
     return (
       <PreviewPanelShell mode={mode}>
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <p className="max-w-sm text-sm text-muted-foreground">
-            Preview is only available in the Test Rig desktop app.
+            This environment does not support browser previews.
           </p>
         </div>
       </PreviewPanelShell>

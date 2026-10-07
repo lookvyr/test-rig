@@ -1,5 +1,9 @@
 "use client";
 
+import { PREVIEW_ZOOM_LEVELS, INCOGNITO_BROWSER_PROFILE_ID } from "@t3tools/contracts";
+import { BrowserDeviceToolbar } from "~/browser/BrowserDeviceToolbar";
+import { ServerBrowserSurface, type ServerBrowserHandle } from "~/browser/ServerBrowserSurface";
+
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
@@ -81,6 +85,7 @@ export function PreviewView({
   onSendAnnotation,
 }: Props) {
   const [focusUrlNonce, setFocusUrlNonce] = useState<number | undefined>(undefined);
+  const [serverAspectRatio, setServerAspectRatio] = useState<number | null>(null);
   const [pickActive, setPickActive] = useState(false);
   const activeRecordingTabIds = useActiveBrowserRecordingTabIds();
   const pickActiveRef = useRef(false);
@@ -114,6 +119,9 @@ export function PreviewView({
         : findActiveBrowserRecordingRuntimeTabId(threadRef, tabId)
       : null;
   const snapshot = tabId ? (previewState.sessions[tabId] ?? null) : null;
+  const serverBrowser = snapshot?.runtime === "server";
+  const serverSurfaceRef = useRef<ServerBrowserHandle | null>(null);
+  const [serverConnected, setServerConnected] = useState(false);
   const desktopOverlay = tabId ? (previewState.desktopByTabId[tabId] ?? null) : null;
   const navStatus = snapshot?.navStatus ?? { _tag: "Idle" as const };
   const url = navStatus._tag === "Idle" ? "" : navStatus.url;
@@ -135,7 +143,10 @@ export function PreviewView({
 
   const navigateToResolvedUrl = useCallback(
     async (resolvedUrl: string) => {
-      if (runtimeTabId && previewBridge) {
+      if (serverBrowser) {
+        serverSurfaceRef.current?.navigate(resolvedUrl);
+        rememberPreviewUrl(threadRef, resolvedUrl);
+      } else if (runtimeTabId && previewBridge) {
         // Drive the webview imperatively; `usePreviewBridge` mirrors the
         // resolved URL back to the server so other clients stay in sync.
         await previewBridge.navigate(runtimeTabId, resolvedUrl);
@@ -149,7 +160,7 @@ export function PreviewView({
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       }
     },
-    [open, runtimeTabId, threadRef],
+    [open, runtimeTabId, threadRef, serverBrowser],
   );
 
   const handleSubmitUrl = useCallback(
@@ -191,20 +202,34 @@ export function PreviewView({
   );
 
   const handleRefresh = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
-  }, [runtimeTabId]);
+    if (serverBrowser) serverSurfaceRef.current?.reload();
+    else if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
+  }, [runtimeTabId, serverBrowser]);
 
   const handleZoomIn = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);
-  }, [runtimeTabId]);
+    if (serverBrowser)
+      serverSurfaceRef.current?.adjust({
+        zoomFactor:
+          PREVIEW_ZOOM_LEVELS.find((level) => level > (snapshot?.zoomFactor ?? 1)) ??
+          PREVIEW_ZOOM_LEVELS.at(-1)!,
+      });
+    else if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);
+  }, [runtimeTabId, serverBrowser, snapshot?.zoomFactor]);
 
   const handleZoomOut = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.zoomOut(runtimeTabId);
-  }, [runtimeTabId]);
+    if (serverBrowser)
+      serverSurfaceRef.current?.adjust({
+        zoomFactor:
+          PREVIEW_ZOOM_LEVELS.findLast((level) => level < (snapshot?.zoomFactor ?? 1)) ??
+          PREVIEW_ZOOM_LEVELS[0],
+      });
+    else if (previewBridge && runtimeTabId) void previewBridge.zoomOut(runtimeTabId);
+  }, [runtimeTabId, serverBrowser, snapshot?.zoomFactor]);
 
   const handleResetZoom = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.resetZoom(runtimeTabId);
-  }, [runtimeTabId]);
+    if (serverBrowser) serverSurfaceRef.current?.adjust({ zoomFactor: 1 });
+    else if (previewBridge && runtimeTabId) void previewBridge.resetZoom(runtimeTabId);
+  }, [runtimeTabId, serverBrowser]);
 
   const handleViewportChange = useCallback(
     async (nextViewport: PreviewViewportSetting) => {
@@ -232,6 +257,14 @@ export function PreviewView({
   );
 
   const handleToggleDeviceToolbar = () => {
+    if (serverBrowser) {
+      void handleViewportChange(
+        viewport._tag === "fill"
+          ? { _tag: "freeform", width: 1024, height: 768 }
+          : FILL_PREVIEW_VIEWPORT,
+      );
+      return;
+    }
     if (!runtimeTabId) return;
     if (viewport._tag !== "fill") {
       void commitBrowserViewportChange(runtimeTabId, FILL_PREVIEW_VIEWPORT).catch(() => undefined);
@@ -252,12 +285,14 @@ export function PreviewView({
   }, [handleViewportChange, runtimeTabId]);
 
   const handleBack = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.goBack(runtimeTabId);
-  }, [runtimeTabId]);
+    if (serverBrowser) serverSurfaceRef.current?.history(-1);
+    else if (previewBridge && runtimeTabId) void previewBridge.goBack(runtimeTabId);
+  }, [runtimeTabId, serverBrowser]);
 
   const handleForward = useCallback(() => {
-    if (previewBridge && runtimeTabId) void previewBridge.goForward(runtimeTabId);
-  }, [runtimeTabId]);
+    if (serverBrowser) serverSurfaceRef.current?.history(1);
+    else if (previewBridge && runtimeTabId) void previewBridge.goForward(runtimeTabId);
+  }, [runtimeTabId, serverBrowser]);
 
   const handleOpenInBrowser = useCallback(() => {
     if (!localApi || !url) return;
@@ -648,22 +683,24 @@ export function PreviewView({
         url={url}
         loading={loading}
         loadProgress={loadProgress}
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
-        refreshDisabled={refreshDisabled}
+        canGoBack={canGoBack && (!serverBrowser || serverConnected)}
+        canGoForward={canGoForward && (!serverBrowser || serverConnected)}
+        refreshDisabled={refreshDisabled || (serverBrowser && !serverConnected)}
         focusUrlNonce={focusUrlNonce}
         onBack={handleBack}
         onForward={handleForward}
         onRefresh={handleRefresh}
         onSubmit={handleSubmitUrl}
         onOpenInBrowser={tabId ? handleOpenInBrowser : undefined}
-        onCapture={previewBridge && tabId ? handleCapture : undefined}
+        onCapture={!serverBrowser && previewBridge && tabId ? handleCapture : undefined}
         captureDisabled={!desktopOverlay || isUnreachable}
         recording={recordingRuntimeTabId !== null}
-        onPictureInPicture={previewBridge && tabId ? handlePictureInPicture : undefined}
+        onPictureInPicture={
+          !serverBrowser && previewBridge && tabId ? handlePictureInPicture : undefined
+        }
         pictureInPicture={miniPlayer?.tabId === tabId}
         pictureInPictureDisabled={!desktopOverlay?.hasWebContents || isUnreachable}
-        onPickElement={previewBridge && tabId ? handlePickElement : undefined}
+        onPickElement={!serverBrowser && previewBridge && tabId ? handlePickElement : undefined}
         pickActive={pickActive}
         // Disable when there's no tab (nothing to pick on) OR the page
         // failed to load (a React overlay covers the webview, so the
@@ -673,14 +710,50 @@ export function PreviewView({
           isUnreachable ? "Page didn't load — pick unavailable until the page renders" : undefined
         }
         trailingActions={
-          previewBridge ? (
+          serverBrowser || previewBridge ? (
             <PreviewMoreMenu
+              serverActions={
+                serverBrowser
+                  ? {
+                      hardReload: async () => {
+                        serverSurfaceRef.current?.reload({ ignoreCache: true });
+                      },
+                      zoomIn: async () => handleZoomIn(),
+                      zoomOut: async () => handleZoomOut(),
+                      resetZoom: async () => handleResetZoom(),
+                      setColorScheme: async (_id, colorScheme) => {
+                        serverSurfaceRef.current?.adjust({ colorScheme });
+                      },
+                      clearCookies: async () => {
+                        serverSurfaceRef.current?.adjust({ clear: "cookies" });
+                      },
+                      clearCache: async () => {
+                        serverSurfaceRef.current?.adjust({ clear: "cache" });
+                      },
+                    }
+                  : undefined
+              }
+              onClearProfile={
+                serverBrowser &&
+                !snapshot?.automationOwner &&
+                snapshot?.profileId !== INCOGNITO_BROWSER_PROFILE_ID
+                  ? () => serverSurfaceRef.current?.clearProfile()
+                  : undefined
+              }
               environmentId={threadRef.environmentId}
               profileId={snapshot?.profileId}
               tabId={runtimeTabId}
-              hasWebContents={desktopOverlay?.hasWebContents ?? false}
-              zoomFactor={desktopOverlay?.zoomFactor ?? 1}
-              colorScheme={desktopOverlay?.colorScheme ?? "system"}
+              hasWebContents={
+                serverBrowser ? serverConnected : (desktopOverlay?.hasWebContents ?? false)
+              }
+              zoomFactor={
+                serverBrowser ? (snapshot?.zoomFactor ?? 1) : (desktopOverlay?.zoomFactor ?? 1)
+              }
+              colorScheme={
+                serverBrowser
+                  ? (snapshot?.colorScheme ?? "system")
+                  : (desktopOverlay?.colorScheme ?? "system")
+              }
               deviceToolbarVisible={viewport._tag !== "fill"}
               onToggleDeviceToolbar={handleToggleDeviceToolbar}
               nativePictureInPicture={desktopOverlay?.pictureInPicture ?? false}
@@ -690,8 +763,28 @@ export function PreviewView({
         }
       />
 
+      {serverBrowser && viewport._tag !== "fill" ? (
+        <BrowserDeviceToolbar
+          setting={viewport}
+          width={viewport.width}
+          aspectRatio={serverAspectRatio}
+          onAspectRatioChange={setServerAspectRatio}
+          onChange={handleViewportChange}
+        />
+      ) : null}
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {runtimeTabId && snapshot && !showEmptyState ? (
+        {serverBrowser && tabId ? (
+          <ServerBrowserSurface
+            key={tabId}
+            ref={serverSurfaceRef}
+            environmentId={threadRef.environmentId}
+            threadId={threadRef.threadId}
+            tabId={tabId}
+            visible={visible}
+            onControl={(control) => setServerConnected(control?.canOperate === true)}
+            className="absolute inset-0 h-full w-full"
+          />
+        ) : runtimeTabId && snapshot && !showEmptyState ? (
           <BrowserSurfaceSlot
             key={runtimeTabId}
             tabId={runtimeTabId}

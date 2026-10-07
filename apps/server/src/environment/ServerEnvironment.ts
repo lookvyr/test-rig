@@ -134,6 +134,7 @@ export const make = Effect.gen(function* () {
     },
     serverVersion: packageJson.version,
     capabilities: {
+      serverBrowser: true,
       orchestrationProtocolVersion: 2,
       repositoryIdentity: true,
       connectionProbe: true,

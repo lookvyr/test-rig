@@ -482,7 +482,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       if (surface.kind === "file" && !surface.attachment) {
         items.push({ id: "copy-path", label: "Copy path" });
       }
-      if (surface.kind === "preview" && surface.resourceId && props.onSetBrowserMuted) {
+      if (
+        surface.kind === "preview" &&
+        surface.resourceId &&
+        props.onSetBrowserMuted &&
+        props.previewSessions?.[surface.resourceId]?.runtime !== "server"
+      ) {
         const muted = props.desktopOverlays?.[surface.resourceId]?.audioMuted === true;
         items.push({ id: muted ? "unmute" : "mute", label: muted ? "Unmute tab" : "Mute tab" });
       }

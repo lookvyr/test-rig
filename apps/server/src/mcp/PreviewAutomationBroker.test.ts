@@ -57,6 +57,128 @@ const requestsFrom = (
     }),
   );
 
+const startRoutingHost = Effect.fn("startRoutingHost")(function* (
+  broker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
+  host: PreviewAutomationHost,
+  fallback = false,
+) {
+  const connected = yield* Deferred.make<string>();
+  const requests: RoutedRequest[] = [];
+  const events = yield* broker.connect(host, { fallback });
+  const fiber = yield* events.pipe(
+    Stream.runForEach((event) => {
+      if (event.type === "connected") return Deferred.succeed(connected, event.connectionId);
+      requests.push({ ...event.request, connectionId: event.connectionId });
+      return broker.respond({
+        clientId: host.clientId,
+        connectionId: event.connectionId,
+        requestId: event.request.requestId,
+        ok: true,
+        result: { host: host.clientId, tabId: event.request.tabId ?? `tab-${host.clientId}` },
+      });
+    }),
+    Effect.forkScoped,
+  );
+  const connectionId = yield* Deferred.await(connected);
+  return { requests, fiber, connectionId };
+});
+
+it.effect(
+  "prefers native tabs over a focused server with more operations and keeps that assignment",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const broker = yield* makeBroker;
+        yield* startRoutingHost(
+          broker,
+          makeHost({ clientId: "native", supportedOperations: ["open", "status"] }),
+        );
+        const server = yield* startRoutingHost(
+          broker,
+          makeHost({ clientId: "server", supportedOperations: ["open", "status", "hover"] }),
+          true,
+        );
+        yield* broker.focusHost({
+          clientId: "server",
+          environmentId: scope.environmentId,
+          connectionId: server.connectionId,
+          focused: true,
+        });
+
+        expect(yield* broker.invoke({ scope, operation: "open", input: {} })).toMatchObject({
+          host: "native",
+        });
+        const unsupported = yield* broker
+          .invoke<void>({ scope, operation: "hover", input: { x: 1, y: 1 } })
+          .pipe(Effect.flip);
+        expect(unsupported).toBeInstanceOf(PreviewAutomationNoAvailableHostError);
+        expect(yield* broker.invoke({ scope, operation: "status", input: {} })).toEqual({
+          host: "native",
+          tabId: "tab-native",
+        });
+        expect(server.requests).toHaveLength(0);
+      }),
+    ),
+);
+
+it.effect("keeps an existing server session there when a native desktop connects", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const server = yield* startRoutingHost(
+        broker,
+        makeHost({ clientId: "server", supportedOperations: ["open", "status"] }),
+        true,
+      );
+      expect(yield* broker.invoke({ scope, operation: "open", input: {} })).toMatchObject({
+        host: "server",
+      });
+      yield* startRoutingHost(
+        broker,
+        makeHost({ clientId: "native", supportedOperations: ["open", "status"] }),
+      );
+
+      expect(yield* broker.invoke({ scope, operation: "status", input: {} })).toEqual({
+        host: "server",
+        tabId: "tab-server",
+      });
+      expect(server.requests.at(-1)?.agentSessionId).toBe(server.requests[0]?.agentSessionId);
+      expect(server.requests[0]?.agentSessionId).toBeTruthy();
+      expect(
+        yield* broker.invoke({
+          scope: { ...scope, providerSessionId: "new-session" },
+          operation: "open",
+          input: {},
+        }),
+      ).toMatchObject({ host: "native" });
+    }),
+  ),
+);
+
+it.effect("falls back after the native host disconnects without reusing its implicit tab", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const native = yield* startRoutingHost(
+        broker,
+        makeHost({ clientId: "native", supportedOperations: ["open", "status"] }),
+      );
+      const server = yield* startRoutingHost(
+        broker,
+        makeHost({ clientId: "server", supportedOperations: ["open", "status"] }),
+        true,
+      );
+      yield* broker.invoke({ scope, operation: "open", input: {} });
+      yield* Fiber.interrupt(native.fiber);
+
+      expect(yield* broker.invoke({ scope, operation: "status", input: {} })).toMatchObject({
+        host: "server",
+      });
+      expect(server.requests[0]?.tabId).toBeUndefined();
+    }),
+  ),
+);
+
 it.effect("atomically registers a connected host and correlates its response", () =>
   Effect.scoped(
     Effect.gen(function* () {

@@ -125,12 +125,12 @@ function ChatRouteGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         if (!routeThreadRef) return;
-        if (!isPreviewSupportedInRuntime()) {
+        if (!isPreviewSupportedInRuntime(routeThreadRef?.environmentId)) {
           toastManager.add(
             stackedThreadToast({
               type: "info",
-              title: "Preview is desktop-only",
-              description: "Open Test Rig in the desktop app to use the in-app preview.",
+              title: "Browser preview unavailable",
+              description: "Connect to an environment that supports browser previews.",
             }),
           );
           return;

@@ -1,3 +1,4 @@
+import { previewRuntimeFor } from "~/browser/previewRuntime";
 import type {
   AssetCreateUrlResult,
   AssetResource,
@@ -43,7 +44,11 @@ export async function openUrlInPreview<E>(input: {
 }): Promise<AtomCommandResult<void, E>> {
   const result = await input.openPreview({
     environmentId: input.threadRef.environmentId,
-    input: { threadId: input.threadRef.threadId, url: input.url },
+    input: {
+      threadId: input.threadRef.threadId,
+      runtime: previewRuntimeFor(input.threadRef.environmentId),
+      url: input.url,
+    },
   });
   return mapAtomCommandResult(result, (snapshot) => {
     applyPreviewServerSnapshot(input.threadRef, snapshot);
@@ -62,7 +67,7 @@ export async function openFileInPreview<AssetError, PreviewError>(input: {
   }) => Promise<AtomCommandResult<AssetCreateUrlResult, AssetError>>;
   readonly openPreview: OpenPreviewMutation<PreviewError>;
 }): Promise<AtomCommandResult<void, AssetError | PreviewError | BrowserPreviewUnavailableError>> {
-  if (!isPreviewSupportedInRuntime()) {
+  if (!isPreviewSupportedInRuntime(input.threadRef.environmentId)) {
     return AsyncResult.failure(
       Cause.fail(
         new BrowserPreviewUnavailableError({

@@ -2,6 +2,7 @@ import { ChatMarkdownAssetImage } from "./ChatMarkdownAssetImage";
 export { ChatMarkdownAssetImage };
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
 import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
+import { videoMimeType } from "@t3tools/shared/video";
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 export interface ChatMarkdownContextReference {
   kind: string;
@@ -888,7 +889,7 @@ function ChatMarkdown({
           onOpen={openInPreferredEditor}
           onOpenInBrowser={
             threadRef &&
-            isPreviewSupportedInRuntime() &&
+            isPreviewSupportedInRuntime(threadRef?.environmentId) &&
             isBrowserPreviewFile(fileLinkMeta.filePath)
               ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
               : undefined
@@ -939,6 +940,7 @@ function ChatMarkdown({
             <ChatMarkdownAssetImage
               environmentId={threadRef.environmentId}
               resource={{ _tag: "media-file", threadId: threadRef.threadId, path: classified.path }}
+              kind={videoMimeType({ name: classified.path, mimeType: "" }) ? "video" : "image"}
               alt={alt}
               imageProps={props}
               onImageExpand={onImageExpand}
@@ -1001,7 +1003,8 @@ function ChatMarkdown({
           const faviconHost = resolveExternalWebLinkHost(href);
           const isSameDocumentLink = href?.startsWith("#") ?? false;
           const onClick = props.onClick;
-          const canOpenInPreview = Boolean(threadRef) && isPreviewSupportedInRuntime();
+          const canOpenInPreview =
+            Boolean(threadRef) && isPreviewSupportedInRuntime(threadRef?.environmentId);
           const link = (
             <a
               {...props}

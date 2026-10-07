@@ -35,6 +35,23 @@ import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 import * as SessionStore from "./SessionStore.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
 
+/** Media transports use the same cookie or short-lived ticket as the RPC WebSocket. */
+export const authenticateMediaRequest = (scope: AuthEnvironmentScope) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const auth = yield* EnvironmentAuth.EnvironmentAuth;
+    const session = yield* auth.authenticateWebSocketUpgrade(request).pipe(
+      Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+        failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
+      ),
+      Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+        failEnvironmentInternal("internal_error", error),
+      ),
+    );
+    if (!session.scopes.includes(scope)) return yield* failEnvironmentScopeRequired(scope);
+    return session;
+  });
+
 const CREDENTIAL_RESPONSE_HEADERS = {
   "cache-control": "no-store",
   pragma: "no-cache",

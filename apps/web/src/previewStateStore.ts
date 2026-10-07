@@ -8,6 +8,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
+  type EnvironmentId,
   type DesktopPreviewColorScheme,
   type PreviewEvent,
   type PreviewListResult,
@@ -17,6 +18,7 @@ import {
 import { Atom } from "effect/unstable/reactivity";
 
 import { PREVIEW_RECENT_URL_LIMIT } from "./components/preview/previewConstants";
+import { readEnvironmentSupportsServerBrowser } from "./state/entities";
 import { appAtomRegistry } from "./rpc/atomRegistry";
 
 export interface DesktopPreviewOverlay {
@@ -35,6 +37,8 @@ export interface DesktopPreviewOverlay {
 export interface ThreadPreviewState {
   snapshot: PreviewSessionSnapshot | null;
   sessions: Record<string, PreviewSessionSnapshot>;
+  /** A full server list has reconciled persisted panel tabs. Events alone are partial. */
+  hasLoadedSessions: boolean;
   /** Tabs intentionally closed by this client. Stale list snapshots must not resurrect them. */
   suppressedTabIds: ReadonlySet<string>;
   activeTabId: string | null;
@@ -50,6 +54,7 @@ export interface ThreadPreviewState {
 const EMPTY_THREAD_PREVIEW_STATE: ThreadPreviewState = Object.freeze({
   snapshot: null,
   sessions: {},
+  hasLoadedSessions: false,
   suppressedTabIds: new Set<string>(),
   activeTabId: null,
   desktopOverlay: null,
@@ -362,6 +367,7 @@ export function reconcilePreviewServerSessions(
       recentlySeenUrls,
       serverEpoch: result.serverEpoch,
       serverRevision: result.revision,
+      hasLoadedSessions: true,
     };
   });
 }
@@ -450,9 +456,12 @@ export function removePreviewThread(ref: ScopedThreadRef): void {
   changedPreviewThreadKeys.delete(threadKey);
 }
 
-export function isPreviewSupportedInRuntime(): boolean {
+export function isPreviewSupportedInRuntime(environmentId?: EnvironmentId | null): boolean {
   if (typeof window === "undefined") return false;
-  return Boolean(window.desktopBridge?.preview);
+  return (
+    Boolean(window.desktopBridge?.preview) ||
+    (environmentId != null && readEnvironmentSupportsServerBrowser(environmentId))
+  );
 }
 
 export function resetPreviewStateForTests(): void {
