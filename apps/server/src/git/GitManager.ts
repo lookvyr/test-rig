@@ -877,6 +877,35 @@ export const make = Effect.gen(function* () {
       }),
     );
 
+  const resolvePullRequestHeadRemote = Effect.fn("resolvePullRequestHeadRemote")(function* (
+    cwd: string,
+    pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
+    repositoryNameWithOwner: string,
+  ) {
+    const originRemoteUrl = yield* gitCore.readConfigValue(cwd, "remote.origin.url");
+    // Reuse the configured transport only when both the host and repository match the PR.
+    if (
+      originRemoteUrl &&
+      !pullRequest.isCrossRepository &&
+      normalizeGitRemoteUrl(originRemoteUrl) === pullRequestRepositoryKey(pullRequest.url) &&
+      parseRepositoryNameWithOwnerFromRemoteUrl(originRemoteUrl)?.toLowerCase() ===
+        repositoryNameWithOwner.toLowerCase()
+    )
+      return "origin";
+    const cloneUrls = yield* (yield* sourceControlProvider(cwd)).getRepositoryCloneUrls({
+      cwd,
+      repository: repositoryNameWithOwner,
+    });
+    return yield* gitCore.ensureRemote({
+      cwd,
+      preferredName:
+        pullRequest.headRepositoryOwnerLogin?.trim() ||
+        repositoryNameWithOwner.split("/")[0]?.trim() ||
+        "fork",
+      url: shouldPreferSshRemote(originRemoteUrl) ? cloneUrls.sshUrl : cloneUrls.url,
+    });
+  });
+
   const configurePullRequestHeadUpstreamBase = Effect.fn("configurePullRequestHeadUpstream")(
     function* (
       cwd: string,
@@ -904,21 +933,11 @@ export const make = Effect.gen(function* () {
         return;
       }
 
-      const cloneUrls = yield* (yield* sourceControlProvider(cwd)).getRepositoryCloneUrls({
+      const remoteName = yield* resolvePullRequestHeadRemote(
         cwd,
-        repository: repositoryNameWithOwner,
-      });
-      const originRemoteUrl = yield* gitCore.readConfigValue(cwd, "remote.origin.url");
-      const remoteUrl = shouldPreferSshRemote(originRemoteUrl) ? cloneUrls.sshUrl : cloneUrls.url;
-      const preferredRemoteName =
-        pullRequest.headRepositoryOwnerLogin?.trim() ||
-        repositoryNameWithOwner.split("/")[0]?.trim() ||
-        "fork";
-      const remoteName = yield* gitCore.ensureRemote({
-        cwd,
-        preferredName: preferredRemoteName,
-        url: remoteUrl,
-      });
+        pullRequest,
+        repositoryNameWithOwner,
+      );
 
       yield* gitCore.fetchRemoteTrackingBranch({
         cwd,
@@ -964,24 +983,14 @@ export const make = Effect.gen(function* () {
           prNumber: pullRequest.number,
           branch: localBranch,
         });
-        return;
+        return false;
       }
 
-      const cloneUrls = yield* (yield* sourceControlProvider(cwd)).getRepositoryCloneUrls({
+      const remoteName = yield* resolvePullRequestHeadRemote(
         cwd,
-        repository: repositoryNameWithOwner,
-      });
-      const originRemoteUrl = yield* gitCore.readConfigValue(cwd, "remote.origin.url");
-      const remoteUrl = shouldPreferSshRemote(originRemoteUrl) ? cloneUrls.sshUrl : cloneUrls.url;
-      const preferredRemoteName =
-        pullRequest.headRepositoryOwnerLogin?.trim() ||
-        repositoryNameWithOwner.split("/")[0]?.trim() ||
-        "fork";
-      const remoteName = yield* gitCore.ensureRemote({
-        cwd,
-        preferredName: preferredRemoteName,
-        url: remoteUrl,
-      });
+        pullRequest,
+        repositoryNameWithOwner,
+      );
 
       yield* gitCore.fetchRemoteBranch({
         cwd,
@@ -995,6 +1004,7 @@ export const make = Effect.gen(function* () {
         remoteName,
         remoteBranch: pullRequest.headBranch,
       });
+      return true;
     },
   );
 
@@ -1012,6 +1022,7 @@ export const make = Effect.gen(function* () {
             branch: localBranch,
           })
           .pipe(
+            Effect.as(false),
             Effect.mapError(
               (fallbackCause) =>
                 new GitPullRequestMaterializationError({
@@ -2597,7 +2608,7 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      yield* materializePullRequestHeadBranch(
+      const upstreamConfigured = yield* materializePullRequestHeadBranch(
         input.cwd,
         pullRequestWithRemoteInfo,
         localPullRequestBranch,
@@ -2639,7 +2650,10 @@ export const make = Effect.gen(function* () {
           ),
         },
       );
-      yield* ensureExistingWorktreeUpstream(worktree.worktree.path, worktree.worktree.refName);
+      // Worktrees share branch configuration; materialization already fetched and set its upstream.
+      if (!upstreamConfigured) {
+        yield* ensureExistingWorktreeUpstream(worktree.worktree.path, worktree.worktree.refName);
+      }
       yield* maybeRunSetupScript(worktree.worktree.path);
 
       return {

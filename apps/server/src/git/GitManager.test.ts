@@ -673,6 +673,8 @@ function makeManager(input?: {
   setupScriptRunner?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"];
   gitConfigReads?: string[];
   statusDetailsCalls?: string[];
+  reportedOriginUrl?: string;
+  trackingFetches?: string[];
   /** Seeds the V2 stores the per-project settings lookup reads. */
   seed?: Effect.Effect<
     void,
@@ -689,7 +691,10 @@ function makeManager(input?: {
   const serverSettingsLayer = ServerSettings.ServerSettingsService.layerTest(input?.serverSettings);
 
   const vcsDriverLayer =
-    input?.gitConfigReads || input?.statusDetailsCalls
+    input?.gitConfigReads ||
+    input?.statusDetailsCalls ||
+    input?.reportedOriginUrl ||
+    input?.trackingFetches
       ? Layer.effect(
           GitVcsDriver.GitVcsDriver,
           GitVcsDriver.make.pipe(
@@ -702,7 +707,15 @@ function makeManager(input?: {
                   ),
                 readConfigValue: (cwd, key) =>
                   Effect.sync(() => input.gitConfigReads?.push(key)).pipe(
-                    Effect.andThen(service.readConfigValue(cwd, key)),
+                    Effect.andThen(
+                      key === "remote.origin.url" && input.reportedOriginUrl
+                        ? Effect.succeed(input.reportedOriginUrl)
+                        : service.readConfigValue(cwd, key),
+                    ),
+                  ),
+                fetchRemoteTrackingBranch: (target) =>
+                  Effect.sync(() => input.trackingFetches?.push(target.remoteBranch)).pipe(
+                    Effect.andThen(service.fetchRemoteTrackingBranch(target)),
                   ),
               }),
             ),
@@ -4967,8 +4980,10 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       yield* runGit(repoDir, ["checkout", "main"]);
 
       const statusDetailsCalls: string[] = [];
+      const trackingFetches: string[] = [];
       const { manager } = yield* makeManager({
         statusDetailsCalls,
+        trackingFetches,
         ghScenario: {
           pullRequest: {
             number: 77,
@@ -4996,8 +5011,86 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       ])).stdout.trim();
       expect(worktreeBranch).toBe("feature/pr-worktree");
       expect(statusDetailsCalls).toEqual([]);
+      expect(trackingFetches).toEqual(["feature/pr-worktree"]);
     }),
   );
+
+  for (const scenario of [
+    {
+      label: "matching HTTPS origin",
+      origin: "https://github.com/owner/repo.git",
+      fork: false,
+      lookups: 0,
+    },
+    {
+      label: "matching SSH origin",
+      origin: "git@github.com:owner/repo.git",
+      fork: false,
+      lookups: 0,
+    },
+    {
+      label: "same path on another host",
+      origin: "https://enterprise.example/owner/repo.git",
+      fork: false,
+      lookups: 1,
+    },
+    { label: "fork PR", origin: "https://github.com/owner/repo.git", fork: true, lookups: 1 },
+  ]) {
+    it.effect(
+      `prepares a new worktree without duplicate upstream fetching: ${scenario.label}`,
+      () =>
+        Effect.gen(function* () {
+          const repoDir = yield* makeTempDir("t3code-git-manager-");
+          yield* initRepo(repoDir);
+          const remoteDir = yield* createBareRemote();
+          yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+          yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+          yield* runGit(repoDir, ["checkout", "-b", "feature/review-speed"]);
+          NodeFS.writeFileSync(NodePath.join(repoDir, "review.txt"), "review\n");
+          yield* runGit(repoDir, ["add", "review.txt"]);
+          yield* runGit(repoDir, ["commit", "-m", "Review speed fixture"]);
+          yield* runGit(repoDir, ["push", "origin", "feature/review-speed"]);
+          yield* runGit(repoDir, ["checkout", "main"]);
+          const headRepository = scenario.fork ? "contributor/repo" : "owner/repo";
+          const trackingFetches: string[] = [];
+          const { manager, ghCalls } = yield* makeManager({
+            reportedOriginUrl: scenario.origin,
+            trackingFetches,
+            ghScenario: {
+              pullRequest: {
+                number: 101,
+                title: "Review",
+                url: "https://github.com/owner/repo/pull/101",
+                baseRefName: "main",
+                headRefName: "feature/review-speed",
+                state: "open",
+                isCrossRepository: scenario.fork,
+                headRepositoryNameWithOwner: headRepository,
+                headRepositoryOwnerLogin: scenario.fork ? "contributor" : "owner",
+              },
+              repositoryCloneUrls: { [headRepository]: { url: remoteDir, sshUrl: remoteDir } },
+            },
+          });
+          const result = yield* preparePullRequestThread(manager, {
+            cwd: repoDir,
+            reference: "101",
+            mode: "worktree",
+          });
+          expect(result.worktreePath).not.toBeNull();
+          expect(
+            (yield* runGit(result.worktreePath!, [
+              "rev-parse",
+              "--abbrev-ref",
+              "@{upstream}",
+            ])).stdout.trim(),
+          ).toBe("origin/feature/review-speed");
+          expect(ghCalls.filter((call) => call.startsWith("repo view "))).toHaveLength(
+            scenario.lookups,
+          );
+          expect(trackingFetches).toEqual([]);
+        }),
+    );
+  }
 
   it.effect("preserves both branch materialization failures when the fallback also fails", () =>
     Effect.gen(function* () {
