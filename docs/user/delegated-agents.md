@@ -47,6 +47,10 @@ Open the child from its task row in the conversation, or from the right panel's
 Agents tab. Completed children appear under Previous agents. Inside the child,
 use Open parent thread to return to the conversation that delegated the work.
 
+Working children remain visible after the parent finishes its response, including
+while you send a follow-up. Claude's native background children retain their tool
+activity and results as they finish.
+
 Completion updates identify the child and show its result preview. Open the
 update to visit that child. The update keeps its reported outcome and time even
 if the child starts more work.

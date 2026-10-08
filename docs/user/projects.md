@@ -13,3 +13,8 @@ keeps its prompt and attachments. Model and permission choices you made explicit
 selection follows the destination project's defaults. Close draft
 terminals before changing projects so their shells stay in the workspace where
 they started.
+
+Worktree removal checks for uncommitted tracked changes and nonignored untracked
+files, even if your Git settings hide untracked files from status. Files covered
+by Git ignore rules, such as ignored dependencies and build output, do not block
+removal.

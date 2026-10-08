@@ -1,5 +1,35 @@
 # Selected upstream ports
 
+## October 7 pretrial batch
+
+Selected against upstream `14fe0158ed`, adapted to Orchestrator V2 on Test Rig's
+`codex/orchestration-v2` branch. Each item received an independent Astra review.
+
+| Upstream change                                          | Retained scope                                                                                         |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| [#14595](https://github.com/pingdotgg/t3code/pull/14595) | Preserve composer caret on refocus and file-chip insertion.                                            |
+| [#11500](https://github.com/pingdotgg/t3code/pull/11500) | Keep partial workspace search results when scans time out.                                             |
+| [#16878](https://github.com/pingdotgg/t3code/pull/16878) | Keep active child cards visible after the parent finishes.                                             |
+| [#16260](https://github.com/pingdotgg/t3code/pull/16260) | Serialize shared Codex initialization.                                                                 |
+| [#15571](https://github.com/pingdotgg/t3code/pull/15571) | Clean up interrupted provider startup and credential ownership.                                        |
+| [#16917](https://github.com/pingdotgg/t3code/pull/16917) | Unload idle Codex threads while retaining the shared runtime.                                          |
+| [#16486](https://github.com/pingdotgg/t3code/pull/16486) | Preserve late Claude native-child frames and terminal tool states.                                     |
+| [#16897](https://github.com/pingdotgg/t3code/pull/16897) | Fresh Claude prompt UUIDs and completed-without-start handling.                                        |
+| [#15834](https://github.com/pingdotgg/t3code/pull/15834) | Protect hidden nonignored untracked files during worktree removal. Ignored files still permit removal. |
+| [#16771](https://github.com/pingdotgg/t3code/pull/16771) | Bound large untracked-file indexing during status refresh.                                             |
+| [#15666](https://github.com/pingdotgg/t3code/pull/15666) | Passive sidebar subscriptions retain local status without remote polling leases.                       |
+| [#15266](https://github.com/pingdotgg/t3code/pull/15266) | Virtualize palette results and debounce search-derived filtering.                                      |
+| [#16652](https://github.com/pingdotgg/t3code/pull/16652) | Strip unused image bodies before persistence and serve retained images outside chat projections.       |
+
+The image port includes the minimal signed-image serving dependency from
+[#16199](https://github.com/pingdotgg/t3code/pull/16199), using the existing asset
+route and wire projector. Codex MCP results retain image content alongside
+structured metadata. It does not introduce a separate detail-fetch architecture.
+
+See [verification evidence and limits](pretrial-batch-2026-10-07.md).
+
+## Earlier selected ports
+
 These changes were selected from T3 Code nightly
 `v0.0.39-nightly.20260904.1278` and adapted to Test Rig's existing implementation.
 
