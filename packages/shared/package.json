@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./systemCertificateAuthorities": {
+      "types": "./src/systemCertificateAuthorities.ts",
+      "import": "./src/systemCertificateAuthorities.ts"
+    },
     "./themePalettes": {
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"

@@ -41,6 +41,19 @@ Enable an integration before using any of its features. Test Rig scans it after 
 
 Settings belong to the server environment that owns the repository. If you use more than one environment, configure each one separately.
 
+## Corporate certificates
+
+Test Rig's server and desktop app automatically include the operating system's
+trusted certificates for HTTPS requests. On managed machines using Zscaler or
+another HTTPS inspection service, its CA must be installed and trusted in the
+server machine's operating system (Keychain on macOS, the Windows certificate
+store, or the system CA store on Linux). Restart Test Rig after the trust store
+changes.
+
+Existing `NODE_EXTRA_CA_CERTS` configuration is also preserved. Certificate and
+hostname validation remain enabled. Git and provider CLIs use their own network
+configuration; this setting applies to requests made by Test Rig itself.
+
 ## Generated writing defaults
 
 Generating a commit message keeps your existing staged and unstaged selections intact. The general Git commit workflow stages its selected changes when the commit runs. A failed or cancelled message-generation step leaves staging unchanged, including partially staged files.

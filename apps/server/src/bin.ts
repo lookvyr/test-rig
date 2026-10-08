@@ -5,6 +5,7 @@ import * as Layer from "effect/Layer";
 import { Command } from "effect/unstable/cli";
 
 import * as NetService from "@t3tools/shared/Net";
+import { configureSystemCertificateAuthorities } from "@t3tools/shared/systemCertificateAuthorities";
 import packageJson from "../package.json" with { type: "json" };
 import { browserCommand } from "./cli/browser.ts";
 import { authCommand } from "./cli/auth.ts";
@@ -32,6 +33,7 @@ export const makeCli = () =>
 export const cli = makeCli();
 
 if (import.meta.main) {
+  configureSystemCertificateAuthorities();
   Command.run(cli, { version: packageJson.version }).pipe(
     Effect.scoped,
     Effect.provide(CliRuntimeLayer),
