@@ -4,6 +4,9 @@ import { ProjectId, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "../types";
 import {
   buildBrowseGroups,
+  buildCommandPaletteRows,
+  findHighlightedCommandPaletteItem,
+  type CommandPaletteActionItem,
   buildThreadActionItems,
   enumerateCommandPaletteItems,
   filterCommandPaletteGroups,
@@ -318,5 +321,48 @@ describe("buildBrowseGroups", () => {
     finishNavigation?.();
     await action;
     expect(actionSettled).toBe(true);
+  });
+});
+
+describe("virtualized command palette rows", () => {
+  const action = (value: string, disabled = false): CommandPaletteActionItem => ({
+    kind: "action",
+    value,
+    searchTerms: [],
+    title: value,
+    icon: null,
+    ...(disabled ? { disabled } : {}),
+    run: async () => {},
+  });
+  const groups: CommandPaletteGroup[] = [
+    { value: "actions", label: "Actions", items: [action("new-thread"), action("offline", true)] },
+    { value: "threads", label: "Threads", items: [action("thread-a"), action("thread-b")] },
+  ];
+
+  it("keeps group order and headings while indexing only enabled items", () => {
+    const { rows, itemValues, rowIndexByItemIndex } = buildCommandPaletteRows(groups);
+
+    expect(rows.map((row) => (row.kind === "label" ? `# ${row.label}` : row.key))).toEqual([
+      "# Actions",
+      "actions:new-thread",
+      "actions:offline",
+      "# Threads",
+      "threads:thread-a",
+      "threads:thread-b",
+    ]);
+    expect(itemValues).toEqual(["new-thread", "thread-a", "thread-b"]);
+    expect(rowIndexByItemIndex).toEqual([1, 4, 5]);
+    expect(rows.flatMap((row) => (row.kind === "item" ? [row.itemIndex] : []))).toEqual([
+      0,
+      null,
+      1,
+      2,
+    ]);
+  });
+
+  it("resolves Enter to the highlighted item without needing its row mounted", () => {
+    expect(findHighlightedCommandPaletteItem(groups, "thread-b")?.value).toBe("thread-b");
+    expect(findHighlightedCommandPaletteItem(groups, "offline")).toBeNull();
+    expect(findHighlightedCommandPaletteItem(groups, null)).toBeNull();
   });
 });
