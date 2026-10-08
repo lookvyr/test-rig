@@ -91,6 +91,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onRequestClose?: () => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  onBrowseInstance?: (instanceId: ProviderInstanceId | null) => void;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -98,6 +99,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     instanceEntries,
     getModelDisabledReason,
     onInstanceModelChange,
+    onBrowseInstance,
   } = props;
   const [searchQuery, setSearchQuery] = useState("");
   const [showTopScrollFade, setShowTopScrollFade] = useState(false);
@@ -116,6 +118,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       return favorites.length > 0 ? "favorites" : props.activeInstanceId;
     },
   );
+  useEffect(() => {
+    onBrowseInstance?.(selectedInstanceId === "favorites" ? null : selectedInstanceId);
+  }, [onBrowseInstance, selectedInstanceId]);
+
   const [expandedLegacyInstances, setExpandedLegacyInstances] = useState(
     () =>
       new Set<ProviderInstanceId>(

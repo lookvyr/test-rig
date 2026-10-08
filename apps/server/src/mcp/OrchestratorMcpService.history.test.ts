@@ -1,3 +1,5 @@
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -101,6 +103,8 @@ it.effect("retrieves whole omitted handoff items through paged MCP history", () 
       issuedAt: 1,
     };
     const dependencies = Layer.mergeAll(
+      Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+      Layer.mock(ProjectService.ProjectService)({}),
       NodeServices.layer,
       Layer.mock(ThreadManagementService.ThreadManagementService)({
         getThreadRecords: (id, fields, filter) =>
@@ -165,6 +169,8 @@ it.effect("retrieves whole omitted handoff items through paged MCP history", () 
   }).pipe(
     Effect.provide(
       Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         ProjectionStore.layer.pipe(Layer.provide(V2SqlitePersistenceMemory)),
         ContextHandoffService.layer.pipe(Layer.provide(IdAllocator.layer)),
       ),

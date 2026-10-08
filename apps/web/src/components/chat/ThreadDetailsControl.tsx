@@ -16,6 +16,7 @@ import {
   THREAD_DETAILS_PANEL_SPLIT_CHECKS_CLASS,
   THREAD_DETAILS_PANEL_ICON_ACTION_CLASS,
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+  THREAD_DETAILS_PANEL_TRAILING_SLOT_CLASS,
 } from "./threadDetailsPanelStyles";
 import { ChevronDownIcon } from "lucide-react";
 
@@ -99,7 +100,10 @@ export function ThreadDetailsSelectControl({
       render={<ThreadDetailsControl part="select" className={className} />}
     >
       {children}
-      <SelectPrimitive.Icon data-slot="select-icon">
+      <SelectPrimitive.Icon
+        data-slot="select-icon"
+        className={THREAD_DETAILS_PANEL_TRAILING_SLOT_CLASS}
+      >
         <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>

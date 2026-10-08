@@ -354,6 +354,55 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("waits for child history before mounting the list and snaps its first end pin", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (frame: number) => frames.delete(frame));
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const flushFrame = () =>
+      act(() => {
+        const callbacks = [...frames.values()];
+        frames.clear();
+        callbacks.forEach((callback) => callback(0));
+      });
+    const props = {
+      ...buildProps(),
+      isWorking: true,
+      activeTurnInProgress: true,
+      parentThreadLink: {
+        relationship: "subagent" as const,
+        threadId: ThreadId.make("parent"),
+        title: "Parent",
+      },
+      timelineEntries: [],
+    };
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(() => {
+        renderer = create(<MessagesTimeline {...props} isLoading />);
+      });
+      expect(renderer!.root.findAllByProps({ "data-testid": "legend-list" })).toHaveLength(0);
+      expect(renderer!.root.findByProps({ "data-timeline-loading": "true" })).toBeDefined();
+      await flushFrame();
+      await flushFrame();
+      await act(() => {
+        renderer!.update(<MessagesTimeline {...props} isLoading={false} />);
+      });
+      const list = () => renderer!.root.findByProps({ "data-testid": "legend-list" });
+      expect(list().props["data-maintain-scroll-at-end-animated"]).toBe(false);
+      await flushFrame();
+      expect(list().props["data-maintain-scroll-at-end-animated"]).toBe(false);
+      await flushFrame();
+      expect(list().props["data-maintain-scroll-at-end-animated"]).toBe(true);
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
   it("shows dynamic tool input without cached output when the row is expanded", async () => {
     activityTestState.expanded = true;
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

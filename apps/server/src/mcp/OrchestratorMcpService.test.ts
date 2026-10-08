@@ -1,3 +1,6 @@
+import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import { OrchestratorProjectionError } from "../orchestration-v2/Orchestrator.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -15,6 +18,7 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 import * as Layer from "effect/Layer";
@@ -66,6 +70,8 @@ describe("OrchestratorMcpService", () => {
         turnItems: [],
       } as unknown as OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -152,6 +158,8 @@ describe("OrchestratorMcpService", () => {
       } as unknown as OrchestrationV2ThreadProjection;
       let hasNestedWork = true;
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -263,6 +271,8 @@ describe("OrchestratorMcpService", () => {
         providerThreads: [],
       } as unknown as OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -337,6 +347,8 @@ describe("OrchestratorMcpService", () => {
         providerThreads: [],
       } as unknown as OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -416,6 +428,8 @@ describe("OrchestratorMcpService", () => {
         providerThreads: [],
       } as unknown as OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -492,6 +506,8 @@ describe("OrchestratorMcpService", () => {
         providerThreads: [],
       } as unknown as OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -642,6 +658,134 @@ describe("OrchestratorMcpService provider resolution", () => {
   } as unknown as OrchestrationV2ThreadProjection;
 
   it.effect(
+    "advertises and validates OpenCode models from the caller's worktree without changing global health",
+    () =>
+      Effect.gen(function* () {
+        const instanceId = ProviderInstanceId.make("opencode-workspace");
+        const provider = providerSnapshot({
+          instanceId,
+          driver: ProviderDriverKind.make("opencode"),
+          model: "launch-dir/model",
+        });
+        const parent = parentProjection([]);
+        let projection: OrchestrationV2ThreadProjection = {
+          ...parent,
+          thread: { ...parent.thread, worktreePath: "/worktrees/current" },
+        };
+        const reads: string[] = [];
+        let failCatalog = false;
+        const dependencies = Layer.mergeAll(
+          NodeServices.layer,
+          Layer.mock(ProjectService.ProjectService)({
+            getById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: projectId,
+                  title: "Current project",
+                  workspaceRoot: "/repo/current",
+                  defaultModelSelection: null,
+                  scripts: [],
+                  createdAt: provider.checkedAt,
+                  updatedAt: provider.checkedAt,
+                  deletedAt: null,
+                }),
+              ),
+          }),
+          Layer.mock(ProviderInstanceRegistry)({
+            getInstance: () =>
+              Effect.succeed({
+                enabled: true,
+                getWorkspaceCatalog: (cwd: string) =>
+                  Effect.sync(() => {
+                    reads.push(cwd);
+                    return {
+                      skills: [],
+                      slashCommands: [],
+                      models: [
+                        {
+                          slug: "workspace/model",
+                          name: "Workspace model",
+                          isCustom: false,
+                          capabilities: null,
+                        },
+                      ],
+                      ...(failCatalog ? { errorMessage: "Workspace catalog unavailable" } : {}),
+                    };
+                  }),
+              } as unknown as ProviderInstance),
+          }),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            getThreadRecords: () => Effect.succeed(projection),
+            dispatch: () =>
+              Effect.die("Expected the request to reach dispatch with a valid workspace model"),
+          }),
+          Layer.mock(ProviderRegistry.ProviderRegistry)({
+            getProviders: Effect.succeed([provider]),
+          }),
+          adapterRegistryLayer([instanceId]),
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+        );
+        yield* Effect.gen(function* () {
+          const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+          const capabilities = yield* service.capabilities(scope);
+          assert.deepEqual(
+            capabilities.providers[0]?.models.map((model) => model.id),
+            ["workspace/model"],
+          );
+          projection = { ...projection, thread: { ...projection.thread, worktreePath: null } };
+          const rootCapabilities = yield* service.capabilities(scope);
+          assert.deepEqual(
+            rootCapabilities.providers[0]?.models.map((model) => model.id),
+            ["workspace/model"],
+          );
+          assert.strictEqual(reads.at(-1), "/repo/current");
+          projection = {
+            ...projection,
+            thread: { ...projection.thread, worktreePath: "/worktrees/current" },
+          };
+          const accepted = yield* service
+            .delegateTask(scope, {
+              task: "Review",
+              target: { providerInstanceId: instanceId, model: "workspace/model" },
+              mode: "async",
+              clientRequestId: "workspace-model",
+            })
+            .pipe(Effect.exit);
+          assert.strictEqual(accepted._tag, "Failure");
+          if (accepted._tag === "Failure")
+            assert.include(String(accepted.cause), "Expected the request to reach dispatch");
+          const rejected = yield* service
+            .delegateTask(scope, {
+              task: "Review",
+              target: { providerInstanceId: instanceId, model: "launch-dir/model" },
+              mode: "async",
+              clientRequestId: "launch-model",
+            })
+            .pipe(Effect.result);
+          assert.strictEqual(rejected._tag, "Failure");
+          if (rejected._tag === "Failure")
+            assert.strictEqual(rejected.failure.code, "model_unavailable");
+          failCatalog = true;
+          const unavailable = yield* service.capabilities(scope);
+          assert.isFalse(unavailable.providers[0]?.canRunChildTask);
+          assert.include(
+            unavailable.providers[0]?.constraints.join(" "),
+            "Workspace catalog unavailable",
+          );
+          assert.isTrue(
+            reads.every((cwd) => cwd === "/worktrees/current" || cwd === "/repo/current"),
+          );
+          assert.deepEqual(
+            provider.models.map((model) => model.slug),
+            ["launch-dir/model"],
+          );
+          assert.strictEqual(provider.status, "ready");
+        }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }),
+  );
+
+  it.effect(
     "advertises orchestration capability from registered adapters rather than a driver allowlist",
     () =>
       Effect.gen(function* () {
@@ -693,6 +837,8 @@ describe("OrchestratorMcpService provider resolution", () => {
           forkShadow,
         ];
         const dependencies = Layer.mergeAll(
+          Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+          Layer.mock(ProjectService.ProjectService)({}),
           NodeServices.layer,
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             getThreadRecords: () => Effect.succeed(parentProjection([])),
@@ -815,6 +961,8 @@ describe("OrchestratorMcpService provider resolution", () => {
         };
         const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
         const dependencies = Layer.mergeAll(
+          Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+          Layer.mock(ProjectService.ProjectService)({}),
           NodeServices.layer,
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             getThreadRecords: (threadId) =>
@@ -914,6 +1062,8 @@ describe("OrchestratorMcpService provider resolution", () => {
       };
       let delegated = false;
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (threadId) =>
@@ -995,6 +1145,8 @@ describe("OrchestratorMcpService provider resolution", () => {
         checkedAt: "2026-09-13T00:00:00.000Z",
       });
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: () => Effect.succeed(parentProjection([])),
@@ -1095,6 +1247,8 @@ describe("OrchestratorMcpService provider resolution", () => {
         const probes = yield* Ref.make(0);
         const dispatched = yield* Ref.make(0);
         const dependencies = Layer.mergeAll(
+          Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+          Layer.mock(ProjectService.ProjectService)({}),
           NodeServices.layer,
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             getThreadRecords: (threadId) =>
@@ -1252,6 +1406,8 @@ describe("OrchestratorMcpService provider resolution", () => {
           const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
           let delegated = false;
           const dependencies = Layer.mergeAll(
+            Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+            Layer.mock(ProjectService.ProjectService)({}),
             NodeServices.layer,
             Layer.mock(ThreadManagementService.ThreadManagementService)({
               getThreadRecords: (threadId) =>
@@ -1411,6 +1567,8 @@ describe("OrchestratorMcpService provider resolution", () => {
       const parent = parentProjection([]);
       const dispatched = yield* Ref.make<ReadonlyArray<string>>([]);
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: () =>
@@ -1497,6 +1655,8 @@ describe("OrchestratorMcpService provider resolution", () => {
         ],
       } satisfies OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
+        Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+        Layer.mock(ProjectService.ProjectService)({}),
         NodeServices.layer,
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           getThreadRecords: (id) =>

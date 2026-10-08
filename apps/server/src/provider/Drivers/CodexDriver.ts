@@ -226,6 +226,22 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
+        getWorkspaceCatalog: (cwd) =>
+          checkCodexProviderStatus(effectiveConfig, undefined, processEnv, cwd).pipe(
+            Effect.map((catalog) => ({
+              skills: catalog.skills,
+              slashCommands: catalog.slashCommands,
+              ...(catalog.status === "error"
+                ? { errorMessage: catalog.message ?? "Workspace inventory could not be loaded." }
+                : {}),
+            })),
+            Effect.orElseSucceed(() => ({
+              skills: [],
+              slashCommands: [],
+              errorMessage: "Workspace inventory could not be loaded.",
+            })),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          ),
         adapter,
         orchestrationAdapter,
         textGeneration,

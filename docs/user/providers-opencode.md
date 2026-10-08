@@ -4,7 +4,9 @@ Test Rig requires OpenCode 2. OpenCode 1 executables are rejected with a version
 error. Set **Binary path** on the provider instance if the OpenCode 2 executable
 is not on the server's `PATH`, then refresh provider status.
 
-Models, agents, skills, and commands come from the selected OpenCode server.
+Models, agents, skills, and commands come from the selected OpenCode server
+and the current chat’s repository or worktree. Switching chats updates the
+composer’s workspace inventory without restarting Test Rig.
 The plan agent limits edits to its plan locations. Switching back to the default
 interaction mode restores the build agent unless you selected another agent.
 Session approval grants apply to that session only.

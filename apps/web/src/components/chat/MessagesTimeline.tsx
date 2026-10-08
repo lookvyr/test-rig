@@ -474,6 +474,7 @@ interface MessagesTimelineProps {
   onManualNavigation: () => void;
   cancelPositionRestoreRef?: React.RefObject<(() => void) | null>;
   hideEmptyPlaceholder?: boolean;
+  isLoading?: boolean;
   topFadeEnabled?: boolean;
   historyControls?: MessagesTimelineHistoryControls;
   /** Non-null when older turns exist beyond the loaded window. */
@@ -537,6 +538,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onManualNavigation,
   cancelPositionRestoreRef,
   hideEmptyPlaceholder = false,
+  isLoading = false,
   topFadeEnabled = false,
   historyControls,
   loadEarlier = null,
@@ -563,9 +565,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const listIdentityRef = useRef(listIdentityKey);
   const previousLatestRunRef = useRef(latestRun);
-  // The list stays mounted across thread switches. Its first end pins on the
-  // new thread must snap, not glide, even if that thread is mid-turn.
-  const [settlingListIdentity, setSettlingListIdentity] = useState<string | null>(null);
+  // Initial end pins must snap on both a fresh mount and a thread switch,
+  // including when the messages arrive after the shell metadata.
+  const [settlingListIdentity, setSettlingListIdentity] = useState<string | null>(listIdentityKey);
   let paintedExpandedRunIds = expandedRunIds;
   let paintedExpandedWorkGroupIds = expandedWorkGroupIds;
   let paintedExpandedAttemptIds = expandedAttemptIds;
@@ -612,7 +614,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, []);
 
   useEffect(() => {
-    if (settlingListIdentity === null) return;
+    if (settlingListIdentity === null || isLoading) return;
     // Two frames covers the fresh-data layout pass and the initial end pin.
     let second: number | null = null;
     const first = requestAnimationFrame(() => {
@@ -624,7 +626,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       cancelAnimationFrame(first);
       if (second !== null) cancelAnimationFrame(second);
     };
-  }, [settlingListIdentity]);
+  }, [isLoading, settlingListIdentity]);
 
   const suspendEndScrollMaintenanceForDisclosure = useCallback(
     (anchorKey: string, collapsed = false) => {
@@ -1287,6 +1289,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ),
     [],
   );
+
+  if (isLoading) {
+    return <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />;
+  }
 
   if (
     findRequest === 0 &&

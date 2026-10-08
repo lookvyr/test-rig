@@ -39,6 +39,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useOpenInPreferredEditor } from "../editorPreferences";
 import { type DraftId } from "../composerDraftStore";
+import { useReviewThread } from "../hooks/useReviewThread";
 import { openDiffFilePrimaryAction } from "../diffFileActions";
 import { useCheckpointDiff } from "~/lib/checkpointDiffState";
 import { cn } from "~/lib/utils";
@@ -63,7 +64,7 @@ import {
 } from "../lib/diffRendering";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
-import { useProject, useThread } from "../state/entities";
+import { useProject } from "../state/entities";
 import { resolveThreadRouteRef } from "../threadRoutes";
 import { useClientSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
@@ -368,14 +369,16 @@ export default function DiffPanel({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
   });
-  const routeThreadRef = threadRef ?? routedThreadRef;
+  const { threadRef: routeThreadRef, thread: activeThread } = useReviewThread(
+    threadRef ?? routedThreadRef,
+    composerDraftTarget,
+  );
   const fileSelection = useDiffPanelStore((state) =>
     routeThreadRef
       ? (state.fileSelectionByThreadKey[scopedThreadKey(routeThreadRef)] ?? null)
       : null,
   );
   const activeThreadId = routeThreadRef?.threadId ?? null;
-  const activeThread = useThread(routeThreadRef);
   const workspaceMutationId = useThreadWorkspaceMutationId(routeThreadRef);
   const activeProjectId = activeThread?.projectId ?? null;
   const activeProject = useProject(

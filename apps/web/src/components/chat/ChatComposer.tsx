@@ -95,6 +95,8 @@ import {
   removeInlineTerminalContextPlaceholder,
 } from "../../lib/terminalContext";
 import { useComposerPathSearch } from "../../lib/composerPathSearchState";
+import { useEnvironmentQuery } from "../../state/query";
+import { serverEnvironment } from "../../state/server";
 import { type ElementContextDraft } from "../../lib/elementContext";
 import { ComposerPendingElementContexts } from "./ComposerPendingElementContexts";
 import { ComposerPendingReviewComments } from "./ComposerPendingReviewComments";
@@ -624,7 +626,11 @@ export interface ChatComposerProps {
     cursorAdjacentToMention: boolean,
   ) => void;
 
-  onProviderModelSelect: (instanceId: ProviderInstanceId, model: string) => void;
+  onProviderModelSelect: (
+    instanceId: ProviderInstanceId,
+    model: string,
+    providers?: ReadonlyArray<ServerProvider>,
+  ) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
@@ -852,9 +858,73 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedProvider: ProviderDriverKind =
     selectedProviderEntry?.driverKind ?? requestedDriverKind;
 
+  const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
+  const [browsedModelInstanceId, setBrowsedModelInstanceId] = useState<ProviderInstanceId | null>(
+    null,
+  );
+  const browsedProvider = providerInstanceEntries.find(
+    (entry) => entry.instanceId === browsedModelInstanceId,
+  );
+  const browsedWorkspaceCatalog = useEnvironmentQuery(
+    environmentId !== null &&
+      gitCwd !== null &&
+      isComposerModelPickerOpen &&
+      browsedProvider?.driverKind === "opencode" &&
+      browsedProvider.enabled &&
+      browsedProvider.isAvailable &&
+      browsedModelInstanceId !== selectedInstanceId
+      ? serverEnvironment.providerWorkspaceCatalog({
+          environmentId,
+          input: { instanceId: browsedProvider.instanceId, cwd: gitCwd },
+        })
+      : null,
+  );
+
+  const workspaceCatalog = useEnvironmentQuery(
+    environmentId !== null && gitCwd !== null && !noProviderAvailable
+      ? serverEnvironment.providerWorkspaceCatalog({
+          environmentId,
+          input: { instanceId: selectedInstanceId, cwd: gitCwd },
+        })
+      : null,
+  );
+  const workspaceProviderStatuses = useMemo(
+    () =>
+      providerStatuses.map((provider) => {
+        const selected = provider.instanceId === selectedInstanceId;
+        const catalog = selected
+          ? workspaceCatalog.data
+          : provider.instanceId === browsedModelInstanceId
+            ? browsedWorkspaceCatalog.data
+            : null;
+        if (!selected && !catalog) return provider;
+        return {
+          ...provider,
+          skills: catalog?.skills ?? [],
+          slashCommands: catalog?.slashCommands ?? [],
+          ...(catalog?.models === undefined ? {} : { models: catalog.models }),
+        };
+      }),
+    [
+      providerStatuses,
+      selectedInstanceId,
+      workspaceCatalog.data,
+      browsedModelInstanceId,
+      browsedWorkspaceCatalog.data,
+    ],
+  );
+  const workspaceProviderEntries = useMemo(
+    () =>
+      applyProviderInstanceSettings(
+        deriveProviderInstanceEntries(workspaceProviderStatuses),
+        settings,
+      ),
+    [workspaceProviderStatuses, settings],
+  );
+
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadRef: composerDraftTarget,
-    providers: providerStatuses,
+    providers: workspaceProviderStatuses,
     selectedProvider,
     selectedInstanceId,
     threadModelSelection: activeThreadModelSelection,
@@ -862,12 +932,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     settings,
   });
   const selectedProviderStatus = useMemo(
-    () => selectedProviderEntry?.snapshot ?? null,
-    [selectedProviderEntry],
+    () =>
+      workspaceProviderStatuses.find((provider) => provider.instanceId === selectedInstanceId) ??
+      null,
+    [workspaceProviderStatuses, selectedInstanceId],
   );
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider["models"][number]>>(
-    () => selectedProviderEntry?.models ?? [],
-    [selectedProviderEntry],
+    () => selectedProviderStatus?.models ?? [],
+    [selectedProviderStatus],
   );
 
   const composerPromptInjectionState = useMemo(
@@ -919,11 +991,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>
   >(() => {
     const out = new Map<ProviderInstanceId, ReadonlyArray<AppModelOption>>();
-    for (const entry of providerInstanceEntries) {
+    for (const entry of workspaceProviderEntries) {
       out.set(entry.instanceId, getAppModelOptionsForInstance(settings, entry));
     }
     return out;
-  }, [providerInstanceEntries, settings]);
+  }, [workspaceProviderEntries, settings]);
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
     const currentOptions = modelOptionsByInstance.get(selectedInstanceId) ?? [];
     return currentOptions.some((option) => option.slug === selectedModelForPicker)
@@ -985,7 +1057,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
-  const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
+
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null);
   const [isStashMenuOpen, setIsStashMenuOpen] = useState(false);
@@ -1268,15 +1340,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const isComposerMenuLoading =
-    composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending;
+    (composerTriggerKind === "path" && pathTriggerQuery.length > 0 && workspaceEntries.isPending) ||
+    ((composerTriggerKind === "skill" || composerTriggerKind === "slash-command") &&
+      workspaceCatalog.isPending);
   const composerMenuEmptyState = useMemo(() => {
+    if (composerTriggerKind === "skill" || composerTriggerKind === "slash-command") {
+      const error = workspaceCatalog.error ?? workspaceCatalog.data?.errorMessage;
+      if (error) return error;
+    }
     if (composerTriggerKind === "skill") {
       return "No skills found. Try / to browse provider commands.";
     }
     return composerTriggerKind === "path"
       ? "No matching files or folders."
       : "No matching command.";
-  }, [composerTriggerKind]);
+  }, [composerTriggerKind, workspaceCatalog.error, workspaceCatalog.data?.errorMessage]);
 
   // ------------------------------------------------------------------
   // Provider traits UI
@@ -3520,7 +3598,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     model={selectedModelForPickerWithCustomFallback}
                     lockedProvider={lockedProvider}
                     lockedContinuationGroupKey={lockedContinuationGroupKey}
-                    instanceEntries={providerInstanceEntries}
+                    instanceEntries={workspaceProviderEntries}
                     keybindings={keybindings}
                     modelOptionsByInstance={modelOptionsByInstance}
                     triggerClassName="-ms-px ps-0"
@@ -3532,11 +3610,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             composerProviderState.modelPickerIconClassName,
                         }
                       : {})}
+                    onBrowseInstance={setBrowsedModelInstanceId}
                     onOpenChange={(open) => {
+                      if (!open) setBrowsedModelInstanceId(null);
                       setIsComposerModelPickerOpen(open);
                     }}
                     getModelDisabledReason={getModelDisabledReason}
-                    onInstanceModelChange={onProviderModelSelect}
+                    onInstanceModelChange={(instanceId, model) =>
+                      onProviderModelSelect(instanceId, model, workspaceProviderStatuses)
+                    }
                   />
                 )}
 

@@ -218,6 +218,32 @@ it.effect("invalidates origin remote cache when a driver mutation adds origin", 
   }).pipe(Effect.provide(TestLayer)),
 );
 
+it.effect("preserves staged paths whose working tree has reverted to HEAD", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.GitVcsDriver;
+      const cwd = yield* makeTmpDir();
+      yield* initRepoWithCommit(cwd);
+      yield* writeTextFile(cwd, "README.md", "staged edit\n");
+      yield* git(cwd, ["add", "README.md"]);
+      yield* writeTextFile(cwd, "README.md", "# test\n");
+      const status = yield* driver.statusDetailsLocal(cwd, { includeBranchChanges: true });
+      assert.isTrue(status.hasWorkingTreeChanges);
+      assert.deepStrictEqual(status.workingTree, {
+        files: [{ path: "README.md", insertions: 0, deletions: 0 }],
+        insertions: 0,
+        deletions: 0,
+      });
+      const staged = yield* driver.getReviewDiffPreview({
+        cwd,
+        sourceKind: "staged",
+        includePatch: false,
+      });
+      assert.equal(staged.sources[0]!.files![0]!.path, "README.md");
+    }),
+  ).pipe(Effect.provide(TestLayer)),
+);
+
 for (const hasUpstream of [false, true]) {
   it.effect(`skips divergence for local-only status (upstream: ${hasUpstream})`, () =>
     Effect.scoped(
@@ -253,6 +279,7 @@ for (const hasUpstream of [false, true]) {
         yield* git(cwd, ["checkout", "feature/local-status"]);
         yield* writeTextFile(cwd, "README.md", "# edited\nnew line\n");
 
+        yield* writeTextFile(cwd, "untracked.txt", "new file\n");
         const local = yield* driver.statusDetailsLocal(cwd, {
           includeDivergence: false,
           includeBranchChanges: true,
@@ -266,7 +293,14 @@ for (const hasUpstream of [false, true]) {
           insertions: 2,
           deletions: 1,
         });
-        assert.deepInclude(local.branchChanges, { insertions: 3, deletions: 1 });
+        assert.deepInclude(local.branchChanges, { insertions: 4, deletions: 1 });
+        assert.deepInclude(local.workingTree.files, {
+          path: "untracked.txt",
+          insertions: 1,
+          deletions: 0,
+        });
+        assert.equal(local.workingTree.insertions, 3);
+        assert.equal(local.workingTree.deletions, 1);
         assert.equal(local.aheadCount, 0);
         assert.equal(local.behindCount, 0);
         assert.equal(local.aheadOfDefaultCount, 0);
@@ -274,12 +308,29 @@ for (const hasUpstream of [false, true]) {
         assert.isFalse(commands.some((args) => args.includes("rev-list")));
         assert.isFalse(commands.some((args) => args.includes("fetch")));
 
+        const preview = yield* driver.getReviewDiffPreview({
+          cwd,
+          sourceKind: "working-tree",
+          includePatch: false,
+        });
+        const reviewFiles = preview.sources[0]!.files!;
+        assert.equal(
+          reviewFiles.reduce((sum, file) => sum + file.additions, 0),
+          local.workingTree.insertions,
+        );
+        assert.equal(
+          reviewFiles.reduce((sum, file) => sum + file.deletions, 0),
+          local.workingTree.deletions,
+        );
         commands.length = 0;
         const full = yield* driver.statusDetails(cwd);
         assert.equal(full.aheadCount, 1);
         assert.equal(full.behindCount, hasUpstream ? 1 : 0);
         assert.equal(full.aheadOfDefaultCount, 1);
-        assert.deepStrictEqual(full.workingTree, local.workingTree);
+        assert.deepStrictEqual(
+          full.workingTree.files.filter((file) => file.path !== "untracked.txt"),
+          local.workingTree.files.filter((file) => file.path !== "untracked.txt"),
+        );
         assert.isTrue(commands.some((args) => args.includes("rev-list")));
         assert.isFalse(commands.some((args) => args.includes("--no-ahead-behind")));
       }),

@@ -19,6 +19,39 @@ const writeSkill = Effect.fn(function* (
 });
 
 it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
+  it.effect("keeps same-name repository and worktree skills isolated across repeated reads", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "claude-workspace-catalog-" });
+      const home = path.join(root, "home");
+      const workspaces = ["repo-first", "repo-second", "worktree-first"].map((name) =>
+        path.join(root, name),
+      );
+      yield* writeSkill(
+        path.join(home, "skills"),
+        "review",
+        "---\nname: review\ndescription: Global\n---\n",
+      );
+      for (const cwd of workspaces) {
+        yield* writeSkill(
+          path.join(cwd, ".claude", "skills"),
+          "review",
+          `---\nname: review\ndescription: ${cwd}\n---\n`,
+        );
+      }
+      for (const cwd of [...workspaces, workspaces[0]!]) {
+        const skills = yield* discoverClaudeSkills({ homePath: home }, cwd);
+        assert.strictEqual(skills.length, 1);
+        assert.strictEqual(
+          skills[0]?.path,
+          path.join(cwd, ".claude", "skills", "review", "SKILL.md"),
+        );
+        assert.strictEqual(skills[0]?.description, cwd);
+      }
+    }),
+  );
+
   it.effect("discovers user and project skills with frontmatter metadata", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

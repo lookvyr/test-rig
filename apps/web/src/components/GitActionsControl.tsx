@@ -1832,9 +1832,11 @@ export default function GitActionsControl({
                 />
                 <span
                   className={
-                    stagedOnly || panel
-                      ? "ml-0.5"
-                      : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
+                    panel
+                      ? "ml-0.5 min-w-0 truncate"
+                      : stagedOnly
+                        ? "ml-0.5"
+                        : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
                   }
                 >
                   {quickAction.label}
@@ -1857,9 +1859,11 @@ export default function GitActionsControl({
               <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
               <span
                 className={
-                  stagedOnly || panel
-                    ? "ml-0.5"
-                    : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
+                  panel
+                    ? "ml-0.5 min-w-0 truncate"
+                    : stagedOnly
+                      ? "ml-0.5"
+                      : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
                 }
               >
                 {quickAction.label}

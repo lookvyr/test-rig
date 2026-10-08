@@ -1,4 +1,8 @@
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
+import {
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+  THREAD_DETAILS_PANEL_TRAILING_SLOT_CLASS,
+} from "./chat/threadDetailsPanelStyles";
 import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
 import { useUnlinkPullRequest } from "../hooks/useUnlinkPullRequest";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -819,7 +823,12 @@ export function BranchToolbarBranchSelector({
         >
           <ComboboxTrigger
             render={
-              <ThreadDetailsControl panel={displayMode === "panel"} variant="ghost" size="xs" />
+              <ThreadDetailsControl
+                panel={displayMode === "panel"}
+                part="select"
+                variant="ghost"
+                size="xs"
+              />
             }
             className={
               displayMode === "panel"
@@ -839,7 +848,13 @@ export function BranchToolbarBranchSelector({
             >
               {triggerLabel}
             </span>
-            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+            {displayMode === "panel" ? (
+              <span className={THREAD_DETAILS_PANEL_TRAILING_SLOT_CLASS}>
+                <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />
+              </span>
+            ) : (
+              <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+            )}
           </ComboboxTrigger>
         </span>
       </div>

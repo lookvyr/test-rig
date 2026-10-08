@@ -63,3 +63,52 @@ it.effect(
       assert.strictEqual(f.leases(), 0);
     }),
 );
+
+it.effect("scopes every native catalog to each selected repository and worktree", () =>
+  Effect.gen(function* () {
+    const f = yield* makeOpenCode2Fixture;
+    const reads: Array<[string, string | null]> = [];
+    f.behavior.onRequest = (url) => {
+      const cwd = url.searchParams.get("location[directory]");
+      if (
+        ["/api/model", "/api/agent", "/api/provider", "/api/command", "/api/skill"].includes(
+          url.pathname,
+        )
+      ) {
+        reads.push([url.pathname, cwd]);
+      }
+      if (url.pathname === "/api/model")
+        return Response.json({
+          data: [{ id: "workspace", providerID: "local", name: cwd, enabled: true, variants: [] }],
+        });
+      if (url.pathname === "/api/provider")
+        return Response.json({ data: [{ id: "local", name: "Local" }] });
+      if (url.pathname === "/api/command")
+        return Response.json({ data: [{ name: "review", description: cwd }] });
+      if (url.pathname === "/api/skill")
+        return Response.json({
+          data: [{ id: "review", name: "Review", path: `${cwd}/.opencode/skills/review/SKILL.md` }],
+        });
+    };
+    const settings = yield* decodeSettings({ enabled: true });
+    for (const cwd of ["/repo/first", "/repo/second", "/worktrees/first", "/repo/first"]) {
+      const snapshot = yield* checkOpenCode2ProviderStatus(settings, cwd, f.runtime);
+      assert.strictEqual(snapshot.skills[0]?.path, `${cwd}/.opencode/skills/review/SKILL.md`);
+      assert.strictEqual(
+        snapshot.slashCommands.find((command) => command.name === "review")?.description,
+        cwd,
+      );
+      assert.strictEqual(snapshot.models[0]?.name, cwd);
+      for (const path of [
+        "/api/model",
+        "/api/agent",
+        "/api/provider",
+        "/api/command",
+        "/api/skill",
+      ]) {
+        assert.isTrue(reads.some(([readPath, readCwd]) => readPath === path && readCwd === cwd));
+      }
+    }
+    assert.strictEqual(f.leases(), 0);
+  }),
+);

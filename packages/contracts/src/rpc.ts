@@ -180,6 +180,7 @@ import {
   ServerRemoveKeybindingInput,
   ServerRemoveKeybindingResult,
   ServerProviderUpdatedPayload,
+  ServerProviderWorkspaceCatalog,
   ServerTraceDiagnosticsResult,
   ServerProcessDiagnosticsResult,
   ServerProcessResourceHistoryInput,
@@ -286,6 +287,7 @@ export const WS_METHODS = {
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverGetProviderWorkspaceCatalog: "server.getProviderWorkspaceCatalog",
   serverUpdateProvider: "server.updateProvider",
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverRemoveKeybinding: "server.removeKeybinding",
@@ -345,6 +347,15 @@ export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   success: ServerConfig,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
 });
+
+export const WsServerGetProviderWorkspaceCatalogRpc = Rpc.make(
+  WS_METHODS.serverGetProviderWorkspaceCatalog,
+  {
+    payload: Schema.Struct({ instanceId: ProviderInstanceId, cwd: Schema.String }),
+    success: ServerProviderWorkspaceCatalog,
+    error: EnvironmentAuthorizationError,
+  },
+);
 
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
   payload: Schema.Struct({
@@ -996,6 +1007,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerGetProviderWorkspaceCatalogRpc,
   WsServerUpdateProviderRpc,
   WsServerUpsertKeybindingRpc,
   WsServerRemoveKeybindingRpc,

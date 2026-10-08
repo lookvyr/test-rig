@@ -222,6 +222,15 @@ export const ServerProvider = Schema.Struct({
 });
 export type ServerProvider = typeof ServerProvider.Type;
 
+/** Workspace inventory is separate from the environment-wide health snapshot. */
+export const ServerProviderWorkspaceCatalog = Schema.Struct({
+  skills: Schema.Array(ServerProviderSkill),
+  slashCommands: Schema.Array(ServerProviderSlashCommand),
+  models: Schema.optional(Schema.Array(ServerProviderModel)),
+  errorMessage: Schema.optional(Schema.String),
+});
+export type ServerProviderWorkspaceCatalog = typeof ServerProviderWorkspaceCatalog.Type;
+
 // Provider status kinds grow over time (ServerProviderState,
 // ServerProviderAuthStatus, ServerProviderVersionAdvisoryStatus,
 // ServerProviderUpdateStatus); an older client must not fail the whole config

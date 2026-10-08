@@ -6,8 +6,11 @@ beside the conversation. On narrower windows, the same controls open in a
 popover. Hiding the wide details card is remembered for that conversation.
 
 The workspace control names the current directory. Hover to see its full path,
-or open its context menu to copy the path. **Changes** includes the available
-addition and deletion totals.
+or open its context menu to copy the path. **Changes** shows uncommitted addition
+and deletion totals, including untracked files. When the checkout is clean, it
+shows the committed branch totals instead. Clicking it opens the matching
+**Uncommitted** or **Branch** view. You can inspect existing changes in a new chat
+before sending its first message.
 
 **Changes** opens the review panel, where the existing stacked/split diffs,
 changed-file tree, and comparison controls remain available. Details and review

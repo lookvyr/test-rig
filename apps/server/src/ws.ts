@@ -77,6 +77,8 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
+import { readProviderWorkspaceCatalog } from "./provider/WorkspaceCatalog.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -327,6 +329,7 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      const providerInstances = yield* ProviderInstanceRegistry;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
@@ -662,6 +665,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetConfig, loadServerConfig, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetProviderWorkspaceCatalog]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetProviderWorkspaceCatalog,
+            readProviderWorkspaceCatalog(input, providerInstances.getInstance),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverRefreshProviders]: (input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshProviders,

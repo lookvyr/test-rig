@@ -35,9 +35,15 @@ export const PullRequestTargetInput = Schema.Struct({
     }),
   ),
   repository: Schema.optional(
-    TrimmedNonEmptyString.annotate({
+    TrimmedNonEmptyString.check(
+      Schema.makeFilter((value) =>
+        value.includes("://") || value.startsWith("//")
+          ? "repository must be a path below the host, such as owner/repo. Pass a full pull request URL in url instead."
+          : true,
+      ),
+    ).annotate({
       description:
-        "Repository path below the host, for example owner/repo. Required with number when url is omitted.",
+        "Repository path below the host, for example owner/repo or group/subgroup/repo. Do not include a URL scheme or host. Required with number when url is omitted.",
     }),
   ),
   number: Schema.optional(
@@ -218,7 +224,7 @@ export const ListThreadPullRequestsResult = Schema.Struct({
 export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.Type;
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
-  description: `${REGISTER_EVERY_PR} Links a pull request to this thread so T3 Code tracks it, shows its status beside the thread, and settles the thread when it merges. Pass the URL, or repository plus number. Linking an already-linked pull request succeeds with alreadyLinked=true.`,
+  description: `${REGISTER_EVERY_PR} Links a pull request to this thread so T3 Code tracks it, shows its status beside the thread, and settles the thread when it merges. Pass a full PR URL in url, or a repository path plus number, for example {repository: "owner/repo", number: 123}. Repository is a path, not a URL; host defaults to this thread's project. Linking an already-linked pull request succeeds with alreadyLinked=true.`,
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,

@@ -1,3 +1,5 @@
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Exit from "effect/Exit";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
@@ -769,6 +771,8 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+  const providerInstances = yield* ProviderInstanceRegistry;
+  const projects = yield* ProjectService.ProjectService;
   const providerAdapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
   const secretRequests = yield* SecretRequests.SecretRequests;
   const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
@@ -912,6 +916,37 @@ const make = Effect.gen(function* () {
 
   const loadProviders = providerRegistry.getProviders;
 
+  const providerForWorkspace = Effect.fn("OrchestratorMcpService.providerForWorkspace")(function* (
+    provider: ServerProvider,
+    parent: Pick<OrchestrationV2ThreadProjection, "thread">,
+  ) {
+    if (provider.driver !== "opencode") return provider;
+    const instance = yield* providerInstances.getInstance(provider.instanceId);
+    if (!instance?.enabled || !instance.getWorkspaceCatalog) return provider;
+    const cwd =
+      parent.thread.worktreePath ??
+      (yield* projects.getById(parent.thread.projectId).pipe(
+        Effect.mapError(
+          (error) =>
+            new OrchestratorMcpFailure({
+              code: "orchestration_error",
+              message: `Unable to read the current workspace: ${String(error)}`,
+            }),
+        ),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              failure("thread_not_found", "The current thread's project was not found."),
+            onSome: (project) => Effect.succeed(project.workspaceRoot),
+          }),
+        ),
+      ));
+    const catalog = yield* instance.getWorkspaceCatalog(cwd);
+    if (catalog.errorMessage)
+      return { ...provider, status: "error" as const, message: catalog.errorMessage, models: [] };
+    return { ...provider, models: catalog.models ?? provider.models };
+  });
+
   /**
    * Instance ids the adapter registry resolves — the same lookup a
    * `delegated_task.request` performs when it runs. Capability reporting and
@@ -996,7 +1031,13 @@ const make = Effect.gen(function* () {
       }
       instanceId ??= input.parent.thread.modelSelection.instanceId;
 
-      const provider = input.providers.find((candidate) => candidate.instanceId === instanceId);
+      const environmentProvider = input.providers.find(
+        (candidate) => candidate.instanceId === instanceId,
+      );
+      const provider =
+        environmentProvider === undefined
+          ? undefined
+          : yield* providerForWorkspace(environmentProvider, input.parent);
       if (provider === undefined) {
         return yield* failure(
           "provider_unavailable",
@@ -1521,7 +1562,9 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireCapability(scope);
         const parent = yield* loadProjection(scope.threadId);
-        const providers = yield* loadProviders;
+        const providers = yield* Effect.forEach(yield* loadProviders, (provider) =>
+          providerForWorkspace(provider, parent),
+        );
         const orchestrationCapableInstanceIds = yield* loadOrchestrationCapableInstanceIds();
         return {
           parentThreadId: scope.threadId,
@@ -2173,6 +2216,8 @@ export const layer: Layer.Layer<
   OrchestratorMcpService,
   never,
   | Crypto.Crypto
+  | ProviderInstanceRegistry
+  | ProjectService.ProjectService
   | ThreadManagementService.ThreadManagementService
   | ProviderRegistry.ProviderRegistry
   | ProviderAdapterRegistry.ProviderAdapterRegistryV2

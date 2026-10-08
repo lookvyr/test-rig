@@ -1,6 +1,8 @@
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import {
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+  THREAD_DETAILS_PANEL_TRAILING_SLOT_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./chat/threadDetailsPanelStyles";
 import type {
@@ -471,6 +473,7 @@ export default function ProjectScriptsControl({
                 panel={panel}
                 size="xs"
                 variant="outline"
+                part="select"
                 aria-label="Project actions"
               />
             }
@@ -479,13 +482,19 @@ export default function ProjectScriptsControl({
             <span
               className={
                 panel
-                  ? "min-w-0 truncate"
+                  ? "min-w-0 flex-1 truncate"
                   : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
               }
             >
               Add action
             </span>
-            <ChevronDownIcon className="size-3.5" />
+            {panel ? (
+              <span className={THREAD_DETAILS_PANEL_TRAILING_SLOT_CLASS}>
+                <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />
+              </span>
+            ) : (
+              <ChevronDownIcon className="size-3.5" />
+            )}
           </MenuTrigger>
           <MenuPopup align="end">
             {importMenuItems}

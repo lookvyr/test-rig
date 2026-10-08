@@ -25,6 +25,7 @@ import type {
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
+  ServerProviderWorkspaceCatalog,
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -69,6 +70,8 @@ export interface ProviderInstance {
   readonly accentColor?: string | undefined;
   readonly enabled: boolean;
   readonly snapshot: ServerProviderShape;
+  /** Read the selected workspace without publishing or changing instance health. */
+  readonly getWorkspaceCatalog?: (cwd: string) => Effect.Effect<ServerProviderWorkspaceCatalog>;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   /** Isolated V2 native engine; legacy consumers retain their own event stream. */
   readonly orchestrationAdapter?: import("../orchestration-v2/ProviderAdapter.ts").ProviderAdapterV2Shape;

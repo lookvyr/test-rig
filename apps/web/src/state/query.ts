@@ -1,5 +1,5 @@
 import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react";
-import { useContext, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
@@ -28,6 +28,21 @@ export function useEnvironmentQuery<A, E>(
   const selectedAtom = atom ?? EMPTY_ASYNC_RESULT_ATOM;
   const result = useAtomValue(selectedAtom);
   const refresh = useAtomRefresh(selectedAtom);
+  const recovery = useRef<{ atom: typeof selectedAtom; attempted: boolean }>({
+    atom: selectedAtom,
+    attempted: false,
+  });
+  const interrupted = result._tag === "Failure" && Cause.hasInterruptsOnly(result.cause);
+  useEffect(() => {
+    if (recovery.current.atom !== selectedAtom || result._tag === "Success") {
+      recovery.current = { atom: selectedAtom, attempted: false };
+    }
+    if (atom === null || !interrupted || result.waiting || recovery.current.attempted) return;
+    // A canceled cached read can survive switching scopes. Retry once while mounted;
+    // repeated cancellation stays actionable rather than creating a refresh loop.
+    recovery.current.attempted = true;
+    refresh();
+  }, [atom, selectedAtom, interrupted, result, refresh]);
   return environmentQueryView(result, refresh, atom !== null);
 }
 
@@ -39,7 +54,14 @@ function environmentQueryView<A, E>(
   return {
     data: Option.getOrNull(AsyncResult.value(result)),
     hasValue: enabled && Option.isSome(AsyncResult.value(result)),
-    error: result._tag === "Failure" ? formatError(result.cause) : null,
+    error:
+      result._tag === "Failure"
+        ? Cause.hasInterruptsOnly(result.cause)
+          ? result.waiting
+            ? null
+            : "The request was canceled. Refresh to try again."
+          : formatError(result.cause)
+        : null,
     isPending: enabled && result.waiting,
     refresh,
   };

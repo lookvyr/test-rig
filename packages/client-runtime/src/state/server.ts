@@ -327,6 +327,12 @@ export function createServerEnvironmentAtoms<R, E>(
           Stream.mapAccum(Option.none<ServerLifecycleWelcomePayload>, projectServerWelcome),
         ),
     }),
+    providerWorkspaceCatalog: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:provider-workspace-catalog",
+      tag: WS_METHODS.serverGetProviderWorkspaceCatalog,
+      staleTimeMs: 30_000,
+      idleTtlMs: 30_000,
+    }),
     refreshProviders: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:refresh-providers",
       tag: WS_METHODS.serverRefreshProviders,

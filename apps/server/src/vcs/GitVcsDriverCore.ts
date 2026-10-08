@@ -2004,11 +2004,24 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     files.sort((a, b) => a.path.localeCompare(b.path));
 
-    const branchChanges = options?.includeBranchChanges
-      ? yield* readBranchChangeTotals(repositoryPaths?.worktreeRoot ?? cwd, refName).pipe(
-          Effect.orElseSucceed(() => undefined),
-        )
+    const changeTotals = options?.includeBranchChanges
+      ? yield* readBranchChangeTotals(
+          repositoryPaths?.worktreeRoot ?? cwd,
+          refName,
+          hasWorkingTreeChanges,
+        ).pipe(Effect.orElseSucceed(() => undefined))
       : undefined;
+    if (changeTotals?.workingTree) {
+      const countedPaths = new Set(changeTotals.workingTree.files.map((file) => file.path));
+      // Staged changes can be reversed in the worktree: net diff is empty, but the
+      // porcelain entry must remain available for commit and staging actions.
+      for (const file of files) {
+        if (!countedPaths.has(file.path)) {
+          changeTotals.workingTree.files.push({ ...file, insertions: 0, deletions: 0 });
+        }
+      }
+      changeTotals.workingTree.files.sort((a, b) => a.path.localeCompare(b.path));
+    }
 
     return {
       isRepo: true,
@@ -2017,12 +2030,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       branch: refName,
       upstreamRef,
       hasWorkingTreeChanges,
-      workingTree: {
+      workingTree: changeTotals?.workingTree ?? {
         files,
         insertions,
         deletions,
       },
-      ...(branchChanges ? { branchChanges } : {}),
+      ...(changeTotals ? { branchChanges: changeTotals.branchChanges } : {}),
       hasUpstream: upstreamRef !== null,
       aheadCount,
       behindCount,
@@ -2684,10 +2697,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return { baseRef, mergeBase };
   });
 
-  // Totals for the thread panel's Changes row. Same base and untracked files as the Changes view.
+  // Share the temporary index when counting branch and uncommitted changes, including untracked files.
   const readBranchChangeTotals = Effect.fn("readBranchChangeTotals")(function* (
     cwd: string,
     branch: string | null,
+    includeWorkingTree: boolean,
   ) {
     const { baseRef, mergeBase } = yield* resolveReviewMergeBase(cwd, branch);
     const untracked = yield* prepareUntrackedReviewIndex(cwd, []);
@@ -2729,7 +2743,33 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       insertions += file.additions;
       deletions += file.deletions;
     }
-    return { baseRef, insertions, deletions };
+    let workingTree;
+    if (includeWorkingTree) {
+      let workingResult = mergeBase === "HEAD" ? result : yield* readNumstat("HEAD");
+      if (workingResult.exitCode !== 0 && isUnbornHeadStderr(workingResult.stderr)) {
+        workingResult = yield* readNumstat(yield* readEmptyTreeHash(cwd));
+      }
+      if (workingResult.exitCode !== 0) {
+        return yield* new GitCommandError({
+          operation: "GitVcsDriver.readBranchChangeTotals",
+          command: "git diff --numstat HEAD",
+          cwd,
+          detail: "Could not read uncommitted Changes totals.",
+          exitCode: workingResult.exitCode,
+        });
+      }
+      const files = parseReviewNumstat(workingResult.stdout).map((file) => ({
+        path: file.path,
+        insertions: file.additions,
+        deletions: file.deletions,
+      }));
+      workingTree = {
+        files,
+        insertions: files.reduce((total, file) => total + file.insertions, 0),
+        deletions: files.reduce((total, file) => total + file.deletions, 0),
+      };
+    }
+    return { branchChanges: { baseRef, insertions, deletions }, workingTree };
   }, Effect.scoped);
 
   const getReviewDiffPreview = Effect.fn("getReviewDiffPreview")(function* (

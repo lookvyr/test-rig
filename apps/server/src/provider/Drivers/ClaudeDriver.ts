@@ -235,6 +235,27 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
+        getWorkspaceCatalog: (workspaceCwd) =>
+          checkClaudeProviderStatus(
+            effectiveConfig,
+            () =>
+              probeClaudeCapabilities(effectiveConfig, processEnv, workspaceCwd).pipe(
+                Effect.provideService(Path.Path, path),
+              ),
+            processEnv,
+            workspaceCwd,
+          ).pipe(
+            Effect.map((catalog) => ({
+              skills: catalog.skills,
+              slashCommands: catalog.slashCommands,
+              ...(catalog.status === "error"
+                ? { errorMessage: catalog.message ?? "Workspace inventory could not be loaded." }
+                : {}),
+            })),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
+          ),
         adapter,
         orchestrationAdapter,
         textGeneration,

@@ -24,6 +24,38 @@ it.layer(NodeServices.layer)("Codex CLI compatibility", (it) => {
       }),
     );
 
+  it.effect(
+    "discovers the requested repositories and worktree without using the launch directory",
+    () =>
+      Effect.gen(function* () {
+        const seen: string[] = [];
+        for (const cwd of ["/repo/first", "/repo/second", "/worktrees/first", "/repo/first"]) {
+          const provider = yield* checkCodexProviderStatus(
+            settings,
+            (input) => {
+              seen.push(input.cwd);
+              return Effect.succeed({
+                version: "0.156.1",
+                account: { account: null, requiresOpenaiAuth: false },
+                models: [],
+                skills: [
+                  {
+                    name: "review",
+                    path: `${input.cwd}/.agents/skills/review/SKILL.md`,
+                    enabled: true,
+                  },
+                ],
+              });
+            },
+            undefined,
+            cwd,
+          );
+          assert.strictEqual(provider.skills[0]?.path, `${cwd}/.agents/skills/review/SKILL.md`);
+        }
+        assert.deepEqual(seen, ["/repo/first", "/repo/second", "/worktrees/first", "/repo/first"]);
+      }),
+  );
+
   it.effect("reports versions without the required history and revert protocol", () =>
     Effect.gen(function* () {
       for (const version of ["0.155.0", "0.156.0-alpha.1"]) {

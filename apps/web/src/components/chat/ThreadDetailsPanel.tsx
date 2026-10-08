@@ -52,7 +52,9 @@ export function ThreadDetailsPanel(props: {
         })
       : null,
   ).data;
-  const changesTotals = gitStatus?.branchChanges ?? gitStatus?.workingTree;
+  const changesTotals = gitStatus?.hasWorkingTreeChanges
+    ? gitStatus.workingTree
+    : gitStatus?.branchChanges;
   const fileScripts = useT3ProjectFileScripts(
     props.threadRef.environmentId,
     props.scripts ? props.openInCwd : null,
@@ -128,8 +130,8 @@ export function ThreadDetailsPanel(props: {
             <FileDiffIcon />
             <span className="flex-1 text-left">Changes</span>
             <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
-              <span className="text-success">+{changesTotals?.insertions ?? 0}</span>
-              <span className="text-destructive">-{changesTotals?.deletions ?? 0}</span>
+              <span className="text-success">+{changesTotals?.insertions ?? "…"}</span>
+              <span className="text-destructive">-{changesTotals?.deletions ?? "…"}</span>
             </span>
           </ThreadDetailsControl>
           {props.onShowPullRequest ? (

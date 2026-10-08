@@ -6148,12 +6148,16 @@ function ChatViewContent(props: ChatViewProps) {
   );
 
   const onProviderModelSelect = useCallback(
-    (instanceId: ProviderInstanceId, model: string) => {
+    (
+      instanceId: ProviderInstanceId,
+      model: string,
+      scopedProviders: ReadonlyArray<ServerProvider> = providerStatuses,
+    ) => {
       if (!activeThread) return;
       const resolvedModel = resolveAppModelSelectionForInstance(
         instanceId,
         settings,
-        providerStatuses,
+        scopedProviders,
         model,
       );
       if (!resolvedModel) {
@@ -6630,6 +6634,7 @@ function ChatViewContent(props: ChatViewProps) {
                 onIsAtEndChange={onIsAtEndChange}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
+                isLoading={threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 {...(!searchHistory && loadEarlierTurns
                   ? { historyControls: loadEarlierTurns }
@@ -6904,6 +6909,12 @@ function ChatViewContent(props: ChatViewProps) {
                 availableEditors={availableEditors}
                 branchToolbar={showComposerContextStrip ? branchToolbarProps : null}
                 onOpenChanges={() => {
+                  useThreadDetailsStore.getState().setPopoverOpen(activeThreadRef, false);
+                  if (initialDiffPanelGitScope === "branch") {
+                    useDiffPanelStore.getState().selectBranchBaseRef(activeThreadRef, null);
+                  } else {
+                    useDiffPanelStore.getState().selectGitScope(activeThreadRef, "working-tree");
+                  }
                   setSideDiffThreadRef(null);
                   useRightPanelStore.getState().open(activeThreadRef, "diff");
                   onDiffPanelOpen?.();

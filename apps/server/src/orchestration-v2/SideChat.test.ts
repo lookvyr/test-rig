@@ -1,3 +1,5 @@
+import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -578,7 +580,13 @@ const coordinationScope: McpInvocationScope = {
   issuedAt: 1,
 };
 
+const mcpWorkspaceServices = Layer.merge(
+  Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
+  Layer.mock(ProjectService.ProjectService)({}),
+);
+
 const mcpCoordinationLayer = OrchestratorMcp.layer
+  .pipe(Layer.provide(mcpWorkspaceServices))
   .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
   .pipe(
     Layer.provideMerge(coordinationLayer),
@@ -1023,6 +1031,7 @@ it.effect("recovers a partially accepted batch without duplicating its first con
     }).pipe(
       Effect.provide(
         OrchestratorMcp.layer
+          .pipe(Layer.provide(mcpWorkspaceServices))
           .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
           .pipe(Layer.provide(dependencies)),
       ),

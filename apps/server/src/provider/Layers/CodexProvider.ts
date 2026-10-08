@@ -521,6 +521,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     ChildProcessSpawner.ChildProcessSpawner | Scope.Scope
   > = probeCodexAppServerProvider,
   environment?: NodeJS.ProcessEnv,
+  cwd: string = process.cwd(),
 ): Effect.fn.Return<
   ServerProviderDraft,
   ServerSettingsError,
@@ -551,7 +552,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     binaryPath: codexSettings.binaryPath,
     homePath: codexSettings.homePath,
     launchArgs: resolveCodexLaunchArgs(codexSettings.launchArgs, resolvedEnvironment),
-    cwd: process.cwd(),
+    cwd,
     customModels: codexSettings.customModels,
     environment: resolvedEnvironment,
   }).pipe(

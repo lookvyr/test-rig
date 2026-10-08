@@ -192,6 +192,17 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         accentColor,
         enabled,
         snapshot,
+        getWorkspaceCatalog: (cwd) =>
+          checkOpenCode2ProviderStatus(effectiveConfig, cwd, runtime).pipe(
+            Effect.map((catalog) => ({
+              skills: catalog.skills,
+              slashCommands: catalog.slashCommands,
+              models: catalog.models,
+              ...(catalog.status === "error"
+                ? { errorMessage: catalog.message ?? "Workspace inventory could not be loaded." }
+                : {}),
+            })),
+          ),
         adapter,
         orchestrationAdapter,
         textGeneration,
