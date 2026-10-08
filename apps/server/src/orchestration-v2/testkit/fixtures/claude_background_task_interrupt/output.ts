@@ -44,7 +44,7 @@ export function assertClaudeBackgroundTaskInterruptOutput(
     projection.turnItems.flatMap((item) =>
       item.type === "command_execution" ? [item.status] : [],
     ),
-    ["completed", "failed"],
+    ["completed", "interrupted"],
     "the background launch completed; the interrupted foreground command did not",
   );
 }
