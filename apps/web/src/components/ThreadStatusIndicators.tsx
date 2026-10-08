@@ -240,7 +240,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
     (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
-          input: { cwd: gitCwd },
+          input: { cwd: gitCwd, includeRemote: false },
         })
       : null,
     enabled,

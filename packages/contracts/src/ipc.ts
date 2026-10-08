@@ -26,6 +26,7 @@ import type {
   GitPullRequestRefInput,
   GitResolvePullRequestResult,
   VcsStatusInput,
+  VcsStatusSubscriptionInput,
   VcsStatusResult,
 } from "./git.ts";
 import type {
@@ -1153,7 +1154,7 @@ export interface EnvironmentApi {
     pull: (input: VcsPullInput) => Promise<VcsPullResult>;
     refreshStatus: (input: VcsStatusInput) => Promise<VcsStatusResult>;
     onStatus: (
-      input: VcsStatusInput,
+      input: VcsStatusSubscriptionInput,
       callback: (status: VcsStatusResult) => void,
       options?: {
         onResubscribe?: () => void;
