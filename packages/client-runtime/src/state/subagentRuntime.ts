@@ -5,6 +5,7 @@
 import * as DateTime from "effect/DateTime";
 import type {
   OrchestrationV2Subagent,
+  OrchestrationV2TurnItem,
   OrchestrationV2SubagentPresentation,
   RuntimeTaskUsage,
 } from "@t3tools/contracts";
@@ -80,6 +81,11 @@ export function isTerminalSubagentStatus(status: RuntimeSubagentStatus): boolean
  * but resumable; waiting counts as active because it needs the user. */
 export function isActiveSubagentStatus(status: RuntimeSubagentStatus): boolean {
   return isOrchestrationV2WorkActive(status);
+}
+
+/** A working child's card outlives its launching turn until the child finishes. */
+export function isLiveSubagentTurnItem(item: OrchestrationV2TurnItem): boolean {
+  return item.type === "subagent" && isOrchestrationV2WorkActive(item.status);
 }
 
 /**
