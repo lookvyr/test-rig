@@ -1,6 +1,7 @@
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
+import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as OrchestratorV2 from "./orchestration-v2/Orchestrator.ts";
 import * as ProviderAdapterRegistryV2 from "./orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ScheduledTaskService from "./scheduledTasks/ScheduledTaskService.ts";
@@ -705,6 +706,7 @@ const buildAppUnderTest = (options?: {
             streamProjectedApplicationEvents: () => Stream.never,
             ...options?.layers?.applicationEvents,
           }),
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
           Layer.mock(ThreadSearch.ThreadSearch)({ search: () => Effect.succeed({ matches: [] }) }),
         ),
       ),

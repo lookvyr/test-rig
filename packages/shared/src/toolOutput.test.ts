@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { compactDynamicToolOutput, toolOutputIndicatesFailure } from "./toolOutput.ts";
+import {
+  compactDynamicToolOutput,
+  MAX_TOOL_OUTPUT_IMAGES,
+  toolOutputImages,
+  toolOutputIndicatesFailure,
+} from "./toolOutput.ts";
 
 describe("compactDynamicToolOutput", () => {
   it("extracts IDs through the MCP result envelopes used by T3 summaries", () => {
@@ -171,5 +176,43 @@ describe("toolOutputIndicatesFailure", () => {
     ]) {
       expect(toolOutputIndicatesFailure(text)).toBe(false);
     }
+  });
+});
+
+describe("toolOutputImages", () => {
+  const mcpImage = { type: "image", data: "AAAA", mimeType: "image/png" };
+  const claudeImage = {
+    type: "image",
+    source: { type: "base64", media_type: "image/JPEG", data: "BBBB" },
+  };
+
+  it("reads MCP and Anthropic raster blocks in asset order", () => {
+    expect(
+      toolOutputImages({ content: [{ type: "text", text: "captured" }, claudeImage, mcpImage] }),
+    ).toEqual([
+      { mimeType: "image/jpeg", data: "BBBB" },
+      { mimeType: "image/png", data: "AAAA" },
+    ]);
+    expect(toolOutputImages([mcpImage])).toEqual([{ mimeType: "image/png", data: "AAAA" }]);
+    expect(toolOutputImages(mcpImage)).toEqual([{ mimeType: "image/png", data: "AAAA" }]);
+    expect(toolOutputImages({ type: "image", mimeType: "image/png" })).toEqual([
+      { mimeType: "image/png" },
+    ]);
+  });
+
+  it("excludes inline SVG, HTML and URL sources", () => {
+    expect(
+      toolOutputImages([
+        { ...mcpImage, mimeType: "image/svg+xml" },
+        { ...mcpImage, mimeType: "text/html" },
+        { type: "image", source: { type: "url", url: "https://example.com/a.png" } },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("bounds the images exposed per tool result", () => {
+    expect(toolOutputImages(Array.from({ length: 10_000 }, () => mcpImage))).toHaveLength(
+      MAX_TOOL_OUTPUT_IMAGES,
+    );
   });
 });

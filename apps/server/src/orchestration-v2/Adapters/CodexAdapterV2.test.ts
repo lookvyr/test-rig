@@ -915,6 +915,27 @@ describe("CodexAdapterV2 dynamic tool projection", () => {
     });
   });
 
+  it("preserves MCP screenshot blocks alongside structured metadata", () => {
+    const metadata = {
+      title: "Browser fixture",
+      screenshot: { mimeType: "image/png", width: 1, height: 1 },
+    };
+    const content = [
+      { type: "text", text: "Screenshot captured" },
+      { type: "image", mimeType: "image/png", data: "A".repeat(400) },
+    ];
+    const projection = CodexAdapterV2.projectCodexDynamicToolItem({
+      type: "mcpToolCall",
+      id: "snapshot-call",
+      server: "test_rig",
+      tool: "preview_snapshot",
+      status: "completed",
+      arguments: { includeImage: true, save: false },
+      result: { structuredContent: metadata, content },
+    });
+    assert.deepEqual(projection.output, { structuredContent: metadata, content });
+  });
+
   it("preserves namespaced dynamic tool output", () => {
     const projection = CodexAdapterV2.projectCodexDynamicToolItem({
       type: "dynamicToolCall",

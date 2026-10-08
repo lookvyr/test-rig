@@ -4,7 +4,11 @@ import type {
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
-import { compactDynamicToolOutput, toolOutputIndicatesFailure } from "@t3tools/shared/toolOutput";
+import {
+  compactDynamicToolOutput,
+  toolOutputImages,
+  toolOutputIndicatesFailure,
+} from "@t3tools/shared/toolOutput";
 
 const MAX_DETAIL_STRING_BYTES = 32_768;
 const MAX_DYNAMIC_VALUE_BYTES = 16_384;
@@ -97,7 +101,15 @@ export function projectTurnItemForWire(item: OrchestrationV2TurnItem): Orchestra
       };
     case "dynamic_tool": {
       const { output: rawOutput, ...projected } = item;
-      const output = compactDynamicToolOutput(rawOutput);
+      const compactOutput = compactDynamicToolOutput(rawOutput);
+      const images = toolOutputImages(rawOutput);
+      const output =
+        images.length === 0
+          ? compactOutput
+          : {
+              ...(compactOutput === undefined ? {} : { structuredContent: compactOutput }),
+              content: images.map((image) => ({ type: "image", mimeType: image.mimeType })),
+            };
       return {
         ...projected,
         input: summarizeDynamicValue(item.input),

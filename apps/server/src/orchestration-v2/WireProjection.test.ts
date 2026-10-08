@@ -322,4 +322,47 @@ describe("orchestration V2 wire projection", () => {
     };
     expect(projectTurnItemForWire({ ...base, output })).not.toHaveProperty("output");
   });
+  it("retains image asset markers in order without putting screenshot bytes on the wire", () => {
+    const output = {
+      content: [
+        { type: "text", text: "Screenshot captured" },
+        { type: "image", mimeType: "image/png", data: "A".repeat(40_000) },
+        {
+          type: "image",
+          source: { type: "base64", media_type: "image/jpeg", data: "B".repeat(50_000) },
+        },
+      ],
+    };
+    const projected = projectTurnItemForWire({ ...base, output });
+    expect(projected).toMatchObject({
+      output: {
+        content: [
+          { type: "image", mimeType: "image/png" },
+          { type: "image", mimeType: "image/jpeg" },
+        ],
+      },
+    });
+    const decoded = decodeTurnItemJson(encodeTurnItemJson(projected));
+    expect(decoded).toEqual(projected);
+    expect(JSON.stringify(projected)).not.toContain("A".repeat(40_000));
+    expect(JSON.stringify(projected)).not.toContain("B".repeat(50_000));
+  });
+  it("preserves tool metadata together with images across repeated wire projections", () => {
+    const item = {
+      ...base,
+      output: {
+        structuredContent: { threadId: "thread-target", taskId: "task-1" },
+        content: [{ type: "image", mimeType: "image/png", data: "A".repeat(400) }],
+      },
+    };
+    const once = projectTurnItemForWire(item);
+    const twice = projectTurnItemForWire(once);
+    expect(twice).toEqual(once);
+    expect(once).toMatchObject({
+      output: {
+        structuredContent: { threadId: "thread-target", taskId: "task-1" },
+        content: [{ type: "image", mimeType: "image/png" }],
+      },
+    });
+  });
 });

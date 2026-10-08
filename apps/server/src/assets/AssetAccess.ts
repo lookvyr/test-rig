@@ -14,6 +14,8 @@ import {
   AssetWorkspacePathValidationError,
   AssetWorkspaceResolutionError,
   AssetWorkspaceRootNormalizationError,
+  ThreadId,
+  TurnItemId,
   ToolActivityNativeAppReference,
 } from "@t3tools/contracts";
 import {
@@ -29,6 +31,8 @@ import {
   readImageDimensions,
   type ImageDimensions,
 } from "@t3tools/shared/imageDimensions";
+import { MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH, toolOutputImages } from "@t3tools/shared/toolOutput";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
 import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
@@ -139,6 +143,14 @@ const AssetClaimsSchema = Schema.Union([
   }),
   Schema.Struct({
     version: Schema.Literal(1),
+    kind: Schema.Literal("tool-output-image"),
+    threadId: ThreadId,
+    itemId: TurnItemId,
+    index: Schema.Number,
+    expiresAt: Schema.Number,
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
     kind: Schema.Literal("native-app-icon"),
     app: ToolActivityNativeAppReference,
     expiresAt: Schema.Number,
@@ -150,14 +162,16 @@ const AssetClaimsJson = Schema.fromJsonString(AssetClaimsSchema);
 const decodeAssetClaims = Schema.decodeUnknownOption(AssetClaimsJson);
 const encodeAssetClaims = Schema.encodeSync(AssetClaimsJson);
 
-export type ResolvedAsset = {
-  readonly kind: "file";
-  readonly path: string;
-  readonly download?: boolean;
-  readonly fileName?: string;
-  readonly mimeType?: string;
-  readonly file?: OpenMediaFile;
-};
+export type ResolvedAsset =
+  | { readonly kind: "bytes"; readonly bytes: Uint8Array; readonly mimeType: string }
+  | {
+      readonly kind: "file";
+      readonly path: string;
+      readonly download?: boolean;
+      readonly fileName?: string;
+      readonly mimeType?: string;
+      readonly file?: OpenMediaFile;
+    };
 
 function decodeClaims(encodedPayload: string): AssetClaims | null {
   try {
@@ -185,6 +199,23 @@ const optionOnNotFound = <A, R>(
         error.reason._tag === "NotFound" ? Effect.succeed(Option.none<A>()) : Effect.fail(error),
     }),
   );
+
+const readToolOutputImage = Effect.fn("AssetAccess.readToolOutputImage")(function* (input: {
+  readonly threadId: ThreadId;
+  readonly itemId: TurnItemId;
+  readonly index: number;
+}) {
+  const store = yield* ProjectionStore.ProjectionStoreV2;
+  const records = yield* store.getThreadRecords(input.threadId, ["turnItems"], {
+    turnItemIds: [input.itemId],
+  });
+  const item = records.turnItems[0];
+  const image =
+    item?.type === "dynamic_tool" ? toolOutputImages(item.output)[input.index] : undefined;
+  return image?.data === undefined || image.data.length > MAX_TOOL_OUTPUT_IMAGE_BASE64_LENGTH
+    ? null
+    : { mimeType: image.mimeType, bytes: Buffer.from(image.data, "base64") };
+});
 
 const resolveCanonicalFile = Effect.fn("AssetAccess.resolveCanonicalFile")(function* (
   filePath: string,
@@ -679,6 +710,28 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       }
       break;
     }
+    case "tool-output-image": {
+      const image = yield* readToolOutputImage(input.resource).pipe(
+        Effect.mapError(
+          (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+        ),
+      );
+      if (image === null) {
+        return yield* new AssetWorkspaceAssetNotFoundError({ resource: input.resource });
+      }
+      claims = {
+        version: 1,
+        kind: "tool-output-image",
+        threadId: input.resource.threadId,
+        itemId: input.resource.itemId,
+        index: input.resource.index,
+        expiresAt,
+      };
+      // The allowed types are all `image/<extension>`.
+      fileName = `image-${input.resource.index + 1}.${image.mimeType.slice("image/".length)}`;
+      imageDimensions = readImageDimensions(image.bytes);
+      break;
+    }
     case "native-app-icon": {
       claims = {
         version: 1,
@@ -797,6 +850,20 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     return faviconPath === claims.filePath
       ? ({ kind: "file", path: faviconPath } satisfies ResolvedAsset)
       : null;
+  }
+
+  if (claims.kind === "tool-output-image") {
+    const image = yield* readToolOutputImage(claims).pipe(
+      Effect.tapError((cause) =>
+        Effect.logError("Failed to read tool output image.", {
+          threadId: claims.threadId,
+          itemId: claims.itemId,
+          cause,
+        }),
+      ),
+      Effect.orElseSucceed(() => null),
+    );
+    return image ? ({ kind: "bytes", ...image } satisfies ResolvedAsset) : null;
   }
 
   if (claims.kind === "native-app-icon") {

@@ -431,7 +431,7 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),
     otlpTracesProxyRouteLayer,
-    assetRouteLayer,
+    assetRouteLayer.pipe(Layer.provide(ProjectionStoreV2.layer)),
     attachmentUploadRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,

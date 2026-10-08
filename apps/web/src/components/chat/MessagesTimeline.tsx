@@ -2867,6 +2867,7 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               workspaceRoot={ctx.workspaceRoot}
               onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
+              onImageExpand={ctx.onImageExpand}
             />
           </div>
         </div>
@@ -2940,6 +2941,7 @@ function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event"
               workspaceRoot={ctx.workspaceRoot}
               onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
+              onImageExpand={ctx.onImageExpand}
             />
           </div>
         </div>
@@ -5301,6 +5303,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
               workspaceRoot={workspaceRoot}
               onOpenThread={ctx.onOpenThread}
               onOpenTurnDiff={ctx.onOpenTurnDiff}
+              onImageExpand={ctx.onImageExpand}
             />
           ) : expandedBody ? (
             <pre className={toolCallExpandedBodyClassName}>{expandedBody}</pre>

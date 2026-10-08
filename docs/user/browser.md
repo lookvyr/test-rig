@@ -99,3 +99,10 @@ A failed browser entry may require a fresh request.
 The destination page receives the value. This does not prevent the page—or an
 agent subsequently reading that page—from accessing it. The private card keeps
 the entry and transfer out of chat; it is not a password vault.
+
+## Tool screenshots in chat
+
+Expand a tool call to see raster images it returned, including browser and MCP
+screenshots. Select an image to enlarge it. A tool result can show up to eight
+images; oversized images are unavailable. Images read from local files continue
+to use the file preview.

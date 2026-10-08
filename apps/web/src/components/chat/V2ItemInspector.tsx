@@ -1,3 +1,4 @@
+import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import type {
   EnvironmentId,
   OrchestrationV2ProjectedTurnItem,
@@ -10,7 +11,8 @@ import { memo } from "react";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { Button } from "../ui/button";
-import ChatMarkdown from "../ChatMarkdown";
+import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
+import { toolOutputImages } from "@t3tools/shared/toolOutput";
 import { resolveExternalWebLinkHref } from "./externalLinkContextMenu";
 
 interface V2ItemInspectorProps {
@@ -18,6 +20,7 @@ interface V2ItemInspectorProps {
   readonly environmentId: EnvironmentId;
   readonly cwd?: string | undefined;
   readonly workspaceRoot?: string | undefined;
+  readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
 }
@@ -155,6 +158,22 @@ export const V2ItemInspector = memo(function V2ItemInspector(props: V2ItemInspec
             Input
           </p>
           <StructuredValue value={item.input} />
+          {toolOutputImages(item.output).map((_, index) => (
+            <ChatMarkdownAssetImage
+              // eslint-disable-next-line react/no-array-index-key -- Signed asset index identifies the image within this source item.
+              key={`${props.projectedItem.sourceItemId}:${index}`}
+              environmentId={props.environmentId}
+              resource={{
+                _tag: "tool-output-image",
+                threadId: props.projectedItem.sourceThreadId,
+                itemId: props.projectedItem.sourceItemId,
+                index,
+              }}
+              alt="Tool output image"
+              maxHeightRem={16}
+              onImageExpand={props.onImageExpand}
+            />
+          ))}
         </div>
       ) : null}
 

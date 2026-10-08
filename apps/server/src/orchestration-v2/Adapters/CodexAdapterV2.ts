@@ -29,6 +29,7 @@ import {
 } from "@t3tools/contracts";
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { toolOutputImages } from "@t3tools/shared/toolOutput";
 import { dynamicToolTitle } from "@t3tools/shared/toolActivity";
 import { getModelSelectionStringOptionValue, modelSelectionsEqual } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
@@ -460,7 +461,9 @@ function codexMcpToolOutput(
     item.result === null || item.result === undefined
       ? undefined
       : item.result.structuredContent !== null && item.result.structuredContent !== undefined
-        ? item.result.structuredContent
+        ? toolOutputImages(item.result.content).length === 0
+          ? item.result.structuredContent
+          : { structuredContent: item.result.structuredContent, content: item.result.content }
         : item.result.content;
 
   if (item.error === null || item.error === undefined) {
