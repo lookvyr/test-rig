@@ -636,7 +636,8 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
   const focusAt = useCallback(
     (nextCursor: number) => {
       if (!editor) return;
-      editor.view.dom.focus({ preventScroll: true });
+      // Synchronize the native caret while focusing so rapid input uses the editor selection.
+      editor.view.focus();
       const pending = pendingControlled.current;
       if (pending) {
         pending.cursor = clampCollapsedComposerCursor(pending.value, nextCursor);
