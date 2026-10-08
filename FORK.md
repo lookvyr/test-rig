@@ -131,6 +131,18 @@ An exclusion must be enforced at the owning server, process, or packaging
 boundary. Missing configuration or hidden UI is not sufficient when a route,
 lifecycle, executable provider, or outbound client remains reachable.
 
+## Stop behavior
+
+As of October 7, 2026, Stop follows upstream's cascading behavior: it stops the
+conversation's app-owned delegated children recursively, ends their pull request
+watches, and suppresses pending delegated-result wakeups. A child can also be
+stopped directly from the Agents list; this stops its descendants without
+stopping its parent or siblings. Independent historical forks remain independent.
+This replaces the earlier nonrecursive Stop decision recorded in the V2 audits.
+Explicit run-targeted requests still reject stale Stops rather than interrupting
+a newer parent run. Settling a conversation continues to pause its PR watches;
+Stop ends them.
+
 ## Deferred decisions
 
 - SSH connectivity is acceptable but deferred until a concrete need follows

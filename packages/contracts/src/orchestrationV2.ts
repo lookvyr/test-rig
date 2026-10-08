@@ -2820,6 +2820,10 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     runId: RunId,
     reason: Schema.optional(Schema.String),
+    /**
+     * Set by the Stop button. Stop also holds the queue, ends the thread's pull request
+     * watches, and stops every delegated task under the thread.
+     */
     holdQueue: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
@@ -3041,6 +3045,17 @@ const OrchestrationV2InternalCommand = Schema.Union([
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
     secretStatus: OrchestrationV2SecretRequestStatus,
+  }),
+  /**
+   * Stop for one thread, whatever it is doing: interrupts its running turn, holds its queue,
+   * ends its pull request watches, and drops pending delegated-task wakes. Nothing to stop is
+   * an accepted no-op. Delegated tasks under the thread get their own `thread.stop`.
+   */
+  Schema.Struct({
+    type: Schema.Literal("thread.stop"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    reason: Schema.optional(Schema.String),
   }),
 ]);
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;

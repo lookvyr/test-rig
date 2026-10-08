@@ -219,3 +219,30 @@ audit's repairs are included in the build installed on the other machine.
 Install the commit containing this audit report or a later commit on
 `codex/orchestration-v2`; the baseline commit `021970c08` does not include these
 repairs.
+
+## Stop policy follow-up
+
+After this audit, the user changed the earlier independent-child cancellation
+decision. The upstream cascade from `f32c23cf1` and child Lineage shortcut from
+`c5c6f9cb4` were ported into Test Rig. Stop now recursively stops app-owned
+delegated conversations, ends their PR watches, and suppresses pending result
+wakeups. Direct run-targeted late-Stop protection remains. Historical forks and
+settled-watch pause behavior are unchanged.
+
+The port keeps Test Rig's existing stalled-run repair and separate effect
+executor. Cross-provider background interruption and terminal-task cancellation
+are covered by regression tests. Independent server and client reviews passed.
+
+Live desktop verification used one parent, two app-owned children, and one
+grandchild. The Alpha shortcut stopped Alpha and its grandchild while the parent
+and Beta kept running. Parent Stop then interrupted the parent and Beta. Each
+conversation showed its interrupted run; read-only database checks confirmed all
+four runs interrupted and every provider-interrupt/cascade effect succeeded.
+The test used disposable sleep commands and did not edit project files.
+
+After this port, the full workspace suite passed **9,279 tests across 835 files**,
+with zero failures and the same single opt-in legacy V1 live test skipped. All
+10 workspace typechecks, full lint (zero errors, 323 warnings), formatting,
+whitespace checks, and the desktop build passed. This follow-up's logs are at
+`/tmp/test-rig-cascade-full-tests.log`, `-full-typecheck.log`, `-full-lint.log`,
+`-full-format.log`, and `-build.log` under the same filename prefix.

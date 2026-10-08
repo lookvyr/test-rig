@@ -30,6 +30,7 @@ import {
   GitForkIcon,
   MoreHorizontalIcon,
   PlusIcon,
+  SquareIcon,
   UnplugIcon,
 } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -49,6 +50,7 @@ import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadR
 
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { toastManager } from "../ui/toast";
 import { THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS } from "./threadDetailsPanelStyles";
 
 // Lineage paging: a busy thread can accumulate dozens of forks and subagents,
@@ -223,6 +225,8 @@ export function ThreadRelationshipsPanel(props: {
   const currentProject = projects.find((project) => project.id === currentThread?.projectId);
   const navigate = useNavigate();
   const stopSession = useAtomCommand(threadEnvironment.stopSession);
+  const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn, { reportFailure: false });
+  const [stoppingThreadId, setStoppingThreadId] = useState<ThreadId | null>(null);
   const [busyAction, setBusyAction] = useState<"detach" | null>(null);
   const relationshipRows = useMemo(
     () =>
@@ -267,6 +271,19 @@ export function ThreadRelationshipsPanel(props: {
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(scopeThreadRef(props.environmentId, threadId)),
     });
+  };
+
+  const stopSubagent = async (childThreadId: ThreadId) => {
+    if (stoppingThreadId !== null) return;
+    setStoppingThreadId(childThreadId);
+    const result = await interruptTurn({
+      environmentId: props.environmentId,
+      input: { threadId: childThreadId },
+    });
+    setStoppingThreadId(null);
+    if (result._tag === "Failure") {
+      toastManager.add({ type: "error", title: "Could not stop subagent" });
+    }
   };
 
   const detach = async () => {
@@ -328,6 +345,10 @@ export function ThreadRelationshipsPanel(props: {
                 isSubagent && !isParent ? subagentsByThreadId.get(threadId) : undefined,
                 node?.thread,
               );
+              const canStop =
+                agent?.origin === "app_owned" &&
+                agent.startedAt &&
+                ["pending", "running", "waiting"].includes(agent.status);
               const threadTitle = relationshipThreadTitle({
                 title: node?.thread?.title ?? agent?.title ?? threadId,
                 isSubagent,
@@ -379,7 +400,9 @@ export function ThreadRelationshipsPanel(props: {
                   </span>
                   {agent ? (
                     agent.startedAt ? (
-                      <span className="shrink-0 text-2xs font-normal tabular-nums text-muted-foreground">
+                      <span
+                        className={`shrink-0 text-2xs font-normal tabular-nums text-muted-foreground ${canStop ? "group-hover:opacity-0 group-focus-within:opacity-0 pointer-coarse:opacity-0 [@media(hover:none)]:opacity-0" : ""}`}
+                      >
                         <AgentElapsed agent={agent} />
                       </span>
                     ) : null
@@ -392,7 +415,7 @@ export function ThreadRelationshipsPanel(props: {
                 </>
               );
               return (
-                <li key={threadId} className="group flex h-9 items-center rounded-lg">
+                <li key={threadId} className="group relative flex h-9 items-center rounded-lg">
                   <Tooltip>
                     <TooltipTrigger
                       delay={200}
@@ -410,6 +433,28 @@ export function ThreadRelationshipsPanel(props: {
                     </TooltipTrigger>
                     <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
                   </Tooltip>
+                  {canStop && agent ? (
+                    <div className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <ThreadDetailsControl
+                              size="icon-xs"
+                              variant="ghost"
+                              part="icon"
+                              tone="destructive"
+                              aria-label={`Stop subagent ${threadTitle}`}
+                              disabled={stoppingThreadId !== null}
+                              onClick={() => void stopSubagent(threadId)}
+                            />
+                          }
+                        >
+                          <SquareIcon aria-hidden className="size-3 fill-current" />
+                        </TooltipTrigger>
+                        <TooltipPopup side="left">Stop subagent</TooltipPopup>
+                      </Tooltip>
+                    </div>
+                  ) : null}
                 </li>
               );
             })

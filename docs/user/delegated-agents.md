@@ -69,8 +69,18 @@ do not inherit these labels from the parent's settings.
 
 ## Stopping delegated work
 
-Stopping the parent prevents its current delegation round from automatically
-waking it with results. App-owned children are separate conversations and can
-continue running. To stop a particular child, ask the parent to cancel that task,
-or open the child and choose Stop. Cancelling a child does not recursively cancel
-its own delegated children; stop those separately when needed.
+Stopping the parent stops its app-owned delegated children and their delegated
+children recursively. It also ends those conversations' pull request watches
+and prevents pending delegated results from automatically waking them again.
+Independent historical forks are not part of this cancellation tree.
+
+To stop one child, use its Stop button in the Agents tab's Lineage list, open
+the child and choose Stop, or ask the parent to cancel that task. The button
+appears when you hover or focus an active app-owned child and stays visible on
+touch devices. Stopping one child also stops its descendants; the parent and
+siblings continue working.
+
+Cancelling an already completed task also stops later work in its child
+conversation. Its published result remains available. Provider-native subagents
+follow their provider's interruption behavior and do not have this Lineage
+shortcut.

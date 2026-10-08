@@ -414,17 +414,10 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
       ),
     ),
   );
-  const threadManagementProvided = Layer.unwrap(
-    Effect.gen(function* () {
-      const orchestrator = yield* Orchestrator.OrchestratorV2;
-      return Layer.mock(ThreadManagementService.ThreadManagementService)({
-        dispatch: orchestrator.dispatch,
-        getThreadRecords: orchestrator.getThreadRecords,
-        getThreadProjection: orchestrator.getThreadProjection,
-        recoverDelegatedTask: orchestrator.recoverDelegatedTask,
-      });
-    }),
-  ).pipe(Layer.provide(orchestratorProvided));
+  const threadManagementProvided = ThreadManagementService.layer.pipe(
+    Layer.provide(Layer.mergeAll(orchestratorProvided, storesLayer, serverConfigLayer)),
+    Layer.provide(NodeServices.layer),
+  );
   const continuationWorkerProvided =
     options.runContinuationWorker === true
       ? ProviderContinuationService.workerLive.pipe(

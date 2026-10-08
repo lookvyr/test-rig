@@ -98,6 +98,10 @@ The pull request stays linked to the conversation.
 Settling the conversation pauses its watch; the details panel shows that paused
 state and still lets you stop watching.
 
+Choosing **Stop** for the conversation ends its watches and recursively stops
+its app-owned delegated conversations and their watches. The pull request links
+remain. Start a new watch explicitly when you want monitoring to resume.
+
 An active watch reports comments and edits from other accounts, including replies
 in review threads. A newly added required check produces an update when it passes,
 even if the watch never saw it running. Incomplete comment reads wait for a complete
