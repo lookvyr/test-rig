@@ -2125,6 +2125,16 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         yield* Deferred.await(processed);
       });
       const offeredMessages: Array<SDKUserMessage> = [];
+      const promptIndices = new Map<string, number>();
+      const promptUuid = (index: number) => {
+        const uuid = offeredMessages[index]?.uuid;
+        assert.isDefined(uuid);
+        return uuid!;
+      };
+      const promptUuidForAttempt = (attemptId: string) => {
+        if (!promptIndices.has(attemptId)) promptIndices.set(attemptId, promptIndices.size);
+        return promptUuid(promptIndices.get(attemptId)!);
+      };
       const continuationRequests: Array<ProviderContinuationRequest> = [];
       const terminalReceipts =
         yield* Queue.unbounded<Extract<ProviderAdapterV2Event, { type: "turn.terminal" }>>();
@@ -2242,6 +2252,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         processQueues,
         offerAndWait,
         offeredMessages,
+        promptUuid,
+        promptUuidForAttempt,
         continuationRequests,
         events,
         terminalReceipts,
@@ -4312,7 +4324,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const stamp = (frame: SDKMessage, attemptId: RunAttemptId) =>
             claudeSdkFrame({
               ...frame,
-              user_message_uuid: ClaudeAdapterV2.claudePromptUuid(attemptId),
+              user_message_uuid: harness.promptUuidForAttempt(attemptId),
             });
           const runOf = (attemptId: RunAttemptId) => RunId.make(`run-${attemptId}`);
           const planToolUse = claudeSdkFrame({
@@ -4528,7 +4540,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const stamp = (frame: SDKMessage, attemptId: RunAttemptId) =>
           claudeSdkFrame({
             ...frame,
-            user_message_uuid: ClaudeAdapterV2.claudePromptUuid(attemptId),
+            user_message_uuid: harness.promptUuidForAttempt(attemptId),
           });
 
         yield* harness.runtime.startTurn(
@@ -4651,7 +4663,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const stamp = (frame: SDKMessage, attemptId: RunAttemptId) =>
           claudeSdkFrame({
             ...frame,
-            user_message_uuid: ClaudeAdapterV2.claudePromptUuid(attemptId),
+            user_message_uuid: harness.promptUuidForAttempt(attemptId),
           });
 
         yield* harness.runtime.startTurn(
@@ -4749,7 +4761,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const stamp = (frame: SDKMessage, attemptId: RunAttemptId) =>
           claudeSdkFrame({
             ...frame,
-            user_message_uuid: ClaudeAdapterV2.claudePromptUuid(attemptId),
+            user_message_uuid: harness.promptUuidForAttempt(attemptId),
           });
         const assistantTexts = () =>
           harness.events.flatMap((event) =>
@@ -4770,10 +4782,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             attachments: [],
           }),
         );
-        assert.equal(
-          harness.offeredMessages[0]?.uuid,
-          ClaudeAdapterV2.claudePromptUuid(firstAttempt),
-        );
+        assert.equal(harness.offeredMessages[0]?.uuid, harness.promptUuidForAttempt(firstAttempt));
         yield* Queue.offer(
           harness.sdkMessages,
           stamp(
@@ -4815,6 +4824,118 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         yield* awaitUntil(() => harness.terminalEvents().length === 2, "second turn terminal");
         assert.deepEqual(assistantTexts(), ["One.", "Two."]);
         assert.equal(harness.terminalEvents()[1]?.status, "failed");
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
+  it.effect("gives the same run attempt a fresh prompt uuid on every offer", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Two servers sharing a database copy allocate identical run attempt
+        // ids and resume the same Claude session. Claude acks a prompt whose
+        // uuid its transcript already holds without ever running a turn.
+        const original = yield* makeWakeHarness;
+        const copy = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
+        for (const harness of [original, copy]) {
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make("attempt-claude-shared-copy"),
+              text: "Continue where you left off.",
+              attachments: [],
+            }),
+          );
+        }
+        assert.notEqual(original.promptUuid(0), copy.promptUuid(0));
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
+  it.effect("fails a prompt Claude completes without starting a turn for it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Claude answers a prompt whose uuid its transcript already holds with
+        // a lone completed lifecycle frame and never runs a turn for it.
+        const harness = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-duplicate-prompt"),
+            text: "Bump this PR to the latest main.",
+            attachments: [],
+          }),
+        );
+        yield* Queue.offer(
+          harness.sdkMessages,
+          claudeSdkFrame({
+            type: "command_lifecycle",
+            command_uuid: harness.promptUuid(0),
+            state: "completed",
+            uuid: "00000000-0000-4000-8000-000000000790",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        yield* awaitUntil(() => harness.terminalEvents().length === 1, "turn terminal");
+        const [terminal] = harness.terminalEvents();
+        assert.equal(terminal?.status, "failed");
+        if (terminal?.status !== "failed") return;
+        assert.equal(terminal.threadDisposition, "reusable");
+        assert.include(terminal.failure.message, "never started a turn");
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
+  it.effect("keeps a started prompt running until its result", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-started-prompt"),
+            text: "Bump this PR to the latest main.",
+            attachments: [],
+          }),
+        );
+        const lifecycle = (state: string, uuid: string) =>
+          claudeSdkFrame({
+            type: "command_lifecycle",
+            command_uuid: harness.promptUuid(0),
+            state,
+            uuid,
+            session_id: WAKE_NATIVE_SESSION,
+          });
+        yield* Queue.offer(
+          harness.sdkMessages,
+          lifecycle("queued", "00000000-0000-4000-8000-000000000791"),
+        );
+        yield* Queue.offer(
+          harness.sdkMessages,
+          lifecycle("started", "00000000-0000-4000-8000-000000000792"),
+        );
+        // The CLI can report the prompt completed before its turn's result.
+        yield* Queue.offer(
+          harness.sdkMessages,
+          lifecycle("completed", "00000000-0000-4000-8000-000000000793"),
+        );
+        yield* Queue.offer(
+          harness.sdkMessages,
+          claudeSdkFrame({
+            ...makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000794", result: "Done." }),
+            user_message_uuid: harness.promptUuid(0),
+          }),
+        );
+        yield* awaitUntil(() => harness.terminalEvents().length === 1, "turn terminal");
+        assert.equal(harness.terminalEvents()[0]?.status, "completed");
       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     ),
   );
@@ -5835,7 +5956,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const stamp = (frame: SDKMessage, attemptId: RunAttemptId) =>
           claudeSdkFrame({
             ...frame,
-            user_message_uuid: ClaudeAdapterV2.claudePromptUuid(attemptId),
+            user_message_uuid: harness.promptUuidForAttempt(attemptId),
           });
 
         yield* harness.runtime.startTurn(

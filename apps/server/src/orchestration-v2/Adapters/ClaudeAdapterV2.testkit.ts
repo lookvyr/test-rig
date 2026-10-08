@@ -1,3 +1,4 @@
+import * as NodeCrypto from "node:crypto";
 import {
   forkSession,
   query,
@@ -640,8 +641,7 @@ function makeReplayQueryRunner(
     },
   });
 
-  // Prompt uuids are derived from ids that differ between the recording and
-  // a replay run, so a matched prompt offer maps the recorded uuid to the
+  // Prompt uuids are fresh for each offer, so a matched prompt offer maps the recorded uuid to the
   // replayed one, and inbound frames echoing or acknowledging it are
   // rewritten to match.
   const promptUuidReplacements = new Map<string, string>();
@@ -1564,10 +1564,10 @@ async function recordClaudeStreamingQuery(input: {
   };
   try {
     for (const [index, prompt] of input.prompts.entries()) {
-      // Like the adapter, give each prompt a uuid Claude echoes on its turn.
+      // Like the adapter, give each prompt a fresh uuid Claude echoes on its turn.
       const message = ClaudeAdapterV2.makeClaudeUserMessage({
         text: prompt,
-        uuid: ClaudeAdapterV2.claudePromptUuid(`${input.sessionId}:prompt:${index + 1}`),
+        uuid: NodeCrypto.randomUUID(),
       });
       input.entries.push({
         type: "expect_outbound",
