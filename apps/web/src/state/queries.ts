@@ -13,6 +13,7 @@ import type {
   EnvironmentId,
   OrchestrationV2ThreadProjection,
   ProjectContentMatch,
+  ProjectEntry,
   ProjectEntryKind,
   ThreadId,
   TurnItemId,
@@ -38,6 +39,7 @@ const PROJECT_CONTENT_SEARCH_DEBOUNCE_MS = 120;
 const PROJECT_CONTENT_SEARCH_LIMIT = 500;
 const THREAD_SEARCH_DEBOUNCE_MS = 200;
 const VCS_REF_LIST_LIMIT = 100;
+const EMPTY_PROJECT_ENTRIES: ReadonlyArray<ProjectEntry> = [];
 const EMPTY_REFS: ReadonlyArray<VcsRef> = [];
 const EMPTY_CONTENT_MATCHES: ReadonlyArray<ProjectContentMatch> = [];
 const INITIAL_BRANCH_CURSORS = [undefined] as const;
@@ -288,7 +290,7 @@ export function useProjectPathSearch(
   );
 
   return {
-    entries: result.data?.entries ?? [],
+    entries: result.data?.entries ?? EMPTY_PROJECT_ENTRIES,
     error: result.error,
     isPending:
       !areProjectPathSearchTargetsEqual(normalizedTarget, debouncedTarget) || result.isPending,

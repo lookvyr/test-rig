@@ -3513,7 +3513,7 @@ function LiveActivityRow({
   const showShimmer = animated && shimmer;
   return (
     <div
-      ref={animated ? observeVisibleAnimation : undefined}
+      ref={showShimmer ? observeVisibleAnimation : undefined}
       className="relative min-h-6 w-fit max-w-full min-w-0 overflow-hidden rounded-md text-sm leading-relaxed"
     >
       <LiveActivityContent
@@ -3579,13 +3579,7 @@ function LiveActivityContent({
         ) : null
       }
       label={
-        <span
-          className={cn(
-            "block truncate",
-            highlighted && "text-foreground",
-            active && "live-tool-shine",
-          )}
-        >
+        <span className={cn("block truncate", (highlighted || active) && "text-foreground")}>
           {label}
         </span>
       }
@@ -3721,7 +3715,6 @@ function WorkGroupHeader(props: {
 }) {
   return (
     <WorkLogButton
-      ref={props.active && !props.failed ? observeVisibleAnimation : undefined}
       aria-label={props.failed ? `${props.label}, tool call failed` : props.label}
       aria-expanded={props.expanded}
       onClick={props.onToggle}
@@ -3734,7 +3727,7 @@ function WorkGroupHeader(props: {
         />
       }
       label={
-        <span className={cn("block truncate", props.active && !props.failed && "live-tool-shine")}>
+        <span className={cn("block truncate", props.active && !props.failed && "text-foreground")}>
           {props.label}
         </span>
       }
