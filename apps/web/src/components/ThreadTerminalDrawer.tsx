@@ -6,6 +6,7 @@ import {
 import { type TerminalSessionState } from "@t3tools/client-runtime/state/terminal";
 import {
   Plus,
+  PanelBottomClose,
   SquareSplitHorizontal,
   SquareSplitVertical,
   TerminalSquare,
@@ -31,7 +32,6 @@ import {
   useState,
 } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "~/components/ui/popover";
-import { confirmTerminalClose } from "~/lib/terminalCloseConfirm";
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { copyTerminalLinkFromContextMenu } from "~/terminal/linkContextMenu";
 import { cn } from "~/lib/utils";
@@ -949,6 +949,7 @@ interface ThreadTerminalDrawerProps {
   onSplitTerminal: () => void;
   onSplitTerminalVertical: () => void;
   onNewTerminal: () => void;
+  onHide?: () => void;
   splitShortcutLabel?: string | undefined;
   splitVerticalShortcutLabel?: string | undefined;
   newShortcutLabel?: string | undefined;
@@ -1010,6 +1011,7 @@ export default function ThreadTerminalDrawer({
   onSplitTerminal,
   onSplitTerminalVertical,
   onNewTerminal,
+  onHide,
   splitShortcutLabel,
   splitVerticalShortcutLabel,
   newShortcutLabel,
@@ -1023,6 +1025,7 @@ export default function ThreadTerminalDrawer({
   terminalLaunchLocationsById,
 }: ThreadTerminalDrawerProps) {
   const isPanel = mode === "panel";
+  const terminalTabsRef = useRef<HTMLDivElement>(null);
   const [advancedTypography] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,
     false,
@@ -1166,12 +1169,18 @@ export default function ThreadTerminalDrawer({
     return indexByTerminal >= 0 ? indexByTerminal : 0;
   }, [activeTerminalGroupId, resolvedActiveTerminalId, resolvedTerminalGroups]);
 
+  useEffect(() => {
+    terminalTabsRef.current
+      ?.querySelector('[aria-pressed="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [resolvedActiveGroupIndex, resolvedTerminalGroups.length]);
+
   const visibleTerminalIds =
     resolvedTerminalGroups[resolvedActiveGroupIndex]?.terminalIds ??
     (normalizedTerminalIds.length > 0 ? [resolvedActiveTerminalId] : []);
   const splitDirection =
     resolvedTerminalGroups[resolvedActiveGroupIndex]?.splitDirection ?? "horizontal";
-  const hasTerminalSidebar = normalizedTerminalIds.length > 1;
+  const hasTerminalSidebar = isPanel && normalizedTerminalIds.length > 1;
   const isSplitView = visibleTerminalIds.length > 1;
   const showGroupHeaders =
     resolvedTerminalGroups.length > 1 ||
@@ -1197,12 +1206,12 @@ export default function ThreadTerminalDrawer({
     [cwd, runtimeEnv, terminalLaunchLocationsById, worktreePath],
   );
   const splitTerminalActionLabel = hasReachedSplitLimit
-    ? `Split Terminal Horizontally (max ${MAX_TERMINALS_PER_GROUP} per group)`
+    ? `Split Terminal Horizontally (max ${MAX_TERMINALS_PER_GROUP} per tab)`
     : splitShortcutLabel
       ? `Split Terminal Horizontally (${splitShortcutLabel})`
       : "Split Terminal Horizontally";
   const splitTerminalVerticalActionLabel = hasReachedSplitLimit
-    ? `Split Terminal Vertically (max ${MAX_TERMINALS_PER_GROUP} per group)`
+    ? `Split Terminal Vertically (max ${MAX_TERMINALS_PER_GROUP} per tab)`
     : splitVerticalShortcutLabel
       ? `Split Terminal Vertically (${splitVerticalShortcutLabel})`
       : "Split Terminal Vertically";
@@ -1359,13 +1368,6 @@ export default function ThreadTerminalDrawer({
     );
   }
 
-  const confirmCloseTerminal = (terminalId: string) => {
-    void confirmTerminalClose([
-      terminalLabelById.get(terminalId) ?? getTerminalLabel(terminalId),
-    ]).then((confirmed) => {
-      if (confirmed) onCloseTerminal(terminalId);
-    });
-  };
   const activeTerminalLaunchLocation = resolveTerminalLaunchLocation(resolvedActiveTerminalId);
 
   return (
@@ -1387,7 +1389,89 @@ export default function ThreadTerminalDrawer({
         />
       ) : null}
 
-      {!hasTerminalSidebar && (
+      {!isPanel && (
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/60 px-2 pt-1">
+          <div
+            ref={terminalTabsRef}
+            role="group"
+            aria-label="Terminal tabs"
+            className="flex min-w-0 items-center gap-1 overflow-x-auto"
+          >
+            {resolvedTerminalGroups.map((terminalGroup, index) => {
+              const active = index === resolvedActiveGroupIndex;
+              const terminalId = active ? resolvedActiveTerminalId : terminalGroup.terminalIds[0]!;
+              const labels = terminalGroup.terminalIds.map(
+                (id) => terminalLabelById.get(id) ?? getTerminalLabel(id),
+              );
+              const label = labels.join(" · ");
+              return (
+                <div
+                  key={terminalGroup.id}
+                  className={cn(
+                    "group flex h-8 min-w-24 max-w-64 shrink-0 items-center gap-1 rounded-md border px-2 text-xs",
+                    active
+                      ? "border-border/70 bg-accent text-foreground"
+                      : "border-transparent text-muted-foreground hover:bg-accent/50",
+                  )}
+                >
+                  <button
+                    type="button"
+                    aria-pressed={active}
+                    title={label}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                    onClick={() => onActiveTerminalChange(terminalId)}
+                  >
+                    <TerminalSquare className="size-3.5 shrink-0" />
+                    <span className="truncate">{label}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Close ${label} tab`}
+                    title={`Close ${label} tab`}
+                    className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground focus-visible:opacity-100"
+                    onClick={() => terminalGroup.terminalIds.forEach(onCloseTerminal)}
+                  >
+                    <XIcon className="size-3" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <TerminalActionButton
+            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={onNewTerminalAction}
+            label={newTerminalActionLabel}
+          >
+            <Plus className="size-4" />
+          </TerminalActionButton>
+          <div className="flex-1" />
+          <TerminalActionButton
+            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={onSplitTerminalAction}
+            label={splitTerminalActionLabel}
+          >
+            <SquareSplitHorizontal className="size-3.5" />
+          </TerminalActionButton>
+          <TerminalActionButton
+            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={onSplitTerminalVerticalAction}
+            label={splitTerminalVerticalActionLabel}
+          >
+            <SquareSplitVertical className="size-3.5" />
+          </TerminalActionButton>
+          {onHide && (
+            <TerminalActionButton
+              className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={onHide}
+              label="Hide terminal panel"
+            >
+              <PanelBottomClose className="size-3.5" />
+            </TerminalActionButton>
+          )}
+        </div>
+      )}
+
+      {isPanel && !hasTerminalSidebar && (
         <div className="pointer-events-none absolute right-2 top-2 z-20">
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
             <TerminalActionButton
@@ -1424,7 +1508,7 @@ export default function ThreadTerminalDrawer({
             <div className="h-4 w-px bg-border/80" />
             <TerminalActionButton
               className="p-1 text-foreground/90 transition-colors hover:bg-accent"
-              onClick={() => confirmCloseTerminal(resolvedActiveTerminalId)}
+              onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
               label={closeTerminalActionLabel}
             >
               <Trash2 className="size-3.25" />
@@ -1469,28 +1553,45 @@ export default function ThreadTerminalDrawer({
                         }
                       }}
                     >
-                      <div className="h-full p-1">
-                        <TerminalViewport
-                          advancedTypography={advancedTypography}
-                          threadRef={threadRef}
-                          threadId={threadId}
-                          terminalId={terminalId}
-                          terminalLabel={terminalLabelById.get(terminalId) ?? "Terminal"}
-                          cwd={terminalLaunchLocation.cwd}
-                          {...(terminalLaunchLocation.worktreePath !== undefined
-                            ? { worktreePath: terminalLaunchLocation.worktreePath }
-                            : {})}
-                          {...(terminalLaunchLocation.runtimeEnv
-                            ? { runtimeEnv: terminalLaunchLocation.runtimeEnv }
-                            : {})}
-                          onSessionExited={() => onCloseTerminal(terminalId)}
-                          onAddTerminalContext={onAddTerminalContext}
-                          focusRequestId={focusRequestId}
-                          autoFocus={terminalId === resolvedActiveTerminalId}
-                          resizeEpoch={resizeEpoch}
-                          drawerHeight={drawerHeight}
-                          keybindings={keybindings}
-                        />
+                      <div className="flex h-full min-h-0 flex-col p-1">
+                        {!isPanel && (
+                          <div className="flex h-6 shrink-0 items-center justify-between px-1 text-xs text-muted-foreground">
+                            <span className="truncate">
+                              {terminalLabelById.get(terminalId) ?? "Terminal"}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`Close ${terminalLabelById.get(terminalId) ?? "terminal"} pane`}
+                              className="rounded p-1 hover:bg-accent hover:text-foreground"
+                              onClick={() => onCloseTerminal(terminalId)}
+                            >
+                              <XIcon className="size-3" />
+                            </button>
+                          </div>
+                        )}
+                        <div className="min-h-0 flex-1">
+                          <TerminalViewport
+                            advancedTypography={advancedTypography}
+                            threadRef={threadRef}
+                            threadId={threadId}
+                            terminalId={terminalId}
+                            terminalLabel={terminalLabelById.get(terminalId) ?? "Terminal"}
+                            cwd={terminalLaunchLocation.cwd}
+                            {...(terminalLaunchLocation.worktreePath !== undefined
+                              ? { worktreePath: terminalLaunchLocation.worktreePath }
+                              : {})}
+                            {...(terminalLaunchLocation.runtimeEnv
+                              ? { runtimeEnv: terminalLaunchLocation.runtimeEnv }
+                              : {})}
+                            onSessionExited={() => onCloseTerminal(terminalId)}
+                            onAddTerminalContext={onAddTerminalContext}
+                            focusRequestId={focusRequestId}
+                            autoFocus={terminalId === resolvedActiveTerminalId}
+                            resizeEpoch={resizeEpoch}
+                            drawerHeight={drawerHeight}
+                            keybindings={keybindings}
+                          />
+                        </div>
                       </div>
                     </div>
                   );
@@ -1559,7 +1660,7 @@ export default function ThreadTerminalDrawer({
                   </TerminalActionButton>
                   <TerminalActionButton
                     className="inline-flex h-full items-center border-l border-border/70 px-1 text-foreground/90 transition-colors hover:bg-accent/70"
-                    onClick={() => confirmCloseTerminal(resolvedActiveTerminalId)}
+                    onClick={() => onCloseTerminal(resolvedActiveTerminalId)}
                     label={closeTerminalActionLabel}
                   >
                     <Trash2 className="size-3.25" />
@@ -1629,7 +1730,7 @@ export default function ThreadTerminalDrawer({
                                       <button
                                         type="button"
                                         className="inline-flex size-3.5 items-center justify-center rounded text-xs font-medium leading-none text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100"
-                                        onClick={() => confirmCloseTerminal(terminalId)}
+                                        onClick={() => onCloseTerminal(terminalId)}
                                         aria-label={closeTerminalLabel}
                                       />
                                     }

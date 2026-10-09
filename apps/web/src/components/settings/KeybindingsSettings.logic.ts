@@ -266,6 +266,9 @@ export function buildKeybindingCommandOptions(
 }
 
 export function commandLabel(command: KeybindingCommand): string {
+  if (command === "rightPanel.toggleMaximized") return "Right Panel: Toggle Full View";
+  if (command === "terminal.previousGroup") return "Terminal: Previous Tab";
+  if (command === "terminal.nextGroup") return "Terminal: Next Tab";
   if (command === "diff.toggle") return "Review: Toggle";
   if (command === "threadPanel.toggle") return "Thread Details: Toggle";
   if (command === "view.reopenClosed") return "Reopen Closed View";

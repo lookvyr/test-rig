@@ -3,7 +3,6 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useThreadDetailsStore } from "../threadDetailsStore";
 import { useClosedViewStore } from "../closedViewStore";
 import { planNextReopen, reopenClosedView } from "../reopenClosedView";
-import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
 import { useBrowserProfiles } from "../browser/browserDefaults";
 import { previewRuntimeTabId } from "../browser/previewRuntimeTabId";
 import { previewBridge } from "./preview/previewBridge";
@@ -913,6 +912,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         onSplitTerminal={splitTerminal}
         onSplitTerminalVertical={splitTerminalVertical}
         onNewTerminal={createNewTerminal}
+        onHide={() => useTerminalUiStateStore.getState().setTerminalOpen(threadRef, false)}
         splitShortcutLabel={visible ? splitShortcutLabel : undefined}
         splitVerticalShortcutLabel={visible ? splitVerticalShortcutLabel : undefined}
         newShortcutLabel={visible ? newShortcutLabel : undefined}
@@ -3650,18 +3650,8 @@ function ChatViewContent(props: ChatViewProps) {
     }
   }, [activeThreadRef]);
   const closeRightPanelSurfaces = useCallback(
-    async (surfaces: readonly RightPanelSurface[], confirmTerminals = false) => {
+    async (surfaces: readonly RightPanelSurface[]) => {
       if (!activeThreadRef) return;
-      if (confirmTerminals) {
-        if (isTerminalCloseConfirmPending()) return;
-        const labels = surfaces.flatMap((surface) =>
-          surface.kind === "terminal"
-            ? surface.terminalIds.map((id) => activeTerminalLabelsById.get(id) ?? id)
-            : [],
-        );
-        const first = labels[0];
-        if (first && !(await confirmTerminalClose([first, ...labels.slice(1)]))) return;
-      }
       if (surfaces.some((surface) => surface.kind === "side-chat") && sideThreadRef) {
         if (!(await discardSideChat())) return;
       }
@@ -3673,7 +3663,6 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [
       activeThreadRef,
-      activeTerminalLabelsById,
       sideThreadRef,
       discardSideChat,
       cleanupRightPanelSurfaces,
@@ -3682,7 +3671,7 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const closeRightPanelSurface = useCallback(
     (surface: RightPanelSurface) => {
-      void closeRightPanelSurfaces([surface], true);
+      void closeRightPanelSurfaces([surface]);
     },
     [closeRightPanelSurfaces],
   );
@@ -4825,6 +4814,7 @@ function ChatViewContent(props: ChatViewProps) {
         terminalOpen: Boolean(terminalUiState.terminalOpen),
         previewFocus: isPreviewFocused(),
         previewOpen: previewPanelOpen,
+        rightPanelOpen,
         modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
       };
 
@@ -4961,6 +4951,13 @@ function ChatViewContent(props: ChatViewProps) {
         if (!event.repeat) void restoreLastClosedView();
         return;
       }
+      if (command === "rightPanel.toggleMaximized") {
+        if (!rightPanelOpen) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) toggleRightPanelMaximized();
+        return;
+      }
       if (command === "rightPanel.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -5011,19 +5008,15 @@ function ChatViewContent(props: ChatViewProps) {
       if (command === "terminal.close") {
         event.preventDefault();
         event.stopPropagation();
-        if (event.repeat || isTerminalCloseConfirmPending()) return;
+        if (event.repeat) return;
         const panelTerminalId =
           terminalFocusOwner === "right-panel" && activeRightPanelSurface?.kind === "terminal"
             ? activeRightPanelSurface.activeTerminalId
             : null;
         if (panelTerminalId === null && !terminalUiState.terminalOpen) return;
         const terminalId = panelTerminalId ?? terminalUiState.activeTerminalId;
-        const label = activeTerminalLabelsById.get(terminalId) ?? terminalId;
-        void confirmTerminalClose([label]).then((confirmed) => {
-          if (!confirmed) return;
-          if (panelTerminalId !== null) closePanelTerminal(terminalId);
-          else closeTerminal(terminalId);
-        });
+        if (panelTerminalId !== null) closePanelTerminal(terminalId);
+        else closeTerminal(terminalId);
         return;
       }
 
@@ -5113,6 +5106,7 @@ function ChatViewContent(props: ChatViewProps) {
     keybindings,
     onToggleDiff,
     toggleRightPanel,
+    toggleRightPanelMaximized,
     toggleTerminalVisibility,
     composerRef,
   ]);
@@ -6334,6 +6328,7 @@ function ChatViewContent(props: ChatViewProps) {
       {rightPanelOpen && !shouldUseRightPanelSheet ? (
         <RightPanelMaximizeControl
           maximized={rightPanelMaximized}
+          shortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggleMaximized")}
           onToggle={toggleRightPanelMaximized}
         />
       ) : null}

@@ -81,13 +81,19 @@ shortcut; assign one in **Settings** → **Keybindings**.
 ## Thread and panel shortcuts
 
 With the bottom terminal focused, **Cmd+Option+Up/Down** on macOS or
-**Ctrl+Alt+Up/Down** on Windows/Linux selects the previous/next terminal group.
-Groups follow their displayed order and wrap at either end. A single group stays
-unchanged; switching groups focuses the first terminal in the destination group.
-These commands are `terminal.previousGroup` and `terminal.nextGroup`, configurable
-in **Settings** → **Keybindings**. Their defaults use `when: "terminalFocus"`, so
+**Ctrl+Alt+Up/Down** on Windows/Linux selects the previous/next terminal tab.
+Tabs follow their displayed order and wrap at either end. A single tab stays
+unchanged; switching tabs focuses its terminal, or the first pane in a split tab.
+Find **Terminal: Previous Tab** and **Terminal: Next Tab** in **Settings** → **Keybindings**
+to customize them. Existing `terminal.previousGroup` and `terminal.nextGroup` bindings continue to work. Their defaults use `when: "terminalFocus"`, so
 the same keys can be assigned another action with `when: "!terminalFocus"`.
 Right-panel terminals retain the separate Left/Right tab shortcuts below.
+
+**Cmd+Shift+F** on macOS or **Ctrl+Shift+F** elsewhere toggles the open right panel
+between its normal width and full view, keeping the left sidebar visible. It works
+from the chat, terminal, and embedded browser. With the right panel hidden and focus outside a terminal, the
+same shortcut opens project search. Customize **Right Panel: Toggle Full View**
+(`rightPanel.toggleMaximized`) in Settings → Keybindings.
 
 - `mod+shift+p` (`thread.pin`) pins or unpins the active thread.
 - `mod+shift+s` (`thread.settle`) settles the active thread or restores it to active. Threads that are running or waiting for input cannot be settled.
@@ -121,14 +127,13 @@ To copy a link without selecting text first, right-click it and choose **Copy Li
 `ctrl+c` still interrupts the running terminal command.
 
 Right-click anywhere in a terminal and choose **Paste** to send clipboard text
-to that terminal. Closing an individual terminal asks for confirmation; Cancel keeps it
-running. Bulk tab-close actions and automatic cleanup after a session exits do
-not ask.
+to that terminal. Closing a terminal immediately stops its process and clears its
+history. Hiding the terminal panel keeps its sessions running.
 
 ## `when` Conditions
 
 A `when` expression is evaluated against context keys describing the current UI state. The keys
-the app supplies today are `terminalFocus`, `terminalOpen`, `previewFocus`, `previewOpen`, and
+the app supplies today are `terminalFocus`, `terminalOpen`, `previewFocus`, `previewOpen`, `rightPanelOpen`, and
 `modelPickerOpen`, and `pullRequestsView`. The set is open and grows over time, so treat that as the current list rather
 than a fixed one. Any key the running app does not supply evaluates to `false`.
 

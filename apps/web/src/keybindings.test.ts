@@ -958,6 +958,36 @@ describe("thread and panel default shortcuts", () => {
       }
     });
 
+    it(`toggles full panel view without stealing project search when closed on ${platform}`, () => {
+      const shortcut = event({
+        key: "f",
+        shiftKey: true,
+        ...(platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true }),
+      });
+      for (const focus of [{}, { previewFocus: true }, { terminalFocus: true }]) {
+        assert.strictEqual(
+          resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+            context: { ...focus, rightPanelOpen: true },
+          }),
+          "rightPanel.toggleMaximized",
+        );
+      }
+      assert.strictEqual(
+        resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { rightPanelOpen: false },
+        }),
+        "projectSearch.toggle",
+      );
+      assert.isNull(
+        resolveShortcutCommand(shortcut, DEFAULT_RESOLVED_KEYBINDINGS, {
+          platform,
+          context: { rightPanelOpen: false, terminalFocus: true },
+        }),
+      );
+    });
+
     it(`opens browser tabs from chat, browser, or terminal focus on ${platform}`, () => {
       const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
       const shortcut = event({ ...modifier, key: "t" });

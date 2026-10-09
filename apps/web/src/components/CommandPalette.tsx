@@ -96,7 +96,11 @@ import { openCommandPalette, onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { useThreadDetailsStore } from "../threadDetailsStore";
-import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
+import {
+  selectActiveRightPanel,
+  selectThreadRightPanelState,
+  useRightPanelStore,
+} from "../rightPanelStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import { cn, isMacPlatform, isWindowsPlatform, newProjectId } from "../lib/utils";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -423,6 +427,9 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+  const rightPanelOpen = useRightPanelStore((state) =>
+    routeThreadRef ? selectThreadRightPanelState(state.byThreadKey, routeThreadRef).isOpen : false,
+  );
   const previewOpen = useRightPanelStore((state) =>
     routeThreadRef
       ? selectActiveRightPanel(state.byThreadKey, routeThreadRef) === "preview"
@@ -452,6 +459,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           terminalOpen,
           previewFocus: isPreviewFocused(),
           previewOpen,
+          rightPanelOpen,
         },
       });
       if (command === "themeEditor.toggle") {
@@ -485,6 +493,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     keybindings,
     navigate,
     previewOpen,
+    rightPanelOpen,
     resolvedTheme,
     setOpen,
     terminalOpen,

@@ -9,6 +9,10 @@ files, and side chats. Closing the last tab hides the panel. If the panel is ope
 with no tabs, Command-W hides it. When a terminal is focused, Command-W closes
 that terminal instead. On Windows and Linux, use Ctrl in place of Command.
 
+With the right panel open, **Command-Shift-F** toggles full view while keeping the
+left sidebar visible. Press it again to restore the panel width. On Windows and
+Linux, use Ctrl instead of Command.
+
 Enter a website address or search terms in the browser's address bar, then press
 Enter. Search terms open Google results in the current tab. Searches are sent
 only when you submit them; typing does not request search suggestions.

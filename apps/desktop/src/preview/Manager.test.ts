@@ -86,6 +86,23 @@ describe("isPreviewAppShortcut", () => {
       }
     });
 
+    it(`forwards full-view toggling with the ${platform} modifier`, () => {
+      const input = {
+        type: "keyDown",
+        key: "F",
+        meta: platform === "darwin",
+        control: platform !== "darwin",
+        shift: true,
+        alt: false,
+      } as Electron.Input;
+      expect(PreviewManager.isPreviewAppShortcut(input, platform)).toBe(true);
+      expect(PreviewManager.isPreviewAppShortcut({ ...input, shift: false }, platform)).toBe(false);
+      expect(PreviewManager.isPreviewAppShortcut({ ...input, alt: true }, platform)).toBe(false);
+      expect(PreviewManager.isPreviewAppShortcut({ ...input, type: "keyUp" }, platform)).toBe(
+        false,
+      );
+    });
+
     it(`forwards browser tab shortcuts with the ${platform} modifier`, () => {
       for (const key of ["t", "w"]) {
         const input = {

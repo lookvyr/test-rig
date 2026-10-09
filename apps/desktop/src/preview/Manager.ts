@@ -407,6 +407,7 @@ const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
   // mod+T → new browser tab
   { key: "t", shift: false },
   { key: "t", shift: true },
+  { key: "f", shift: true },
   { key: "arrowleft", shift: false, alt: true },
   { key: "arrowright", shift: false, alt: true },
 ]);
