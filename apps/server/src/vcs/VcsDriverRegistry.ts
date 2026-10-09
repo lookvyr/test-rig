@@ -3,7 +3,10 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 
 import type { VcsDriverKind, VcsError, VcsRepositoryIdentity } from "@t3tools/contracts";
 import { VcsUnsupportedOperationError } from "@t3tools/contracts";
@@ -12,7 +15,10 @@ import * as VcsProjectConfig from "./VcsProjectConfig.ts";
 import * as VcsDriver from "./VcsDriver.ts";
 
 const DETECTION_CACHE_CAPACITY = 2_048;
-const DETECTION_CACHE_TTL = Duration.seconds(2);
+// Status polls detect every open cwd each tick, and detection costs three git
+// processes. `detect` re-checks each hit against the disk, so this TTL only
+// bounds rare changes those stats cannot see.
+const DETECTION_CACHE_TTL = Duration.minutes(5);
 
 export interface VcsDriverResolveInput {
   readonly cwd: string;
@@ -61,6 +67,8 @@ function parseDetectionCacheKey(key: string): {
 }
 
 export const make = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const projectConfig = yield* VcsProjectConfig.VcsProjectConfig;
   const git = yield* GitVcsDriver.makeVcsDriver;
   const drivers: Partial<Record<VcsDriverKind, VcsDriver.VcsDriver["Service"]>> = {
@@ -111,8 +119,80 @@ export const make = Effect.gen(function* () {
     return yield* detectWithDriver("git", git, input.cwd);
   });
 
-  const detectionCache = yield* Cache.makeWith<string, VcsDriverHandle | null, VcsError>(
-    (key) => detectResolvedKind(parseDetectionCacheKey(key)),
+  // Include the root's marker: a linked worktree's shared metadata can survive
+  // removal of its own `.git` file. Intermediate markers catch nested git init.
+  const foldersThroughRoot = (cwd: string, rootPath: string) => {
+    const relative = path.relative(path.resolve(rootPath), path.resolve(cwd));
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+      return [cwd, rootPath];
+    const depth = relative === "" ? 0 : relative.split(path.sep).length;
+    return Array.from({ length: depth + 1 }, (_, levelsUp) =>
+      path.resolve(cwd, ...Array<string>(levelsUp).fill("..")),
+    );
+  };
+
+  // Directory writes (commits, locks, refs) do not change repository identity.
+  // Gitfiles also need size/mtime so retargeting one invalidates the cached answer.
+  const diskIdentity = (target: string) =>
+    fileSystem.stat(target).pipe(
+      Effect.map((stat) =>
+        [
+          stat.type,
+          stat.dev,
+          Option.getOrNull(stat.ino),
+          Option.getOrNull(Option.map(stat.birthtime, (date) => date.getTime())),
+          ...(stat.type === "Directory"
+            ? []
+            : [stat.size, Option.getOrNull(Option.map(stat.mtime, (date) => date.getTime()))]),
+        ].join(":"),
+      ),
+      Effect.catch((error) =>
+        error.reason._tag === "NotFound" ? Effect.succeed(null) : Effect.fail(error),
+      ),
+    );
+
+  // What `detect` re-checks on every cache hit, using stats instead of git.
+  const readDiskState = Effect.fn("VcsDriverRegistry.readDiskState")(
+    function* (cwd: string, repository: VcsRepositoryIdentity) {
+      // Git reports a physical root, including for /tmp aliases on macOS.
+      // Traverse the same physical path so intermediate git init remains visible.
+      const physicalCwd = yield* fileSystem.realPath(cwd);
+      return yield* Effect.all({
+        gitEntries: Effect.forEach(foldersThroughRoot(physicalCwd, repository.rootPath), (folder) =>
+          diskIdentity(path.join(folder, ".git")),
+        ),
+        repositoryEntries: Effect.forEach(
+          repository.metadataPath === null
+            ? [cwd]
+            : [cwd, path.resolve(cwd, repository.metadataPath)],
+          diskIdentity,
+        ),
+      });
+    },
+    Effect.orElseSucceed(() => null),
+  );
+
+  const detectionCache = yield* Cache.makeWith<
+    string,
+    {
+      readonly handle: VcsDriverHandle;
+      readonly gitEntries: ReadonlyArray<string | null>;
+      readonly repositoryEntries: ReadonlyArray<string | null>;
+    } | null,
+    VcsError
+  >(
+    (key) =>
+      Effect.gen(function* () {
+        const input = parseDetectionCacheKey(key);
+        const handle = yield* detectResolvedKind(input);
+        if (handle === null) return null;
+        const disk = yield* readDiskState(input.cwd, handle.repository);
+        return {
+          handle,
+          gitEntries: disk?.gitEntries ?? [],
+          repositoryEntries: disk?.repositoryEntries ?? [],
+        };
+      }),
     {
       capacity: DETECTION_CACHE_CAPACITY,
       timeToLive: Exit.match({
@@ -122,10 +202,27 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  // A hit is stale when its worktree or `.git` folder was removed, or when
+  // `git init` created a nested repository between the cwd and its root.
   const detect: VcsDriverRegistry["Service"]["detect"] = Effect.fn("VcsDriverRegistry.detect")(
     function* (input) {
       const requestedKind = yield* projectConfig.resolveKind(input);
-      return yield* Cache.get(detectionCache, detectionCacheKey({ cwd: input.cwd, requestedKind }));
+      const key = detectionCacheKey({ cwd: input.cwd, requestedKind });
+      const cached = yield* Cache.get(detectionCache, key);
+      if (cached === null) return null;
+      const disk = yield* readDiskState(input.cwd, cached.handle.repository);
+      if (
+        disk !== null &&
+        disk.repositoryEntries.every(
+          (identity, index) => identity !== null && identity === cached.repositoryEntries[index],
+        ) &&
+        disk.gitEntries.length === cached.gitEntries.length &&
+        disk.gitEntries.every((identity, index) => identity === cached.gitEntries[index])
+      ) {
+        return cached.handle;
+      }
+      yield* Cache.invalidate(detectionCache, key);
+      return (yield* Cache.get(detectionCache, key))?.handle ?? null;
     },
   );
 
