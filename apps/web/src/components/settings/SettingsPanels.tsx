@@ -290,6 +290,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
         : []),
+      ...(settings.confirmSideChatDiscard !== DEFAULT_UNIFIED_SETTINGS.confirmSideChatDiscard
+        ? ["Side chat discard confirmation"]
+        : []),
       ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
         ? ["Delete confirmation"]
         : []),
@@ -300,6 +303,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       isBackgroundActivityDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.confirmSideChatDiscard,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.autoRemoveSettledWorktrees,
@@ -409,6 +413,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
+      confirmSideChatDiscard: DEFAULT_UNIFIED_SETTINGS.confirmSideChatDiscard,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
@@ -1788,6 +1793,32 @@ export function GeneralSettingsPanel() {
                 updateSettings({ confirmThreadDelete: Boolean(checked) })
               }
               aria-label="Confirm thread deletion"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("side-chat-discard-confirmation")}
+          description="Ask before closing and discarding a temporary side chat."
+          resetAction={
+            settings.confirmSideChatDiscard !== DEFAULT_UNIFIED_SETTINGS.confirmSideChatDiscard ? (
+              <SettingResetButton
+                label="side chat discard confirmation"
+                onClick={() =>
+                  updateSettings({
+                    confirmSideChatDiscard: DEFAULT_UNIFIED_SETTINGS.confirmSideChatDiscard,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.confirmSideChatDiscard}
+              onCheckedChange={(checked) =>
+                updateSettings({ confirmSideChatDiscard: Boolean(checked) })
+              }
+              aria-label="Confirm side chat discard"
             />
           }
         />

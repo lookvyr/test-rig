@@ -171,6 +171,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "side-chat-discard-confirmation",
+    title: "Side chat discard confirmation",
+    to: "/settings/general",
+  },
+  {
     id: "text-generation-model",
     title: "Text generation model",
     to: "/settings/general",

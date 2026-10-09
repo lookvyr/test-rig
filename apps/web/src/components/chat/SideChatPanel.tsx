@@ -52,8 +52,7 @@ import { type ElementContextDraft } from "../../lib/elementContext";
 import { newMessageId } from "../../lib/utils";
 import { resolveShortcutCommand } from "../../keybindings";
 import { parseStandaloneComposerSlashCommand } from "../../composer-logic";
-import type { TurnDiffSummary } from "../../types";
-import { readLocalApi } from "../../localApi";
+import type { Thread, TurnDiffSummary } from "../../types";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { MessagesTimeline } from "./MessagesTimeline";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -74,8 +73,9 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 
 export function SideChatPanel(props: {
   threadRef: ScopedThreadRef;
+  parentThread: Thread;
   focusRequest: number;
-  onDiscard: () => Promise<void>;
+  onDiscard: () => Promise<boolean>;
   onOpenThread: (threadId: ThreadId) => void;
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
@@ -90,9 +90,8 @@ export function SideChatPanel(props: {
     thread ? threadRef.environmentId : null,
     thread ? threadRef.threadId : null,
   );
-  const project = useProject(
-    thread ? scopeProjectRef(threadRef.environmentId, thread.projectId) : null,
-  );
+  const settingsThread = thread ?? props.parentThread;
+  const project = useProject(scopeProjectRef(threadRef.environmentId, settingsThread.projectId));
   const environment = useEnvironment(threadRef.environmentId);
   const config = useAtomValue(serverEnvironment.configValueAtom(threadRef.environmentId));
   const settings = useEnvironmentSettings(threadRef.environmentId);
@@ -117,9 +116,9 @@ export function SideChatPanel(props: {
   const interactionModeDraft = useComposerDraftStore(
     (store) => store.getComposerDraft(threadRef)?.interactionMode,
   );
-  const runtimeMode = runtimeModeDraft ?? thread?.runtimeMode ?? "full-access";
+  const runtimeMode = runtimeModeDraft ?? settingsThread.runtimeMode ?? "full-access";
   const interactionMode = settings.planModeEnabled
-    ? (interactionModeDraft ?? thread?.interactionMode ?? "default")
+    ? (interactionModeDraft ?? settingsThread.interactionMode ?? "default")
     : "default";
   const startTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
   const persistSettings = usePersistThreadSettings(threadRef.environmentId, thread);
@@ -198,12 +197,11 @@ export function SideChatPanel(props: {
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory);
   const focus = () => composerRef.current?.focusAtEnd();
   useEffect(() => {
-    if (preparing) return;
     const frame = window.requestAnimationFrame(() => {
       composerRef.current?.focusAtEnd();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [preparing, props.focusRequest]);
+  }, [props.focusRequest]);
 
   const resumableRunId = resumableThreadRunId(projection, thread?.runtime?.lastErrorClass);
   const sendStandaloneCommand = async (text: string, continuationOfRunId?: RunId) => {
@@ -434,20 +432,7 @@ export function SideChatPanel(props: {
       setActionBusy(false);
     }
   };
-  const discard = async () => {
-    const api = readLocalApi();
-    if (
-      !api ||
-      !(await api.dialogs.confirm(
-        "Discard this side chat? Running work will stop. File changes remain in the checkout.",
-      ))
-    )
-      return;
-    await props.onDiscard();
-    clearPendingUserInputDrafts(threadRef);
-    useComposerDraftStore.getState().clearComposerContent(threadRef);
-  };
-  const cwd = thread?.worktreePath ?? project?.workspaceRoot;
+  const cwd = settingsThread.worktreePath ?? project?.workspaceRoot;
   const shownError = error ?? thread?.runtime?.lastError;
   return (
     <section
@@ -486,7 +471,15 @@ export function SideChatPanel(props: {
               <MoreHorizontal className="size-4" />
             </MenuTrigger>
             <MenuPopup align="end">
-              <MenuItem onClick={() => void runAction(discard)}>Discard side chat</MenuItem>
+              <MenuItem
+                onClick={() =>
+                  void runAction(async () => {
+                    await props.onDiscard();
+                  })
+                }
+              >
+                Discard side chat
+              </MenuItem>
             </MenuPopup>
           </Menu>
         </div>
@@ -496,202 +489,192 @@ export function SideChatPanel(props: {
           {shownError}
         </div>
       ) : null}
-      {preparing ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          Opening side chat…
+      {timelineEntries.length === 0 ? (
+        <div className="flex min-h-24 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+          <p className="text-sm">Explore a side question</p>
+          <p className="max-w-xs text-xs text-muted-foreground">
+            Starts with the parent’s context from when you opened it.
+          </p>
         </div>
       ) : (
-        <>
-          {timelineEntries.length === 0 ? (
-            <div className="flex min-h-24 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-              <p className="text-sm">Explore a side question</p>
-              <p className="max-w-xs text-xs text-muted-foreground">
-                Starts with the parent’s context from when you opened it.
-              </p>
-            </div>
-          ) : (
-            <MessagesTimeline
-              isWorking={isWorking}
-              activeTurnInProgress={
-                isWorking || !isLatestRunSettled(thread?.latestRun ?? null, thread?.runtime ?? null)
-              }
-              activeTurnStartedAt={deriveActiveWorkStartedAt(
-                thread?.latestRun ?? null,
-                thread?.runtime ?? null,
-                dispatch.localDispatchStartedAt,
-              )}
-              listRef={listRef}
-              timelineEntries={timelineEntries}
-              latestRun={thread?.latestRun ?? null}
-              runningRunId={thread?.runtime?.activeRunId ?? null}
-              turnDiffSummaries={[...diffs.values()]}
-              providerStatuses={providers}
-              runs={projection?.runs ?? []}
-              onOpenThread={props.onOpenThread}
-              onForkFromRun={props.onForkFromRun}
-              routeThreadKey={scopedThreadKey(threadRef)}
-              onOpenTurnDiff={props.onOpenTurnDiff}
-              onImageExpand={props.onExpandImage}
+        <MessagesTimeline
+          isWorking={isWorking}
+          activeTurnInProgress={
+            isWorking || !isLatestRunSettled(thread?.latestRun ?? null, thread?.runtime ?? null)
+          }
+          activeTurnStartedAt={deriveActiveWorkStartedAt(
+            thread?.latestRun ?? null,
+            thread?.runtime ?? null,
+            dispatch.localDispatchStartedAt,
+          )}
+          listRef={listRef}
+          timelineEntries={timelineEntries}
+          latestRun={thread?.latestRun ?? null}
+          runningRunId={thread?.runtime?.activeRunId ?? null}
+          turnDiffSummaries={[...diffs.values()]}
+          providerStatuses={providers}
+          runs={projection?.runs ?? []}
+          onOpenThread={props.onOpenThread}
+          onForkFromRun={props.onForkFromRun}
+          routeThreadKey={scopedThreadKey(threadRef)}
+          onOpenTurnDiff={props.onOpenTurnDiff}
+          onImageExpand={props.onExpandImage}
+          activeThreadEnvironmentId={threadRef.environmentId}
+          markdownCwd={cwd}
+          resolvedTheme={resolvedTheme}
+          timestampFormat={settings.timestampFormat}
+          workspaceRoot={cwd}
+          anchorMessageId={null}
+          onAnchorReady={() => undefined}
+          onAnchorSizeChanged={() => undefined}
+          contentInsetEndAdjustment={0}
+          liveFollowEnabled={liveFollow}
+          onIsAtEndChange={setLiveFollow}
+          onManualNavigation={() => setLiveFollow(false)}
+          loadEarlier={
+            page.history.hasMoreHistory || page.history.error !== null
+              ? {
+                  loading: page.history.loading,
+                  onLoadEarlier: () =>
+                    void loadEarlierHistory({
+                      environmentId: threadRef.environmentId,
+                      input: { threadId: threadRef.threadId },
+                    }),
+                }
+              : null
+          }
+        />
+      )}
+      <div className="shrink-0 px-2 pb-2 pt-1">
+        {nonBlockingUserInputs.length > 0 && (
+          <AsyncUserInputPanel
+            key={scopedThreadKey(threadRef)}
+            threadRef={threadRef}
+            requests={nonBlockingUserInputs}
+            respondingRequestIds={respondingInputIds}
+            onRespond={onRespondToUserInput}
+          />
+        )}
+        <div className="chat-composer-glass-shell">
+          <div className="chat-composer-glass-host relative z-10 rounded-[22px]">
+            <ChatComposer
+              composerDraftTarget={threadRef}
+              environmentId={threadRef.environmentId}
+              routeKind="server"
+              routeThreadRef={threadRef}
+              draftId={null}
+              activeThreadId={threadRef.threadId}
+              promptHistoryMessages={selectThreadMessages(projection)}
               activeThreadEnvironmentId={threadRef.environmentId}
-              markdownCwd={cwd}
-              resolvedTheme={resolvedTheme}
-              timestampFormat={settings.timestampFormat}
-              workspaceRoot={cwd}
-              anchorMessageId={null}
-              onAnchorReady={() => undefined}
-              onAnchorSizeChanged={() => undefined}
-              contentInsetEndAdjustment={0}
-              liveFollowEnabled={liveFollow}
-              onIsAtEndChange={setLiveFollow}
-              onManualNavigation={() => setLiveFollow(false)}
-              loadEarlier={
-                page.history.hasMoreHistory || page.history.error !== null
-                  ? {
-                      loading: page.history.loading,
-                      onLoadEarlier: () =>
-                        void loadEarlierHistory({
-                          environmentId: threadRef.environmentId,
-                          input: { threadId: threadRef.threadId },
-                        }),
-                    }
+              activeThread={thread ?? undefined}
+              isServerThread
+              isLocalDraftThread={false}
+              forceExpandedOnMobile
+              projectSelectionRequired={false}
+              phase={phase}
+              isConnecting={false}
+              isSendBusy={dispatch.isSendBusy}
+              sendDisabledReason={
+                failedFork
+                  ? "The side chat could not open. Discard it and try again."
+                  : preparing
+                    ? "Side chat is opening"
+                    : null
+              }
+              isPreparingWorktree={false}
+              environmentUnavailable={
+                unavailable && environment
+                  ? { label: environment.label, connection: environment.connection }
                   : null
               }
+              activePendingApproval={pendingApprovals[0] ?? null}
+              pendingApprovals={pendingApprovals}
+              pendingUserInputs={pendingUserInputs}
+              {...pending}
+              activePendingIsResponding={
+                pendingUserInputs[0] !== undefined &&
+                respondingInputIds.includes(pendingUserInputs[0].requestId)
+              }
+              respondingRequestIds={respondingRequestIds}
+              showPlanFollowUpPrompt={false}
+              activeProposedPlan={null}
+              runtimeMode={runtimeMode}
+              interactionMode={interactionMode}
+              lockedProvider={
+                settingsThread.runtime?.providerName
+                  ? ProviderDriverKind.make(settingsThread.runtime.providerName)
+                  : null
+              }
+              providerStatuses={[...providers]}
+              activeProjectDefaultModelSelection={project?.defaultModelSelection}
+              activeThreadModelSelection={settingsThread.modelSelection}
+              activeThreadProjection={projection}
+              canInterrupt={deriveCanInterruptRunningThread(
+                thread !== null,
+                thread?.runtime ?? null,
+              )}
+              resolvedTheme={resolvedTheme}
+              settings={settings}
+              keybindings={keybindings}
+              terminalOpen={false}
+              gitCwd={cwd ?? null}
+              promptRef={promptRef}
+              composerImagesRef={imagesRef}
+              composerTerminalContextsRef={terminalContextsRef}
+              composerElementContextsRef={elementContextsRef}
+              composerRef={composerRef}
+              onSend={(event) => void send(event)}
+              onInterrupt={() => void onInterrupt()}
+              onCompactContext={() => void sendStandaloneCommand("/compact")}
+              canResume={resumableRunId !== null && phase !== "running" && !dispatch.isSendBusy}
+              onResume={() => {
+                if (resumableRunId !== null)
+                  void sendStandaloneCommand("Continue where you left off.", resumableRunId);
+              }}
+              onImplementPlanInNewThread={() => undefined}
+              onRespondToApproval={onRespondToApproval}
+              onProviderModelSelect={(instanceId, model) => {
+                if (
+                  !getStartedThreadModelChangeBlockReason({
+                    providers,
+                    hasStartedSession: true,
+                    currentModelSelection: settingsThread.modelSelection,
+                    currentProviderInstanceId: settingsThread.runtime?.providerInstanceId ?? null,
+                    nextModelSelection: { instanceId, model },
+                  })
+                )
+                  useComposerDraftStore
+                    .getState()
+                    .setModelSelection(threadRef, { instanceId, model });
+              }}
+              getModelDisabledReason={(instanceId, model) =>
+                getStartedThreadModelChangeBlockReason({
+                  providers,
+                  hasStartedSession: true,
+                  currentModelSelection: settingsThread.modelSelection,
+                  currentProviderInstanceId: settingsThread.runtime?.providerInstanceId ?? null,
+                  nextModelSelection: { instanceId, model },
+                })?.description ?? null
+              }
+              toggleInteractionMode={() =>
+                useComposerDraftStore
+                  .getState()
+                  .setInteractionMode(threadRef, interactionMode === "plan" ? "default" : "plan")
+              }
+              handleRuntimeModeChange={(mode) =>
+                useComposerDraftStore.getState().setRuntimeMode(threadRef, mode)
+              }
+              handleInteractionModeChange={(mode) =>
+                useComposerDraftStore.getState().setInteractionMode(threadRef, mode)
+              }
+              focusComposer={focus}
+              scheduleComposerFocus={focus}
+              setThreadError={(_id, message) => setError(message)}
+              onExpandImage={props.onExpandImage}
             />
-          )}
-          <div className="shrink-0 px-2 pb-2 pt-1">
-            {nonBlockingUserInputs.length > 0 && (
-              <AsyncUserInputPanel
-                key={scopedThreadKey(threadRef)}
-                threadRef={threadRef}
-                requests={nonBlockingUserInputs}
-                respondingRequestIds={respondingInputIds}
-                onRespond={onRespondToUserInput}
-              />
-            )}
-            <div className="chat-composer-glass-shell">
-              <div className="chat-composer-glass-host relative z-10 rounded-[22px]">
-                <ChatComposer
-                  composerDraftTarget={threadRef}
-                  environmentId={threadRef.environmentId}
-                  routeKind="server"
-                  routeThreadRef={threadRef}
-                  draftId={null}
-                  activeThreadId={threadRef.threadId}
-                  promptHistoryMessages={selectThreadMessages(projection)}
-                  activeThreadEnvironmentId={threadRef.environmentId}
-                  activeThread={thread ?? undefined}
-                  isServerThread
-                  isLocalDraftThread={false}
-                  forceExpandedOnMobile
-                  projectSelectionRequired={false}
-                  phase={phase}
-                  isConnecting={false}
-                  isSendBusy={dispatch.isSendBusy}
-                  sendDisabledReason={
-                    failedFork ? "The side chat could not open. Discard it and try again." : null
-                  }
-                  isPreparingWorktree={false}
-                  environmentUnavailable={
-                    unavailable && environment
-                      ? { label: environment.label, connection: environment.connection }
-                      : null
-                  }
-                  activePendingApproval={pendingApprovals[0] ?? null}
-                  pendingApprovals={pendingApprovals}
-                  pendingUserInputs={pendingUserInputs}
-                  {...pending}
-                  activePendingIsResponding={
-                    pendingUserInputs[0] !== undefined &&
-                    respondingInputIds.includes(pendingUserInputs[0].requestId)
-                  }
-                  respondingRequestIds={respondingRequestIds}
-                  showPlanFollowUpPrompt={false}
-                  activeProposedPlan={null}
-                  runtimeMode={runtimeMode}
-                  interactionMode={interactionMode}
-                  lockedProvider={
-                    thread?.runtime?.providerName
-                      ? ProviderDriverKind.make(thread.runtime.providerName)
-                      : null
-                  }
-                  providerStatuses={[...providers]}
-                  activeProjectDefaultModelSelection={project?.defaultModelSelection}
-                  activeThreadModelSelection={thread?.modelSelection}
-                  activeThreadProjection={projection}
-                  canInterrupt={deriveCanInterruptRunningThread(
-                    thread !== null,
-                    thread?.runtime ?? null,
-                  )}
-                  resolvedTheme={resolvedTheme}
-                  settings={settings}
-                  keybindings={keybindings}
-                  terminalOpen={false}
-                  gitCwd={cwd ?? null}
-                  promptRef={promptRef}
-                  composerImagesRef={imagesRef}
-                  composerTerminalContextsRef={terminalContextsRef}
-                  composerElementContextsRef={elementContextsRef}
-                  composerRef={composerRef}
-                  onSend={(event) => void send(event)}
-                  onInterrupt={() => void onInterrupt()}
-                  onCompactContext={() => void sendStandaloneCommand("/compact")}
-                  canResume={resumableRunId !== null && phase !== "running" && !dispatch.isSendBusy}
-                  onResume={() => {
-                    if (resumableRunId !== null)
-                      void sendStandaloneCommand("Continue where you left off.", resumableRunId);
-                  }}
-                  onImplementPlanInNewThread={() => undefined}
-                  onRespondToApproval={onRespondToApproval}
-                  onProviderModelSelect={(instanceId, model) => {
-                    if (
-                      thread &&
-                      !getStartedThreadModelChangeBlockReason({
-                        providers,
-                        hasStartedSession: true,
-                        currentModelSelection: thread.modelSelection,
-                        currentProviderInstanceId: thread.runtime?.providerInstanceId ?? null,
-                        nextModelSelection: { instanceId, model },
-                      })
-                    )
-                      useComposerDraftStore
-                        .getState()
-                        .setModelSelection(threadRef, { instanceId, model });
-                  }}
-                  getModelDisabledReason={(instanceId, model) =>
-                    thread
-                      ? (getStartedThreadModelChangeBlockReason({
-                          providers,
-                          hasStartedSession: true,
-                          currentModelSelection: thread.modelSelection,
-                          currentProviderInstanceId: thread.runtime?.providerInstanceId ?? null,
-                          nextModelSelection: { instanceId, model },
-                        })?.description ?? null)
-                      : null
-                  }
-                  toggleInteractionMode={() =>
-                    useComposerDraftStore
-                      .getState()
-                      .setInteractionMode(
-                        threadRef,
-                        interactionMode === "plan" ? "default" : "plan",
-                      )
-                  }
-                  handleRuntimeModeChange={(mode) =>
-                    useComposerDraftStore.getState().setRuntimeMode(threadRef, mode)
-                  }
-                  handleInteractionModeChange={(mode) =>
-                    useComposerDraftStore.getState().setInteractionMode(threadRef, mode)
-                  }
-                  focusComposer={focus}
-                  scheduleComposerFocus={focus}
-                  setThreadError={(_id, message) => setError(message)}
-                  onExpandImage={props.onExpandImage}
-                />
-              </div>
-            </div>
           </div>
-        </>
-      )}
+        </div>
+      </div>
     </section>
   );
 }

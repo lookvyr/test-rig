@@ -161,6 +161,7 @@ import {
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
 import { RightPanelTabs } from "./RightPanelTabs";
+import { useSideChatDiscardConfirmation } from "../hooks/useSideChatDiscardConfirmation";
 import { SideChatPanel } from "./chat/SideChatPanel";
 import { ThreadRelationshipsPanel } from "./chat/ThreadRelationshipsControl";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
@@ -1464,6 +1465,10 @@ function ChatViewContent(props: ChatViewProps) {
       ? openingSide.threadId
       : null;
   const sideOpeningRef = useRef(false);
+  const sideOpeningPromiseRef = useRef<Promise<unknown> | null>(null);
+  const sideDiscardingRef = useRef(false);
+  const { confirm: confirmSideChatDiscard, dialog: sideChatDiscardDialog } =
+    useSideChatDiscardConfirmation(routeThreadKey);
   const [sideChatFocusRequest, setSideChatFocusRequest] = useState(0);
   const sideThreadId = sideThreadShell?.id ?? openingSideThreadId;
   const sideThreadRef = useMemo(
@@ -3396,10 +3401,13 @@ function ChatViewContent(props: ChatViewProps) {
     const sideThreadId = newThreadId();
     setOpeningSide({ environmentId, parentId: activeThreadRef.threadId, threadId: sideThreadId });
     useRightPanelStore.getState().open(activeThreadRef, "side-chat");
-    const result = await openSide({
+    const opening = openSide({
       environmentId,
       input: { threadId: activeThreadRef.threadId, sideThreadId },
     });
+    sideOpeningPromiseRef.current = opening;
+    const result = await opening;
+    sideOpeningPromiseRef.current = null;
     sideOpeningRef.current = false;
     if (result._tag === "Failure") {
       setOpeningSide(null);
@@ -3412,15 +3420,36 @@ function ChatViewContent(props: ChatViewProps) {
         });
     }
   }, [activeThreadRef, sideChatAvailable, sideThreadShell, openSide, environmentId]);
-  const discardSideChat = async () => {
-    if (!sideThreadRef || !activeThreadRef) return;
-    const result = await discardSide({
-      environmentId,
-      input: { threadId: sideThreadRef.threadId, onlyIfSideOfThreadId: activeThreadRef.threadId },
-    });
-    if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-    useRightPanelStore.getState().closeSurface(activeThreadRef, "side-chat");
-  };
+  const discardSideChat = useCallback(async () => {
+    if (!sideThreadRef || !activeThreadRef || sideDiscardingRef.current) return false;
+    sideDiscardingRef.current = true;
+    try {
+      if (!(await confirmSideChatDiscard())) return false;
+      await sideOpeningPromiseRef.current;
+      const result = await discardSide({
+        environmentId,
+        input: { threadId: sideThreadRef.threadId, onlyIfSideOfThreadId: activeThreadRef.threadId },
+      });
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) throw squashAtomCommandFailure(result);
+        return false;
+      }
+      clearPendingUserInputDrafts(sideThreadRef);
+      useComposerDraftStore.getState().clearComposerContent(sideThreadRef);
+      setOpeningSide((current) => (current?.threadId === sideThreadRef.threadId ? null : current));
+      useRightPanelStore.getState().closeSurface(activeThreadRef, "side-chat");
+      return true;
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: "Could not discard side chat",
+        description: cause instanceof Error ? cause.message : String(cause),
+      });
+      return false;
+    } finally {
+      sideDiscardingRef.current = false;
+    }
+  }, [activeThreadRef, sideThreadRef, confirmSideChatDiscard, discardSide, environmentId]);
   const addAgentsSurface = useCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
@@ -3620,70 +3649,61 @@ function ChatViewContent(props: ChatViewProps) {
       setActivePreviewTab(activeThreadRef, nextActiveSurface.resourceId);
     }
   }, [activeThreadRef]);
-  const closeRightPanelSurface = useCallback(
-    (surface: RightPanelSurface) => {
+  const closeRightPanelSurfaces = useCallback(
+    async (surfaces: readonly RightPanelSurface[], confirmTerminals = false) => {
       if (!activeThreadRef) return;
-      const close = () => {
-        cleanupRightPanelSurfaces([surface]);
-        useRightPanelStore.getState().closeSurface(activeThreadRef, surface.id);
-        syncActivePreviewSurface();
-      };
-      if (surface.kind !== "terminal") {
-        close();
-        return;
+      if (confirmTerminals) {
+        if (isTerminalCloseConfirmPending()) return;
+        const labels = surfaces.flatMap((surface) =>
+          surface.kind === "terminal"
+            ? surface.terminalIds.map((id) => activeTerminalLabelsById.get(id) ?? id)
+            : [],
+        );
+        const first = labels[0];
+        if (first && !(await confirmTerminalClose([first, ...labels.slice(1)]))) return;
       }
-      if (isTerminalCloseConfirmPending()) return;
-      const labels = surface.terminalIds.map((id) => activeTerminalLabelsById.get(id) ?? id);
-      const first = labels[0];
-      if (!first) return;
-      void confirmTerminalClose([first, ...labels.slice(1)]).then((confirmed) => {
-        if (confirmed) close();
-      });
+      if (surfaces.some((surface) => surface.kind === "side-chat") && sideThreadRef) {
+        if (!(await discardSideChat())) return;
+      }
+      cleanupRightPanelSurfaces(surfaces);
+      for (const surface of surfaces) {
+        useRightPanelStore.getState().closeSurface(activeThreadRef, surface.id);
+      }
+      syncActivePreviewSurface();
     },
     [
       activeThreadRef,
+      activeTerminalLabelsById,
+      sideThreadRef,
+      discardSideChat,
       cleanupRightPanelSurfaces,
       syncActivePreviewSurface,
-      activeTerminalLabelsById,
     ],
+  );
+  const closeRightPanelSurface = useCallback(
+    (surface: RightPanelSurface) => {
+      void closeRightPanelSurfaces([surface], true);
+    },
+    [closeRightPanelSurfaces],
   );
   const closeOtherRightPanelSurfaces = useCallback(
     (surface: RightPanelSurface) => {
-      if (!activeThreadRef) return;
-      const surfaces = rightPanelState.surfaces.filter((entry) => entry.id !== surface.id);
-      cleanupRightPanelSurfaces(surfaces);
-      useRightPanelStore.getState().closeOtherSurfaces(activeThreadRef, surface.id);
-      syncActivePreviewSurface();
+      void closeRightPanelSurfaces(
+        rightPanelState.surfaces.filter((entry) => entry.id !== surface.id),
+      );
     },
-    [
-      activeThreadRef,
-      cleanupRightPanelSurfaces,
-      rightPanelState.surfaces,
-      syncActivePreviewSurface,
-    ],
+    [closeRightPanelSurfaces, rightPanelState.surfaces],
   );
   const closeRightPanelSurfacesToRight = useCallback(
     (surface: RightPanelSurface) => {
-      if (!activeThreadRef) return;
-      const surfaceIndex = rightPanelState.surfaces.findIndex((entry) => entry.id === surface.id);
-      if (surfaceIndex < 0) return;
-      const surfaces = rightPanelState.surfaces.slice(surfaceIndex + 1);
-      cleanupRightPanelSurfaces(surfaces);
-      useRightPanelStore.getState().closeSurfacesToRight(activeThreadRef, surface.id);
-      syncActivePreviewSurface();
+      const index = rightPanelState.surfaces.findIndex((entry) => entry.id === surface.id);
+      if (index >= 0) void closeRightPanelSurfaces(rightPanelState.surfaces.slice(index + 1));
     },
-    [
-      activeThreadRef,
-      cleanupRightPanelSurfaces,
-      rightPanelState.surfaces,
-      syncActivePreviewSurface,
-    ],
+    [closeRightPanelSurfaces, rightPanelState.surfaces],
   );
   const closeAllRightPanelSurfaces = useCallback(() => {
-    if (!activeThreadRef) return;
-    cleanupRightPanelSurfaces(rightPanelState.surfaces);
-    useRightPanelStore.getState().closeAllSurfaces(activeThreadRef);
-  }, [activeThreadRef, cleanupRightPanelSurfaces, rightPanelState.surfaces]);
+    void closeRightPanelSurfaces(rightPanelState.surfaces);
+  }, [closeRightPanelSurfaces, rightPanelState.surfaces]);
   const copyRightPanelFilePath = useCallback((relativePath: string) => {
     if (typeof window === "undefined" || !navigator.clipboard?.writeText) {
       toastManager.add(
@@ -6326,6 +6346,7 @@ function ChatViewContent(props: ChatViewProps) {
         <SideChatPanel
           key={scopedThreadKey(sideThreadRef)}
           threadRef={sideThreadRef}
+          parentThread={activeThread}
           focusRequest={sideChatFocusRequest}
           onDiscard={discardSideChat}
           onOpenThread={onOpenRelatedThread}
@@ -6337,9 +6358,7 @@ function ChatViewContent(props: ChatViewProps) {
             useRightPanelStore.getState().open(activeThreadRef, "diff");
           }}
         />
-      ) : (
-        <div className="p-4 text-sm text-muted-foreground">Opening side chat…</div>
-      )
+      ) : null
     ) : activeRightPanelSurface?.kind === "pull-request" ? (
       pullRequestSelection ? (
         <PullRequestInspector
@@ -6939,6 +6958,7 @@ function ChatViewContent(props: ChatViewProps) {
               />
             ) : null}
 
+            {sideChatDiscardDialog}
             <AlertDialog open={branchRestoreConfirmOpen} onOpenChange={setBranchRestoreConfirmOpen}>
               <AlertDialogPopup>
                 <AlertDialogHeader>
