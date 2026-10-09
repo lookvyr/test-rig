@@ -478,7 +478,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       type: "http",
       url: "http://127.0.0.1:43123/mcp",
       headers: {
-        Authorization: "Bearer secret-claude-token",
+        Authorization: "${TEST_RIG_MCP_AUTHORIZATION}",
       },
       timeout: ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
     },
@@ -531,6 +531,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       assert.deepEqual(overrides, {
         allowedTools: [ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD],
         mcpServers: T3_MCP_SERVERS,
+        mcpEnvironment: { TEST_RIG_MCP_AUTHORIZATION: "Bearer secret-claude-token" },
       });
     });
   });
@@ -547,6 +548,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       assert.deepEqual(overrides, {
         allowedTools: ["Read", "mcp__test_rig__*"],
         mcpServers: T3_MCP_SERVERS,
+        mcpEnvironment: { TEST_RIG_MCP_AUTHORIZATION: "Bearer secret-claude-token" },
       });
     });
   });
@@ -566,6 +568,7 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
           ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
         ],
         mcpServers: T3_MCP_SERVERS,
+        mcpEnvironment: { TEST_RIG_MCP_AUTHORIZATION: "Bearer secret-claude-token" },
       });
       assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD));
     });
@@ -698,11 +701,12 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
             type: "http",
             url: "http://127.0.0.1:43123/mcp",
             headers: {
-              Authorization: "Bearer secret-claude-token",
+              Authorization: "${TEST_RIG_MCP_AUTHORIZATION}",
             },
             timeout: ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
           },
         },
+        mcpEnvironment: { TEST_RIG_MCP_AUTHORIZATION: "Bearer secret-claude-token" },
       });
 
       const options = ClaudeAdapterV2.makeClaudeQueryOptions({
@@ -713,8 +717,12 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
         nativeThreadId: "native-thread-claude-mcp",
         resume: false,
         cwd: "/workspace",
-        ...overrides,
+        allowedTools: overrides.allowedTools ?? [],
+        mcpServers: overrides.mcpServers ?? {},
+        environment: { ...overrides.mcpEnvironment },
       });
+      assert.notInclude(JSON.stringify(options.mcpServers), "secret-claude-token");
+      assert.equal(options.env?.TEST_RIG_MCP_AUTHORIZATION, "Bearer secret-claude-token");
       assert.isObject(options.systemPrompt);
       const systemPrompt = options.systemPrompt as {
         readonly type: string;
@@ -2264,6 +2272,66 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       };
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
+
+  it.effect("passes MCP credentials through the child environment and reopens on rotation", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarnessWithOptions({
+        environment: { CLAUDE_CONFIG_DIR: "/synthetic/claude-config" },
+        freshQueueOnReopen: true,
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(harness.threadId)),
+      );
+      const setCredential = (authorizationHeader: string) =>
+        McpProviderSession.setMcpProviderSession({
+          environmentId: EnvironmentId.make("environment-claude-rotation"),
+          threadId: harness.threadId,
+          providerSessionId: "mcp-session-claude-rotation",
+          providerInstanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          endpoint: "http://127.0.0.1:43123/mcp",
+          authorizationHeader,
+          browserToolsAvailable: true,
+        });
+      const now = yield* DateTime.now;
+      const turn = (ordinal: number) =>
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make(`attempt-mcp-rotation:${ordinal}`),
+          text: "Check MCP configuration.",
+          attachments: [],
+          providerTurnOrdinal: ordinal,
+        });
+      setCredential("Bearer first-test-credential");
+      yield* harness.runtime.startTurn(turn(1));
+      const firstOptions = harness.getOpenedOptions();
+      assert.equal(firstOptions?.env?.TEST_RIG_MCP_AUTHORIZATION, "Bearer first-test-credential");
+      assert.equal(firstOptions?.env?.CLAUDE_CONFIG_DIR, "/synthetic/claude-config");
+      assert.deepEqual(firstOptions?.mcpServers, {
+        test_rig: {
+          type: "http",
+          url: "http://127.0.0.1:43123/mcp",
+          headers: { Authorization: "${TEST_RIG_MCP_AUTHORIZATION}" },
+          timeout: ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
+        },
+      });
+      yield* harness.offerAndWait(turnOneResult);
+      yield* Queue.take(harness.terminalReceipts);
+
+      setCredential("Bearer rotated-test-credential");
+      yield* harness.runtime.startTurn(turn(2));
+      const rotatedOptions = harness.getOpenedOptions();
+      assert.lengthOf(harness.processQueues, 2);
+      assert.notStrictEqual(rotatedOptions, firstOptions);
+      assert.equal(
+        rotatedOptions?.env?.TEST_RIG_MCP_AUTHORIZATION,
+        "Bearer rotated-test-credential",
+      );
+      assert.equal(rotatedOptions?.env?.CLAUDE_CONFIG_DIR, "/synthetic/claude-config");
+      assert.deepEqual(rotatedOptions?.mcpServers, firstOptions?.mcpServers);
+    }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
 
   it.effect(
     "reuses a background shell's query for omitted and explicit Normal, but blocks Fast",
