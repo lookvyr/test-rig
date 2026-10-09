@@ -74,6 +74,7 @@ export async function reopenClosedView<E>(
     return true;
   }
   const surface = view.surface;
+  if (surface.kind === "side-chat") return false;
   if (!options.workspaceAvailable && (surface.kind === "file" || surface.kind === "files"))
     return false;
   if (surface.kind === "file")

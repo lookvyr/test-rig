@@ -59,8 +59,8 @@ export function useSideChatDiscardConfirmation(threadKey: string) {
         <AlertDialogHeader>
           <AlertDialogTitle>Discard side chat?</AlertDialogTitle>
           <AlertDialogDescription>
-            Running work will stop and this temporary conversation and its draft will be removed.
-            File changes remain in the checkout.
+            Running work, including all subagents, will stop. This temporary conversation, its
+            subagents, and its draft will be removed. File changes remain in the checkout.
           </AlertDialogDescription>
           <label className="mt-3 flex items-center gap-2 text-sm">
             <Checkbox checked={dontAskAgain} onCheckedChange={setDontAskAgain} />

@@ -60,8 +60,10 @@ interface RightPanelTabsProps {
   surfaces: readonly RightPanelSurface[];
   activeSurfaceId: string | null;
   pendingSurfaceIds: ReadonlySet<string>;
+  workingSurfaceIds?: ReadonlySet<string>;
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>;
   terminalLabelsById: ReadonlyMap<string, string>;
+  sideChatTitles?: ReadonlyMap<string, string>;
   browserProfiles?: readonly { id: string; name: string }[];
   desktopOverlays?: Readonly<Record<string, { audible?: boolean; audioMuted?: boolean }>>;
   onSetBrowserMuted?: (tabId: string, muted: boolean) => void;
@@ -360,6 +362,7 @@ function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
   terminalLabelsById: ReadonlyMap<string, string>,
+  sideChatTitles?: ReadonlyMap<string, string>,
 ): string {
   switch (surface.kind) {
     case "diff":
@@ -378,7 +381,7 @@ function surfaceTitle(
     case "pull-request":
       return "Pull request";
     case "side-chat":
-      return "Side chat";
+      return sideChatTitles?.get(surface.threadId) ?? "Side chat";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -584,7 +587,13 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
-              const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
+              const working = props.workingSurfaceIds?.has(surface.id) ?? false;
+              const title = surfaceTitle(
+                surface,
+                props.previewSessions,
+                props.terminalLabelsById,
+                props.sideChatTitles,
+              );
               const audio =
                 surface.kind === "preview" && surface.resourceId
                   ? props.desktopOverlays?.[surface.resourceId]
@@ -611,9 +620,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   >
                     <span className="relative flex size-3 items-center justify-center group-hover/tab:hidden group-focus-visible/close:hidden">
                       <SurfaceIcon surface={surface} theme={resolvedTheme} />
-                      {pending ? (
+                      {pending || working ? (
                         <span
-                          className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
+                          className={cn(
+                            "absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full",
+                            pending ? "bg-amber-500" : "bg-emerald-500",
+                          )}
                           aria-hidden
                         />
                       ) : null}
@@ -653,7 +665,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                         </button>
                       }
                     />
-                    <TooltipPopup>{title}</TooltipPopup>
+                    <TooltipPopup>
+                      {title}
+                      {pending ? " — Needs attention" : working ? " — Working" : ""}
+                    </TooltipPopup>
                   </Tooltip>
                 </div>
               );

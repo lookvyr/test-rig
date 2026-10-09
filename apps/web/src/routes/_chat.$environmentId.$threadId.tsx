@@ -74,7 +74,7 @@ function ChatThreadRouteView() {
   useEffect(() => {
     if (!threadRef || !serverThreadShell?.sideOfThreadId) return;
     const parentRef = scopeThreadRef(threadRef.environmentId, serverThreadShell.sideOfThreadId);
-    useRightPanelStore.getState().open(parentRef, "side-chat");
+    useRightPanelStore.getState().openSideChat(parentRef, threadRef.threadId);
     void navigate({
       to: "/$environmentId/$threadId",
       params: { environmentId: parentRef.environmentId, threadId: parentRef.threadId },

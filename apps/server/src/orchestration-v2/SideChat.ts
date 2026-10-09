@@ -1,7 +1,6 @@
 import { CommandId, ProviderSessionId, type ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as Option from "effect/Option";
 
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
@@ -55,38 +54,19 @@ export const openSideChat = Effect.fn("orchestrationV2.openSideChat")(function* 
       thread: child.thread,
       modelSelection: child.thread.modelSelection,
     });
-    const sourceSessionId =
-      source.providerSessionId ?? ProviderSessionId.make(`side-source:${input.commandId}`);
-    const existing = yield* sessions.get(sourceSessionId);
-    const sourceSession = Option.isSome(existing)
-      ? existing.value
-      : yield* sessions.open({
-          threadId: parent.thread.id,
-          providerSessionId: sourceSessionId,
-          modelSelection: parent.thread.modelSelection,
-          runtimePolicy,
-        });
-    return yield* Effect.gen(function* () {
-      const loaded = yield* sourceSession.resumeThread({
-        providerThread: source,
-        threadId: parent.thread.id,
-        modelSelection: parent.thread.modelSelection,
-        runtimePolicy,
-      });
-      const temporary = yield* sessions.open({
-        threadId: child.thread.id,
-        providerSessionId: childSessionId,
-        modelSelection: child.thread.modelSelection,
-        runtimePolicy,
-      });
-      return yield* temporary.forkThread({
-        sourceProviderThread: loaded,
-        sourceProviderTurns,
-        providerTurnId: completedTurn.id,
-        targetThreadId: child.thread.id,
-        modelSelection: child.thread.modelSelection,
-        runtimePolicy,
-      });
+    const temporary = yield* sessions.open({
+      threadId: child.thread.id,
+      providerSessionId: childSessionId,
+      modelSelection: child.thread.modelSelection,
+      runtimePolicy,
+    });
+    return yield* temporary.forkThread({
+      sourceProviderThread: source,
+      sourceProviderTurns,
+      providerTurnId: completedTurn.id,
+      targetThreadId: child.thread.id,
+      modelSelection: child.thread.modelSelection,
+      runtimePolicy,
     });
   }).pipe(Effect.ensuring(sessions.close(childSessionId).pipe(Effect.ignore)));
   const result = yield* Effect.result(capture);

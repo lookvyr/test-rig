@@ -100,22 +100,22 @@ describe("rightPanelStore", () => {
     });
   });
 
-  it("reopens one side-chat tab alongside other surfaces without changing its draft", async () => {
+  it("keeps independent side-chat tabs and preserves drafts when switching tabs", async () => {
     const { useComposerDraftStore } = await import("./composerDraftStore");
     const childRef = scopeThreadRef(refA.environmentId, ThreadId.make("side-child"));
     useComposerDraftStore.getState().setPrompt(childRef, "An unfinished side question");
     const panel = useRightPanelStore.getState();
     panel.openBrowser(refA, "browser-tab");
-    panel.open(refA, "side-chat");
-    panel.open(refA, "side-chat");
+    panel.openSideChat(refA, childRef.threadId);
+    panel.openSideChat(refA, childRef.threadId);
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.map(
         (surface) => surface.kind,
       ),
     ).toEqual(["preview", "side-chat"]);
-    panel.closeSurface(refA, "side-chat");
+    panel.closeSurface(refA, `side-chat:${childRef.threadId}`);
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBe("preview");
-    panel.open(refA, "side-chat");
+    panel.openSideChat(refA, childRef.threadId);
     expect(useComposerDraftStore.getState().getComposerDraft(childRef)?.prompt).toBe(
       "An unfinished side question",
     );
@@ -123,6 +123,52 @@ describe("rightPanelStore", () => {
       "side-chat",
     );
     useComposerDraftStore.getState().clearComposerContent(childRef);
+  });
+
+  it("reconciles multiple side chats without reopening a hidden panel or remembering discarded chats", async () => {
+    const { useClosedViewStore } = await import("./closedViewStore");
+    useClosedViewStore.setState({ entries: [] });
+    const first = ThreadId.make("side-first");
+    const second = ThreadId.make("side-second");
+    const panel = useRightPanelStore.getState();
+    panel.openSideChat(refA, first);
+    panel.openSideChat(refA, second);
+    panel.close(refA);
+    panel.reconcileSideChatSurfaces(refA, [first, second]);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
+    ).toBe(false);
+    panel.show(refA);
+    panel.closeSurface(refA, `side-chat:${second}`);
+    panel.reconcileSideChatSurfaces(refA, [first]);
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: `side-chat:${first}`,
+      kind: "side-chat",
+      threadId: first,
+    });
+    expect(useClosedViewStore.getState().entries).toEqual([]);
+    panel.reconcileSideChatSurfaces(refA, []);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toEqual([]);
+  });
+
+  it("drops old singleton side chats during migration and preserves identified chats", () => {
+    const result = migratePersistedRightPanelState({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "side-chat",
+          surfaces: [
+            { kind: "side-chat", id: "side-chat" },
+            { kind: "side-chat", id: "side-chat:one", threadId: "one" },
+          ],
+        },
+      },
+    });
+    expect(result.byThreadKey["env-1:thread-A"]?.surfaces).toEqual([
+      { kind: "side-chat", id: "side-chat:one", threadId: "one" },
+    ]);
   });
 
   it("drops the legacy singleton terminal surface during migration", () => {

@@ -18,7 +18,7 @@ import {
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { Bot, MoreHorizontal } from "lucide-react";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { useComposerDraftStore, type ComposerImageAttachment } from "../../composerDraftStore";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -67,6 +67,7 @@ import {
   serializeComposerPrompt,
   prepareComposerMessage,
 } from "./composerMessage";
+import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -107,6 +108,7 @@ export function SideChatPanel(props: {
   const sending = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [showAgents, setShowAgents] = useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<RuntimeRequestId[]>([]);
   const [respondingInputIds, setRespondingInputIds] = useState<RuntimeRequestId[]>([]);
   const [liveFollow, setLiveFollow] = useState(true);
@@ -376,6 +378,9 @@ export function SideChatPanel(props: {
             attachments,
             ...(prepared.context ? { context: prepared.context } : {}),
           },
+          ...(projection?.messages.some((message) => message.role === "user")
+            ? {}
+            : { titleSeed: context.prompt.trim().slice(0, 80) || "Side chat" }),
           modelSelection: context.selectedModelSelection,
           runtimeMode,
           interactionMode,
@@ -462,6 +467,15 @@ export function SideChatPanel(props: {
           Temporary
         </span>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="Side chat agents"
+            aria-expanded={showAgents}
+            onClick={() => setShowAgents((value) => !value)}
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+          >
+            <Bot className="size-3.5" /> Agents
+          </button>
           <Menu>
             <MenuTrigger
               aria-label="Side chat actions"
@@ -484,6 +498,14 @@ export function SideChatPanel(props: {
           </Menu>
         </div>
       </div>
+      {showAgents ? (
+        <div className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border/50">
+          <ThreadRelationshipsPanel
+            environmentId={threadRef.environmentId}
+            threadId={threadRef.threadId}
+          />
+        </div>
+      ) : null}
       {shownError ? (
         <div role="alert" className="border-b border-border/50 px-3 py-2 text-xs text-destructive">
           {shownError}

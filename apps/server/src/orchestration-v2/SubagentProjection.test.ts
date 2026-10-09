@@ -72,6 +72,7 @@ function makeParentThread(): OrchestrationV2AppThread {
     snoozedAt,
     deletedAt: null,
     historyOrigin: "v1_import",
+    sideOfThreadId: ThreadId.make("main-conversation"),
   };
 }
 
@@ -103,6 +104,7 @@ it("keeps a subagent child awake when its parent thread is snoozed", () => {
   assert.deepEqual(childThread.modelSelection, childModelSelection);
   assert.equal(childThread.activeProviderThreadId, childProviderThreadId);
   assert.isUndefined(childThread.historyOrigin);
+  assert.isNull(childThread.sideOfThreadId);
   assert.deepEqual(childThread.lineage, {
     parentThreadId,
     relationshipToParent: "subagent",

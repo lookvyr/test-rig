@@ -63,6 +63,11 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
       ...projection.thread,
       deletedAt: projection.thread.deletedAt ?? now,
       titleRegeneration: null,
+      ...(projection.thread.pullRequests === undefined
+        ? {}
+        : {
+            pullRequests: projection.thread.pullRequests.map(({ watch: _watch, ...link }) => link),
+          }),
       updatedAt: now,
     },
   });
@@ -198,7 +203,7 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
       },
     });
     effects.push({
-      id: `effect:${command.commandId}:provider-session.detach:${session.id}`,
+      id: `effect:${command.commandId}:${command.threadId}:provider-session.detach:${session.id}`,
       commandId: command.commandId,
       threadId: command.threadId,
       request: {

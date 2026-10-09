@@ -742,8 +742,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const threadForkService = yield* ThreadForkServiceV2;
   const threadDispatch = yield* ThreadCommandExecutor;
   const withThreadLock = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
-    projectionStore.getThread(threadId).pipe(
-      Effect.map((thread) => thread.sideOfThreadId ?? threadId),
+    Effect.gen(function* () {
+      let thread = yield* projectionStore.getThread(threadId);
+      const visited = new Set<ThreadId>();
+      while (
+        thread.sideOfThreadId == null &&
+        thread.lineage.relationshipToParent === "subagent" &&
+        thread.lineage.parentThreadId !== null &&
+        !visited.has(thread.id)
+      ) {
+        visited.add(thread.id);
+        thread = yield* projectionStore.getThread(thread.lineage.parentThreadId);
+      }
+      // Temporary descendants share their owner's lock so delegation cannot race disposal.
+      return thread.sideOfThreadId ?? threadId;
+    }).pipe(
       Effect.catchTag("ProjectionStoreThreadNotFoundError", () => Effect.succeed(threadId)),
       Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })),
       Effect.flatMap((owner) => threadDispatch.withLock(owner, effect)),
@@ -3381,17 +3394,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
-  const ownedSideChats = (parentThreadId: ThreadId) =>
-    projectionStore
-      .getShellSnapshot()
-      .pipe(
-        Effect.map((shell) =>
-          [...shell.threads, ...shell.archivedThreads].filter(
-            (thread) => thread.sideOfThreadId === parentThreadId,
-          ),
-        ),
-      );
-
   const dispatchSideOpen = Effect.fn("orchestrationV2.dispatch.sideOpen")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "thread.side.open" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -3417,16 +3419,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     ) {
       return yield* fail("Side chats require an active parent conversation.");
     }
-    const existing = (yield* ownedSideChats(command.threadId).pipe(mapDispatchError(command)))[0];
     const now = yield* DateTime.now;
-    if (existing !== undefined) {
-      const thread = yield* projectionStore.getThread(existing.id).pipe(mapDispatchError(command));
-      yield* emit(
-        events,
-        command,
-      )({ type: "thread.metadata-updated", threadId: thread.id, occurredAt: now, payload: thread });
-      return;
-    }
     if (
       source === undefined ||
       source.nativeThreadRef?.strength !== "strong" ||
@@ -4495,6 +4488,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           });
           return;
         }
+      }
+
+      if (projection.thread.deletedAt !== null) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "Deleted conversations cannot receive messages.",
+        });
       }
 
       if (projection.thread.settledOverride !== null) {
@@ -9689,10 +9690,35 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           });
         }
         const shell = yield* projectionStore.getShellSnapshot().pipe(mapDispatchError(command));
-        const childIds = [...shell.threads, ...shell.archivedThreads]
+        const shells = [...shell.threads, ...shell.archivedThreads];
+        const childIds = shells
           .filter((thread) => thread.sideOfThreadId === command.threadId)
           .map((thread) => thread.id);
-        const plans = yield* Effect.forEach([...childIds, command.threadId], (threadId) =>
+        const temporaryIds = new Set(
+          target.sideOfThreadId ? [command.threadId, ...childIds] : childIds,
+        );
+        const childrenByParent = new Map<ThreadId, ThreadId[]>();
+        for (const thread of shells) {
+          const parentId =
+            thread.sideOfThreadId ??
+            (thread.lineage.relationshipToParent === "subagent"
+              ? thread.lineage.parentThreadId
+              : null);
+          if (parentId === null) continue;
+          const children = childrenByParent.get(parentId) ?? [];
+          children.push(thread.id);
+          childrenByParent.set(parentId, children);
+        }
+        const pending = [...temporaryIds];
+        for (const parentId of pending) {
+          for (const childId of childrenByParent.get(parentId) ?? []) {
+            if (temporaryIds.has(childId)) continue;
+            temporaryIds.add(childId);
+            pending.push(childId);
+          }
+        }
+        const deletedIds = [...temporaryIds].filter((id) => id !== command.threadId);
+        const plans = yield* Effect.forEach([...deletedIds, command.threadId], (threadId) =>
           Effect.gen(function* () {
             const projection = yield* projectionStore
               .getThreadRecords(threadId, [

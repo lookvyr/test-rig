@@ -27,7 +27,6 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { V2SqlitePersistenceMemory } from "../persistence/Layers/V2Sqlite.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
@@ -245,7 +244,7 @@ const seed = Effect.gen(function* () {
 });
 
 it.effect(
-  "opens an empty native side, reuses it, and cancels capture when its parent is deleted",
+  "opens independent native sides and cancels their captures when their parent is deleted",
   () =>
     Effect.gen(function* () {
       const { store, orchestrator } = yield* seed;
@@ -284,7 +283,8 @@ it.effect(
         createdBy: "user",
         creationSource: "web",
       });
-      assert.equal(replay.storedEvents[0]?.event.threadId, childId);
+      assert.equal(replay.storedEvents[0]?.event.threadId, ThreadId.make("unused"));
+      assert.isNull((yield* store.getThread(ThreadId.make("unused"))).deletedAt);
       yield* orchestrator.dispatch({
         type: "thread.delete",
         commandId: CommandId.make("delete-parent"),
@@ -302,7 +302,7 @@ it.effect(
       );
       assert.equal(
         effects.filter((effect) => effect.request.type === "terminal.cleanup").length,
-        2,
+        3,
       );
       yield* orchestrator.dispatch({
         type: "thread.side.open.complete",
@@ -374,7 +374,7 @@ it.effect(
 );
 
 it.effect(
-  "keeps a reopened parent session alive while closing only the temporary fork session",
+  "forks native context without resuming the parent and closes only the temporary fork session",
   () =>
     Effect.gen(function* () {
       const { orchestrator } = yield* seed;
@@ -388,9 +388,6 @@ it.effect(
         nativeThreadRef: { ...source.nativeThreadRef!, nativeId: "native-side" },
       };
       // Only operations used by native context capture are implemented.
-      const parentRuntime = {
-        resumeThread: () => Effect.succeed(source),
-      } as unknown as ProviderAdapterV2SessionRuntime;
       const childRuntime = {
         forkThread: () =>
           Deferred.succeed(forkStarted, undefined).pipe(
@@ -418,9 +415,10 @@ it.effect(
                 }),
             }),
             Layer.mock(ProviderSessionManagerV2)({
-              get: () => Effect.succeed(Option.none()),
-              open: (input) =>
-                Effect.succeed(input.threadId === parentId ? parentRuntime : childRuntime),
+              open: (input) => {
+                assert.equal(input.threadId, childId);
+                return Effect.succeed(childRuntime);
+              },
               close: (id) =>
                 Effect.sync(() => {
                   closed.push(id);
@@ -431,7 +429,7 @@ it.effect(
         Effect.forkChild,
       );
       yield* Deferred.await(forkStarted);
-      // A parent turn may now own the reopened session while the side fork is in flight.
+      // Forking does not acquire or interfere with the parent native writer.
       yield* Deferred.succeed(finishFork, undefined);
       yield* Fiber.join(running);
       assert.deepEqual(closed, [ProviderSessionId.make("side-open:open")]);
@@ -468,7 +466,7 @@ it.effect("keeps explicit PR unlinking and includes archived sides in ownership 
       createdBy: "user",
       creationSource: "web",
     });
-    assert.equal(reused.storedEvents[0]?.event.threadId, childId);
+    assert.equal(reused.storedEvents[0]?.event.threadId, ThreadId.make("another-side"));
     yield* orchestrator.dispatch({
       type: "thread.delete",
       commandId: CommandId.make("delete-with-archive"),
@@ -593,8 +591,24 @@ const mcpCoordinationLayer = OrchestratorMcp.layer
     Layer.provide(
       Layer.mergeAll(
         NodeServices.layer,
-        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
-        Layer.mock(ProviderAdapterRegistryV2)({}),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({
+          getProviders: Effect.succeed([
+            {
+              instanceId,
+              driver: ProviderDriverKind.make("codex"),
+              enabled: true,
+              installed: true,
+              version: "test",
+              status: "ready" as const,
+              auth: { status: "authenticated" as const },
+              checkedAt: "2026-10-09T00:00:00.000Z",
+              models: [{ slug: "test", name: "test", isCustom: false, capabilities: null }],
+              slashCommands: [],
+              skills: [],
+            },
+          ]),
+        }),
+        Layer.mock(ProviderAdapterRegistryV2)({ list: () => Effect.succeed([instanceId]) }),
         Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
       ),
     ),
@@ -1037,4 +1051,126 @@ it.effect("recovers a partially accepted batch without duplicating its first con
       ),
     );
   }).pipe(Effect.provide(coordinationLayer)),
+);
+
+it.effect(
+  "discard removes the nested agent tree while keeping sibling sides, parent, and independent forks",
+  () =>
+    Effect.gen(function* () {
+      const { store, orchestrator } = yield* readySide;
+      const side = yield* store.getThread(childId);
+      const agentId = ThreadId.make("side-agent");
+      const nestedId = ThreadId.make("nested-agent");
+      const forkId = ThreadId.make("independent-fork");
+      for (const [id, parentThreadId, relationshipToParent] of [
+        [agentId, childId, "subagent"],
+        [nestedId, agentId, "subagent"],
+        [forkId, childId, "fork"],
+      ] as const) {
+        yield* store.apply({
+          id: EventId.make(`create:${id}`),
+          type: "thread.created",
+          threadId: id,
+          occurredAt: now,
+          payload: {
+            ...side,
+            id,
+            sideOfThreadId: null,
+            activeProviderThreadId: null,
+            lineage: { parentThreadId, relationshipToParent, rootThreadId: childId },
+          },
+        });
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make(`run:${id}`),
+          threadId: id,
+          messageId: MessageId.make(`run:${id}`),
+          text: "Work",
+          attachments: [],
+          dispatchMode: { type: "start_immediately" },
+          createdBy: "user",
+          creationSource: "web",
+        });
+      }
+      const siblingId = ThreadId.make("sibling-side");
+      yield* orchestrator.dispatch({
+        type: "thread.side.open",
+        commandId: CommandId.make("sibling-open"),
+        threadId: parentId,
+        sideThreadId: siblingId,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("discard-tree"),
+        threadId: childId,
+        onlyIfSideOfThreadId: parentId,
+      });
+      for (const id of [childId, agentId, nestedId]) {
+        const projection = yield* store.getThreadRecords(id, ["runs"]);
+        assert.isNotNull(projection.thread.deletedAt);
+        assert.isTrue(projection.runs.every((run) => run.status === "cancelled"));
+      }
+      for (const id of [parentId, siblingId, forkId])
+        assert.isNull((yield* store.getThread(id)).deletedAt);
+      const shell = yield* store.getShellSnapshot();
+      assert.isFalse(
+        shell.threads.some((thread) => [childId, agentId, nestedId].includes(thread.id)),
+      );
+      const late = yield* Effect.result(
+        orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("late-child-work"),
+          threadId: nestedId,
+          messageId: MessageId.make("late-child-work"),
+          text: "Late work",
+          attachments: [],
+          dispatchMode: { type: "start_immediately" },
+          createdBy: "user",
+          creationSource: "web",
+        }),
+      );
+      assert.equal(late._tag, "Failure");
+    }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect(
+  "side-chat MCP credentials can discover, delegate, inspect and cancel nested agents",
+  () =>
+    Effect.gen(function* () {
+      const { store, orchestrator } = yield* readySide;
+      const mcp = yield* OrchestratorMcp.OrchestratorMcpService;
+      const capabilities = yield* mcp.capabilities(coordinationScope);
+      assert.isTrue(capabilities.features.appOwnedSubagents);
+      assert.isTrue(capabilities.providers[0]?.canRunChildTask);
+      const task = yield* mcp.delegateTask(coordinationScope, {
+        task: "Inspect only",
+        mode: "async",
+        clientRequestId: "side-delegation",
+      });
+      assert.isNotNull(task.childThreadId);
+      assert.isNull((yield* store.getThread(task.childThreadId!)).sideOfThreadId);
+      const status = yield* mcp.taskStatus(coordinationScope, task.taskId);
+      assert.equal(status.taskId, task.taskId);
+      const childScope = { ...coordinationScope, threadId: task.childThreadId! };
+      const nested = yield* mcp.delegateTask(childScope, {
+        task: "Nested inspection",
+        mode: "async",
+        clientRequestId: "nested-delegation",
+      });
+      assert.isNotNull(nested.childThreadId);
+      const cancelled = yield* mcp.cancelTask(childScope, { taskId: nested.taskId });
+      assert.equal(cancelled.status, "cancel_requested");
+      yield* orchestrator.dispatch({
+        type: "thread.delete",
+        commandId: CommandId.make("discard-delegates"),
+        threadId: childId,
+        onlyIfSideOfThreadId: parentId,
+      });
+      for (const id of [task.childThreadId!, nested.childThreadId!])
+        assert.isNotNull((yield* store.getThread(id)).deletedAt);
+      const stale = yield* mcp.capabilities(coordinationScope).pipe(Effect.flip);
+      assert.equal(stale.code, "thread_not_found");
+    }).pipe(Effect.provide(mcpCoordinationLayer)),
 );

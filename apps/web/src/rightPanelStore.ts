@@ -8,7 +8,7 @@
  * workspace paths, and diff/files remain singleton surfaces.
  */
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { ChatFileAttachment } from "./types";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -50,12 +50,12 @@ export type RightPanelSurface =
       revealRequestId: number;
     }
   | { id: "agents"; kind: "agents" }
-  | { id: "side-chat"; kind: "side-chat" }
+  | { id: `side-chat:${string}`; kind: "side-chat"; threadId: ThreadId }
   | { id: "pull-request"; kind: "pull-request" };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
-// v10 derives PR content from Git status instead of a saved workspace link.
-const RIGHT_PANEL_STORAGE_VERSION = 10;
+// v11 gives each temporary conversation its own tab.
+const RIGHT_PANEL_STORAGE_VERSION = 11;
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
@@ -65,7 +65,11 @@ export interface ThreadRightPanelState {
 
 interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
-  open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
+  open: (
+    ref: ScopedThreadRef,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "side-chat">,
+  ) => void;
+  openSideChat: (ref: ScopedThreadRef, threadId: ThreadId) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
@@ -83,12 +87,16 @@ interface RightPanelStoreState {
   closeOtherSurfaces: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeSurfacesToRight: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeAllSurfaces: (ref: ScopedThreadRef) => void;
+  reconcileSideChatSurfaces: (ref: ScopedThreadRef, threadIds: readonly ThreadId[]) => void;
   reconcileBrowserSurfaces: (ref: ScopedThreadRef, tabIds: readonly string[]) => void;
   reconcileFileSurfaces: (ref: ScopedThreadRef, workspaceAvailable: boolean) => void;
   show: (ref: ScopedThreadRef) => void;
   close: (ref: ScopedThreadRef) => void;
   toggleVisibility: (ref: ScopedThreadRef) => void;
-  toggle: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
+  toggle: (
+    ref: ScopedThreadRef,
+    kind: Exclude<RightPanelKind, "file" | "terminal" | "side-chat">,
+  ) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
 
@@ -99,7 +107,7 @@ const EMPTY_THREAD_STATE: ThreadRightPanelState = {
 };
 
 const singletonSurface = (
-  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal">,
+  kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "side-chat">,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
@@ -110,8 +118,6 @@ const singletonSurface = (
       return { id: "agents", kind };
     case "pull-request":
       return { id: "pull-request", kind };
-    case "side-chat":
-      return { id: "side-chat", kind };
   }
 };
 
@@ -183,6 +189,7 @@ const closeThread = (
       (a, b) => Number(a.id === current.activeSurfaceId) - Number(b.id === current.activeSurfaceId),
     )) {
       if (
+        surface.kind === "side-chat" ||
         surface.kind === "terminal" ||
         (surface.kind === "preview" && surface.resourceId !== null)
       )
@@ -217,6 +224,12 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                     // Dropped surface kind: plans now render inline in the
                     // transcript (v9).
                     if ((surface as { kind?: string }).kind === "plan") return [];
+                    if (surface.kind === "side-chat") {
+                      return typeof surface.threadId === "string" &&
+                        surface.id === `side-chat:${surface.threadId}`
+                        ? [surface]
+                        : [];
+                    }
                     if (surface.kind === "pull-request") return [singletonSurface("pull-request")];
                     if (surface.kind === "file") {
                       const revealLine =
@@ -304,6 +317,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             }
             return upsertSurface(current, singletonSurface(kind));
           }),
+        })),
+      openSideChat: (ref, threadId) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
+            upsertSurface(current, { id: `side-chat:${threadId}`, kind: "side-chat", threadId }),
+          ),
         })),
       openBrowser: (ref, tabId) =>
         set((state) => ({
@@ -497,6 +516,33 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               ? current
               : { ...current, isOpen: false, surfaces: [], activeSurfaceId: null },
           ),
+        })),
+      reconcileSideChatSurfaces: (ref, threadIds) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
+            const ids = new Set(threadIds);
+            const surfaces = current.surfaces.filter(
+              (surface) => surface.kind !== "side-chat" || ids.has(surface.threadId),
+            );
+            for (const threadId of ids) {
+              if (!surfaces.some((surface) => surface.id === `side-chat:${threadId}`)) {
+                surfaces.push({ id: `side-chat:${threadId}`, kind: "side-chat", threadId });
+              }
+            }
+            if (
+              surfaces.length === current.surfaces.length &&
+              surfaces.every((surface, index) => surface === current.surfaces[index])
+            )
+              return current;
+            return {
+              ...current,
+              surfaces,
+              isOpen: current.isOpen && surfaces.length > 0,
+              activeSurfaceId: surfaces.some((surface) => surface.id === current.activeSurfaceId)
+                ? current.activeSurfaceId
+                : (surfaces.at(-1)?.id ?? null),
+            };
+          }),
         })),
       reconcileBrowserSurfaces: (ref, tabIds) =>
         set((state) => ({

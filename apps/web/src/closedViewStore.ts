@@ -53,7 +53,7 @@ function validEntry(value: unknown): value is ClosedViewEntry {
   if (surface.kind === "preview")
     return surface.id === "browser:new" && surface.resourceId === null;
   return (
-    ["diff", "files", "agents", "side-chat", "pull-request"].includes(surface.kind ?? "") &&
+    ["diff", "files", "agents", "pull-request"].includes(surface.kind ?? "") &&
     surface.id === surface.kind
   );
 }

@@ -810,6 +810,11 @@ const make = Effect.gen(function* () {
             `Unable to read thread ${threadId}: ${errorMessage(error)}`,
           ),
         ),
+        Effect.flatMap((projection) =>
+          projection.thread.deletedAt != null
+            ? Effect.fail(failure("thread_not_found", "The conversation was deleted."))
+            : Effect.succeed(projection),
+        ),
       );
 
   const loadProjectThread = (

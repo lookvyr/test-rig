@@ -275,6 +275,18 @@ it.effect("queues provider and resource cleanup and preserves an earlier deletio
       now: deletedAt,
       idAllocator: yield* IdAllocator.IdAllocatorV2,
     });
+    const siblingId = ThreadId.make("sibling-with-shared-session");
+    const siblingPlan = yield* planThreadDeletion({
+      command: { ...command, threadId: siblingId },
+      projection: { ...projection, thread: { ...projection.thread, id: siblingId } },
+      attachmentIds: [],
+      now: deletedAt,
+      idAllocator: yield* IdAllocator.IdAllocatorV2,
+    });
+    const detachIds = [...plan.effects, ...siblingPlan.effects]
+      .filter((effect) => effect.request.type === "provider-session.detach")
+      .map((effect) => effect.id);
+    assert.equal(new Set(detachIds).size, 2);
     const deleted = plan.events.reduce(applyToProjection, projection);
     assert.deepEqual(deleted.thread.deletedAt, createdAt);
     assert.deepEqual(
