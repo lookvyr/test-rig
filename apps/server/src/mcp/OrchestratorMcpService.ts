@@ -68,6 +68,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import {
@@ -81,7 +82,15 @@ import type { McpInvocationScope } from "./McpInvocationContext.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
-const TASK_POLL_INTERVAL_MS = 50;
+// Only lifecycle events can settle a delegated task; transcript output cannot.
+const TASK_WAKE_EVENTS = [
+  { thread: "parent", eventType: "subagent.updated" },
+  { thread: "parent", eventType: "thread.deleted" },
+  { thread: "child", eventType: "run.updated" },
+  { thread: "child", eventType: "subagent.updated" },
+  { thread: "child", eventType: "provider-thread.updated" },
+  { thread: "child", eventType: "thread.deleted" },
+] as const;
 const DEFAULT_THREAD_LIST_LIMIT = 50;
 const DEFAULT_THREAD_READ_LIMIT = 50;
 const DEFAULT_THREAD_RUN_LIMIT = 10;
@@ -331,9 +340,11 @@ export function hasPendingChildRuns(
   childProjection: Pick<OrchestrationV2ThreadProjection, "runs">,
   delegatedRun: OrchestrationV2Run | undefined,
 ): boolean {
+  // Held queued runs wait for the user to resume the child; task_cancel holds them.
   return childProjection.runs.some(
     (run) =>
       !ThreadManagementService.isTerminalRunStatus(run.status) &&
+      !(run.status === "queued" && run.queueHeld === true) &&
       (delegatedRun === undefined || run.ordinal > delegatedRun.ordinal),
   );
 }
@@ -1274,14 +1285,43 @@ const make = Effect.gen(function* () {
       return response;
     });
 
+  // Re-read the task only when an event on the parent or child thread can
+  // change its status, instead of polling the projections every 50 ms.
   const waitForTask = (scope: McpInvocationScope, taskId: NodeId, timeoutMs: number) =>
     Effect.gen(function* () {
-      while (true) {
-        const result = yield* readTask(scope, taskId, false, true);
-        if (isTerminalTaskStatus(result.status)) return result;
-        yield* Effect.sleep(Duration.millis(TASK_POLL_INTERVAL_MS));
-      }
-    }).pipe(Effect.timeoutOption(Duration.millis(timeoutMs)));
+      const streamError = (error: unknown) =>
+        failure(
+          "orchestration_error",
+          `Unable to watch delegated task ${taskId}: ${errorMessage(error)}`,
+        );
+      // Sequences are global, so one cursor taken before the first read
+      // replays anything either thread records after it.
+      const afterSequence = yield* threadManagement
+        .getThreadEventSequence(scope.threadId)
+        .pipe(Effect.mapError(streamError));
+      const initial = yield* readTask(scope, taskId, false, true);
+      if (isTerminalTaskStatus(initial.status)) return Option.some(initial);
+      // One stream per event type, so transcript events never fill a buffer.
+      return yield* Stream.mergeAll(
+        TASK_WAKE_EVENTS.map(({ thread, eventType }) =>
+          threadManagement.streamStoredEventsFrom({
+            threadId: thread === "parent" ? scope.threadId : initial.childThreadId,
+            afterSequence,
+            eventType,
+          }),
+        ),
+        { concurrency: "unbounded" },
+      ).pipe(
+        Stream.mapError(streamError),
+        Stream.mapEffect((stored) =>
+          stored.event.type === "thread.deleted"
+            ? Effect.fail(failure("thread_not_found", "The conversation was deleted."))
+            : readTask(scope, taskId, false, true),
+        ),
+        Stream.filter((result) => isTerminalTaskStatus(result.status)),
+        Stream.runHead,
+      );
+    }).pipe(Effect.timeoutOption(Duration.millis(timeoutMs)), Effect.map(Option.flatten));
 
   // Load a single scheduled task and enforce that it belongs to the calling
   // thread's project, so agents can only read/mutate tasks in their own scope.
