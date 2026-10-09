@@ -17,7 +17,11 @@ import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
-import { projectTurnItemForWire, projectDomainEventForWire } from "./WireProjection.ts";
+import {
+  projectTurnItemForWire,
+  projectTurnItemForDetail,
+  projectDomainEventForWire,
+} from "./WireProjection.ts";
 import { threadShellFromProjection } from "./ProjectionStore.ts";
 
 const decodeTurnItem = Schema.decodeUnknownSync(OrchestrationV2TurnItem);
@@ -173,9 +177,67 @@ describe("orchestration V2 wire projection", () => {
 
   it("omits even small dynamic tool results while retaining input", () => {
     const item = { ...base, output: { ok: true } } satisfies OrchestrationV2TurnItem;
-    expect(projectTurnItemForWire(item)).toEqual(base);
+    expect(projectTurnItemForWire(item)).toEqual({ ...base, outputOmitted: true });
     expect(item.output).toEqual({ ok: true });
   });
+
+  it("returns the PR watch result only in the bounded detail read", () => {
+    const result = {
+      host: "github.com",
+      repository: "example/project",
+      number: 42,
+      url: "https://github.com/example/project/pull/42",
+      watching: true,
+      wasWatching: false,
+    };
+    const item = {
+      ...base,
+      toolName: "mcp__test_rig__watch_pull_request",
+      input: { url: result.url },
+      output: { content: [{ type: "text", text: JSON.stringify(result) }] },
+    };
+    expect(projectTurnItemForWire(item)).toMatchObject({ outputOmitted: true });
+    expect(projectTurnItemForWire(item)).not.toHaveProperty("output");
+    const detail = projectTurnItemForDetail(item);
+    expect(detail).toEqual(item);
+    expect(decodeTurnItemJson(encodeTurnItemJson(detail))).toEqual(detail);
+  });
+
+  it.each(["Screenshot captured", "x".repeat(300_000)])(
+    "keeps detail image indices while bounding text, case %#",
+    (text) => {
+      const output = {
+        content: [
+          { type: "text", text },
+          { type: "image", mimeType: "image/png", data: "PNG_BYTES" },
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/jpeg", data: "JPEG_BYTES" },
+          },
+        ],
+      };
+      const detail = projectTurnItemForDetail({ ...base, output });
+      const encoded = JSON.stringify(detail);
+      expect(encoded).not.toContain("PNG_BYTES");
+      expect(encoded).not.toContain("JPEG_BYTES");
+      expect(encoded.length).toBeLessThan(270_000);
+      const expectedImages = [
+        { type: "image", mimeType: "image/png" },
+        { type: "image", mimeType: "image/jpeg" },
+      ];
+      expect(detail).toMatchObject({
+        output:
+          text.length > 256 * 1024
+            ? [
+                { type: "text", text: expect.stringContaining("output truncated for transport") },
+                ...expectedImages,
+              ]
+            : { content: [{ type: "text", text }, ...expectedImages] },
+      });
+      expect(output.content[1]).toHaveProperty("data", "PNG_BYTES");
+      expect(decodeTurnItemJson(encodeTurnItemJson(detail))).toEqual(detail);
+    },
+  );
 
   it("keeps undefined dynamic input intact", () => {
     const item = { ...base, input: undefined } satisfies OrchestrationV2TurnItem;
@@ -252,9 +314,23 @@ describe("orchestration V2 wire projection", () => {
       const projected = projectTurnItemForWire(item);
       expect(projected).not.toHaveProperty("output");
       expect(projected).toMatchObject({ input: "test", status: "completed" });
+      // Clients fetch withheld output on demand, so they need to know it exists.
+      expect(projected.type === "command_execution" ? projected.outputOmitted : null).toBe(
+        output ? true : undefined,
+      );
       expect(item.output).toBe(output);
     },
   );
+
+  it.each([
+    ["echo ok", "echo ok"],
+    ["a".repeat(262_143) + "😀", "a".repeat(262_143) + "\n… output truncated for transport"],
+  ])("bounds fetched command input without changing persistence, case %#", (input, expected) => {
+    const item = { ...base, type: "command_execution" as const, input, output: "ok" };
+    const projected = projectTurnItemForDetail(item);
+    expect(projected).toMatchObject({ input: expected, output: "ok" });
+    expect(item.input).toBe(input);
+  });
 
   it("keeps failure evidence without retaining command output", () => {
     const item = {
@@ -290,6 +366,14 @@ describe("orchestration V2 wire projection", () => {
     expect(projected).not.toHaveProperty("newStr");
     expect(projected).toMatchObject({ fileName: "src/main.ts", additions: 3, deletions: 1 });
     expect(item.diffStr).toBe("+new code");
+    // A failed edit keeps the provider's error so expanding the row can show it.
+    const failed = projectTurnItemForWire({
+      ...item,
+      status: "failed",
+      diffStr: "String to replace not found",
+    });
+    expect(failed).toMatchObject({ diffStr: "String to replace not found" });
+    expect(failed).not.toHaveProperty("newStr");
   });
 
   it("retains only result identities and failure metadata in live tool events", () => {

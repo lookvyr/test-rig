@@ -99,6 +99,20 @@ export const makeHandlers = Effect.fn("orchestrationV2.makeRpcHandlers")(functio
       ),
     [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
       observe.effect(ORCHESTRATION_V2_WS_METHODS.getWorkflowScript, readWorkflowScript(input)),
+    [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: (input) =>
+      observe.effect(
+        ORCHESTRATION_V2_WS_METHODS.getTurnItem,
+        threads.getTurnItem(input).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationV2GetThreadProjectionError({
+                threadId: input.threadId,
+                message: "Failed to load turn item",
+                cause,
+              }),
+          ),
+        ),
+      ),
     [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: (input) =>
       observe.effect(
         ORCHESTRATION_V2_WS_METHODS.getTurnDiff,

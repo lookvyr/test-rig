@@ -251,3 +251,19 @@ export function toolOutputImageBlocks(value: unknown): ReadonlyArray<unknown> {
 export function toolOutputImages(value: unknown): ReadonlyArray<ToolOutputImage> {
   return toolOutputImageBlocks(value).flatMap((block) => readToolOutputImage(block) ?? []);
 }
+
+/**
+ * Replaces each image's bytes with `{ type: "image", mimeType }` and keeps its
+ * position, so detail reads stay small and clients load the bytes as assets.
+ */
+export function omitToolOutputImageData(value: unknown): unknown {
+  const omit = (block: unknown) => {
+    const image = readToolOutputImage(block);
+    return image?.data === undefined ? block : { type: "image", mimeType: image.mimeType };
+  };
+  if (Array.isArray(value)) return value.map(omit);
+  if (Predicate.isObject(value) && Array.isArray(value.content)) {
+    return { ...value, content: value.content.map(omit) };
+  }
+  return omit(value);
+}

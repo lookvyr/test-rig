@@ -20,6 +20,7 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
  */
 export const RPC_REQUIRED_SCOPES = {
   "orchestration.getThreadProjection": AuthOrchestrationReadScope,
+  "orchestration.getTurnItem": AuthOrchestrationReadScope,
   "orchestration.launchThread": AuthOrchestrationOperateScope,
   "orchestration.subscribeArchivedShell": AuthOrchestrationReadScope,
   "projects.mutate": AuthOrchestrationOperateScope,

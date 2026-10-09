@@ -92,6 +92,11 @@ request link to open GitHub for those actions.
 
 ## Watching a pull request
 
+Expand the agent’s PR watch tool call in the conversation to see its arguments and
+result, including the pull request URL and whether watching started or was already
+active. These details describe that call; the current watch controls are in the
+conversation’s details panel.
+
 When an agent starts watching a linked pull request, the conversation's details
 panel shows an eye beside it. Choose **Stop watching** to stop that monitor.
 The pull request stays linked to the conversation.

@@ -1,4 +1,4 @@
-import { ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
+import { ORCHESTRATION_WS_METHODS, ORCHESTRATION_V2_WS_METHODS } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
@@ -18,6 +18,13 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       // Scripts are immutable per run: cache generously.
       staleTimeMs: 300_000,
       idleTtlMs: 300_000,
+    }),
+    // One fetch while running, then a fresh cache key when the item finishes.
+    turnItem: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:orchestration:turn-item",
+      tag: ORCHESTRATION_V2_WS_METHODS.getTurnItem,
+      staleTimeMs: 60_000,
+      idleTtlMs: 60_000,
     }),
     fullThreadDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:orchestration:full-thread-diff",
