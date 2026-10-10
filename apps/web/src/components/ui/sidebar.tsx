@@ -370,7 +370,7 @@ function SidebarRail({
     side: "left" | "right";
     startWidth: number;
     startX: number;
-    transitionTargets: HTMLElement[];
+    widthTargets: HTMLElement[];
     width: number;
     wrapper: HTMLElement;
   } | null>(null);
@@ -380,7 +380,7 @@ function SidebarRail({
   const railTitle = canResize ? "Drag to resize sidebar" : "Toggle Sidebar";
 
   const stopResize = React.useCallback(
-    (pointerId: number) => {
+    (pointerId: number, commit = true) => {
       const resizeState = resizeStateRef.current;
       if (!resizeState) {
         return;
@@ -388,13 +388,18 @@ function SidebarRail({
       if (resizeState.rafId !== null) {
         window.cancelAnimationFrame(resizeState.rafId);
       }
-      resizeState.transitionTargets.forEach((element) => {
+      const finalWidth = resolvedResizable
+        ? clampSidebarWidth(commit ? resizeState.width : resizeState.startWidth, resolvedResizable)
+        : resizeState.startWidth;
+      resizeState.wrapper.style.setProperty("--sidebar-width", `${finalWidth}px`);
+      resizeState.widthTargets.forEach((element) => {
+        element.style.removeProperty("width");
         element.style.removeProperty("transition-duration");
       });
-      if (resolvedResizable?.storageKey && typeof window !== "undefined") {
-        setLocalStorageItem(resolvedResizable.storageKey, resizeState.width, Schema.Finite);
+      if (commit && resolvedResizable?.storageKey && typeof window !== "undefined") {
+        setLocalStorageItem(resolvedResizable.storageKey, finalWidth, Schema.Finite);
       }
-      resolvedResizable?.onResize?.(resizeState.width);
+      resolvedResizable?.onResize?.(finalWidth);
       resizeStateRef.current = null;
       if (resizeState.rail.hasPointerCapture(pointerId)) {
         resizeState.rail.releasePointerCapture(pointerId);
@@ -426,12 +431,13 @@ function SidebarRail({
 
       const startWidth = sidebarContainer.getBoundingClientRect().width;
       const initialWidth = clampSidebarWidth(startWidth, resolvedResizable);
-      const transitionTargets = [
+      const widthTargets = [
         sidebarRoot.querySelector<HTMLElement>("[data-slot='sidebar-gap']"),
         sidebarRoot.querySelector<HTMLElement>("[data-slot='sidebar-container']"),
       ].filter((element): element is HTMLElement => element !== null);
-      transitionTargets.forEach((element) => {
+      widthTargets.forEach((element) => {
         element.style.setProperty("transition-duration", "0ms");
+        element.style.setProperty("width", `${initialWidth}px`);
       });
 
       event.preventDefault();
@@ -446,11 +452,10 @@ function SidebarRail({
         side: sidebarInstance?.side ?? "left",
         startWidth: initialWidth,
         startX: event.clientX,
-        transitionTargets,
+        widthTargets,
         width: initialWidth,
         wrapper,
       };
-      wrapper.style.setProperty("--sidebar-width", `${initialWidth}px`);
       event.currentTarget.setPointerCapture(event.pointerId);
       document.body.style.cursor = "col-resize";
       document.body.style.userSelect = "none";
@@ -500,7 +505,11 @@ function SidebarRail({
           return;
         }
 
-        activeResizeState.wrapper.style.setProperty("--sidebar-width", `${nextWidth}px`);
+        // Only these two elements consume width during a drag. Updating the inherited
+        // wrapper variable every frame invalidates styles throughout the app.
+        activeResizeState.widthTargets.forEach((element) => {
+          element.style.setProperty("width", `${nextWidth}px`);
+        });
         activeResizeState.width = nextWidth;
       });
     },
@@ -532,9 +541,12 @@ function SidebarRail({
     (event: React.PointerEvent<HTMLButtonElement>) => {
       onPointerCancel?.(event);
       if (event.defaultPrevented) return;
-      endResizeInteraction(event);
+      const resizeState = resizeStateRef.current;
+      if (!resizeState || resizeState.pointerId !== event.pointerId) return;
+      suppressClickRef.current = resizeState.moved;
+      stopResize(event.pointerId, false);
     },
-    [endResizeInteraction, onPointerCancel],
+    [stopResize, onPointerCancel],
   );
 
   const handleClick = React.useCallback(
@@ -556,6 +568,20 @@ function SidebarRail({
   );
 
   React.useLayoutEffect(() => {
+    const resizeState = resizeStateRef.current;
+    if (resizeState && !canResize) stopResize(resizeState.pointerId, false);
+  }, [canResize, stopResize]);
+
+  React.useLayoutEffect(() => {
+    const resizeState = resizeStateRef.current;
+    if (resizeState && resolvedResizable) {
+      resizeState.pendingWidth = clampSidebarWidth(resizeState.pendingWidth, resolvedResizable);
+      resizeState.width = clampSidebarWidth(resizeState.width, resolvedResizable);
+      resizeState.widthTargets.forEach((element) => {
+        element.style.setProperty("width", `${resizeState.width}px`);
+      });
+      return;
+    }
     if (!resolvedResizable?.storageKey || typeof window === "undefined") return;
     const rail = railRef.current;
     if (!rail) return;
@@ -583,7 +609,8 @@ function SidebarRail({
       if (resizeState?.rafId != null) {
         window.cancelAnimationFrame(resizeState.rafId);
       }
-      resizeState?.transitionTargets.forEach((element) => {
+      resizeState?.widthTargets.forEach((element) => {
+        element.style.removeProperty("width");
         element.style.removeProperty("transition-duration");
       });
       document.body.style.removeProperty("cursor");

@@ -34,3 +34,9 @@ threads.
 **Archive thread** removes a stopped thread from the usual list while keeping
 its history. Open **Settings → Archive** to unarchive it. Archive is separate
 from settling or deleting a thread.
+
+## Resizing
+
+Drag the sidebar edge to change its width. Releasing saves that width. Collapsing
+the sidebar during a drag cancels the unsaved change; the restored width still
+fits the current window.
