@@ -260,11 +260,11 @@ export function SideChatPanel(props: {
 
   const send = async (event?: { preventDefault: () => void }) => {
     event?.preventDefault();
-    if (pending.activePendingProgress) {
+    const context = composerRef.current?.getSendContext();
+    if (pending.activePendingProgress && context?.answeringPendingUserInput !== false) {
       pending.onAdvanceActivePendingUserInput();
       return;
     }
-    const context = composerRef.current?.getSendContext();
     if (
       !thread ||
       !context?.providerAvailable ||

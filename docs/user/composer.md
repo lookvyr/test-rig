@@ -50,6 +50,18 @@ as while the agent is working. After an interrupted turn, **Resume thread** can
 continue where the agent left off when the composer is empty and the provider
 supports continuation. You can also send your own follow-up.
 
+## Incoming approvals and questions
+
+A new approval or blocking question waits while you are typing in the focused
+composer. It appears after 1.5 seconds without a draft edit, when you move focus
+away, or after you send. Your unsent draft returns after you answer or approve.
+A request that has already appeared is not hidden again when you resume typing.
+This also applies to temporary side chats.
+
+While a request is held, Send keeps its normal meaning: it steers the active
+turn when steering is available. It does not submit your draft as a question
+answer. Nonblocking questions keep their separate answer controls.
+
 ## Plans and attachments
 
 When legacy plan mode is enabled, text feedback can refine a proposed plan.
