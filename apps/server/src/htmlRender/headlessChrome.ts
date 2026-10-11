@@ -51,6 +51,8 @@ const PAGE_ORIGIN = "http://t3-page.localhost";
 const PAGE_URL = `${PAGE_ORIGIN}/page.html`;
 // Stack traces and load errors name the page this way instead of its URL.
 const PAGE_NAME = "page.html";
+// Each measuring load reads its own copy of the page off the pipe.
+const MEASURE_CONCURRENCY = 3;
 
 const textEncoder = new TextEncoder();
 
@@ -562,3 +564,36 @@ export const captureHtmlScreenshot = Effect.fn("headlessChrome.captureHtmlScreen
       ),
   }),
 );
+
+/**
+ * Content heights of the page at each width, each from a fresh load, since
+ * pages often lay themselves out from the width once at load. One browser,
+ * a few widths at a time.
+ */
+export const measureHtmlHeights = Effect.fn("headlessChrome.measureHtmlHeights")(function* (input: {
+  readonly executable: string;
+  readonly noSandbox: boolean;
+  readonly html: string;
+  readonly widths: ReadonlyArray<number>;
+  readonly urlFragment: string;
+}) {
+  const path = yield* Path.Path;
+  const directory = yield* scratchDirectory;
+  const browser = yield* launchBrowser({
+    executable: input.executable,
+    noSandbox: input.noSandbox,
+    profileDirectory: path.join(directory, "profile"),
+  });
+  const body = pageBody(input.html);
+  return yield* Effect.forEach(
+    input.widths,
+    (width) =>
+      browser.openPage(width).pipe(
+        Effect.flatMap((page) =>
+          page.load(body, input.urlFragment).pipe(Effect.ensuring(page.close)),
+        ),
+        Effect.map((height) => [width, height] as const),
+      ),
+    { concurrency: MEASURE_CONCURRENCY },
+  );
+}, Effect.scoped);

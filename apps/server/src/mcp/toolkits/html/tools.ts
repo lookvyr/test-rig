@@ -1,5 +1,6 @@
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import {
+  HTML_RENDER_COLUMN_WIDTH,
   HTML_RENDER_LAYOUT_GUIDE,
   HTML_RENDER_MAX_HEIGHT,
   HTML_RENDER_MAX_TITLE_LENGTH,
@@ -27,7 +28,7 @@ export const HtmlPreviewTool = Tool.make("html_preview", {
     html: Html,
     width: Schema.optional(
       Schema.Int.annotate({
-        description: `Viewport width in CSS pixels, 240-1600. Defaults to ${728}, the reply column; use about 390 to check phones.`,
+        description: `Viewport width in CSS pixels, 240-1600. Defaults to ${HTML_RENDER_COLUMN_WIDTH}, the reply column; use about 390 to check phones.`,
       }),
     ),
     appearance: Schema.optional(
@@ -89,6 +90,7 @@ const HtmlRenderTool = Tool.make(HTML_RENDER_TOOL_NAME, {
       attachmentId: Schema.String,
       title: Schema.String,
       height: Schema.Number,
+      heights: Schema.optional(Schema.Array(Schema.Tuple([Schema.Int, Schema.Int]))),
     }),
     message: Schema.String,
   }),

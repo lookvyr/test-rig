@@ -180,20 +180,60 @@ describe("htmlRenderFromToolItem", () => {
 });
 
 describe("htmlRenderFrameHeight", () => {
-  it("reserves the requested height, then fits the content without exceeding the cap", () => {
-    expect(htmlRenderFrameHeight(reference)).toBe(420);
-    expect(htmlRenderFrameHeight(reference, 300)).toBe(300);
-    expect(htmlRenderFrameHeight(reference, 900)).toBe(420);
-    expect(htmlRenderFrameHeight(reference, 10)).toBe(80);
-    expect(htmlRenderFrameHeight({ ...reference, height: 9000 })).toBe(HTML_RENDER_MAX_HEIGHT);
+  const measured = readHtmlRenderReference({
+    ...reference,
+    height: 1500,
+    heights: [
+      [728, 1403],
+      [390, 1290],
+      [1000, 1660],
+    ],
+  })!;
+
+  it("takes the taller neighbor between measured widths and holds the ends", () => {
+    expect(measured.heights?.map(([width]) => width)).toEqual([390, 728, 1000]);
+    expect(htmlRenderFrameHeight(measured, 728)).toBe(1403);
+    expect(htmlRenderFrameHeight(measured, 559)).toBe(1403);
+    expect(htmlRenderFrameHeight(measured, 320)).toBe(1290);
   });
 
-  it("compares references by value to preserve a mounted page across timeline updates", () => {
-    expect(htmlRenderReferencesEqual(reference, { ...reference })).toBe(true);
-    expect(htmlRenderReferencesEqual(reference, { ...reference, attachmentId: "other" })).toBe(
-      false,
+  it("takes the taller layout when a breakpoint falls between measured widths", () => {
+    // 900px tall below a 600px media query, 450px above it.
+    const responsive = readHtmlRenderReference({
+      ...reference,
+      height: 2000,
+      heights: [
+        [520, 900],
+        [640, 450],
+      ],
+    })!;
+    expect(htmlRenderFrameHeight(responsive, 590)).toBe(900);
+    expect(htmlRenderFrameHeight(responsive, 640)).toBe(450);
+  });
+
+  it("fits a page the client lays out taller than the server measured", () => {
+    // The agent passed contentHeight at the column width, so the page should never scroll.
+    const fitted = { ...measured, height: 1403 };
+    expect(htmlRenderFrameHeight(fitted, 728, 1415)).toBe(1415);
+    expect(htmlRenderFrameHeight(fitted, 1400)).toBe(1660);
+    expect(htmlRenderFrameHeight(fitted, 728, 5000)).toBe(HTML_RENDER_MAX_HEIGHT);
+  });
+
+  it("keeps the agent's height when it asked for a scrolling frame or the page is unmeasured", () => {
+    const scrolling = { ...measured, height: 600 };
+    expect(htmlRenderFrameHeight(scrolling, 728, 1415)).toBe(600);
+    expect(htmlRenderFrameHeight(scrolling, 1400)).toBe(600);
+    expect(htmlRenderFrameHeight(reference, 728)).toBe(reference.height);
+    expect(htmlRenderFrameHeight(reference, 728, 900)).toBe(reference.height);
+    expect(htmlRenderFrameHeight(reference, 728, 300)).toBe(300);
+  });
+
+  it("drops a malformed table and compares tables by value", () => {
+    expect(readHtmlRenderReference({ ...reference, heights: [[728, "x"]] })?.heights).toBe(
+      undefined,
     );
-    expect(htmlRenderReferencesEqual(reference, { ...reference, height: 500 })).toBe(false);
-    expect(htmlRenderReferencesEqual(reference, { ...reference, title: "Other" })).toBe(false);
+    const copy = readHtmlRenderReference(JSON.parse(JSON.stringify(measured)))!;
+    expect(htmlRenderReferencesEqual(measured, copy)).toBe(true);
+    expect(htmlRenderReferencesEqual(measured, { ...copy, heights: [[390, 1290]] })).toBe(false);
   });
 });

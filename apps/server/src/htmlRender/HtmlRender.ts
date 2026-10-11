@@ -1,35 +1,39 @@
+import type { ThreadId } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
-import { htmlRenderTheme, htmlRenderThemeFragment } from "@t3tools/shared/htmlRender";
+import {
+  clampHtmlRenderHeight,
+  HTML_RENDER_COLUMN_WIDTH,
+  HTML_RENDER_MAX_TITLE_LENGTH,
+  HTML_RENDER_MEASURE_FONTS,
+  HTML_RENDER_MEASURE_WIDTHS,
+  htmlRenderTheme,
+  htmlRenderThemeFragment,
+  injectHtmlRenderBootstrap,
+  type HtmlRenderReference,
+} from "@t3tools/shared/htmlRender";
 import {
   T3_CODE_DARK_THEME_COLORS,
   T3_CODE_LIGHT_THEME_COLORS,
   type ThemeAppearance,
 } from "@t3tools/shared/themePalettes";
-import type * as Path from "effect/Path";
-import * as Semaphore from "effect/Semaphore";
-import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import { resolveRootCliCommand } from "../cli/invocation.ts";
-import * as HeadlessChrome from "./headlessChrome.ts";
-import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
-import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
-import type { ThreadId } from "@t3tools/contracts";
-import {
-  clampHtmlRenderHeight,
-  HTML_RENDER_MAX_TITLE_LENGTH,
-  injectHtmlRenderBootstrap,
-  type HtmlRenderReference,
-} from "@t3tools/shared/htmlRender";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import { createAttachmentId } from "../attachmentStore.ts";
+import { resolveRootCliCommand } from "../cli/invocation.ts";
 import * as ServerConfig from "../config.ts";
+import * as HeadlessChrome from "./headlessChrome.ts";
+import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
+import * as PreviewBrowserHost from "../preview/PreviewBrowserHost.ts";
 
 const MIB = 1024 * 1024;
 const MAX_IMAGE_BYTES = 10 * MIB;
@@ -94,7 +98,11 @@ export class HtmlRender extends Context.Service<
   {
     /** The self-contained page that gets stored: local images inlined, theme bootstrap injected. */
     readonly prepare: (html: string) => Effect.Effect<string, HtmlRenderPrepareError>;
-    /** Stores a prepared page as a thread attachment for clients to show inline. */
+    /**
+     * Stores a prepared page as a thread attachment for clients to show inline,
+     * measuring its height at each client width when the preview browser is
+     * already installed.
+     */
     readonly publish: (input: {
       readonly threadId: ThreadId;
       readonly html: string;
@@ -312,8 +320,16 @@ const inlineLocalImages = Effect.fn("HtmlRender.inlineLocalImages")(function* (h
 });
 
 const MIN_PREVIEW_WIDTH = 240;
-const MAX_PREVIEW_WIDTH = 1600;
+const MAX_PREVIEW_WIDTH = 1_600;
+// Each preview or measurement runs its own browser; more at once mostly costs memory.
 const MAX_CONCURRENT_BROWSERS = 2;
+// Publishing waits this long at most for heights before returning without them.
+const MEASURE_TIMEOUT = "6 seconds";
+
+// Measured in the dark theme with Arial-metric fonts, so text wraps close to how clients show it.
+const MEASURE_FRAGMENT = htmlRenderThemeFragment(
+  htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark", HTML_RENDER_MEASURE_FONTS),
+);
 
 const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -354,11 +370,42 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  // Never installs the browser: html_render must not depend on it.
+  const measure = Effect.fn("HtmlRender.measure")(
+    function* (html: string) {
+      const executable = yield* previewBrowser.installed;
+      if (Option.isNone(executable)) return undefined;
+      const heights = yield* launching(executable.value, (noSandbox) =>
+        HeadlessChrome.measureHtmlHeights({
+          executable: executable.value,
+          noSandbox,
+          html,
+          widths: HTML_RENDER_MEASURE_WIDTHS,
+          urlFragment: MEASURE_FRAGMENT,
+        }).pipe(Effect.provideContext(services)),
+      ).pipe(
+        Effect.timeoutOrElse({
+          duration: MEASURE_TIMEOUT,
+          orElse: () =>
+            Effect.fail(
+              new HeadlessChrome.HtmlRenderBrowserError({
+                reason: `measuring took longer than ${MEASURE_TIMEOUT}`,
+              }),
+            ),
+        }),
+      );
+      return heights.toSorted(([left], [right]) => left - right);
+    },
+    Effect.catch((cause) =>
+      Effect.logWarning("Could not measure an HTML render; publishing it without heights.", {
+        cause,
+      }).pipe(Effect.as(undefined)),
+    ),
+  );
+
   // The bootstrap goes in first so its head scan never runs over inlined image data.
   const inline = (html: string) =>
-    inlineLocalImages(injectHtmlRenderBootstrap(html)).pipe(
-      Effect.provideService(FileSystem.FileSystem, fileSystem),
-    );
+    inlineLocalImages(injectHtmlRenderBootstrap(html)).pipe(Effect.provideContext(services));
 
   const prepare = Effect.fn("HtmlRender.prepare")(function* (html: string) {
     const inlined = yield* inline(html);
@@ -387,8 +434,9 @@ const make = Effect.gen(function* () {
     if (attachmentId === null || filePath === null) {
       return yield* new HtmlRenderStoreError({ cause: new Error("Invalid thread id.") });
     }
-    yield* fileSystem.writeFileString(filePath, html).pipe(
+    const heights = yield* fileSystem.writeFileString(filePath, html).pipe(
       Effect.mapError((cause) => new HtmlRenderStoreError({ cause })),
+      Effect.andThen(measure(html)),
       // Only the returned reference lets thread deletion find the page, so a
       // publish that fails or is interrupted before returning removes it.
       Effect.onError(() => fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore)),
@@ -397,6 +445,7 @@ const make = Effect.gen(function* () {
       attachmentId,
       title: input.title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) || "HTML",
       height: clampHtmlRenderHeight(input.height),
+      ...(heights === undefined ? {} : { heights }),
     } satisfies HtmlRenderReference;
   });
 
@@ -407,7 +456,7 @@ const make = Effect.gen(function* () {
   }) {
     const width = Math.min(
       MAX_PREVIEW_WIDTH,
-      Math.max(MIN_PREVIEW_WIDTH, Math.round(input.width ?? 728)),
+      Math.max(MIN_PREVIEW_WIDTH, Math.round(input.width ?? HTML_RENDER_COLUMN_WIDTH)),
     );
     const appearance = input.appearance ?? "dark";
     const inlined = yield* inline(input.html);
@@ -415,7 +464,7 @@ const make = Effect.gen(function* () {
     const theme = htmlRenderTheme(
       appearance === "light" ? T3_CODE_LIGHT_THEME_COLORS : T3_CODE_DARK_THEME_COLORS,
       appearance,
-      { sans: "Arial, Helvetica, sans-serif", mono: "Consolas, monospace" },
+      HTML_RENDER_MEASURE_FONTS,
     );
     const screenshot = yield* launching(executable, (noSandbox) =>
       HeadlessChrome.captureHtmlScreenshot({

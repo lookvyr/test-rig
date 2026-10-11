@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import { describe } from "vite-plus/test";
 
-import { isLoopbackHostname, resolveDevRedirectUrl } from "./http.ts";
+import { assetResponseHeaders, isLoopbackHostname, resolveDevRedirectUrl } from "./http.ts";
 
 describe("http dev routing", () => {
   it("treats localhost and loopback addresses as local", () => {
@@ -24,5 +24,20 @@ describe("http dev routing", () => {
     expect(resolveDevRedirectUrl(devUrl, requestUrl)).toBe(
       "http://127.0.0.1:5173/pair?token=test-token",
     );
+  });
+});
+
+describe("HTML asset sandbox", () => {
+  it("allows downloads without allowing modals or same-origin access", () => {
+    for (const headers of [
+      assetResponseHeaders("page.html"),
+      assetResponseHeaders("attachment", { mimeType: "text/html" }),
+    ]) {
+      const sandbox = headers["Content-Security-Policy"]?.split(" ");
+      expect(sandbox).toContain("sandbox");
+      expect(sandbox).toContain("allow-downloads");
+      expect(sandbox).not.toContain("allow-modals");
+      expect(sandbox).not.toContain("allow-same-origin");
+    }
   });
 });

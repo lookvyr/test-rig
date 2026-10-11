@@ -3,6 +3,9 @@ import { describe, expect, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -10,15 +13,30 @@ import * as Path from "effect/Path";
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as HtmlRender from "./HtmlRender.ts";
-const layerTest = HtmlRender.layer.pipe(
-  Layer.provide(
-    Layer.mock(PreviewBrowser.PreviewBrowser)({
-      executable: Effect.die("Publishing must not launch a browser"),
-    }),
+const layerHtmlRender = (
+  executable?: string,
+  installed: Effect.Effect<Option.Option<string>> = Effect.succeed(
+    Option.fromUndefinedOr(executable),
   ),
-  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "test-rig-html-render-" })),
-  Layer.provideMerge(NodeServices.layer),
-);
+) =>
+  HtmlRender.layer.pipe(
+    Layer.provide(
+      Layer.succeed(
+        PreviewBrowser.PreviewBrowser,
+        PreviewBrowser.PreviewBrowser.of({
+          executable:
+            executable === undefined
+              ? Effect.die("This test has no preview browser.")
+              : Effect.succeed(executable),
+          installed,
+        }),
+      ),
+    ),
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "test-rig-html-render-" })),
+    Layer.provideMerge(NodeServices.layer),
+  );
+const layerTest = layerHtmlRender();
+
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 describe("HtmlRender", () => {
@@ -164,5 +182,38 @@ describe("HtmlRender", () => {
       expect(html).toContain('<style id="t3-theme">');
       expect(html).toContain("<p>Quarterly revenue</p>");
     }).pipe(Effect.provide(layerTest)),
+  );
+  it.effect("removes the page when publishing is interrupted", () =>
+    Effect.gen(function* () {
+      const measuring = yield* Deferred.make<void>();
+      yield* Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const config = yield* ServerConfig.ServerConfig;
+        const htmlRender = yield* HtmlRender.HtmlRender;
+        const storedPages = fileSystem
+          .readDirectory(config.attachmentsDir, { recursive: true })
+          .pipe(Effect.map((names) => names.filter((name) => name.endsWith(".html"))));
+
+        const publishing = yield* htmlRender
+          .publish({
+            threadId: ThreadId.make("thread-html-cancel"),
+            html: "<p>x</p>",
+            title: "X",
+            height: 200,
+          })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(measuring);
+        expect(yield* storedPages).toHaveLength(1);
+        yield* Fiber.interrupt(publishing);
+        expect(yield* storedPages).toEqual([]);
+      }).pipe(
+        Effect.provide(
+          layerHtmlRender(
+            undefined,
+            Deferred.succeed(measuring, undefined).pipe(Effect.andThen(Effect.never)),
+          ),
+        ),
+      );
+    }),
   );
 });

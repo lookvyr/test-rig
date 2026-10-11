@@ -22,13 +22,49 @@ export const HTML_RENDER_MAX_TITLE_LENGTH = 200;
 export interface HtmlRenderReference {
   readonly attachmentId: string;
   readonly title: string;
-  /** The agent's initial frame height in CSS pixels, and the cap on its content height. */
+  /** The agent's frame height; caps unmeasured pages and intentionally scrolling frames. */
   readonly height: number;
+  /**
+   * `[width, contentHeight]` pairs the server measured at publish, ascending by
+   * width. Absent when the preview browser was not installed yet.
+   */
+  readonly heights?: ReadonlyArray<readonly [width: number, height: number]>;
+}
+
+/** Frame widths the server measures a page at, from phones to the wide chat setting. */
+export const HTML_RENDER_MEASURE_WIDTHS = [320, 375, 430, 520, 640, 728, 860, 1000, 1144] as const;
+
+/**
+ * The reply column's frame width at the default chat width. Agents preview at
+ * it, and it picks the measured height when a client cannot know its width.
+ */
+export const HTML_RENDER_COLUMN_WIDTH = 728;
+
+const MAX_MEASURED_HEIGHTS = 24;
+
+function readMeasuredHeights(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_MEASURED_HEIGHTS) {
+    return undefined;
+  }
+  const heights = value.flatMap((entry) =>
+    Array.isArray(entry) &&
+    entry.length === 2 &&
+    Number.isInteger(entry[0]) &&
+    entry[0] >= 1 &&
+    entry[0] <= 10_000 &&
+    typeof entry[1] === "number" &&
+    Number.isFinite(entry[1])
+      ? [[entry[0] as number, clampHtmlRenderHeight(entry[1])] as const]
+      : [],
+  );
+  return heights.length === value.length
+    ? [...heights].sort((left, right) => left[0] - right[0])
+    : undefined;
 }
 
 export function readHtmlRenderReference(value: unknown): HtmlRenderReference | undefined {
   if (typeof value !== "object" || value === null) return undefined;
-  const { attachmentId, title, height } = value as Record<string, unknown>;
+  const { attachmentId, title, height, heights } = value as Record<string, unknown>;
   if (
     typeof attachmentId !== "string" ||
     attachmentId.length === 0 ||
@@ -39,10 +75,12 @@ export function readHtmlRenderReference(value: unknown): HtmlRenderReference | u
   ) {
     return undefined;
   }
+  const measured = readMeasuredHeights(heights);
   return {
     attachmentId,
     title: title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) || "HTML",
     height: clampHtmlRenderHeight(height),
+    ...(measured === undefined ? {} : { heights: measured }),
   };
 }
 
@@ -51,13 +89,46 @@ export function htmlRenderReferencesEqual(left: HtmlRenderReference, right: Html
   return (
     left.attachmentId === right.attachmentId &&
     left.title === right.title &&
-    left.height === right.height
+    left.height === right.height &&
+    (left.heights ?? []).length === (right.heights ?? []).length &&
+    (left.heights ?? []).every(
+      ([width, height], index) =>
+        right.heights?.[index]?.[0] === width && right.heights[index][1] === height,
+    )
   );
 }
 
-/** Fits the client-rendered page up to the height requested by the agent. */
-export function htmlRenderFrameHeight(reference: HtmlRenderReference, contentHeight?: number) {
-  return clampHtmlRenderHeight(Math.min(reference.height, contentHeight ?? reference.height));
+// The taller of the heights measured at the nearest widths on each side. A
+// breakpoint between two measured widths can make the page as tall as either.
+function measuredHeight(heights: NonNullable<HtmlRenderReference["heights"]>, width: number) {
+  const above = heights.findIndex(([measuredWidth]) => measuredWidth >= width);
+  const high = above === -1 ? heights.length - 1 : above;
+  const low = heights[high]![0] === width ? high : Math.max(0, high - 1);
+  return Math.max(heights[low]![1], heights[high]![1]);
+}
+
+/**
+ * The frame height for a page at a frame width. It is the page's own reported
+ * `contentHeight` when the client has one, else the server's measurement for
+ * that width. A page even a few pixels taller than its frame scrolls inside it
+ * and takes the reader's scroll, so the frame fits the page. The agent's height
+ * caps it only when it is below the page's height at the column width (the
+ * agent asked for a scrolling frame) or when the page was never measured.
+ */
+export function htmlRenderFrameHeight(
+  reference: HtmlRenderReference,
+  width: number,
+  contentHeight?: number,
+) {
+  const heights = reference.heights;
+  if (heights === undefined || heights.length === 0) {
+    return clampHtmlRenderHeight(Math.min(reference.height, contentHeight ?? reference.height));
+  }
+  const cap =
+    measuredHeight(heights, HTML_RENDER_COLUMN_WIDTH) > reference.height
+      ? reference.height
+      : HTML_RENDER_MAX_HEIGHT;
+  return clampHtmlRenderHeight(Math.min(cap, contentHeight ?? measuredHeight(heights, width)));
 }
 
 /** A readable download name: the title without characters file systems reject. */
@@ -84,6 +155,16 @@ export const HTML_RENDER_DEFAULT_FONTS: HtmlRenderFonts = {
   sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
   // Concrete names only: some engines alias `ui-monospace` to the proportional UI font.
   mono: '"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace',
+};
+
+/**
+ * Fonts the server's headless browser lays pages out with. Arial-metric faces
+ * stand in for the system UI fonts readers see, so measured heights and
+ * preview screenshots wrap text close to how a client will.
+ */
+export const HTML_RENDER_MEASURE_FONTS: HtmlRenderFonts = {
+  sans: '"Liberation Sans", Arimo, Arial, Helvetica, sans-serif',
+  mono: '"Liberation Mono", Cousine, Menlo, Consolas, monospace',
 };
 
 /** The resolved theme a client hands an HTML render. */
@@ -179,8 +260,10 @@ export const HTML_RENDER_THEME_GUIDE = [
 
 /** Agent-facing layout rules for a page that sits inside a reply. */
 export const HTML_RENDER_LAYOUT_GUIDE = [
-  `The frame is borderless on the thread's background, as wide as the reply column (728px on desktop by default, wider if the reader widens chat, about 360px on phones), and its left edge lines up with your reply text.`,
+  `The frame is borderless on the thread's background, as wide as the reply column (${HTML_RENDER_COLUMN_WIDTH}px on desktop by default, wider if the reader widens chat, about 360px on phones), and its left edge lines up with your reply text.`,
+  "The page sits on the thread's own background, so by default leave html, body, and the outermost element with no background color. This overrides general style preferences such as a fixed black page background.",
   "Use a fluid width with no horizontal padding on the outermost element, and no outer card, border, or banner title: the page is part of your reply.",
+  "If a box needs its own background (a mock of a specific screen, a panel that must stand apart), give it at least 16px of padding on every side and var(--radius) corners, so content never touches its edge.",
   "Give charts fixed pixel heights rather than heights that scale with width.",
   "Let content set the page's height. Avoid viewport-based heights such as 100vh or height:100% on html or body; the frame grows to fit the page, so they can make it grow again and again.",
 ].join(" ");
@@ -242,7 +325,9 @@ export function htmlRenderThemeMessage(theme: HtmlRenderTheme) {
 // reply reads as a box within the thread, so it stays hidden.
 const BASE_CSS =
   "html{background:var(--background);color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none}" +
-  "html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}";
+  "html::-webkit-scrollbar{display:none}body{margin:0}code,kbd,pre,samp{font-family:var(--font-mono)}" +
+  // Focus outlines paint inside the element, so the frame edge never clips them.
+  ":where(:focus-visible){outline:2px solid var(--ring)}:focus-visible{outline-width:2px!important;outline-offset:-2px!important}";
 
 function rootRule(theme: HtmlRenderTheme): string {
   const declarations = Object.entries(theme.variables)
@@ -258,13 +343,15 @@ function rootRule(theme: HtmlRenderTheme): string {
 // the reader clicks to another page never replaces the page inside the thread:
 // a framed page asks its client to open it, and a top-level page (mobile)
 // opens it as a new window, which the client sends to the browser. A framed
-// page also reports its content height so its client can fit the frame to the page.
+// page also reports its content height, measured as the server measures it,
+// so its client can fit the frame to the page.
 const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("t3-theme"),n=0;if(!s)return;var b=${JSON.stringify(BASE_CSS)};function a(t){if(!t||typeof t!=="object"||!t.variables||typeof t.variables!=="object")return;var c=":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+b;}try{var m=/[#&]${THEME_FRAGMENT_KEY}=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,"",location.pathname+location.search);}}catch(e){}window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(HOST_CONTEXT_CHANGED_METHOD)}&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables});});document.addEventListener("click",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches("a[href]");}):null,u;if(!l)return;try{u=new URL(l.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split("#")[0]===location.href.split("#")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",id:"t3-link-"+(++n),method:${JSON.stringify(OPEN_LINK_METHOD)},params:{url:u.href}},"*");}else{l.setAttribute("target","_blank");l.setAttribute("rel","noopener");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(SIZE_CHANGED_METHOD)},params:{height:v}},"*");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener("load",z);}})();`;
 
 function bootstrapMarkup(markup: string): string {
   const dark = htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark");
   const light = htmlRenderTheme(T3_CODE_LIGHT_THEME_COLORS, "light");
-  // Without a client-provided theme, a downloaded page follows the OS appearance.
+  // Without a client-provided theme (a direct download, the headless preview
+  // without a fragment) the page follows the OS appearance.
   const defaultCss = `${rootRule(dark)}@media (prefers-color-scheme: light){${rootRule(light)}}${BASE_CSS}`;
   return [
     /<meta\s[^>]*charset/i.test(markup.slice(0, 4096)) ? "" : '<meta charset="utf-8">',

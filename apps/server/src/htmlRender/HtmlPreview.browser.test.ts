@@ -2,9 +2,15 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
-import { htmlRenderTheme } from "@t3tools/shared/htmlRender";
+import {
+  HTML_RENDER_MEASURE_FONTS,
+  HTML_RENDER_MEASURE_WIDTHS,
+  htmlRenderTheme,
+} from "@t3tools/shared/htmlRender";
 import { T3_CODE_DARK_THEME_COLORS } from "@t3tools/shared/themePalettes";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import { ThreadId } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -12,13 +18,17 @@ import * as NodeDgram from "node:dgram";
 import * as NodeHttp from "node:http";
 import * as NodeURL from "node:url";
 import * as ServerConfig from "../config.ts";
+import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as HtmlRender from "./HtmlRender.ts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
 const TEST_BROWSER_ENV = "TEST_RIG_TEST_HEADLESS_SHELL";
 const layerHtmlRender = (executable: string) =>
   HtmlRender.layer.pipe(
     Layer.provide(
-      Layer.mock(PreviewBrowser.PreviewBrowser)({ executable: Effect.succeed(executable) }),
+      Layer.mock(PreviewBrowser.PreviewBrowser)({
+        executable: Effect.succeed(executable),
+        installed: Effect.succeed(Option.some(executable)),
+      }),
     ),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "test-rig-preview-" })),
     Layer.provideMerge(NodeServices.layer),
@@ -62,7 +72,7 @@ describe("HTML preview in Chromium", () => {
           expect(preview.consoleMessages).toEqual(
             expect.arrayContaining([
               { level: "log", text: "ready 3" },
-              { level: "info", text: "Arial, Helvetica, sans-serif" },
+              { level: "info", text: HTML_RENDER_MEASURE_FONTS.sans },
               {
                 level: "warning",
                 text: htmlRenderTheme(T3_CODE_DARK_THEME_COLORS, "dark").variables["--background"],
@@ -166,5 +176,49 @@ describe("HTML preview in Chromium", () => {
         expect(datagrams).toEqual([]);
       }).pipe(Effect.scoped),
     30_000,
+  );
+  it.live(
+    "measures a published page at every client width with a fresh load each",
+    (ctx) =>
+      Effect.gen(function* () {
+        const executable = (yield* HostProcessEnvironment)[TEST_BROWSER_ENV];
+        if (!executable) return ctx.skip(`Set ${TEST_BROWSER_ENV} to run this test.`);
+        yield* Effect.gen(function* () {
+          const htmlRender = yield* HtmlRender.HtmlRender;
+          // Like a D3 chart, the page sizes itself from the width once, at load.
+          const reference = yield* htmlRender.publish({
+            threadId: ThreadId.make("thread-html-measure"),
+            html: '<div id="chart"></div><script>document.getElementById("chart").style.height = innerWidth / 2 + "px";</script>',
+            title: "Chart",
+            height: 600,
+          });
+
+          expect(reference.heights).toEqual(
+            HTML_RENDER_MEASURE_WIDTHS.map((width) => [width, Math.ceil(width / 2)]),
+          );
+        }).pipe(Effect.provide(layerHtmlRender(executable)));
+      }),
+    30_000,
+  );
+
+  it.live("publishes without measurements when the installed browser cannot launch", () =>
+    Effect.gen(function* () {
+      const htmlRender = yield* HtmlRender.HtmlRender;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const config = yield* ServerConfig.ServerConfig;
+      const reference = yield* htmlRender.publish({
+        threadId: ThreadId.make("thread-html-browser-failure"),
+        html: "<p>Still available</p>",
+        title: "Fallback",
+        height: 250,
+      });
+      expect(reference.height).toBe(250);
+      expect(reference.heights).toBeUndefined();
+      const stored = resolveAttachmentPathById({
+        attachmentsDir: config.attachmentsDir,
+        attachmentId: reference.attachmentId,
+      });
+      expect(yield* fileSystem.readFileString(stored!)).toContain("<p>Still available</p>");
+    }).pipe(Effect.provide(layerHtmlRender("/nonexistent/test-rig-preview-browser"))),
   );
 });

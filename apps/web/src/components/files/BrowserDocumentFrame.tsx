@@ -72,7 +72,7 @@ export function BrowserDocumentFrame(props: {
           title={props.title}
           className={className}
           onLoad={onLoad}
-          sandbox="allow-scripts allow-forms allow-popups allow-modals"
+          sandbox="allow-scripts allow-forms allow-popups allow-downloads"
         />
       )}
     </div>

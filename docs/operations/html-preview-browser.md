@@ -2,7 +2,7 @@
 
 `html_preview` runs on the Test Rig server and needs no connected renderer. It lazily installs a pinned Chrome for Testing headless shell under `<Test Rig home>/tools/chrome-headless-shell/<platform>/<version>`. Download size and SHA-256 must match before extraction and atomic publication. Installs belong to the server scope, so a tool timeout does not restart the download.
 
-Each preview uses a temporary profile and CDP pipes. At most two previews run concurrently. A capture times out after 20 seconds, limits screenshots to 4,000 pixels tall, and bounds console output. The tool returns the PNG as MCP image content alongside height and console metadata. Publishing with `html_render` does not launch or install Chromium.
+Each preview uses a temporary profile and CDP pipes. At most two previews run concurrently. A capture times out after 20 seconds, limits screenshots to 4,000 pixels tall, and bounds console output. The tool returns the PNG as MCP image content alongside height and console metadata. Publishing with `html_render` never installs Chromium. When it is already installed, publication measures the page at nine widths (320–1,144 pixels) using one browser with up to three pages at a time. Measurement shares the two-browser concurrency limit with previews and falls back to publishing without measurements after six seconds or on failure.
 
 ## Linux setup
 
