@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { ThreadPullRequestLink } from "./threadPullRequest.ts";
+import { ThreadPullRequestLink, ThreadPullRequestWatch } from "./threadPullRequest.ts";
 
 const decodeLinks = Schema.decodeUnknownEffect(Schema.Array(ThreadPullRequestLink));
 
@@ -81,5 +81,25 @@ it.effect("keeps historical watch records readable without passed check names", 
     ]);
     assert.equal(links[0]?.watch?.passed, true);
     assert.isUndefined(links[0]?.watch?.passedChecks);
+    assert.isUndefined(links[0]?.watch?.approvalDecision);
+    assert.isUndefined(links[0]?.watch?.mergeReadiness);
   }),
 );
+
+it("round-trips observed approval and readiness in persisted watches", () => {
+  const saved = {
+    startedAt: "2026-10-11T12:00:00.000Z",
+    headSha: "head",
+    failedChecks: [],
+    passed: true,
+    remarksThrough: "2026-10-11T12:00:00.000Z",
+    remarkIds: [],
+    conflicting: false,
+    wakes: 0,
+    approvalDecision: "approved",
+    mergeReadiness: { status: "ready", reason: "GitHub merge state: CLEAN" },
+  };
+  const codec = Schema.fromJsonString(ThreadPullRequestWatch);
+  const decoded = Schema.decodeUnknownSync(codec)(JSON.stringify(saved));
+  assert.deepEqual(JSON.parse(Schema.encodeSync(codec)(decoded)), saved);
+});

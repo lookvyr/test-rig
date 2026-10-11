@@ -17,6 +17,7 @@ import type {
   PullRequestMergeMethod,
   PullRequestOmittedFileStat,
   PullRequestMergeability,
+  PullRequestMergeReadiness,
   PullRequestReaction,
   PullRequestReactionContent,
   PullRequestReviewCommentDraft,
@@ -422,6 +423,9 @@ const RawCommitSchema = Schema.Struct({
 
 const RawDetailSchema = Schema.Struct({
   ...RawListItemSchema.fields,
+  mergeStateStatus: Schema.optional(Schema.NullOr(Schema.String)),
+  isMergeQueueEnabled: Schema.optional(Schema.Boolean),
+  isInMergeQueue: Schema.optional(Schema.Boolean),
   /** GitHub's explicit distinction between a fork head and a branch in the base repository. */
   isCrossRepository: Schema.optional(Schema.Boolean),
   /** Names the fork a pull request came from, which is what qualifies its head ref. */
@@ -821,11 +825,14 @@ function checkContextNodesSelection(host: string): string {
 }
 
 export const pullRequestCoreGraphQlQuery = (host: string) => {
+  // Older Enterprise schemas lack merge queue fields; their readiness remains unknown.
+  const queue = host.toLowerCase() === "github.com" ? " isMergeQueueEnabled isInMergeQueue" : "";
   return `query($owner: String!, $name: String!, $number: Int!, $headRef: String!) {
   repository(owner: $owner, name: $name) {
     mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed viewerPermission
     pullRequest(number: $number) {
       number title url body state isDraft mergeable reviewDecision
+      mergeStateStatus${queue}
       additions deletions changedFiles createdAt updatedAt mergedAt closedAt
       headRefName baseRefName headRefOid isCrossRepository
       headRepositoryOwner { login }
@@ -1335,6 +1342,8 @@ export interface GitHubPullRequestListItem {
 }
 
 export interface GitHubPullRequestDetail extends GitHubPullRequestListItem {
+  readonly approvalDecision?: PullRequestReviewDecision | null;
+  readonly mergeReadiness?: PullRequestMergeReadiness;
   /** True only when GitHub says the head belongs to another repository. */
   readonly isCrossRepository?: boolean;
   /** The owner of the head branch's repository; null where `gh` did not say. */
@@ -1754,10 +1763,52 @@ function toListItem(raw: Schema.Schema.Type<typeof RawListItemSchema>): GitHubPu
   };
 }
 
+function toMergeReadiness(
+  raw: Schema.Schema.Type<typeof RawDetailSchema>,
+): PullRequestMergeReadiness | undefined {
+  if (raw.mergeStateStatus === undefined) return undefined;
+  const state = raw.mergeStateStatus?.toUpperCase() ?? "UNKNOWN";
+  const reason = `GitHub merge state: ${state}${state === "UNSTABLE" ? "; mergeable with non-passing checks" : ""}`;
+  const review = toReviewDecision(raw.reviewDecision);
+  if (raw.isDraft || raw.mergeable === "CONFLICTING") {
+    return { status: "blocked", reason };
+  }
+  if (review === "review-required" || review === "changes-requested") {
+    return { status: "blocked", reason: `${reason}; review: ${raw.reviewDecision}` };
+  }
+  if (raw.isInMergeQueue === true) return { status: "queued", reason };
+  switch (state) {
+    case "CLEAN":
+    case "HAS_HOOKS":
+    case "UNSTABLE":
+      return {
+        status:
+          raw.isMergeQueueEnabled === true
+            ? "queue-required"
+            : raw.isMergeQueueEnabled === false
+              ? "ready"
+              : "unknown",
+        reason,
+      };
+    case "BLOCKED":
+    case "BEHIND":
+    case "DIRTY":
+    case "DRAFT":
+      return { status: "blocked", reason };
+    default:
+      return { status: "unknown", reason };
+  }
+}
+
 function toDetail(raw: Schema.Schema.Type<typeof RawDetailSchema>): GitHubPullRequestDetail {
   const autoMergeMethod = toMergeMethod(raw.autoMergeRequest?.mergeMethod);
+  const mergeReadiness = toMergeReadiness(raw);
   return {
     ...toListItem(raw),
+    ...(raw.reviewDecision === undefined
+      ? {}
+      : { approvalDecision: toReviewDecision(raw.reviewDecision) }),
+    ...(mergeReadiness === undefined ? {} : { mergeReadiness }),
     ...(typeof raw.isCrossRepository === "boolean"
       ? { isCrossRepository: raw.isCrossRepository }
       : {}),

@@ -371,3 +371,30 @@ it.effect("includes complete review threads even when the flat conversation omit
     assert.include((yield* Ref.get(fixture.commands))[0]?.wake?.text ?? "", "Report thread-only");
   }),
 );
+
+it.effect("persists readiness with one combined wake and no repeat on the next sweep", () =>
+  Effect.gen(function* () {
+    let current: PullRequestDetail = {
+      ...detail,
+      approvalDecision: "approved",
+      mergeReadiness: { status: "blocked", reason: "GitHub merge state: BLOCKED" },
+    };
+    const fixture = yield* harness({ detail: () => Effect.succeed(current) });
+    yield* fixture.reactor.sweep;
+    current = {
+      ...current,
+      mergeReadiness: { status: "ready", reason: "GitHub merge state: CLEAN" },
+    };
+    yield* fixture.reactor.sweep;
+    yield* fixture.reactor.sweep;
+    const commands = yield* Ref.get(fixture.commands);
+    assert.equal(commands.length, 2);
+    assert.include(commands[0]!.wake!.text, "review decision");
+    assert.include(commands[1]!.wake!.text, "ready to merge");
+    assert.notInclude(commands[1]!.wake!.text, "review decision");
+    assert.equal(commands[1]!.watch?.mergeReadiness?.status, "ready");
+    current = { ...current, state: "closed" };
+    yield* fixture.reactor.sweep;
+    assert.isNull((yield* Ref.get(fixture.commands)).at(-1)!.watch);
+  }),
+);

@@ -56,6 +56,9 @@ function watchesEqual(left: ThreadPullRequestWatch, right: ThreadPullRequestWatc
     left.failedChecks.join("\n") === right.failedChecks.join("\n") &&
     left.passed === right.passed &&
     (left.passedChecks ?? []).join("\n") === (right.passedChecks ?? []).join("\n") &&
+    left.approvalDecision === right.approvalDecision &&
+    left.mergeReadiness?.status === right.mergeReadiness?.status &&
+    left.mergeReadiness?.reason === right.mergeReadiness?.reason &&
     left.remarksThrough === right.remarksThrough &&
     left.remarkIds.join("\n") === right.remarkIds.join("\n") &&
     left.conflicting === right.conflicting &&

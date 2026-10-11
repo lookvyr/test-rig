@@ -74,6 +74,14 @@ export type PullRequestChecksState = typeof PullRequestChecksState.Type;
 export const PullRequestMergeability = Schema.Literals(["mergeable", "conflicting", "unknown"]);
 export type PullRequestMergeability = typeof PullRequestMergeability.Type;
 
+/** Host-evaluated merge readiness, separate from conflict detection and individual checks. */
+export const PullRequestMergeReadiness = Schema.Struct({
+  status: Schema.Literals(["ready", "blocked", "unknown", "queue-required", "queued"]),
+  /** The host's explanation, including its original merge state when available. */
+  reason: TrimmedNonEmptyString,
+});
+export type PullRequestMergeReadiness = typeof PullRequestMergeReadiness.Type;
+
 export const PullRequestMergeMethod = Schema.Literals(["merge", "squash", "rebase"]);
 export type PullRequestMergeMethod = typeof PullRequestMergeMethod.Type;
 
@@ -843,6 +851,9 @@ export const PullRequestDetail = Schema.Struct({
   state: PullRequestState,
   isDraft: Schema.Boolean,
   mergeability: PullRequestMergeability,
+  /** The host's aggregate review verdict, without inferring approval from individual reviews. */
+  approvalDecision: Schema.optional(Schema.NullOr(PullRequestReviewDecision)),
+  mergeReadiness: Schema.optional(PullRequestMergeReadiness),
   additions: NonNegativeInt,
   deletions: NonNegativeInt,
   changedFiles: NonNegativeInt,

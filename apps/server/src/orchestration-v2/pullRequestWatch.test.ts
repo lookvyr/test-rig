@@ -267,6 +267,137 @@ describe("evaluatePullRequestWatch", () => {
   });
 });
 
+describe("host merge readiness", () => {
+  const ready = detail({
+    approvalDecision: "approved",
+    mergeReadiness: { status: "ready", reason: "GitHub merge state: CLEAN" },
+  });
+
+  it("reports an already-ready PR, combines its approval and comment, and stays quiet afterwards", () => {
+    const review = {
+      ...remark("alex", "2026-10-02T12:06:00Z", "Looks good."),
+      kind: "review" as const,
+      reviewState: "APPROVED",
+    };
+    const report = evaluatePullRequestWatch(watch(), ready, [review]);
+    assert.deepEqual(
+      report.changes.map((change) => change.kind),
+      ["remarks", "approval-changed", "merge-readiness-changed"],
+    );
+    assert.deepEqual(evaluatePullRequestWatch(report.next, ready, [review]).changes, []);
+    const message = pullRequestWatchMessage({
+      number: 1,
+      url: "https://github.com/o/r/pull/1",
+      baseBranch: "main",
+      headSha: report.next.headSha,
+      report,
+    });
+    assert.include(message.text, '"Looks good."');
+    assert.include(message.text, "Host review decision on aaaaaaa: approved");
+    assert.include(message.text, "ready to merge on aaaaaaa (GitHub merge state: CLEAN)");
+    assert.include(message.text, "before any authorized merge");
+  });
+
+  it("reports readiness after an earlier approval without repeating that approval", () => {
+    const blocked = detail({
+      ...ready,
+      mergeReadiness: { status: "blocked", reason: "GitHub merge state: BLOCKED" },
+    });
+    const first = evaluatePullRequestWatch(watch(), blocked, noRemarks);
+    assert.deepEqual(
+      first.changes.map((change) => change.kind),
+      ["approval-changed"],
+    );
+    const second = evaluatePullRequestWatch(first.next, ready, noRemarks);
+    assert.deepEqual(
+      second.changes.map((change) => change.kind),
+      ["merge-readiness-changed"],
+    );
+  });
+
+  it("reports revoked approval and blocked readiness, including on a new commit", () => {
+    const first = evaluatePullRequestWatch(watch(), ready, noRemarks);
+    const blocked = detail({
+      headSha: "bbbbbbbbbb",
+      approvalDecision: "review-required",
+      mergeReadiness: { status: "blocked", reason: "GitHub merge state: BLOCKED" },
+    });
+    const report = evaluatePullRequestWatch(first.next, blocked, noRemarks);
+    assert.deepEqual(
+      report.changes.map((change) => change.kind),
+      ["approval-changed", "merge-readiness-changed"],
+    );
+    assert.deepEqual(evaluatePullRequestWatch(report.next, blocked, noRemarks).changes, []);
+    assert.deepEqual(
+      evaluatePullRequestWatch(
+        first.next,
+        { ...ready, headSha: "bbbbbbbbbb" },
+        noRemarks,
+      ).changes.map((change) => change.kind),
+      ["approval-changed", "merge-readiness-changed"],
+    );
+  });
+
+  it("does not infer readiness from passing checks or approval alone", () => {
+    const report = evaluatePullRequestWatch(
+      watch(),
+      detail({ approvalDecision: "approved", checks: [check("test", "success")] }),
+      noRemarks,
+    );
+    assert.deepEqual(
+      report.changes.map((change) => change.kind),
+      ["checks-passed", "approval-changed"],
+    );
+    assert.isUndefined(report.next.mergeReadiness);
+  });
+
+  it("records an initial unknown silently and reports loss of a previously known verdict", () => {
+    const unknown = detail({
+      mergeReadiness: { status: "unknown", reason: "GitHub merge state: UNKNOWN" },
+    });
+    assert.deepEqual(evaluatePullRequestWatch(watch(), unknown, noRemarks).changes, []);
+    const first = evaluatePullRequestWatch(watch(), ready, noRemarks);
+    const missing = evaluatePullRequestWatch(first.next, detail(), noRemarks);
+    assert.equal(missing.next.approvalDecision, null);
+    assert.equal(missing.next.mergeReadiness?.status, "unknown");
+    assert.deepEqual(
+      missing.changes.map((change) => change.kind),
+      ["approval-changed", "merge-readiness-changed"],
+    );
+    assert.deepEqual(evaluatePullRequestWatch(missing.next, detail(), noRemarks).changes, []);
+  });
+
+  it("distinguishes queue readiness and queue entry, and does not spend the comment wake limit", () => {
+    const queued = detail({
+      mergeReadiness: { status: "queue-required", reason: "GitHub merge state: CLEAN" },
+    });
+    const first = evaluatePullRequestWatch(
+      watch({ wakes: PULL_REQUEST_WATCH_WAKE_LIMIT - 1 }),
+      queued,
+      [remark("alex", "2026-10-02T12:06:00Z")],
+    );
+    assert.isFalse(first.exhausted);
+    assert.equal(first.next.wakes, 0);
+    const report = evaluatePullRequestWatch(
+      first.next,
+      { ...queued, mergeReadiness: { status: "queued", reason: "GitHub merge state: CLEAN" } },
+      noRemarks,
+    );
+    assert.deepEqual(
+      report.changes.map((change) => change.kind),
+      ["merge-readiness-changed"],
+    );
+    const message = pullRequestWatchMessage({
+      number: 1,
+      url: "https://github.com/o/r/pull/1",
+      baseBranch: "main",
+      headSha: report.next.headSha,
+      report,
+    });
+    assert.include(message.text, "in the merge queue; it has not merged yet");
+  });
+});
+
 describe("pullRequestWatchMessage", () => {
   it("tells the agent what changed and marks failures for the timeline", () => {
     const report = evaluatePullRequestWatch(

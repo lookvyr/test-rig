@@ -11,6 +11,7 @@ import {
   PullRequestActor,
   PullRequestChecksState,
   PullRequestMergeability,
+  PullRequestMergeReadiness,
   PullRequestReviewDecision,
   PullRequestState,
 } from "./pullRequest.ts";
@@ -108,6 +109,9 @@ export const ThreadPullRequestWatch = Schema.Struct({
   passed: Schema.Boolean,
   /** Names in the passing gate; absent from historical watch records. */
   passedChecks: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  /** Last observed host verdicts; absent on historical watches and unsupported hosts. */
+  approvalDecision: Schema.optionalKey(Schema.NullOr(PullRequestReviewDecision)),
+  mergeReadiness: Schema.optionalKey(PullRequestMergeReadiness),
   /** Remarks from others created or edited up to this host time were reported. */
   remarksThrough: IsoDateTime,
   /** Remarks active exactly at `remarksThrough` that were reported, so a late one still counts. */

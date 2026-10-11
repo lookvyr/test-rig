@@ -6723,3 +6723,29 @@ it.effect("keeps Azure continuation cursors separate for repositories with the s
     assert.deepStrictEqual(seen, ["/org-b"]);
   }),
 );
+
+it.effect("carries authoritative approval and readiness through the detail service", () =>
+  Effect.gen(function* () {
+    const mergeReadiness = { status: "ready" as const, reason: "GitHub merge state: CLEAN" };
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/w", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: () =>
+            Effect.succeed({
+              ...hostedChangeRequest("Description"),
+              approvalDecision: "approved" as const,
+              mergeReadiness,
+            }),
+        }),
+      ],
+    });
+    const result = yield* service.detail({
+      projectId: "p1" as ProjectId,
+      repository: "acme/web",
+      number: 1,
+    });
+    assert.equal(result.approvalDecision, "approved");
+    assert.deepEqual(result.mergeReadiness, mergeReadiness);
+  }),
+);

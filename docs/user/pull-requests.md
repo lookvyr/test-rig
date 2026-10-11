@@ -112,3 +112,16 @@ in review threads. A newly added required check produces an update when it passe
 even if the watch never saw it running. Incomplete comment reads wait for a complete
 read before advancing. Host rate limits delay reads until the retry window ends;
 the watch stays enabled and a requested refresh waits for that retry.
+
+For GitHub pull requests, watching also reports the host's aggregate review decision
+and changes in merge readiness. Passing checks, an approving review, and readiness
+are separate signals. A ready update includes the head commit and GitHub's merge
+state; it does not authorize the agent to merge. Readiness follows GitHub's merge
+rules, so optional checks may still be non-passing. Merge queue updates distinguish
+being ready for the queue from being in it or being ready for a direct merge.
+
+The monitor checks about once a minute and combines changes found in one pass into
+one update. It reports a PR that is already ready on the first read, reports when
+readiness changes again, and reassesses new commits. Unknown or unavailable status
+is never treated as ready. GitHub can publish a review before recalculating merge
+readiness, so related changes may arrive in successive updates.

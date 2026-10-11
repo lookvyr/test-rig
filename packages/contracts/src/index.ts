@@ -238,6 +238,7 @@ export {
   PullRequestListFilters,
   PullRequestChecksState,
   PullRequestMergeability,
+  PullRequestMergeReadiness,
   PullRequestMergeMethod,
   PullRequestAction,
   PullRequestUpdateMethod,

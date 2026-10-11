@@ -3,6 +3,8 @@ import type {
   PullRequestCheck,
   PullRequestComment,
   PullRequestDetail,
+  PullRequestMergeReadiness,
+  PullRequestReviewDecision,
   ThreadPullRequestWatch,
 } from "@t3tools/contracts";
 
@@ -18,6 +20,8 @@ export type PullRequestWatchChange =
   | { readonly kind: "checks-failed"; readonly failed: ReadonlyArray<PullRequestCheck> }
   | { readonly kind: "checks-passed"; readonly count: number; readonly required: boolean }
   | { readonly kind: "remarks"; readonly remarks: ReadonlyArray<PullRequestComment> }
+  | { readonly kind: "approval-changed"; readonly decision: PullRequestReviewDecision | null }
+  | { readonly kind: "merge-readiness-changed"; readonly readiness: PullRequestMergeReadiness }
   | { readonly kind: "conflicting" };
 
 export interface PullRequestWatchReport {
@@ -43,7 +47,16 @@ const isFailedCheck = (check: PullRequestCheck) =>
  */
 export function evaluatePullRequestWatch(
   watch: ThreadPullRequestWatch,
-  detail: Pick<PullRequestDetail, "headSha" | "checks" | "mergeability" | "viewer" | "author">,
+  detail: Pick<
+    PullRequestDetail,
+    | "headSha"
+    | "checks"
+    | "mergeability"
+    | "viewer"
+    | "author"
+    | "approvalDecision"
+    | "mergeReadiness"
+  >,
   remarks: ReadonlyArray<PullRequestComment> | null,
 ): PullRequestWatchReport {
   const changes: Array<PullRequestWatchChange> = [];
@@ -102,6 +115,35 @@ export function evaluatePullRequestWatch(
   const conflicting =
     detail.mergeability === "unknown" ? watch.conflicting : detail.mergeability === "conflicting";
 
+  const approvalDecision =
+    detail.approvalDecision === undefined && watch.approvalDecision !== undefined
+      ? null
+      : detail.approvalDecision;
+  if (
+    approvalDecision !== undefined &&
+    (approvalDecision !== watch.approvalDecision || (headMoved && approvalDecision !== null)) &&
+    (approvalDecision !== null || watch.approvalDecision !== undefined)
+  ) {
+    changes.push({ kind: "approval-changed", decision: approvalDecision });
+  }
+  const mergeReadiness =
+    detail.mergeReadiness ??
+    (watch.mergeReadiness === undefined
+      ? undefined
+      : { status: "unknown" as const, reason: "The host did not report merge readiness" });
+  if (mergeReadiness !== undefined) {
+    const previous = watch.mergeReadiness;
+    const actionable = ["ready", "queue-required", "queued"].includes(mergeReadiness.status);
+    if (
+      (previous === undefined && actionable) ||
+      (previous !== undefined &&
+        (previous.status !== mergeReadiness.status || previous.reason !== mergeReadiness.reason)) ||
+      (headMoved && actionable)
+    ) {
+      changes.push({ kind: "merge-readiness-changed", readiness: mergeReadiness });
+    }
+  }
+
   const commentsOnly = changes.length > 0 && changes.every((change) => change.kind === "remarks");
   const progress = headMoved || (changes.length > 0 && !commentsOnly);
   const wakes = (progress ? 0 : watch.wakes) + (commentsOnly ? 1 : 0);
@@ -113,6 +155,8 @@ export function evaluatePullRequestWatch(
       failedChecks,
       passed,
       passedChecks,
+      ...(approvalDecision === undefined ? {} : { approvalDecision }),
+      ...(mergeReadiness === undefined ? {} : { mergeReadiness }),
       remarksThrough,
       remarkIds,
       conflicting,
@@ -166,6 +210,21 @@ function changeLines(
       ];
     case "conflicting":
       return [`- The branch now conflicts with ${context.baseBranch}.`];
+    case "approval-changed":
+      return [`- Host review decision${context.commit}: ${change.decision ?? "not reported"}.`];
+    case "merge-readiness-changed": {
+      const labels: Record<PullRequestMergeReadiness["status"], string> = {
+        ready: "The host reports this PR is ready to merge",
+        blocked: "The host reports this PR is blocked from merging",
+        unknown: "Merge readiness is unknown; do not rely on a previous ready update",
+        "queue-required":
+          "The host reports this PR is ready for the merge queue; a direct merge is not available",
+        queued: "This PR is in the merge queue; it has not merged yet",
+      };
+      return [
+        `- ${labels[change.readiness.status]}${context.commit} (${change.readiness.reason}).`,
+      ];
+    }
   }
 }
 
@@ -174,6 +233,8 @@ const SUMMARY: Record<PullRequestWatchChange["kind"], string> = {
   "checks-passed": "checks passed",
   remarks: "new comments",
   conflicting: "merge conflict",
+  "approval-changed": "review decision changed",
+  "merge-readiness-changed": "merge readiness changed",
 };
 
 /** The wake the agent reads and the timeline notification the user sees. */
@@ -195,7 +256,7 @@ export function pullRequestWatchMessage(input: {
     "",
     exhausted
       ? `T3 Code stopped watching after ${PULL_REQUEST_WATCH_WAKE_LIMIT} comment-only updates in a row. Call watch_pull_request to watch it again.`
-      : "Look into each item and act on it as your task requires. T3 Code keeps watching and wakes you on the next change, so end your turn when you are done. Call unwatch_pull_request when you no longer need updates.",
+      : "Look into each item and act on it as your task requires. Verify the current head and requirements before any authorized merge. T3 Code keeps watching and wakes you on the next change, so end your turn when you are done. Call unwatch_pull_request when you no longer need updates.",
   ].join("\n");
   const failed = changes.some(
     (change) => change.kind === "checks-failed" || change.kind === "conflicting",

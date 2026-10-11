@@ -313,6 +313,62 @@ describe("pull request detail decoding", () => {
       commits: page.commits ?? [],
     }));
 
+  it("preserves the host approval decision independently of display review fallbacks", () => {
+    const raw = JSON.parse(detailJson);
+    const decoded = expectSuccess(
+      decodePullRequestDetailJson(
+        JSON.stringify({
+          ...raw,
+          reviewDecision: "REVIEW_REQUIRED",
+          latestReviews: [{ state: "APPROVED" }],
+          mergeStateStatus: "CLEAN",
+          isMergeQueueEnabled: false,
+        }),
+      ),
+    );
+    expect(decoded.reviewDecision).toBe("approved");
+    expect(decoded.approvalDecision).toBe("review-required");
+    expect(decoded.mergeReadiness?.status).toBe("blocked");
+  });
+
+  it("maps host merge states without guessing when queue information is missing", () => {
+    const raw = JSON.parse(detailJson);
+    const decode = (entry: Record<string, unknown>) =>
+      expectSuccess(
+        decodePullRequestDetailJson(
+          JSON.stringify({ ...raw, reviewDecision: null, isMergeQueueEnabled: false, ...entry }),
+        ),
+      );
+    for (const state of ["CLEAN", "UNSTABLE", "HAS_HOOKS"])
+      expect(decode({ mergeStateStatus: state }).mergeReadiness?.status).toBe("ready");
+    for (const state of ["BLOCKED", "BEHIND", "DIRTY", "DRAFT"])
+      expect(decode({ mergeStateStatus: state }).mergeReadiness?.status).toBe("blocked");
+    for (const state of ["UNKNOWN", "FUTURE_STATE", null])
+      expect(decode({ mergeStateStatus: state }).mergeReadiness?.status).toBe("unknown");
+    expect(
+      decode({ mergeStateStatus: "CLEAN", isMergeQueueEnabled: undefined }).mergeReadiness?.status,
+    ).toBe("unknown");
+    expect(
+      decode({ mergeStateStatus: "CLEAN", isMergeQueueEnabled: true }).mergeReadiness?.status,
+    ).toBe("queue-required");
+    expect(
+      decode({ mergeStateStatus: "BLOCKED", isMergeQueueEnabled: true, isInMergeQueue: true })
+        .mergeReadiness?.status,
+    ).toBe("queued");
+    expect(decode({ mergeStateStatus: "CLEAN", isDraft: true }).mergeReadiness?.status).toBe(
+      "blocked",
+    );
+    expect(
+      decode({ mergeStateStatus: "CLEAN", mergeable: "CONFLICTING" }).mergeReadiness?.status,
+    ).toBe("blocked");
+    expect(decode({}).mergeReadiness).toBeUndefined();
+    expect(pullRequestCoreGraphQlQuery("github.com")).toContain(
+      "mergeStateStatus isMergeQueueEnabled isInMergeQueue",
+    );
+    expect(pullRequestCoreGraphQlQuery("github.example.com")).not.toContain("isMergeQueueEnabled");
+    expect(pullRequestCoreGraphQlQuery("github.example.com")).not.toContain("isInMergeQueue");
+  });
+
   it("maps check-run status and commit-status state onto one vocabulary", () => {
     const detail = expectSuccess(decodePullRequestDetailJson(detailJson));
     expect(detail.checks.map((check) => [check.name, check.status])).toEqual([

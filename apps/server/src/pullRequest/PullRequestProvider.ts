@@ -20,6 +20,7 @@ import type {
   PullRequestMergeCapabilities,
   PullRequestMergeMethod,
   PullRequestMergeability,
+  PullRequestMergeReadiness,
   PullRequestOmittedFileStat,
   PullRequestReaction,
   PullRequestReactionContent,
@@ -213,6 +214,8 @@ export interface ProviderChangeRequestStat {
 }
 
 export interface ProviderChangeRequestDetail extends ProviderChangeRequest {
+  readonly approvalDecision?: PullRequestReviewDecision | null;
+  readonly mergeReadiness?: PullRequestMergeReadiness;
   /** The head commit, where the host's detail read reports it. */
   readonly headSha?: string | null;
   readonly body: string;
