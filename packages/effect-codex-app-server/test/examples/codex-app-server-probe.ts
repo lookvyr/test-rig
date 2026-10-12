@@ -12,7 +12,6 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
 import * as CodexClient from "../../src/client.ts";
-import type { ServerNotificationParamsByMethod } from "../../src/_generated/meta.gen.ts";
 
 const runTurns = process.argv.includes("--run-turns");
 
@@ -79,7 +78,7 @@ const program = Effect.gen(function* () {
     yield* Effect.sync(() => NodeAssert.equal(thread.historyMode, "paginated"));
     yield* Console.log("PASS thread/start (paginated history)");
 
-    type CompletedTurn = ServerNotificationParamsByMethod["turn/completed"]["turn"];
+    type CompletedTurn = CodexClient.CodexAppServerNotificationPayload<"turn/completed">["turn"];
     let completion = yield* Deferred.make<CompletedTurn>();
     let textDeltas = 0;
     let commands = 0;

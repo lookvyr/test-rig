@@ -31,6 +31,17 @@ Keep provider-specific compatibility work in the Codex adapter, runtime, or prot
 
 ## Focused maintenance checks
 
+The typed client validates `turn/completed` lifecycle fields against the generated schema,
+but exposes its nested `turn.items` as `unknown[]`. Individual item notifications retain
+their generated validation. An unfamiliar item in a completion summary must not discard
+the completion signal and leave the turn active. The V2 adapter uses that signal to close
+leftover nonpersistent tool activity before publishing the terminal event.
+
+Typed notification decode failures emit a warning with method and schema issue metadata.
+When incoming protocol logging is enabled, they also emit a `decode_failed` record. These
+diagnostics omit notification contents. Regressions cover invalid lifecycle fields and
+completion summaries containing unfamiliar items for successful, failed, and interrupted turns.
+
 Use an isolated Test Rig home and a disposable repository via the `test-t3-app` skill. Never start
 a test server against the live application database. Record the CLI version, generated source
 commit, commands run, and any behavior the installed model could not exercise.

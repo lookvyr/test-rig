@@ -19,6 +19,20 @@ import {
 } from "./_internal/shared.ts";
 import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
 
+// Completion carries lifecycle state; individual item notifications validate their own payloads.
+const TurnCompletedNotification = CodexSchema.V2TurnCompletedNotification.pipe(
+  Schema.fieldsAssign({
+    turn: CodexSchema.V2TurnCompletedNotification__Turn.pipe(
+      Schema.fieldsAssign({ items: Schema.Array(Schema.Unknown) }),
+    ),
+  }),
+);
+
+export type CodexAppServerNotificationPayload<M extends CodexRpc.ServerNotificationMethod> =
+  M extends "turn/completed"
+    ? typeof TurnCompletedNotification.Type
+    : CodexRpc.ServerNotificationParamsByMethod[M];
+
 export interface CodexAppServerClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
@@ -61,7 +75,7 @@ export class CodexAppServerClient extends Context.Service<
     readonly handleServerNotification: <M extends CodexRpc.ServerNotificationMethod>(
       method: M,
       handler: (
-        payload: CodexRpc.ServerNotificationParamsByMethod[M],
+        payload: CodexAppServerNotificationPayload<M>,
       ) => Effect.Effect<void, CodexError.CodexAppServerError>,
     ) => Effect.Effect<void>;
     readonly handleUnknownServerRequest: (
@@ -156,15 +170,37 @@ export const make = Effect.fn("effect-codex-app-server/CodexAppServerClient.make
     notification: CodexProtocol.CodexAppServerIncomingNotification,
   ): Effect.Effect<void, never> => {
     const schema =
-      notification.method in CodexRpc.SERVER_NOTIFICATION_PARAMS
-        ? CodexRpc.SERVER_NOTIFICATION_PARAMS[
-            notification.method as CodexRpc.ServerNotificationMethod
-          ]
-        : undefined;
+      notification.method === "turn/completed"
+        ? TurnCompletedNotification
+        : notification.method in CodexRpc.SERVER_NOTIFICATION_PARAMS
+          ? CodexRpc.SERVER_NOTIFICATION_PARAMS[
+              notification.method as CodexRpc.ServerNotificationMethod
+            ]
+          : undefined;
     const handlers = notificationHandlers.get(notification.method) ?? [];
 
     if (schema) {
       return decodeNotificationPayload(notification.method, schema, notification.params).pipe(
+        Effect.tapError((error) => {
+          const diagnostic = {
+            operation: error.operation,
+            method: notification.method,
+            issueCount: error.issueCount,
+            issueKinds: error.issueKinds,
+            maximumPathDepth: error.maximumPathDepth,
+          };
+          return Effect.logWarning("Could not decode Codex notification", diagnostic).pipe(
+            Effect.andThen(
+              options.logIncoming && options.logger
+                ? options.logger({
+                    direction: "incoming",
+                    stage: "decode_failed",
+                    payload: diagnostic,
+                  })
+                : Effect.void,
+            ),
+          );
+        }),
         Effect.flatMap((decoded) =>
           Effect.forEach(handlers, (handler) => handler(decoded), { discard: true }),
         ),

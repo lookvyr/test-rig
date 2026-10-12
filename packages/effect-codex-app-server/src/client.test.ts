@@ -4,12 +4,46 @@ import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
+import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 
 import * as CodexClient from "./client.ts";
+import type { CodexAppServerProtocolLogEvent } from "./protocol.ts";
+import { makeInMemoryStdio } from "./_internal/stdio.ts";
+
+const makeNotificationHarness = Effect.fn("makeNotificationHarness")(function* () {
+  const { stdio, input } = yield* makeInMemoryStdio();
+  const received = yield* Ref.make<
+    Array<CodexClient.CodexAppServerNotificationPayload<"turn/completed">>
+  >([]);
+  const logs = yield* Ref.make<Array<CodexAppServerProtocolLogEvent>>([]);
+  const processed = yield* Queue.unbounded<void>();
+  const client = yield* CodexClient.make(stdio, {
+    logIncoming: true,
+    logger: (event) => Ref.update(logs, (current) => [...current, event]),
+  });
+  yield* client.handleServerNotification("turn/completed", (payload) =>
+    Ref.update(received, (current) => [...current, payload]),
+  );
+  yield* client.handleUnknownServerNotification((method) =>
+    method === "test/barrier" ? Queue.offer(processed, undefined).pipe(Effect.asVoid) : Effect.void,
+  );
+  const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+  const send = Effect.fn("sendNotification")(function* (
+    params: unknown,
+    method = "turn/completed",
+  ) {
+    const notification = yield* encodeJson({ method, params });
+    const barrier = yield* encodeJson({ method: "test/barrier" });
+    yield* Queue.offer(input, new TextEncoder().encode(`${notification}\n${barrier}\n`));
+    yield* Queue.take(processed);
+  });
+  return { received, logs, send };
+});
 
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/codex-app-server-mock-peer.ts"),
@@ -28,6 +62,80 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
       });
       return yield* spawner.spawn(command);
     });
+
+  it.effect.each(["completed", "failed", "interrupted"] as const)(
+    "delivers %s lifecycle state despite an unfamiliar completion item",
+    (status) =>
+      Effect.gen(function* () {
+        const harness = yield* makeNotificationHarness();
+        const payload = {
+          threadId: "thread-1",
+          turn: {
+            id: "turn-1",
+            status,
+            completedAt: 1782622442,
+            error: status === "failed" ? { message: "Provider failed." } : null,
+            items: [
+              { type: "futureToolItem", id: "future-item", content: { version: 2 } },
+              { type: "agentMessage", id: "answer", text: "Done", phase: "final_answer" },
+            ],
+          },
+        };
+        yield* harness.send(payload);
+        assert.deepEqual(yield* Ref.get(harness.received), [payload]);
+        assert.deepEqual(
+          (yield* Ref.get(harness.logs)).filter((event) => event.stage === "decode_failed"),
+          [],
+        );
+      }),
+  );
+
+  it.effect("rejects invalid lifecycle fields, logs diagnostics and continues reading", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeNotificationHarness();
+      const turn = { id: "turn-1", status: "completed" as const, items: [] };
+      for (const payload of [
+        { threadId: 1, turn },
+        { threadId: "thread-1", turn: { ...turn, id: null } },
+        { threadId: "thread-1", turn: { ...turn, status: "future-status" } },
+        { threadId: "thread-1", turn: { ...turn, error: { message: 42 } } },
+      ]) {
+        yield* harness.send(payload);
+      }
+      assert.deepEqual(yield* Ref.get(harness.received), []);
+      const failures = (yield* Ref.get(harness.logs)).filter(
+        (event) => event.stage === "decode_failed",
+      );
+      assert.equal(failures.length, 4);
+      for (const failure of failures) {
+        assert.equal(failure.direction, "incoming");
+        assert.include(failure.payload, {
+          method: "turn/completed",
+          operation: "decode-notification-payload",
+        });
+        assert.notProperty(failure.payload, "params");
+        assert.notProperty(failure.payload, "cause");
+      }
+      const valid = { threadId: "thread-1", turn };
+      yield* harness.send(valid);
+      assert.deepEqual(yield* Ref.get(harness.received), [valid]);
+    }),
+  );
+
+  it.effect("logs typed payload failures for other notifications", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeNotificationHarness();
+      yield* harness.send(
+        { threadId: "thread-1", turnId: "turn-1", itemId: "item", delta: 42 },
+        "item/agentMessage/delta",
+      );
+      const failures = (yield* Ref.get(harness.logs)).filter(
+        (event) => event.stage === "decode_failed",
+      );
+      assert.equal(failures.length, 1);
+      assert.include(failures[0]!.payload, { method: "item/agentMessage/delta" });
+    }),
+  );
 
   it.effect("initializes, handles typed server requests, and reads account and skills data", () =>
     Effect.gen(function* () {

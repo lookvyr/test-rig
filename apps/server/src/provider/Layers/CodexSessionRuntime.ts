@@ -234,13 +234,13 @@ interface PendingUserInput {
 type CodexServerNotification = {
   readonly [M in CodexRpc.ServerNotificationMethod]: {
     readonly method: M;
-    readonly params: CodexRpc.ServerNotificationParamsByMethod[M];
+    readonly params: CodexClient.CodexAppServerNotificationPayload<M>;
   };
 }[CodexRpc.ServerNotificationMethod];
 
 function makeCodexServerNotification<M extends CodexRpc.ServerNotificationMethod>(
   method: M,
-  params: CodexRpc.ServerNotificationParamsByMethod[M],
+  params: CodexClient.CodexAppServerNotificationPayload<M>,
 ): CodexServerNotification {
   return { method, params } as CodexServerNotification;
 }

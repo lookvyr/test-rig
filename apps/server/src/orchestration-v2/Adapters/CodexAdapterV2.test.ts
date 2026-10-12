@@ -6883,6 +6883,84 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     ),
   );
 
+  it.effect.each(["completed", "failed", "interrupted"] as const)(
+    "finalizes a %s turn with an unfamiliar completion item and a pending PR-list tool",
+    (status) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const nativeThreadId = `native-opaque-completion-${status}`;
+          const nativeTurnId = `native-opaque-turn-${status}`;
+          const toolId = "checking-linked-pull-requests";
+          const prompt = "Check linked pull requests.";
+          const transcript = makeCodexReplayTranscript({
+            scenario: `opaque-completion-${status}`,
+            entries: [
+              ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt }),
+              {
+                type: "emit_inbound",
+                label: "item/started/pr-list",
+                frame: {
+                  method: "item/started",
+                  params: {
+                    threadId: nativeThreadId,
+                    turnId: nativeTurnId,
+                    startedAtMs: 1782622440500,
+                    item: {
+                      type: "mcpToolCall",
+                      id: toolId,
+                      server: "test_rig",
+                      tool: "list_thread_pull_requests",
+                      arguments: {},
+                      status: "inProgress",
+                    },
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "turn/completed/unfamiliar-item",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: {
+                      ...makeCodexReplayTurn({ id: nativeTurnId, status }),
+                      items: [{ type: "futureToolItem", id: "unknown-completion-item" }],
+                      error: status === "failed" ? { message: "Provider failed." } : null,
+                    },
+                  },
+                },
+              },
+              { type: "runtime_exit", status: "success" },
+            ],
+          });
+          const harness = yield* makeCodexReplayHarness(transcript);
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make(`attempt-opaque-${status}`),
+              text: prompt,
+            }),
+          );
+          yield* harness.firstTerminal;
+          assert.equal(harness.terminalEvents()[0]?.status, status);
+          const terminalIndex = harness.events.findIndex((event) => event.type === "turn.terminal");
+          assert.isTrue(
+            harness.events.some(
+              (event, index) =>
+                index < terminalIndex &&
+                event.type === "turn_item.updated" &&
+                event.turnItem.nativeItemRef?.nativeId === toolId &&
+                event.turnItem.status === (status === "completed" ? "cancelled" : status),
+            ),
+          );
+          assert.isFalse(yield* harness.hasPendingBackgroundWork);
+        }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      ),
+  );
+
   const ORPHAN_WAIT_SCENARIO = "codex-orphaned-dynamic-tool";
   const ORPHAN_WAIT_NATIVE_THREAD = "native-codex-orphan-wait-thread";
   const ORPHAN_WAIT_NATIVE_TURN = "native-codex-orphan-wait-turn";
