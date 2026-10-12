@@ -174,6 +174,29 @@ const harness = Effect.fn("PullRequestWatchTest.harness")(function* (
   return { reactor, commands, threads };
 });
 
+it.effect("a plain comment establishes the review baseline and wakes with only comment news", () =>
+  Effect.gen(function* () {
+    const fresh = {
+      ...comment("new-comment"),
+      kind: "issue-comment" as const,
+      path: null,
+      createdAt: "2026-10-06T12:01:00.000Z",
+    };
+    const fixture = yield* harness({
+      detail: () => Effect.succeed({ ...detail, approvalDecision: "review-required" }),
+      activity: () => Effect.succeed(activity({ comments: [fresh], commentCount: 1 })),
+    });
+    yield* fixture.reactor.sweep;
+    const commands = yield* Ref.get(fixture.commands);
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0]?.wake?.notification.summary, "#7: new comments");
+    assert.equal(commands[0]?.watch?.approvalDecision, "review-required");
+    assert.equal(commands[0]?.watch?.wakes, 1);
+    yield* fixture.reactor.sweep;
+    assert.equal((yield* Ref.get(fixture.commands)).length, 1);
+  }),
+);
+
 it.effect("reads every reply page and sees a tail edit with an unchanged comment count", () =>
   Effect.gen(function* () {
     let tail = comment("tail", "2026-10-06T12:06:00.000Z");

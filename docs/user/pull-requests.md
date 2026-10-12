@@ -114,7 +114,11 @@ read before advancing. Host rate limits delay reads until the retry window ends;
 the watch stays enabled and a requested refresh waits for that retry.
 
 For GitHub pull requests, watching also reports the host's aggregate review decision
-and changes in merge readiness. Passing checks, an approving review, and readiness
+and changes in merge readiness. A comment with an unchanged review decision is
+reported as new comments. The first read establishes a baseline; an existing approval
+or request for changes is reported as a review decision, rather than a changed decision.
+Updates distinguish a changed decision, confirmation on a new commit, and a decision
+the host no longer reports. Passing checks, an approving review, and readiness
 are separate signals. A ready update includes the head commit and GitHub's merge
 state; it does not authorize the agent to merge. Readiness follows GitHub's merge
 rules, so optional checks may still be non-passing. Merge queue updates distinguish

@@ -20,7 +20,11 @@ export type PullRequestWatchChange =
   | { readonly kind: "checks-failed"; readonly failed: ReadonlyArray<PullRequestCheck> }
   | { readonly kind: "checks-passed"; readonly count: number; readonly required: boolean }
   | { readonly kind: "remarks"; readonly remarks: ReadonlyArray<PullRequestComment> }
-  | { readonly kind: "approval-changed"; readonly decision: PullRequestReviewDecision | null }
+  | {
+      readonly kind: "approval-changed";
+      readonly decision: PullRequestReviewDecision | null;
+      readonly reason: "initial" | "changed" | "new-head" | "unavailable";
+    }
   | { readonly kind: "merge-readiness-changed"; readonly readiness: PullRequestMergeReadiness }
   | { readonly kind: "conflicting" };
 
@@ -119,12 +123,31 @@ export function evaluatePullRequestWatch(
     detail.approvalDecision === undefined && watch.approvalDecision !== undefined
       ? null
       : detail.approvalDecision;
+  const approvalKnown = watch.approvalDecision !== undefined;
+  const initialApprovalActionable =
+    approvalDecision === "approved" || approvalDecision === "changes-requested";
   if (
     approvalDecision !== undefined &&
-    (approvalDecision !== watch.approvalDecision || (headMoved && approvalDecision !== null)) &&
-    (approvalDecision !== null || watch.approvalDecision !== undefined)
+    ((approvalKnown && approvalDecision !== watch.approvalDecision) ||
+      (!approvalKnown && initialApprovalActionable) ||
+      (approvalKnown &&
+        headMoved &&
+        headSha !== null &&
+        watch.headSha !== null &&
+        approvalDecision !== null))
   ) {
-    changes.push({ kind: "approval-changed", decision: approvalDecision });
+    changes.push({
+      kind: "approval-changed",
+      decision: approvalDecision,
+      reason:
+        approvalDecision === null
+          ? "unavailable"
+          : !approvalKnown
+            ? "initial"
+            : approvalDecision !== watch.approvalDecision
+              ? "changed"
+              : "new-head",
+    });
   }
   const mergeReadiness =
     detail.mergeReadiness ??
@@ -237,6 +260,13 @@ const SUMMARY: Record<PullRequestWatchChange["kind"], string> = {
   "merge-readiness-changed": "merge readiness changed",
 };
 
+const REVIEW_SUMMARY = {
+  initial: "review decision reported",
+  changed: "review decision changed",
+  "new-head": "review decision confirmed on new commit",
+  unavailable: "review decision not reported",
+};
+
 /** The wake the agent reads and the timeline notification the user sees. */
 export function pullRequestWatchMessage(input: {
   readonly number: number;
@@ -261,7 +291,9 @@ export function pullRequestWatchMessage(input: {
   const failed = changes.some(
     (change) => change.kind === "checks-failed" || change.kind === "conflicting",
   );
-  const summary = changes.map((change) => SUMMARY[change.kind]);
+  const summary = changes.map((change) =>
+    change.kind === "approval-changed" ? REVIEW_SUMMARY[change.reason] : SUMMARY[change.kind],
+  );
   if (exhausted) summary.push("stopped watching");
   return {
     text,

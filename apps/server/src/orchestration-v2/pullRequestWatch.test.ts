@@ -273,6 +273,99 @@ describe("host merge readiness", () => {
     mergeReadiness: { status: "ready", reason: "GitHub merge state: CLEAN" },
   });
 
+  const notificationFor = (report: ReturnType<typeof evaluatePullRequestWatch>) =>
+    pullRequestWatchMessage({
+      number: 1,
+      url: "https://github.com/o/r/pull/1",
+      baseBranch: "main",
+      headSha: report.next.headSha,
+      report,
+    }).notification.summary;
+
+  it("establishes a review-required baseline without turning a plain comment into review news", () => {
+    const comment = {
+      ...remark("alex", "2026-10-02T12:06:00Z"),
+      kind: "issue-comment" as const,
+      path: null,
+    };
+    const reported = evaluatePullRequestWatch(
+      watch(),
+      detail({ approvalDecision: "review-required" }),
+      [comment],
+    );
+    assert.deepEqual(reported.changes, [{ kind: "remarks", remarks: [comment] }]);
+    assert.equal(reported.next.approvalDecision, "review-required");
+    assert.equal(notificationFor(reported), "#1: new comments");
+    assert.equal(reported.next.wakes, 1);
+    const nextComment = { ...comment, id: "another", createdAt: "2026-10-02T12:07:00Z" };
+    const again = evaluatePullRequestWatch(
+      reported.next,
+      detail({ approvalDecision: "review-required" }),
+      [comment, nextComment],
+    );
+    assert.equal(notificationFor(again), "#1: new comments");
+  });
+
+  it("reports an initial approval without claiming it changed", () => {
+    const reported = evaluatePullRequestWatch(
+      watch(),
+      detail({ approvalDecision: "approved" }),
+      noRemarks,
+    );
+    assert.equal(notificationFor(reported), "#1: review decision reported");
+    assert.deepEqual(reported.changes, [
+      { kind: "approval-changed", decision: "approved", reason: "initial" },
+    ]);
+  });
+
+  it("silently establishes a non-actionable verdict for an older watch after a push", () => {
+    const reported = evaluatePullRequestWatch(
+      watch({ headSha: "old-head" }),
+      detail({ approvalDecision: "review-required" }),
+      noRemarks,
+    );
+    assert.deepEqual(reported.changes, []);
+    assert.equal(reported.next.approvalDecision, "review-required");
+  });
+
+  it("does not claim a new commit was confirmed when the host omitted its SHA", () => {
+    const baseline = watch({ headSha: "aaaaaaaaaa", approvalDecision: "approved" });
+    const reported = evaluatePullRequestWatch(
+      baseline,
+      detail({ headSha: undefined, approvalDecision: "approved" }),
+      noRemarks,
+    );
+    assert.deepEqual(reported.changes, []);
+    const changed = evaluatePullRequestWatch(
+      baseline,
+      detail({ headSha: undefined, approvalDecision: "review-required" }),
+      noRemarks,
+    );
+    assert.equal(notificationFor(changed), "#1: review decision changed");
+  });
+
+  it("distinguishes actual verdict changes from revalidation on a new commit and a missing verdict", () => {
+    const baseline = watch({ headSha: "aaaaaaaaaa", approvalDecision: "review-required" });
+    const approval = evaluatePullRequestWatch(
+      baseline,
+      detail({ approvalDecision: "approved" }),
+      noRemarks,
+    );
+    assert.equal(notificationFor(approval), "#1: review decision changed");
+    const newHead = evaluatePullRequestWatch(
+      approval.next,
+      detail({ headSha: "bbbbbbbbbb", approvalDecision: "approved" }),
+      noRemarks,
+    );
+    assert.equal(notificationFor(newHead), "#1: review decision confirmed on new commit");
+    const missing = evaluatePullRequestWatch(
+      newHead.next,
+      detail({ headSha: "bbbbbbbbbb" }),
+      noRemarks,
+    );
+    assert.equal(notificationFor(missing), "#1: review decision not reported");
+  });
+
   it("reports an already-ready PR, combines its approval and comment, and stays quiet afterwards", () => {
     const review = {
       ...remark("alex", "2026-10-02T12:06:00Z", "Looks good."),
