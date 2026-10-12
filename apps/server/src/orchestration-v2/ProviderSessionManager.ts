@@ -1,5 +1,5 @@
 import { withWorktreeLease } from "../workspace/worktreeLifecycle.ts";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveMcpServers, resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   ModelSelection,
   OrchestrationV2DomainEvent,
@@ -35,6 +35,8 @@ import * as Stream from "effect/Stream";
 import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
+import { SkillLibraryService } from "../skills/SkillLibrary.ts";
+import { ToolsProjectScopesService } from "../skills/ToolsProjectScopes.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as EventSink from "./EventSink.ts";
@@ -356,6 +358,8 @@ export const layerWithOptions = (
        * reverse costs an agent one toolset and is visible immediately (#7083).
        */
       const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+      const skillLibrary = yield* Effect.serviceOption(SkillLibraryService);
+      const toolsProjectScopes = yield* Effect.serviceOption(ToolsProjectScopesService);
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
       const eventSink = yield* EventSink.EventSinkV2;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -511,7 +515,57 @@ export const layerWithOptions = (
                   browserToolsAvailable,
                   capabilities,
                 });
-                McpProviderSession.setMcpProviderSession(credential.config);
+                const toolSnapshot = yield* Effect.gen(function* () {
+                  const thread = yield* projectionStore.getThread(threadId);
+                  const adapter = yield* registry.get(providerInstanceId);
+                  const settings = Option.isSome(serverSettings)
+                    ? yield* serverSettings.value.getSettings
+                    : undefined;
+                  const toolsScope = Option.isSome(toolsProjectScopes)
+                    ? yield* toolsProjectScopes.value.resolve(thread.projectId)
+                    : undefined;
+                  const skillCatalogue = Option.isSome(skillLibrary)
+                    ? yield* skillLibrary.value
+                        .resolveCatalogue({
+                          projectId: thread.projectId,
+                          provider: adapter.driver,
+                          ...(toolsScope === undefined
+                            ? {}
+                            : {
+                                scopeId: toolsScope.scopeId,
+                                memberProjectIds: toolsScope.projectIds,
+                              }),
+                        })
+                        .pipe(
+                          Effect.catch(() =>
+                            Effect.logWarning(
+                              "Could not resolve app skill catalogue for this session.",
+                            ).pipe(Effect.as(undefined)),
+                          ),
+                        )
+                    : undefined;
+                  return {
+                    projectId: thread.projectId,
+                    appMcpServers:
+                      settings === undefined
+                        ? []
+                        : resolveMcpServers(
+                            settings,
+                            thread.projectId,
+                            adapter.driver,
+                            toolsScope?.scopeId,
+                            toolsScope?.projectIds,
+                          ),
+                    ...(skillCatalogue === undefined ? {} : { skillCatalogue }),
+                  };
+                }).pipe(
+                  Effect.catch(() =>
+                    Effect.logWarning("Could not resolve app-owned tools for this session.").pipe(
+                      Effect.as({ appMcpServers: [] }),
+                    ),
+                  ),
+                );
+                McpProviderSession.setMcpProviderSession({ ...credential.config, ...toolSnapshot });
                 reserveMcpCredential(threadId, credential.config.providerSessionId);
                 return { mcpCredentialId: credential.config.providerSessionId, issued: true };
               }),

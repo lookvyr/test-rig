@@ -7,6 +7,7 @@
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Remote access](./user/remote-access.md)
 - [Source control integrations](./user/source-control.md)
+- [Tools and skill library](./user/tools.md)
 - Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md)
 
 ---

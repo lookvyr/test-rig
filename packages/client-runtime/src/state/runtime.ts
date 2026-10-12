@@ -52,6 +52,8 @@ interface EnvironmentQueryAtomOptions<Input, A, E, R> extends EnvironmentAtomOpt
   readonly staleTimeMs?: number;
   readonly idleTtlMs?: number;
   readonly refreshIntervalMs?: number;
+  /** A local mutation signal that invalidates queries within one environment. */
+  readonly refreshSignal?: (environmentId: EnvironmentIdType) => Atom.Atom<unknown>;
 }
 
 interface EnvironmentSubscriptionAtomOptions<Input, A, E, R> {
@@ -535,6 +537,7 @@ function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
     const idleTtlMs = options.idleTtlMs ?? 5 * 60_000;
     const queryAtom = runtime
       .atom((get) => {
+        if (options.refreshSignal) get(options.refreshSignal(target.environmentId));
         const generation = Option.getOrNull(
           AsyncResult.value(get(rpcGenerationAtom(target.environmentId))),
         );
@@ -626,6 +629,7 @@ export function createEnvironmentRpcQueryAtomFamily<R, ER, TTag extends Environm
     readonly staleTimeMs?: number;
     readonly idleTtlMs?: number;
     readonly refreshIntervalMs?: number;
+    readonly refreshSignal?: (environmentId: EnvironmentIdType) => Atom.Atom<unknown>;
   },
 ) {
   return createEnvironmentQueryAtomFamily(runtime, {
@@ -635,6 +639,7 @@ export function createEnvironmentRpcQueryAtomFamily<R, ER, TTag extends Environm
     ...(options.refreshIntervalMs === undefined
       ? {}
       : { refreshIntervalMs: options.refreshIntervalMs }),
+    ...(options.refreshSignal === undefined ? {} : { refreshSignal: options.refreshSignal }),
     execute: (input: EnvironmentRpcInput<TTag>) => request(options.tag, input),
   });
 }

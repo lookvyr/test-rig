@@ -1,6 +1,10 @@
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as SkillLibrary from "./skills/SkillLibrary.ts";
+import * as ToolsProjectScopes from "./skills/ToolsProjectScopes.ts";
+import * as ProviderMcpRuntime from "./mcp/ProviderMcpRuntime.ts";
+import { SkillLibraryError, type SkillLibrarySourceReadInput } from "@t3tools/contracts";
 import { persistChatAttachments } from "./orchestration-v2/AttachmentUpload.ts";
 import { makeThreadFind } from "./orchestration-v2/ThreadFind.ts";
 import {
@@ -335,12 +339,28 @@ const makeWsRpcLayer = (
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const secretRequests = yield* SecretRequests.SecretRequests;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
+      const skillLibrary = yield* SkillLibrary.SkillLibraryService;
+      const toolsProjectScopes = yield* ToolsProjectScopes.ToolsProjectScopesService;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
+      const discoveredSkillSource = Effect.fn("ws.discoveredSkillSource")(function* (
+        input: SkillLibrarySourceReadInput,
+      ) {
+        const catalog = yield* readProviderWorkspaceCatalog(input, providerInstances.getInstance);
+        const source = catalog.skills.find((skill) => skill.path === input.sourcePath);
+        if (!source) {
+          return yield* new SkillLibraryError({
+            operation: "read-source",
+            message:
+              "This skill is no longer in the provider's workspace catalogue. Refresh and try again.",
+          });
+        }
+        return source;
+      });
       yield* Effect.addFinalizer(() =>
         Ref.get(rpcClientIds).pipe(
           Effect.flatMap((clientIds) =>
@@ -630,6 +650,50 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "orchestration" },
           ),
         [WS_METHODS.secretsAnswerRequest]: (input) => secretRequests.answer(input),
+        [WS_METHODS.toolsProjectScopesList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.toolsProjectScopesList,
+            toolsProjectScopes.list(input.projectIds),
+          ),
+        [WS_METHODS.skillLibraryList]: () =>
+          observeRpcEffect(WS_METHODS.skillLibraryList, skillLibrary.list),
+        [WS_METHODS.skillLibraryRead]: (input) =>
+          observeRpcEffect(WS_METHODS.skillLibraryRead, skillLibrary.read(input)),
+        [WS_METHODS.skillLibraryReadSource]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillLibraryReadSource,
+            discoveredSkillSource(input).pipe(
+              Effect.flatMap((source) => skillLibrary.readSource(input, source)),
+            ),
+          ),
+        [WS_METHODS.skillLibraryUpsert]: (input) =>
+          observeRpcEffect(WS_METHODS.skillLibraryUpsert, skillLibrary.upsert(input)),
+        [WS_METHODS.skillLibraryDelete]: (input) =>
+          observeRpcEffect(WS_METHODS.skillLibraryDelete, skillLibrary.delete(input)),
+        [WS_METHODS.skillLibraryImport]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.skillLibraryImport,
+            discoveredSkillSource(input).pipe(
+              Effect.flatMap((source) => skillLibrary.importSkill(input, source)),
+            ),
+          ),
+        [WS_METHODS.mcpRuntimeList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.mcpRuntimeList,
+            ProviderMcpRuntime.listMcpRuntimeStatuses(input).pipe(
+              Effect.map((statuses) => ({ statuses })),
+            ),
+          ),
+        [WS_METHODS.mcpRuntimeReconnect]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.mcpRuntimeReconnect,
+            ProviderMcpRuntime.reconnectMcpServer(input),
+          ),
+        [WS_METHODS.mcpRuntimeAuthenticate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.mcpRuntimeAuthenticate,
+            ProviderMcpRuntime.authenticateMcpServer(input),
+          ),
         [WS_METHODS.scheduledTasksList]: (_input) =>
           observeRpcEffect(WS_METHODS.scheduledTasksList, scheduledTasks.list(), {
             "rpc.aggregate": "scheduledTasks",

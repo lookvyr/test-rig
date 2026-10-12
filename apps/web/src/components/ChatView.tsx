@@ -2614,6 +2614,14 @@ function ChatViewContent(props: ChatViewProps) {
     const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider);
     return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null;
   }, [activeProviderInstanceId, providerStatuses, selectedProvider]);
+  const activeWorkspaceCatalog = useEnvironmentQuery(
+    gitCwd !== null && activeProviderStatus?.enabled
+      ? serverEnvironment.providerWorkspaceCatalog({
+          environmentId,
+          input: { instanceId: activeProviderStatus.instanceId, cwd: gitCwd },
+        })
+      : null,
+  );
   const providerStatusBannerKey = getProviderStatusBannerKey(activeProviderStatus);
   const [dismissedProviderStatusBannerKey, setDismissedProviderStatusBannerKey] = useState<
     string | null
@@ -6647,7 +6655,11 @@ function ChatViewContent(props: ChatViewProps) {
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeWorkspaceRoot}
-                skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
+                skills={
+                  activeWorkspaceCatalog.data?.skills ??
+                  activeProviderStatus?.skills ??
+                  EMPTY_PROVIDER_SKILLS
+                }
                 anchorMessageId={searchHistory ? null : timelineAnchorMessageId}
                 onAnchorReady={onTimelineAnchorReady}
                 onAnchorSizeChanged={(messageId) => {

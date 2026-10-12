@@ -15,6 +15,7 @@ import {
   ProviderInstanceId,
   ProviderSessionId,
   ThreadId,
+  ToolsScopeId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -35,6 +36,9 @@ import { ProviderWorkspaceMissingError } from "../provider/Errors.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as McpProviderSession from "../mcp/McpProviderSession.ts";
+import { SkillLibraryService } from "../skills/SkillLibrary.ts";
+import { ToolsProjectScopesService } from "../skills/ToolsProjectScopes.ts";
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import { V2SqlitePersistenceMemory as SqlitePersistenceMemory } from "../persistence/Layers/V2Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -469,6 +473,8 @@ function makeTestLayer(input: {
   readonly afterInterrupt?: Effect.Effect<void>;
   readonly serverSettingsLayer?: ReturnType<typeof ServerSettings.layerTest>;
   readonly projectServiceLayer?: Layer.Layer<ProjectService.ProjectService>;
+  readonly skillLibraryLayer?: Layer.Layer<SkillLibraryService>;
+  readonly toolsProjectScopesLayer?: Layer.Layer<ToolsProjectScopesService>;
 }) {
   const configuredEventSinkLayer =
     input.flakyReleaseWrites !== undefined
@@ -535,6 +541,8 @@ function makeTestLayer(input: {
           TestStoresLayer,
           ...(input.serverSettingsLayer === undefined ? [] : [input.serverSettingsLayer]),
           ...(input.projectServiceLayer === undefined ? [] : [input.projectServiceLayer]),
+          ...(input.skillLibraryLayer === undefined ? [] : [input.skillLibraryLayer]),
+          ...(input.toolsProjectScopesLayer === undefined ? [] : [input.toolsProjectScopesLayer]),
         ),
       ),
     ),
@@ -4868,4 +4876,118 @@ it.effect("ProviderSessionManagerV2 waits for an idle unload before resuming the
       },
     );
   }),
+);
+
+it.effect(
+  "ProviderSessionManagerV2 snapshots eligible project tools and catalogue until the session restarts",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const scopeId = ToolsScopeId.make(`git:${"a".repeat(64)}`);
+      const settings = yield* Ref.make({
+        ...DEFAULT_SERVER_SETTINGS,
+        toolsScopeMcpServers: { [scopeId]: { withheld: { enabled: false } } },
+        mcpServers: {
+          withheld: {
+            enabled: true,
+            providers: ["codex" as const],
+            transport: { type: "stdio" as const, command: "withheld", args: [], env: [] },
+          },
+          shared: {
+            enabled: true,
+            providers: ["codex" as const],
+            transport: { type: "stdio" as const, command: "node", args: ["old.js"], env: [] },
+          },
+          claude: {
+            enabled: true,
+            providers: ["claudeAgent" as const],
+            transport: { type: "stdio" as const, command: "node", args: [], env: [] },
+          },
+        },
+      });
+      const projectId = ProjectId.make("tools-snapshot-project");
+      const threadId = ThreadId.make("tools-snapshot-thread");
+      const settingsLayer = Layer.mock(ServerSettings.ServerSettingsService)({
+        getSettings: Ref.get(settings),
+      });
+      const libraryLayer = Layer.mock(SkillLibraryService)({
+        resolveCatalogue: ({
+          projectId: selected,
+          provider,
+          scopeId: selectedScope,
+          memberProjectIds,
+        }) => {
+          assert.equal(selected, projectId);
+          assert.equal(selectedScope, scopeId);
+          assert.deepEqual(memberProjectIds, [projectId]);
+          assert.equal(provider, "codex");
+          return Ref.get(settings).pipe(
+            Effect.map(
+              (current) => `Read catalogue for ${current.mcpServers.shared.transport.args[0]}`,
+            ),
+          );
+        },
+      });
+      yield* Effect.gen(function* () {
+        const sink = yield* EventSink.EventSinkV2;
+        const allocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const now = yield* DateTime.now;
+        const providerSessionId = yield* allocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        yield* sink.write({
+          events: [
+            yield* makeThreadCreatedEvent({ idAllocator: allocator, threadId, projectId, now }),
+          ],
+        });
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+        const snapshot = McpProviderSession.readMcpProviderSession(threadId)!;
+        assert.deepEqual(
+          snapshot.appMcpServers?.map((server) => server.name),
+          ["shared"],
+        );
+        assert.equal(snapshot.projectId, projectId);
+        assert.equal(snapshot.skillCatalogue, "Read catalogue for old.js");
+        yield* Ref.update(settings, (current) => ({
+          ...current,
+          mcpServers: {
+            ...current.mcpServers,
+            shared: {
+              ...current.mcpServers.shared,
+              transport: { ...current.mcpServers.shared.transport, args: ["new.js"] },
+            },
+          },
+        }));
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+        assert.equal(
+          McpProviderSession.readMcpProviderSession(threadId)?.skillCatalogue,
+          "Read catalogue for old.js",
+        );
+        yield* manager.release({ providerSessionId, reason: "manual_shutdown" });
+        assert.isUndefined(McpProviderSession.readMcpProviderSession(threadId));
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+        assert.equal(
+          McpProviderSession.readMcpProviderSession(threadId)?.skillCatalogue,
+          "Read catalogue for new.js",
+        );
+        assert.deepEqual(
+          McpProviderSession.readMcpProviderSession(threadId)?.appMcpServers?.[0]?.transport,
+          { type: "stdio", command: "node", args: ["new.js"], env: [] },
+        );
+      }).pipe(
+        Effect.provide(
+          makeTestLayer({
+            state,
+            idleTimeoutMs: 60000,
+            serverSettingsLayer: settingsLayer,
+            skillLibraryLayer: libraryLayer,
+            toolsProjectScopesLayer: Layer.mock(ToolsProjectScopesService)({
+              resolve: () => Effect.succeed({ scopeId, projectIds: [projectId] }),
+            }),
+          }),
+        ),
+      );
+    }),
 );

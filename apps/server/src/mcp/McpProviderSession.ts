@@ -1,4 +1,10 @@
-import type { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  ResolvedMcpServer,
+} from "@t3tools/contracts";
 
 export interface McpProviderSessionConfig {
   readonly environmentId: EnvironmentId;
@@ -8,6 +14,9 @@ export interface McpProviderSessionConfig {
   readonly endpoint: string;
   readonly authorizationHeader: string;
   readonly browserToolsAvailable: boolean;
+  readonly projectId?: ProjectId;
+  readonly appMcpServers?: ReadonlyArray<ResolvedMcpServer>;
+  readonly skillCatalogue?: string;
   readonly capabilities?: ReadonlySet<string>;
 }
 

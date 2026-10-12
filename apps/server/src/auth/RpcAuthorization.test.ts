@@ -42,6 +42,24 @@ describe("RPC authorization scopes", () => {
     }
   });
 
+  it("allows reading skills while requiring operation authority to change the library", () => {
+    for (const method of [
+      WS_METHODS.toolsProjectScopesList,
+      WS_METHODS.skillLibraryList,
+      WS_METHODS.skillLibraryRead,
+      WS_METHODS.skillLibraryReadSource,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    }
+    for (const method of [
+      WS_METHODS.skillLibraryUpsert,
+      WS_METHODS.skillLibraryDelete,
+      WS_METHODS.skillLibraryImport,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
+
   it("requires mutation authority to cancel setup while allowing read-only observation", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.subscribeWorktreeSetup)).toBe(
       AuthOrchestrationReadScope,
@@ -49,6 +67,13 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.worktreeSetupCancel)).toBe(
       AuthOrchestrationOperateScope,
     );
+  });
+
+  it("allows MCP observation while requiring operation authority for runtime changes", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.mcpRuntimeList)).toBe(AuthOrchestrationReadScope);
+    for (const method of [WS_METHODS.mcpRuntimeReconnect, WS_METHODS.mcpRuntimeAuthenticate]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
   });
 
   it("rejects unknown RPC method names", () => {

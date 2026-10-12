@@ -24,8 +24,9 @@ export function formatProviderSkillDisplayName(
 }
 
 export function formatProviderSkillInstallSource(
-  skill: Pick<ServerProviderSkill, "path" | "scope">,
+  skill: Pick<ServerProviderSkill, "path" | "scope" | "source">,
 ): string | null {
+  if (skill.source === "test-rig") return "Test Rig";
   const normalizedPath = normalizePathSeparators(skill.path);
   if (normalizedPath.includes("/.codex/plugins/") || normalizedPath.includes("/.agents/plugins/")) {
     return "App";

@@ -10,3 +10,8 @@ a repository override a skill with the same name, the repository’s version win
 
 The directory used to start Test Rig does not choose the chat’s skills or
 commands. Each configured provider instance uses its own settings and skills.
+
+Skills assigned through the [Test Rig library](./tools.md) appear alongside the
+provider's skills. They have stable identities, so a library skill and a native
+skill with the same display name remain separate choices. Availability changes
+update the picker; restart an existing agent session to refresh its catalogue.

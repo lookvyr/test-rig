@@ -288,7 +288,77 @@ export function createServerEnvironmentAtoms<R, E>(
     ),
   );
 
+  const listSkillLibrary = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:server:skill-library:list",
+    tag: WS_METHODS.skillLibraryList,
+  });
+  const readSkillLibrary = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:server:skill-library:read",
+    tag: WS_METHODS.skillLibraryRead,
+  });
+  const skillLibraryRevision = Atom.family((_environmentId: EnvironmentId) =>
+    Atom.make(0).pipe(Atom.keepAlive),
+  );
+
   return {
+    listToolsProjectScopes: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:tools-project-scopes:list",
+      tag: WS_METHODS.toolsProjectScopesList,
+    }),
+    listSkillLibrary,
+    readSkillLibrary,
+    readSkillLibrarySource: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:skill-library:source",
+      tag: WS_METHODS.skillLibraryReadSource,
+    }),
+    upsertSkillLibrary: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:skill-library:upsert",
+      tag: WS_METHODS.skillLibraryUpsert,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+      onSuccess: ({ environmentId, input }, registry) =>
+        Effect.sync(() => {
+          registry.refresh(listSkillLibrary({ environmentId, input: {} }));
+          registry.update(skillLibraryRevision(environmentId), (revision) => revision + 1);
+          if (input.id)
+            registry.refresh(readSkillLibrary({ environmentId, input: { id: input.id } }));
+        }),
+    }),
+    deleteSkillLibrary: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:skill-library:delete",
+      tag: WS_METHODS.skillLibraryDelete,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+      onSuccess: ({ environmentId }, registry) =>
+        Effect.sync(() => {
+          registry.refresh(listSkillLibrary({ environmentId, input: {} }));
+          registry.update(skillLibraryRevision(environmentId), (revision) => revision + 1);
+        }),
+    }),
+    importSkillLibrary: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:skill-library:import",
+      tag: WS_METHODS.skillLibraryImport,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+      onSuccess: ({ environmentId }, registry) =>
+        Effect.sync(() => {
+          registry.refresh(listSkillLibrary({ environmentId, input: {} }));
+          registry.update(skillLibraryRevision(environmentId), (revision) => revision + 1);
+        }),
+    }),
+    listMcpRuntimeStatuses: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:mcp-runtime:list",
+      tag: WS_METHODS.mcpRuntimeList,
+      staleTimeMs: 0,
+    }),
+    reconnectMcpServer: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-runtime:reconnect",
+      tag: WS_METHODS.mcpRuntimeReconnect,
+    }),
+    authenticateMcpServer: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-runtime:authenticate",
+      tag: WS_METHODS.mcpRuntimeAuthenticate,
+    }),
     scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
@@ -330,6 +400,7 @@ export function createServerEnvironmentAtoms<R, E>(
     providerWorkspaceCatalog: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:provider-workspace-catalog",
       tag: WS_METHODS.serverGetProviderWorkspaceCatalog,
+      refreshSignal: skillLibraryRevision,
       staleTimeMs: 30_000,
       idleTtlMs: 30_000,
     }),

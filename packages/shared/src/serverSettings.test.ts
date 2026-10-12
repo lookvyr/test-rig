@@ -13,6 +13,95 @@ import {
   isModelSelectionProviderEnabled,
   resolveSourceControlWriterModelSelection,
 } from "./serverSettings.ts";
+import * as Schema from "effect/Schema";
+import { ToolsScopeId } from "../../contracts/src/toolsScope.ts";
+import { McpServerProjectOverride } from "../../contracts/src/mcpServers.ts";
+import { McpServerConfig } from "../../contracts/src/mcpServers.ts";
+
+const decodeMcpConfig = Schema.decodeUnknownSync(McpServerConfig);
+
+describe("MCP settings patches", () => {
+  it("replaces one whole Tools scope entry and removes it without changing physical or global settings", () => {
+    const decode = Schema.decodeUnknownSync(McpServerProjectOverride);
+    const scope = ToolsScopeId.make("git:" + "a".repeat(64));
+    const other = ToolsScopeId.make("project:unrelated");
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      mcpServers: {
+        global: decodeMcpConfig({
+          transport: { type: "http", url: "https://global.test" },
+        }),
+      },
+      projectSettingsOverrides: {
+        physical: { mcpServers: { legacy: decode({ enabled: false }) } },
+      },
+      toolsScopeMcpServers: {
+        [scope]: {
+          docs: decode({
+            transport: { type: "stdio", command: "node", env: [{ name: "OLD", value: "secret" }] },
+          }),
+          removed: decode({ enabled: false }),
+        },
+        [other]: { unrelated: decode({ enabled: false }) },
+      },
+    };
+    const next = applyServerSettingsPatch(current, {
+      toolsScopeMcpServers: {
+        [scope]: {
+          docs: decode({
+            transport: { type: "http", url: "https://new.test" },
+            providers: ["codex"],
+          }),
+        },
+      },
+    });
+    expect(next.toolsScopeMcpServers[scope]).toEqual({
+      docs: decode({ transport: { type: "http", url: "https://new.test" }, providers: ["codex"] }),
+    });
+    expect(next.toolsScopeMcpServers[other]).toEqual(current.toolsScopeMcpServers[other]);
+    expect(next.mcpServers).toEqual(current.mcpServers);
+    expect(next.projectSettingsOverrides).toEqual(current.projectSettingsOverrides);
+    const deleted = applyServerSettingsPatch(next, { toolsScopeMcpServers: { [scope]: null } });
+    expect(deleted.toolsScopeMcpServers).toEqual({ [other]: current.toolsScopeMcpServers[other] });
+    const cleared = applyServerSettingsPatch(current, { toolsScopeMcpServers: { [scope]: {} } });
+    expect(cleared.toolsScopeMcpServers[scope]).toEqual({});
+    expect(cleared.toolsScopeMcpServers[other]).toEqual(current.toolsScopeMcpServers[other]);
+  });
+  it("replaces a whole transport and removes one server without touching its siblings", () => {
+    const decode = Schema.decodeUnknownSync(McpServerConfig);
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      mcpServers: {
+        docs: decode({
+          transport: {
+            type: "stdio",
+            command: "node",
+            args: ["old"],
+            env: [{ name: "OLD", value: "value" }],
+          },
+        }),
+        other: decode({ transport: { type: "http", url: "https://other.test/mcp" } }),
+      },
+    };
+    const next = applyServerSettingsPatch(current, {
+      mcpServers: {
+        docs: decode({
+          transport: { type: "http", url: "https://new.test/mcp" },
+          providers: ["codex"],
+        }),
+      },
+    });
+    expect(next.mcpServers.docs?.transport).toEqual({
+      type: "http",
+      url: "https://new.test/mcp",
+      headers: [],
+    });
+    expect(next.mcpServers.other).toEqual(current.mcpServers.other);
+    expect(applyServerSettingsPatch(next, { mcpServers: { docs: null } }).mcpServers).toEqual({
+      other: current.mcpServers.other,
+    });
+  });
+});
 
 describe("serverSettings helpers", () => {
   it("merges source control provider toggles without changing the other defaults", () => {

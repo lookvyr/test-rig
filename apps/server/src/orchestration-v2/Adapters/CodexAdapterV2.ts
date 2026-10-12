@@ -108,6 +108,12 @@ import {
 } from "../../provider/Layers/codexLaunchArgs.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { appMcpRuntimeName, codexAppMcpConfig } from "../../mcp/AppMcpConfig.ts";
+import {
+  registerProviderMcpRuntime,
+  normalizeMcpRuntimeState,
+  providerMcpRequestError,
+} from "../../mcp/ProviderMcpRuntime.ts";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
@@ -420,7 +426,11 @@ function codexItemStatus(status: "inProgress" | "completed" | "failed" | "declin
  * runs; currency amounts like `€20` do not match and stay prose.
  */
 export function codexSkillMentionText(text: string): string {
-  return text.replace(SKILL_MENTION_PATTERN, "$1$$$2");
+  return text.replace(SKILL_MENTION_PATTERN, (_match, whitespace: string, name: string) =>
+    name.startsWith("test-rig:")
+      ? `${whitespace}[Test Rig library skill ${name}]`
+      : `${whitespace}$${name}`,
+  );
 }
 
 const BACKGROUND_COMMAND_DETAIL_COMMAND_MAX_LENGTH = 200;
@@ -702,6 +712,7 @@ export function buildCodexTurnStartParams(input: {
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly modelSelection: ModelSelection;
   readonly hasT3Mcp?: boolean;
+  readonly skillCatalogue?: string;
   readonly sideChat?: boolean;
   readonly browserToolsAvailable?: boolean;
   readonly deviceToolsAvailable?: boolean;
@@ -732,7 +743,7 @@ export function buildCodexTurnStartParams(input: {
       input.hasT3Mcp !== true
         ? undefined
         : buildCodexDeveloperInstructions(input.runtimePolicy.interactionMode);
-    const additionalContext =
+    const builtInContext =
       input.hasT3Mcp === true || input.sideChat === true
         ? buildCodexAdditionalContext(
             { model: input.modelSelection.model, reasoningEffort: effort ?? "medium" },
@@ -743,6 +754,13 @@ export function buildCodexTurnStartParams(input: {
             input.sideChat,
           )
         : undefined;
+    const additionalContext =
+      input.skillCatalogue === undefined
+        ? builtInContext
+        : {
+            ...builtInContext,
+            test_rig_skill_library: { kind: "application" as const, value: input.skillCatalogue },
+          };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined
         ? undefined
@@ -1233,6 +1251,7 @@ export function codexThreadRuntimeParams(input: {
         ? {}
         : {
             mcp_servers: {
+              ...codexAppMcpConfig(mcpSession.appMcpServers ?? []),
               test_rig: {
                 url: mcpSession.endpoint,
                 http_headers: {
@@ -1394,6 +1413,8 @@ function redactCodexProtocolValue(value: unknown): unknown {
 function isSensitiveCodexProtocolKey(key: string): boolean {
   const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
   return (
+    normalized === "env" ||
+    normalized === "httpheaders" ||
     normalized.endsWith("authorization") ||
     normalized.endsWith("apikey") ||
     normalized.endsWith("token") ||
@@ -1585,6 +1606,13 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           settings: adapterOptions.settings,
           environment: adapterOptions.environment,
         });
+        const mcpRuntimeDisposers = new Map<ThreadId, () => void>();
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            for (const dispose of mcpRuntimeDisposers.values()) dispose();
+            mcpRuntimeDisposers.clear();
+          }),
+        );
         const additionalContextByThread = yield* Ref.make(
           new Map<
             string,
@@ -5781,12 +5809,59 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   ? yield* toCodexInput(turnInput)
                   : [];
               const mcpSession = McpProviderSession.readMcpProviderSession(turnInput.threadId);
+              if (mcpSession !== undefined) {
+                mcpRuntimeDisposers.get(turnInput.threadId)?.();
+                const dispose = registerProviderMcpRuntime({
+                  identity: {
+                    threadId: turnInput.threadId,
+                    projectId: mcpSession.projectId ?? null,
+                    provider: "codex",
+                    providerSessionId: input.providerSessionId,
+                    providerInstanceId: adapterOptions.instanceId,
+                  },
+                  servers: (mcpSession.appMcpServers ?? []).map((server) => ({
+                    name: server.name,
+                    runtimeName: appMcpRuntimeName(server.name),
+                  })),
+                  status: (runtimeName) =>
+                    client
+                      .request("mcpServerStatus/list", {
+                        threadId,
+                        serverName: runtimeName,
+                        limit: 1,
+                      })
+                      .pipe(
+                        Effect.map((result) => {
+                          const status = result.data.find((server) => server.name === runtimeName);
+                          return {
+                            state: normalizeMcpRuntimeState(status?.runtimeStatus),
+                            toolCount: status ? Object.keys(status.tools).length : null,
+                            authStatus: status?.authStatus ?? null,
+                            authenticateSupported: status?.authStatus === "notLoggedIn",
+                          };
+                        }),
+                        Effect.mapError(providerMcpRequestError),
+                      ),
+                  reconnect: () =>
+                    client
+                      .request("config/mcpServer/reload", undefined)
+                      .pipe(Effect.asVoid, Effect.mapError(providerMcpRequestError)),
+                  authenticate: (runtimeName) =>
+                    client
+                      .request("mcpServer/oauth/login", { name: runtimeName, threadId })
+                      .pipe(Effect.mapError(providerMcpRequestError)),
+                });
+                mcpRuntimeDisposers.set(turnInput.threadId, dispose);
+              }
               const turnStartParams = yield* buildCodexTurnStartParams({
                 nativeThreadId: threadId,
                 codexInput,
                 runtimePolicy: turnInput.runtimePolicy,
                 modelSelection: turnInput.modelSelection,
                 hasT3Mcp: mcpSession !== undefined,
+                ...(mcpSession?.skillCatalogue === undefined
+                  ? {}
+                  : { skillCatalogue: mcpSession.skillCatalogue }),
                 sideChat: turnInput.appThread.sideOfThreadId != null,
                 browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
                 deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
@@ -5872,6 +5947,10 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           // `notLoaded` / `notSubscribed` mean there is nothing left to unload.
           unloadThread: (unloadInput) =>
             Effect.gen(function* () {
+              if (unloadInput.providerThread.appThreadId !== null) {
+                mcpRuntimeDisposers.get(unloadInput.providerThread.appThreadId)?.();
+                mcpRuntimeDisposers.delete(unloadInput.providerThread.appThreadId);
+              }
               const nativeThreadId = yield* getNativeThreadId(unloadInput.providerThread);
               yield* client.request("thread/unsubscribe", { threadId: nativeThreadId });
             }).pipe(

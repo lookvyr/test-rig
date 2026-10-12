@@ -52,7 +52,7 @@ export function planClaudeSkillDispatch(
 ): ClaudeSkillDispatch | undefined {
   const mentions = [...prompt.matchAll(SKILL_MENTION_PATTERN)].flatMap((match) => {
     const name = match[2] ?? "";
-    if (!skillNames.has(name)) return [];
+    if (name.startsWith("test-rig:") || !skillNames.has(name)) return [];
     const start = (match.index ?? 0) + (match[1]?.length ?? 0);
     return [{ name, start, end: (match.index ?? 0) + match[0].length }];
   });

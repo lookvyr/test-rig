@@ -21,6 +21,7 @@ import {
   type PermissionResult,
   type PermissionUpdate,
   type Query as ClaudeQuery,
+  type McpServerStatus as ClaudeMcpServerStatus,
   type Settings as ClaudeSdkSettings,
   type SDKAssistantMessage,
   type SDKAPIRetryMessage,
@@ -118,6 +119,12 @@ import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanc
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { appMcpRuntimeName, claudeAppMcpConfig } from "../../mcp/AppMcpConfig.ts";
+import {
+  registerProviderMcpRuntime,
+  normalizeMcpRuntimeState,
+  providerMcpRequestError,
+} from "../../mcp/ProviderMcpRuntime.ts";
 import * as IdAllocator from "../IdAllocator.ts";
 import { makeProviderFailure, makeProviderRetryTurnItem } from "../ProviderFailure.ts";
 import { turnScopedSelectionTransition } from "../ProviderSelectionTransition.ts";
@@ -331,6 +338,13 @@ export interface ClaudeAgentSdkQuerySession {
   readonly setModel: (model: string) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly interrupt: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly close: Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
+  readonly mcpServerStatus?: Effect.Effect<
+    ReadonlyArray<ClaudeMcpServerStatus>,
+    ClaudeAgentSdkQueryRunnerError
+  >;
+  readonly reconnectMcpServer?: (
+    name: string,
+  ) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
 }
 
 type ClaudeQueryStreamExit = Exit.Exit<void, ClaudeAgentSdkQueryRunnerError>;
@@ -672,6 +686,15 @@ export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
                 }),
               ),
             ),
+          mcpServerStatus: Effect.tryPromise({
+            try: () => queryRuntime.mcpServerStatus(),
+            catch: (cause) => queryRunnerError(cause, "mcpServerStatus"),
+          }),
+          reconnectMcpServer: (name) =>
+            Effect.tryPromise({
+              try: () => queryRuntime.reconnectMcpServer(name),
+              catch: (cause) => queryRunnerError(cause, "reconnectMcpServer"),
+            }),
           interrupt: Effect.tryPromise({
             try: () => queryRuntime.interrupt(),
             catch: (cause) => queryRunnerError(cause, "interrupt"),
@@ -793,6 +816,7 @@ export function makeClaudeQueryOptions(input: {
   readonly sdkSettings?: string | ClaudeSdkSettings;
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
+  readonly skillCatalogue?: string | undefined;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
   readonly disallowedTools?: ReadonlyArray<string>;
@@ -886,7 +910,8 @@ export function makeClaudeQueryOptions(input: {
       append:
         buildRuntimeInstructions({ harness: "Claude Code" }) +
         (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS) +
-        (input.sideChat === true ? `\n\n${SIDE_CHAT_INSTRUCTIONS}` : ""),
+        (input.sideChat === true ? `\n\n${SIDE_CHAT_INSTRUCTIONS}` : "") +
+        (input.skillCatalogue === undefined ? "" : `\n\n${input.skillCatalogue}`),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };
@@ -955,12 +980,14 @@ export function claudeMcpQueryOverrides(input: {
   if (session === undefined) {
     return input.allowedTools === undefined ? {} : { allowedTools: input.allowedTools };
   }
+  const appConfig = claudeAppMcpConfig(session.appMcpServers ?? []);
   const mcpAllowedTools = input.readOnlySandbox
     ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
     : [CLAUDE_T3_MCP_TOOL_WILDCARD];
   return {
     allowedTools: Array.from(new Set([...(input.allowedTools ?? []), ...mcpAllowedTools])),
     mcpServers: {
+      ...appConfig.configs,
       test_rig: {
         type: "http",
         url: session.endpoint,
@@ -970,7 +997,10 @@ export function claudeMcpQueryOverrides(input: {
         timeout: CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
       },
     },
-    mcpEnvironment: { [CLAUDE_MCP_AUTHORIZATION_ENV]: session.authorizationHeader },
+    mcpEnvironment: {
+      ...appConfig.environment,
+      [CLAUDE_MCP_AUTHORIZATION_ENV]: session.authorizationHeader,
+    },
   };
 }
 
@@ -2711,6 +2741,7 @@ interface ClaudeLiveQueryContext {
   readonly queryPolicyKey: string;
   readonly selectionKey: string;
   readonly closed: Deferred.Deferred<void, never>;
+  readonly disposeMcpRuntime: () => void;
   // Whether this CLI process echoes a prompt's uuid on the first frame of
   // the turn answering it ("early") or only on its result. Learned from the
   // first prompt turn. "acknowledged": the CLI confirmed it took a prompt's
@@ -2954,7 +2985,12 @@ export function makeClaudeAdapterV2(
         (skills) =>
           new Set(
             skills
-              .filter((skill) => skill.enabled && skill.userInvocable !== false)
+              .filter(
+                (skill) =>
+                  skill.enabled &&
+                  skill.userInvocable !== false &&
+                  !skill.name.startsWith("test-rig:"),
+              )
               .map((skill) => skill.name),
           ),
       ),
@@ -7124,6 +7160,7 @@ export function makeClaudeAdapterV2(
           // the replacement open succeeds or fails below.
           const closedExistingNativeThreadId = existing !== null ? existing.nativeThreadId : null;
           if (existing !== null) {
+            existing.disposeMcpRuntime();
             yield* existing.query.close.pipe(Effect.ignore);
             if (existing.nativeThreadId !== nativeThreadId) {
               yield* clearWakeStateForNativeThread(existing.nativeThreadId);
@@ -7149,6 +7186,8 @@ export function makeClaudeAdapterV2(
               providerSessionId: input.providerSessionId,
               options: makeClaudeQueryOptions({
                 sideChat: turnInput.appThread.sideOfThreadId != null,
+                skillCatalogue: McpProviderSession.readMcpProviderSession(turnInput.threadId)
+                  ?.skillCatalogue,
                 modelSelection: turnInput.modelSelection,
                 nativeThreadId,
                 resume: shouldResume,
@@ -7214,7 +7253,62 @@ export function makeClaudeAdapterV2(
             status: "active",
           });
           const closed = yield* Deferred.make<void, never>();
+          const mcpSession = McpProviderSession.readMcpProviderSession(turnInput.threadId);
+          const disposeMcpRuntime = registerProviderMcpRuntime({
+            identity: {
+              threadId: turnInput.threadId,
+              projectId: mcpSession?.projectId ?? null,
+              provider: "claudeAgent",
+              providerSessionId: input.providerSessionId,
+              providerInstanceId: adapterOptions.instanceId,
+            },
+            servers: (mcpSession?.appMcpServers ?? []).map((server) => ({
+              name: server.name,
+              runtimeName: appMcpRuntimeName(server.name),
+            })),
+            ...(querySession.mcpServerStatus === undefined
+              ? {}
+              : {
+                  inventory: querySession.mcpServerStatus.pipe(
+                    Effect.map(
+                      (statuses) =>
+                        new Map(
+                          statuses.map((status) => [
+                            status.name,
+                            {
+                              state: normalizeMcpRuntimeState(status.status),
+                              toolCount: status.tools?.length ?? null,
+                            },
+                          ]),
+                        ),
+                    ),
+                    Effect.mapError(providerMcpRequestError),
+                  ),
+                }),
+            status: (runtimeName) =>
+              querySession.mcpServerStatus === undefined
+                ? Effect.fail(providerMcpRequestError())
+                : querySession.mcpServerStatus.pipe(
+                    Effect.map((statuses) => {
+                      const status = statuses.find((server) => server.name === runtimeName);
+                      return {
+                        state: normalizeMcpRuntimeState(status?.status),
+                        toolCount: status?.tools?.length ?? null,
+                      };
+                    }),
+                    Effect.mapError(providerMcpRequestError),
+                  ),
+            ...(querySession.reconnectMcpServer === undefined
+              ? {}
+              : {
+                  reconnect: (name: string) =>
+                    querySession.reconnectMcpServer!(name).pipe(
+                      Effect.mapError(providerMcpRequestError),
+                    ),
+                }),
+          });
           const context: ClaudeLiveQueryContext = {
+            disposeMcpRuntime,
             nativeThreadId,
             query: querySession,
             queryPolicyKey,
@@ -7245,6 +7339,7 @@ export function makeClaudeAdapterV2(
                 ) {
                   yield* releaseHeldRootFrames(heldContext);
                 }
+                disposeMcpRuntime();
                 const ownsLiveQuery = yield* Ref.modify(queryContext, (current) =>
                   current?.query === querySession ? [true, null] : [false, current],
                 );
@@ -7495,6 +7590,7 @@ export function makeClaudeAdapterV2(
               return next;
             });
             yield* existing.query.interrupt;
+            existing.disposeMcpRuntime();
             yield* existing.query.close.pipe(Effect.ignore);
             const closed = yield* Deferred.await(existing.closed).pipe(
               Effect.timeoutOption("10 seconds"),
@@ -7584,6 +7680,7 @@ export function makeClaudeAdapterV2(
         const closeSession = Effect.fnUntraced(function* () {
           const existing = yield* Ref.get(queryContext);
           if (existing !== null) {
+            existing.disposeMcpRuntime();
             yield* existing.query.close.pipe(Effect.ignore);
           }
           yield* Effect.yieldNow;
@@ -7604,6 +7701,7 @@ export function makeClaudeAdapterV2(
           }
 
           existing.stopping = true;
+          existing.disposeMcpRuntime();
           yield* existing.query.close.pipe(Effect.ignore);
           const closed = yield* Deferred.await(existing.closed).pipe(
             Effect.timeoutOption("10 seconds"),

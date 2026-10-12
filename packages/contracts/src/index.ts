@@ -333,7 +333,13 @@ export * from "./composerContextClipboard.ts";
 
 export * from "./secretRequest.ts";
 
+export * from "./mcpServers.ts";
+export * from "./mcpRuntime.ts";
+export * from "./skillLibrary.ts";
+
 export {
   OrchestratorMcpRequestSecretInput,
   OrchestratorMcpRequestSecretResult,
 } from "./orchestratorMcp.ts";
+
+export * from "./toolsScope.ts";

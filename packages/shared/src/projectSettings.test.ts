@@ -3,6 +3,7 @@ import {
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   ProjectId,
   ProviderInstanceId,
+  ToolsScopeId,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { createModelSelection } from "./model.ts";
@@ -15,6 +16,135 @@ import {
   withProjectSettingsOverrides,
 } from "./projectSettings.ts";
 import { applyServerSettingsPatch } from "./serverSettings.ts";
+import * as Schema from "effect/Schema";
+import { ProviderDriverKind } from "@t3tools/contracts";
+import { McpServerConfig } from "../../contracts/src/mcpServers.ts";
+import { resolveMcpServers } from "./projectSettings.ts";
+
+describe("project MCP servers", () => {
+  it("changes scope availability without changing an existing worktree connection", () => {
+    const project = ProjectId.make("legacy-connection");
+    const scope = ToolsScopeId.make(`git:${"b".repeat(64)}`);
+    const global = Schema.decodeUnknownSync(McpServerConfig)({
+      transport: { type: "http", url: "https://global.test/mcp" },
+    });
+    const local = Schema.decodeUnknownSync(McpServerConfig)({
+      providers: ["codex"],
+      transport: { type: "http", url: "https://legacy.test/mcp" },
+    });
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      mcpServers: { docs: global },
+      projectSettingsOverrides: { [project]: { mcpServers: { docs: local } } },
+      toolsScopeMcpServers: { [scope]: { docs: { enabled: true } } },
+    };
+    expect(
+      resolveMcpServers(settings, project, ProviderDriverKind.make("codex"), scope, [project]),
+    ).toMatchObject([{ name: "docs", transport: { url: "https://legacy.test/mcp" } }]);
+    expect(
+      resolveMcpServers(settings, project, ProviderDriverKind.make("claudeAgent"), scope, [
+        project,
+      ]),
+    ).toEqual([]);
+    expect(
+      resolveMcpServers(
+        { ...settings, toolsScopeMcpServers: { [scope]: { docs: { enabled: false } } } },
+        project,
+        ProviderDriverKind.make("codex"),
+        scope,
+        [project],
+      ),
+    ).toEqual([]);
+  });
+  it("preserves physical configurations until a shared scope entry overrides them", () => {
+    const first = ProjectId.make("scope-first"),
+      later = ProjectId.make("scope-later");
+    const scope = ToolsScopeId.make(`git:${"a".repeat(64)}`);
+    const legacyServer = {
+      enabled: true,
+      providers: ["codex" as const],
+      transport: { type: "stdio" as const, command: "legacy-docs", args: [], env: [] },
+    };
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      projectSettingsOverrides: { [first]: { mcpServers: { legacyOnly: legacyServer } } },
+    };
+    expect(
+      resolveMcpServers(settings, later, ProviderDriverKind.make("codex"), scope, [first, later]),
+    ).toMatchObject([{ name: "legacyOnly", transport: { command: "legacy-docs" } }]);
+    expect(
+      resolveMcpServers(
+        { ...settings, toolsScopeMcpServers: { [scope]: { legacyOnly: { enabled: false } } } },
+        later,
+        ProviderDriverKind.make("codex"),
+        scope,
+        [first, later],
+      ),
+    ).toEqual([]);
+  });
+  it("disables inherited servers, preserves new globals, and resets to inheritance", () => {
+    const decode = Schema.decodeUnknownSync(McpServerConfig);
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      mcpServers: {
+        docs: decode({ transport: { type: "http", url: "https://docs.test/mcp" } }),
+        later: decode({ transport: { type: "http", url: "https://later.test/mcp" } }),
+      },
+      projectSettingsOverrides: { "project-a": { mcpServers: { docs: { enabled: false } } } },
+    };
+    expect(
+      resolveMcpServers(
+        settings,
+        ProjectId.make("project-a"),
+        ProviderDriverKind.make("codex"),
+      ).map((server) => server.name),
+    ).toEqual(["later"]);
+    const reset = applyServerSettingsPatch(settings, {
+      projectSettingsOverrides: { [ProjectId.make("project-a")]: {} },
+    });
+    expect(
+      resolveMcpServers(reset, ProjectId.make("project-a"), ProviderDriverKind.make("codex")).map(
+        (server) => server.name,
+      ),
+    ).toEqual(["docs", "later"]);
+  });
+
+  it("replaces project transport, controls eligibility and re-enables a global server", () => {
+    const decode = Schema.decodeUnknownSync(McpServerConfig);
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      mcpServers: {
+        docs: decode({
+          enabled: false,
+          providers: ["codex"],
+          transport: { type: "http", url: "https://global.test/mcp" },
+        }),
+      },
+      projectSettingsOverrides: {
+        "project-a": {
+          mcpServers: {
+            docs: {
+              enabled: true,
+              providers: ["claudeAgent"] as const,
+              transport: { type: "stdio" as const, command: "node", args: [], env: [] },
+            },
+          },
+        },
+      },
+    };
+    expect(
+      resolveMcpServers(settings, ProjectId.make("project-a"), ProviderDriverKind.make("codex")),
+    ).toEqual([]);
+    expect(
+      resolveMcpServers(
+        settings,
+        ProjectId.make("project-a"),
+        ProviderDriverKind.make("claudeAgent"),
+      ),
+    ).toMatchObject([{ name: "docs", transport: { type: "stdio", command: "node" } }]);
+    expect(resolveMcpServers(settings, null, ProviderDriverKind.make("claudeAgent"))).toEqual([]);
+  });
+});
 
 const projectId = ProjectId.make("project-a");
 const otherProjectId = ProjectId.make("project-b");

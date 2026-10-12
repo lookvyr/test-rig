@@ -1018,8 +1018,71 @@ describe("CodexAdapterV2 native protocol logging", () => {
             method: "thread/event",
             params: {
               id: "evt-1",
-              http_headers: { Authorization: "[REDACTED]" },
+              http_headers: "[REDACTED]",
               usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
+            },
+          },
+        },
+      });
+    }),
+  );
+
+  it.effect("redacts app MCP env and header secrets regardless of their variable names", () =>
+    Effect.gen(function* () {
+      const writes: Array<unknown> = [];
+      const logger = CodexAdapterV2.makeCodexAppServerProtocolLogger({
+        nativeEventLogger: {
+          filePath: "/tmp/events.log",
+          write: (event) =>
+            Effect.sync(() => {
+              writes.push(event);
+            }),
+          close: () => Effect.void,
+        },
+        threadId: ThreadId.make("mcp-secrets-thread"),
+        providerSessionId: ProviderSessionId.make("mcp-secrets-session"),
+      })!;
+      yield* logger({
+        direction: "outgoing",
+        stage: "decoded",
+        payload: {
+          method: "thread/start",
+          params: {
+            config: {
+              mcp_servers: {
+                "tru-remote": {
+                  url: "https://example.test/mcp",
+                  http_headers: { "X-Credential": "header-secret-with-no-sensitive-name" },
+                },
+                "tru-local": {
+                  command: "node",
+                  args: ["server.js"],
+                  env: {
+                    DATABASE_URL: "postgres://user:env-secret-with-no-sensitive-name@localhost/db",
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      assert.deepEqual(writes[0], {
+        provider: "codex",
+        protocol: "codex.app-server",
+        kind: "protocol",
+        providerSessionId: "mcp-secrets-session",
+        event: {
+          direction: "outgoing",
+          stage: "decoded",
+          payload: {
+            method: "thread/start",
+            params: {
+              config: {
+                mcp_servers: {
+                  "tru-remote": { url: "https://example.test/mcp", http_headers: "[REDACTED]" },
+                  "tru-local": { command: "node", args: ["server.js"], env: "[REDACTED]" },
+                },
+              },
             },
           },
         },

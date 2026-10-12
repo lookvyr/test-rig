@@ -197,6 +197,8 @@ export function applyServerSettingsPatch(
     backgroundActivityProfile,
     backgroundActivity,
     worktreeCleanup: worktreeCleanupPatch,
+    mcpServers: mcpServersPatch,
+    toolsScopeMcpServers: toolsScopeMcpServersPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
     // Already translated into `projectSettingsOverrides` above; the legacy
@@ -279,6 +281,17 @@ export function applyServerSettingsPatch(
       : {}),
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
+      : {}),
+    ...(mcpServersPatch !== undefined
+      ? { mcpServers: mergeSettingsEntries(current.mcpServers, mcpServersPatch) }
+      : {}),
+    ...(toolsScopeMcpServersPatch !== undefined
+      ? {
+          toolsScopeMcpServers: mergeSettingsEntries(
+            current.toolsScopeMcpServers,
+            toolsScopeMcpServersPatch,
+          ),
+        }
       : {}),
     ...(projectSettingsOverridesPatch !== undefined
       ? {

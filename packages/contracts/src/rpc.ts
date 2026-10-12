@@ -1,4 +1,26 @@
+import {
+  ToolsProjectScopesInput,
+  ToolsProjectScopesResult,
+  ToolsScopeError,
+} from "./toolsScope.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
+import {
+  ListMcpRuntimeStatusesInput,
+  ListMcpRuntimeStatusesResult,
+  McpRuntimeAuthenticateResult,
+  McpRuntimeError,
+  McpRuntimeOperationInput,
+} from "./mcpRuntime.ts";
+import {
+  SkillLibraryDetail,
+  SkillLibraryError,
+  SkillLibraryImportInput,
+  SkillLibraryListResult,
+  SkillLibraryReadInput,
+  SkillLibrarySourceDetail,
+  SkillLibrarySourceReadInput,
+  SkillLibraryUpsertInput,
+} from "./skillLibrary.ts";
 import {
   WorktreeSetupSubscribeInput,
   WorktreeSetupStreamEvent,
@@ -276,6 +298,16 @@ export const WS_METHODS = {
   previewAutomationFocusHost: "previewAutomation.focusHost",
 
   secretsAnswerRequest: "secrets.answerRequest",
+  toolsProjectScopesList: "toolsProjectScopes.list",
+  skillLibraryList: "skillLibrary.list",
+  skillLibraryRead: "skillLibrary.read",
+  skillLibraryReadSource: "skillLibrary.readSource",
+  skillLibraryUpsert: "skillLibrary.upsert",
+  skillLibraryDelete: "skillLibrary.delete",
+  skillLibraryImport: "skillLibrary.import",
+  mcpRuntimeList: "mcpRuntime.list",
+  mcpRuntimeReconnect: "mcpRuntime.reconnect",
+  mcpRuntimeAuthenticate: "mcpRuntime.authenticate",
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -969,6 +1001,64 @@ const WsScheduledTasksListRpc = Rpc.make(WS_METHODS.scheduledTasksList, {
   error: Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),
 });
 
+const WsToolsProjectScopesListRpc = Rpc.make(WS_METHODS.toolsProjectScopesList, {
+  payload: ToolsProjectScopesInput,
+  success: ToolsProjectScopesResult,
+  error: Schema.Union([ToolsScopeError, EnvironmentAuthorizationError]),
+});
+
+const WsSkillLibraryListRpc = Rpc.make(WS_METHODS.skillLibraryList, {
+  payload: Schema.Struct({}),
+  success: SkillLibraryListResult,
+  error: Schema.Union([SkillLibraryError, EnvironmentAuthorizationError]),
+});
+
+const WsMcpRuntimeListRpc = Rpc.make(WS_METHODS.mcpRuntimeList, {
+  payload: ListMcpRuntimeStatusesInput,
+  success: ListMcpRuntimeStatusesResult,
+  error: Schema.Union([McpRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsMcpRuntimeReconnectRpc = Rpc.make(WS_METHODS.mcpRuntimeReconnect, {
+  payload: McpRuntimeOperationInput,
+  error: Schema.Union([McpRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsMcpRuntimeAuthenticateRpc = Rpc.make(WS_METHODS.mcpRuntimeAuthenticate, {
+  payload: McpRuntimeOperationInput,
+  success: McpRuntimeAuthenticateResult,
+  error: Schema.Union([McpRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsSkillLibraryReadRpc = Rpc.make(WS_METHODS.skillLibraryRead, {
+  payload: SkillLibraryReadInput,
+  success: SkillLibraryDetail,
+  error: Schema.Union([SkillLibraryError, EnvironmentAuthorizationError]),
+});
+
+const WsSkillLibraryReadSourceRpc = Rpc.make(WS_METHODS.skillLibraryReadSource, {
+  payload: SkillLibrarySourceReadInput,
+  success: SkillLibrarySourceDetail,
+  error: Schema.Union([SkillLibraryError, EnvironmentAuthorizationError]),
+});
+
+const WsSkillLibraryUpsertRpc = Rpc.make(WS_METHODS.skillLibraryUpsert, {
+  payload: SkillLibraryUpsertInput,
+  success: SkillLibraryDetail,
+  error: Schema.Union([SkillLibraryError, EnvironmentAuthorizationError]),
+});
+
+const WsSkillLibraryDeleteRpc = Rpc.make(WS_METHODS.skillLibraryDelete, {
+  payload: SkillLibraryReadInput,
+  error: Schema.Union([SkillLibraryError, EnvironmentAuthorizationError]),
+});
+
+const WsSkillLibraryImportRpc = Rpc.make(WS_METHODS.skillLibraryImport, {
+  payload: SkillLibraryImportInput,
+  success: SkillLibraryDetail,
+  error: Schema.Union([SkillLibraryError, EnvironmentAuthorizationError]),
+});
+
 /** Streams the full scheduled-task list: one snapshot on subscribe, then a fresh list after every change. */
 const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
   payload: ScheduledTaskListInput,
@@ -1003,6 +1093,16 @@ const WsScheduledTasksRunNowRpc = Rpc.make(WS_METHODS.scheduledTasksRunNow, {
 
 export const WsRpcGroup = RpcGroup.make(
   WsSecretsAnswerRequestRpc,
+  WsMcpRuntimeListRpc,
+  WsMcpRuntimeReconnectRpc,
+  WsMcpRuntimeAuthenticateRpc,
+  WsToolsProjectScopesListRpc,
+  WsSkillLibraryListRpc,
+  WsSkillLibraryReadRpc,
+  WsSkillLibraryReadSourceRpc,
+  WsSkillLibraryUpsertRpc,
+  WsSkillLibraryDeleteRpc,
+  WsSkillLibraryImportRpc,
   WsScheduledTasksListRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,

@@ -3,6 +3,7 @@ export type SettingsPath =
   | "/settings/appearance"
   | "/settings/keybindings"
   | "/settings/providers"
+  | "/settings/tools"
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
   | "/settings/connections"
@@ -25,6 +26,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "Appearance",
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
+  "/settings/tools": "Tools",
   "/settings/scheduled-tasks": "Scheduled Tasks",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
@@ -195,6 +197,8 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Providers",
     to: "/settings/providers",
   },
+  { id: "mcp-servers", title: "MCP servers", to: "/settings/tools" },
+  { id: "skill-library", title: "Skill library", to: "/settings/tools" },
   {
     id: "source-control",
     title: "Source control",

@@ -57,6 +57,8 @@ import * as Keybindings from "./keybindings.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as SkillLibrary from "./skills/SkillLibrary.ts";
+import * as ToolsProjectScopes from "./skills/ToolsProjectScopes.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
@@ -74,7 +76,6 @@ import * as ReviewService from "./review/ReviewService.ts";
 import * as GitHubPullRequestWorkspace from "./sourceControl/GitHubPullRequestWorkspace.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
-import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as ProjectStoreV2 from "./orchestration-v2/ProjectStore.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -368,8 +369,16 @@ const RuntimeCoreDependenciesLive = Layer.mergeAll(
     Layer.provideMerge(SourceControlRepositoryServiceLayerLive),
     Layer.provideMerge(ProjectEnrichmentService.layer),
     Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
+    Layer.provideMerge(
+      ToolsProjectScopes.layer.pipe(
+        Layer.provide(ProjectStoreV2.layer),
+        Layer.provide(ProcessRunner.layer),
+      ),
+    ),
     Layer.provideMerge(PersistenceLayerLive),
     Layer.provideMerge(Keybindings.layer),
+  )
+  .pipe(
     Layer.provideMerge(ProviderRegistryLive),
     // The instance registry is the new routing keystone — text generation,
     // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
@@ -391,6 +400,7 @@ const RuntimeCoreDependenciesLive = Layer.mergeAll(
     // keeps a single Live for all opencode consumers.
     Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
     Layer.provideMerge(WorkspaceLayerLive),
+    Layer.provideMerge(SkillLibrary.layer),
   )
   .pipe(
     Layer.provideMerge(ProjectFaviconResolverLayerLive),

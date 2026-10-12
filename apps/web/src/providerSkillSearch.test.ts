@@ -13,6 +13,14 @@ function makeSkill(input: Partial<ServerProviderSkill> & Pick<ServerProviderSkil
 }
 
 describe("searchProviderSkills", () => {
+  it("finds a library skill by its display name and retains the invocation alias", () => {
+    const library = makeSkill({
+      name: "test-rig:12345678-1234-4234-8234-123456789abc",
+      displayName: "Review Follow-up",
+      source: "test-rig",
+    });
+    expect(searchProviderSkills([library], "Review Follow-up")).toEqual([library]);
+  });
   it("moves exact ui matches ahead of broader ui matches", () => {
     const skills = [
       makeSkill({

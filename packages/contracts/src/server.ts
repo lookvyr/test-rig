@@ -99,6 +99,8 @@ export const ServerProviderSkill = Schema.Struct({
   shortDescription: Schema.optional(TrimmedNonEmptyString),
   userInvocationOnly: Schema.optional(Schema.Boolean),
   userInvocable: Schema.optional(Schema.Boolean),
+  /** App-owned library skills use a stable namespaced invocation name. */
+  source: Schema.optional(Schema.Literal("test-rig")),
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
 

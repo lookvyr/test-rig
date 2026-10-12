@@ -52,6 +52,12 @@ import {
   isModelSelectionProviderEnabled,
 } from "@t3tools/shared/serverSettings";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import {
+  materializeMcpServerSecrets,
+  mcpServerSecretNames,
+  planMcpServerSecrets,
+  redactMcpServerSecrets,
+} from "./mcpServerSecrets.ts";
 
 export { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
 
@@ -110,7 +116,7 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
         : instance,
     ]),
   );
-  return { ...settings, providerInstances };
+  return redactMcpServerSecrets({ ...settings, providerInstances });
 }
 
 export class ServerSettingsService extends Context.Service<
@@ -361,10 +367,73 @@ const make = Effect.gen(function* () {
       };
     });
 
+  const materializeSettingsSecrets = Effect.fn("ServerSettings.materializeSecrets")(function* (
+    settings: ServerSettings,
+  ) {
+    const providerSettings = yield* materializeProviderEnvironmentSecrets(settings);
+    const secrets = new Map<string, string>();
+    for (const name of mcpServerSecretNames(providerSettings)) {
+      const secret = yield* secretStore
+        .get(name)
+        .pipe(
+          Effect.mapError(
+            (cause) => new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+          ),
+        );
+      if (Option.isSome(secret)) secrets.set(name, textDecoder.decode(secret.value));
+    }
+    return materializeMcpServerSecrets(providerSettings, secrets);
+  });
+
+  const persistMcpSecrets = Effect.fn("ServerSettings.persistMcpSecrets")(function* (
+    current: ServerSettings,
+    next: ServerSettings,
+  ) {
+    const plan = planMcpServerSecrets(current, next);
+    // Read every source before writing destinations so two renamed variables can swap names.
+    const copySources = new Map<string, Option.Option<Uint8Array>>();
+    for (const change of plan.changes) {
+      if (change.kind !== "copy" || copySources.has(change.from)) continue;
+      const source = yield* secretStore
+        .get(change.from)
+        .pipe(
+          Effect.mapError(
+            (cause) => new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+          ),
+        );
+      copySources.set(change.from, source);
+    }
+    for (const change of plan.changes) {
+      if (change.kind === "remove") continue;
+      const effect =
+        change.kind === "write"
+          ? secretStore.set(change.secretName, textEncoder.encode(change.value))
+          : Effect.gen(function* () {
+              const stored = copySources.get(change.from) ?? Option.none();
+              if (Option.isSome(stored)) yield* secretStore.set(change.secretName, stored.value);
+            });
+      yield* effect.pipe(
+        Effect.mapError(
+          (cause) => new ServerSettingsError({ settingsPath, operation: "write-secret", cause }),
+        ),
+      );
+    }
+    const currentNames = new Set(mcpServerSecretNames(current));
+    return {
+      settings: plan.settings,
+      removals: plan.changes.flatMap((change) =>
+        change.kind === "remove" ? [change.secretName] : [],
+      ),
+      createdNames: plan.changes.flatMap((change) =>
+        change.kind !== "remove" && !currentNames.has(change.secretName) ? [change.secretName] : [],
+      ),
+    };
+  });
+
   const materializeChanges = (changes: Stream.Stream<ServerSettings>) =>
     changes.pipe(
       Stream.mapEffect((settings) =>
-        materializeProviderEnvironmentSecrets(settings).pipe(
+        materializeSettingsSecrets(settings).pipe(
           Effect.catch((error: ServerSettingsError) =>
             Effect.logWarning("failed to materialize provider environment secrets", {
               operation: error.operation,
@@ -613,22 +682,46 @@ const make = Effect.gen(function* () {
     start,
     ready: Deferred.await(startedDeferred),
     getSettings: getSettingsFromCache.pipe(
-      Effect.flatMap(materializeProviderEnvironmentSecrets),
+      Effect.flatMap(materializeSettingsSecrets),
       Effect.map(resolveTextGenerationProvider),
     ),
     updateSettings: (patch) =>
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const nextPersisted = yield* persistProviderEnvironmentSecrets(
-            current,
+          const validated = yield* normalizeServerSettings(
             applyServerSettingsPatch(current, patch),
           );
+          const withMcpSecrets = yield* persistMcpSecrets(current, validated);
+          const nextPersisted = yield* persistProviderEnvironmentSecrets(
+            current,
+            withMcpSecrets.settings,
+          );
           const next = yield* normalizeServerSettings(nextPersisted);
-          yield* writeSettingsAtomically(next);
+          yield* writeSettingsAtomically(next).pipe(
+            Effect.catch((error) =>
+              Effect.forEach(
+                withMcpSecrets.createdNames,
+                (name) => secretStore.remove(name).pipe(Effect.ignore({ log: true })),
+                { discard: true },
+              ).pipe(Effect.andThen(Effect.fail(error))),
+            ),
+          );
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
-          const materialized = yield* materializeProviderEnvironmentSecrets(next);
+          // Old settings continue to own these credentials until the file commits.
+          for (const name of withMcpSecrets.removals) {
+            yield* secretStore
+              .remove(name)
+              .pipe(
+                Effect.catch(() =>
+                  Effect.logWarning(
+                    "Could not remove an obsolete MCP secret after saving settings.",
+                  ),
+                ),
+              );
+          }
+          const materialized = yield* materializeSettingsSecrets(next);
           return resolveTextGenerationProvider(materialized);
         }),
       ),

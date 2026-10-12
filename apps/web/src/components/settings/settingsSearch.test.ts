@@ -36,6 +36,16 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it("finds both Tools library sections", () => {
+    expect(searchSettings("MCP servers")[0]).toMatchObject({
+      id: "mcp-servers",
+      to: "/settings/tools",
+    });
+    expect(searchSettings("skill library")[0]).toMatchObject({
+      id: "skill-library",
+      to: "/settings/tools",
+    });
+  });
   it("matches only setting titles", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);

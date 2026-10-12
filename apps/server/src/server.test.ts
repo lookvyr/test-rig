@@ -104,6 +104,9 @@ import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/provid
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as SkillLibrary from "./skills/SkillLibrary.ts";
+import * as ToolsProjectScopes from "./skills/ToolsProjectScopes.ts";
+import * as ProcessRunner from "./processRunner.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -598,8 +601,7 @@ const buildAppUnderTest = (options?: {
             }),
         }),
       ),
-      Layer.provide(gitManagerLayer),
-      Layer.provide(gitVcsDriverLayer),
+      Layer.provide(Layer.merge(gitManagerLayer, gitVcsDriverLayer)),
       Layer.provide(
         Layer.merge(
           gitWorkflowLayer,
@@ -651,17 +653,20 @@ const buildAppUnderTest = (options?: {
           }),
         ),
       ),
+      Layer.provide(ToolsProjectScopes.layer.pipe(Layer.provide(ProcessRunner.layer))),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ThreadManagement.ThreadManagementService)({
             dispatch: () => Effect.succeed({ sequence: 0, storedEvents: [] }),
-            getShellSnapshot: () =>
-              Effect.succeed({
-                schemaVersion: 1,
-                snapshotSequence: 0,
-                threads: [],
-                archivedThreads: [],
-              }),
+            readShellSnapshot: () =>
+              Effect.succeed(
+                Effect.succeed({
+                  schemaVersion: 1,
+                  snapshotSequence: 0,
+                  threads: [],
+                  archivedThreads: [],
+                }),
+              ),
             getThreadShell: () => Effect.succeed(v2ThreadShell),
             getThreadProjection: () => Effect.succeed(v2Projection),
             getThreadSnapshotWindow: () =>
@@ -681,6 +686,7 @@ const buildAppUnderTest = (options?: {
             ...options?.layers?.projects,
           }),
           Layer.mock(ProjectStore.ProjectStoreV2)({
+            list: () => Effect.succeed([]),
             listShells: () => Effect.succeed([]),
             ...options?.layers?.projectStore,
           }),
@@ -715,7 +721,9 @@ const buildAppUnderTest = (options?: {
             ...options?.layers?.applicationEvents,
           }),
           Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
-          Layer.mock(ThreadSearch.ThreadSearch)({ search: () => Effect.succeed({ matches: [] }) }),
+          Layer.mock(ThreadSearch.ThreadSearch)({
+            search: () => Effect.succeed({ matches: [] }),
+          }),
         ),
       ),
       Layer.provide(SqlitePersistenceMemory),
@@ -844,6 +852,7 @@ const buildAppUnderTest = (options?: {
       Layer.provideMerge(ServerSecretStore.layer),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
+      Layer.provide(SkillLibrary.layer),
       Layer.provide(layerConfig),
     );
 
@@ -1177,6 +1186,132 @@ const NodeHttpServerTestWithWsDeflate = HttpServer.layerTestClient.pipe(
 );
 
 it.layer(NodeServices.layer)("server router seam", (it) => {
+  it.effect("rejects read-only Tools mutations and undiscovered skill imports over RPC", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const ownerUrl = yield* getWsServerUrl("/ws");
+      const input = {
+        name: "review-changes",
+        description: "Review changes",
+        instructions: "Check correctness.",
+        providers: ["codex"] as const,
+        assignment: { allProjects: false, projectIds: [], disabledProjectIds: [] },
+      };
+      const sourceInput = {
+        instanceId: ProviderInstanceId.make("codex"),
+        cwd: "/repo",
+        sourcePath: "/repo/not-discovered/SKILL.md",
+      };
+      const created = yield* withWsRpcClient(ownerUrl, (client) =>
+        Effect.gen(function* () {
+          const created = yield* client[WS_METHODS.skillLibraryUpsert](input);
+          for (const request of [
+            client[WS_METHODS.skillLibraryReadSource](sourceInput).pipe(Effect.asVoid),
+            client[WS_METHODS.skillLibraryImport]({
+              ...sourceInput,
+              providers: input.providers,
+              assignment: input.assignment,
+            }).pipe(Effect.asVoid),
+          ]) {
+            const error = yield* Effect.flip(request);
+            assert.equal(error._tag, "SkillLibraryError");
+          }
+          return created;
+        }),
+      );
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const response = yield* HttpClient.post("/api/auth/pairing-token", {
+        headers: { cookie: ownerCookie },
+        body: yield* HttpBody.json({ scopes: ["orchestration:read"] }),
+      });
+      assert.equal(response.status, 200);
+      const pairing = (yield* response.json) as { readonly credential: string };
+      const readUrl = yield* getWsServerUrl("/ws", { credential: pairing.credential });
+      yield* withWsRpcClient(readUrl, (client) =>
+        Effect.gen(function* () {
+          assert.equal((yield* client[WS_METHODS.skillLibraryList]({})).skills.length, 1);
+          assert.deepEqual(yield* client[WS_METHODS.toolsProjectScopesList]({ projectIds: [] }), {
+            scopes: [],
+          });
+          assert.equal(
+            (yield* client[WS_METHODS.skillLibraryRead]({ id: created.id })).name,
+            input.name,
+          );
+          assert.deepEqual(yield* client[WS_METHODS.mcpRuntimeList]({}), { statuses: [] });
+          for (const request of [
+            client[WS_METHODS.skillLibraryUpsert]({
+              ...input,
+              id: created.id,
+              name: "forbidden",
+            }).pipe(Effect.asVoid),
+            client[WS_METHODS.skillLibraryDelete]({ id: created.id }),
+            client[WS_METHODS.skillLibraryImport]({
+              ...sourceInput,
+              providers: input.providers,
+              assignment: input.assignment,
+            }).pipe(Effect.asVoid),
+            client[WS_METHODS.mcpRuntimeReconnect]({
+              threadId: ThreadId.make("no-session"),
+              serverName: "demo",
+            }),
+            client[WS_METHODS.mcpRuntimeAuthenticate]({
+              threadId: ThreadId.make("no-session"),
+              serverName: "demo",
+            }).pipe(Effect.asVoid),
+          ]) {
+            const error = yield* Effect.flip<void, Effect.Error<typeof request>, never>(request);
+            assert.equal(error._tag, "EnvironmentAuthorizationError");
+            if (error._tag === "EnvironmentAuthorizationError") {
+              assert.equal(error.requiredScope, "orchestration:operate");
+            }
+          }
+          assert.equal(
+            (yield* client[WS_METHODS.skillLibraryRead]({ id: created.id })).name,
+            input.name,
+          );
+        }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "round-trips skill library edits and reads configured MCP runtime status over RPC",
+    () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest();
+        yield* Effect.scoped(
+          withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+            Effect.gen(function* () {
+              const created = yield* client[WS_METHODS.skillLibraryUpsert]({
+                name: "review-changes",
+                description: "Review the current changes",
+                instructions: "# Review\n\nCheck correctness and keep the design simple.",
+                providers: ["codex", "claudeAgent"],
+                assignment: { allProjects: false, projectIds: [], disabledProjectIds: [] },
+              });
+              const listed = yield* client[WS_METHODS.skillLibraryList]({});
+              assert.deepEqual(
+                listed.skills.map((skill) => skill.id),
+                [created.id],
+              );
+              assert.equal("instructions" in listed.skills[0]!, false);
+              const updated = yield* client[WS_METHODS.skillLibraryUpsert]({
+                ...created,
+                instructions: "# Review\n\nCheck correctness, then simplify.",
+                assignment: { allProjects: true, projectIds: [], disabledProjectIds: [] },
+              });
+              const read = yield* client[WS_METHODS.skillLibraryRead]({ id: created.id });
+              assert.equal(read.instructions, updated.instructions);
+              assert.equal(read.assignment.allProjects, true);
+              assert.deepEqual(yield* client[WS_METHODS.mcpRuntimeList]({}), { statuses: [] });
+              yield* client[WS_METHODS.skillLibraryDelete]({ id: created.id });
+              assert.deepEqual(yield* client[WS_METHODS.skillLibraryList]({}), { skills: [] });
+            }),
+          ),
+        );
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("creates the Scratch project once and restores its folder on reuse", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -4408,27 +4543,29 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("maps native shell errors at the RPC boundary", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        layers: {
-          threads: {
-            getShellSnapshot: () =>
-              Effect.fail(new OrchestratorProjectionError({ threadId: v2ThreadId })),
+  for (const phase of ["read", "decode"] as const) {
+    it.effect(`maps native shell ${phase} errors at the RPC boundary`, () =>
+      Effect.gen(function* () {
+        const failure = Effect.fail(new OrchestratorProjectionError({ threadId: v2ThreadId }));
+        yield* buildAppUnderTest({
+          layers: {
+            threads: {
+              readShellSnapshot: () => (phase === "read" ? failure : Effect.succeed(failure)),
+            },
           },
-        },
-      });
-      const error = yield* Effect.scoped(
-        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
-          client[ORCHESTRATION_V2_WS_METHODS.subscribeShell]({}).pipe(
-            Stream.runCollect,
-            Effect.flip,
+        });
+        const error = yield* Effect.scoped(
+          withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+            client[ORCHESTRATION_V2_WS_METHODS.subscribeShell]({}).pipe(
+              Stream.runCollect,
+              Effect.flip,
+            ),
           ),
-        ),
-      );
-      assert.equal(error._tag, "OrchestrationV2GetShellSnapshotError");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
+        );
+        assert.equal(error._tag, "OrchestrationV2GetShellSnapshotError");
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+  }
 
   it.effect("marks empty native shell replay synchronized", () =>
     Effect.gen(function* () {

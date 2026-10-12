@@ -76,6 +76,13 @@ import {
   type OpenCodeRuntimeError,
 } from "../../provider/opencodeRuntime.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { appMcpRuntimeName } from "../../mcp/AppMcpConfig.ts";
+import { mcpServerVariableRecord } from "@t3tools/contracts";
+import {
+  registerProviderMcpRuntime,
+  normalizeMcpRuntimeState,
+  providerMcpRequestError,
+} from "../../mcp/ProviderMcpRuntime.ts";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
 import { t3OrchestrationSystemPrompt } from "../../provider/T3OrchestrationInstructions.ts";
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
@@ -397,6 +404,8 @@ interface ThreadState {
   mcp:
     | { readonly name: string; readonly directory: string; readonly credential: string }
     | undefined;
+  appMcp: ReadonlyArray<{ readonly name: string; readonly directory: string }> | undefined;
+  disposeMcpRuntime: (() => void) | undefined;
   instructions: string | undefined;
 }
 
@@ -458,15 +467,29 @@ const t3McpServerName = (threadId: string) =>
  * this thread's own is allowed again, in every mode. A subagent's session
  * inherits the thread's.
  */
-const mcpRules = (threadId: string | null): ReadonlyArray<Rule> =>
+const mcpRules = (
+  threadId: string | null,
+  policy: RulesPolicy,
+  grants: ReadonlyArray<Rule>,
+): ReadonlyArray<Rule> =>
   threadId === null
     ? []
     : [
         { action: "test_rig-*", resource: "*", effect: "deny" },
+        { action: "tru-????????-*", resource: "*", effect: "deny" },
+        {
+          action: `${appMcpRuntimeName("*", threadId)}_*`,
+          resource: "*",
+          effect:
+            policy.runtimeMode === "full-access" && policy.interactionMode !== "plan"
+              ? "allow"
+              : "ask",
+        },
+        ...grants.filter((grant) => grant.action.startsWith(appMcpRuntimeName("", threadId))),
         { action: `${t3McpServerName(threadId)}_*`, resource: "*", effect: "allow" },
       ];
 
-const sessionRules = (
+export const openCodeSessionRules = (
   policy: RulesPolicy,
   paths: ReadonlyArray<Rule>,
   grants: ReadonlyArray<Rule>,
@@ -484,7 +507,7 @@ const sessionRules = (
   // are never denied: the free tier refuses sessions whose rules deny them.
   ...(policy.interactionMode === "plan" ? [rule("edit", "deny")] : []),
   ...paths,
-  ...mcpRules(threadId),
+  ...mcpRules(threadId, policy, grants),
 ];
 
 const sameRules = (left: ReadonlyArray<Rule> | undefined, right: ReadonlyArray<Rule>) =>
@@ -784,7 +807,7 @@ const SKILL_MENTION = new RegExp(SKILL_MENTION_PATTERN.source, "u");
 const skillsNamed = (text: string, known: ReadonlySet<string>) => [
   ...new Set(
     [...text.matchAll(SKILL_MENTION_PATTERN)].flatMap((match) =>
-      known.has(match[2] ?? "") ? [match[2]!] : [],
+      known.has(match[2] ?? "") && !match[2]?.startsWith("test-rig:") ? [match[2]!] : [],
     ),
   ),
 ];
@@ -930,6 +953,8 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       stoppedChildren: new Set(),
       strandedSteers: new Set(),
       mcp: undefined,
+      appMcp: undefined,
+      disposeMcpRuntime: undefined,
       instructions: undefined,
     });
 
@@ -2831,7 +2856,12 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       currentScope = scope;
       yield* Scope.close(previous, Exit.void);
       // A restarted server forgot T3's MCP servers; the next turn adds them again.
-      for (const state of threads.values()) state.mcp = undefined;
+      for (const state of threads.values()) {
+        state.mcp = undefined;
+        state.appMcp = undefined;
+        state.disposeMcpRuntime?.();
+        state.disposeMcpRuntime = undefined;
+      }
       yield* lock.withPermit(reconcile).pipe(Effect.timeout(RECONCILE_TIMEOUT));
       return stream;
     }).pipe(
@@ -2974,7 +3004,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
         policy.runtimeMode === "full-access" && !plan
           ? []
           : yield* pathsFor(thread.directory, plan ? [thread.agent, "plan"] : [thread.agent]);
-      return sessionRules(
+      return openCodeSessionRules(
         policy,
         paths,
         policy.runtimeMode === "full-access" ? [] : thread.grants,
@@ -3214,7 +3244,10 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
     // spawned one forgets them when it stops.
     yield* Effect.addFinalizer(() =>
       Effect.forEach(
-        [...threads.values()].flatMap((state) => (state.mcp === undefined ? [] : [state.mcp])),
+        [...threads.values()].flatMap((state) => {
+          state.disposeMcpRuntime?.();
+          return [...(state.mcp === undefined ? [] : [state.mcp]), ...(state.appMcp ?? [])];
+        }),
         removeMcp,
         { concurrency: 8, discard: true },
       ),
@@ -3275,7 +3308,107 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           );
         if (added) state.mcp = wanted;
       }
+      if (state.appMcp?.some((server) => server.directory !== directory)) {
+        state.disposeMcpRuntime?.();
+        yield* Effect.forEach(state.appMcp, removeMcp, { concurrency: 8, discard: true });
+        state.appMcp = undefined;
+      }
+      if (state.appMcp === undefined && mcpSession !== undefined && !connection.external) {
+        const registrations: Array<{ name: string; directory: string }> = [];
+        for (const server of mcpSession.appMcpServers ?? []) {
+          const runtimeName = appMcpRuntimeName(server.name, turnInput.threadId);
+          const transport = server.transport;
+          const config =
+            transport.type === "stdio"
+              ? new Mcp.LocalConfig({
+                  type: "local",
+                  command: [transport.command, ...transport.args],
+                  environment: mcpServerVariableRecord(transport.env),
+                })
+              : new Mcp.RemoteConfig({
+                  type: "remote",
+                  url: transport.url,
+                  headers: mcpServerVariableRecord(transport.headers),
+                });
+          const added = yield* client.mcp
+            .add({ server: runtimeName, location: { directory }, config })
+            .pipe(
+              Effect.timeout(INVENTORY_TIMEOUT),
+              Effect.as(true),
+              Effect.catch(() =>
+                Effect.logWarning("Could not add app-owned MCP server to OpenCode.", {
+                  serverName: server.name,
+                }).pipe(Effect.as(false)),
+              ),
+            );
+          if (added) registrations.push({ name: runtimeName, directory });
+        }
+        state.appMcp = registrations;
+        state.disposeMcpRuntime = registerProviderMcpRuntime({
+          identity: {
+            threadId: turnInput.threadId,
+            projectId: mcpSession.projectId ?? null,
+            provider: "opencode",
+            providerSessionId: input.providerSessionId,
+            providerInstanceId: instanceId,
+          },
+          servers: (mcpSession.appMcpServers ?? []).map((server) => ({
+            name: server.name,
+            runtimeName: appMcpRuntimeName(server.name, turnInput.threadId),
+          })),
+          inventory: client.mcp.list({ location: { directory } }).pipe(
+            Effect.map(
+              (result) =>
+                new Map(
+                  (mcpSession.appMcpServers ?? []).map((server) => {
+                    const runtimeName = appMcpRuntimeName(server.name, turnInput.threadId);
+                    const status = result.data.find((server) => server.name === runtimeName);
+                    return [
+                      runtimeName,
+                      registrations.some((server) => server.name === runtimeName)
+                        ? { state: normalizeMcpRuntimeState(status?.status.status) }
+                        : { state: "failed" as const, reconnectSupported: false },
+                    ];
+                  }),
+                ),
+            ),
+            Effect.mapError(providerMcpRequestError),
+          ),
+          status: (runtimeName) =>
+            !registrations.some((server) => server.name === runtimeName)
+              ? Effect.succeed({ state: "failed" as const, reconnectSupported: false })
+              : client.mcp.list({ location: { directory } }).pipe(
+                  Effect.map((result) => {
+                    const server = result.data.find((server) => server.name === runtimeName);
+                    return { state: normalizeMcpRuntimeState(server?.status.status) };
+                  }),
+                  Effect.mapError(providerMcpRequestError),
+                ),
+          reconnect: (runtimeName) =>
+            client.mcp
+              .connect({ server: runtimeName, location: { directory } })
+              .pipe(Effect.asVoid, Effect.mapError(providerMcpRequestError)),
+        });
+      }
+      if (state.appMcp === undefined && mcpSession !== undefined && connection.external) {
+        state.appMcp = [];
+        state.disposeMcpRuntime = registerProviderMcpRuntime({
+          identity: {
+            threadId: turnInput.threadId,
+            projectId: mcpSession.projectId ?? null,
+            provider: "opencode",
+            providerSessionId: input.providerSessionId,
+            providerInstanceId: instanceId,
+          },
+          servers: (mcpSession.appMcpServers ?? []).map((server) => ({
+            name: server.name,
+            runtimeName: appMcpRuntimeName(server.name, turnInput.threadId),
+          })),
+          status: () => Effect.succeed({ state: "unsupported" as const }),
+        });
+      }
       const instructions = [
+        mcpSession?.skillCatalogue,
         buildRuntimeInstructions({ harness: "OpenCode", model: turnInput.modelSelection.model }),
         t3OrchestrationSystemPrompt(state.mcp !== undefined),
       ]
@@ -3997,6 +4130,9 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
             childOwners.delete(child);
             threads.delete(child);
           }
+          state.disposeMcpRuntime?.();
+          if (state.appMcp !== undefined)
+            yield* Effect.forEach(state.appMcp, removeMcp, { discard: true });
           if (state.mcp !== undefined) yield* removeMcp(state.mcp);
         }),
       respondToRuntimeRequest: (requestInput) =>

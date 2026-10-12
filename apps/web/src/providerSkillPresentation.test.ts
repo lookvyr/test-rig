@@ -25,6 +25,14 @@ describe("formatProviderSkillDisplayName", () => {
 });
 
 describe("formatProviderSkillInstallSource", () => {
+  it("labels app-owned library skills independently of their storage path", () => {
+    expect(
+      formatProviderSkillInstallSource({
+        path: "/custom-state/skill/SKILL.md",
+        source: "test-rig",
+      }),
+    ).toBe("Test Rig");
+  });
   it("marks plugin-backed skills as app installs", () => {
     expect(
       formatProviderSkillInstallSource({

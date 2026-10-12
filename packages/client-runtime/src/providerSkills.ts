@@ -70,8 +70,9 @@ export function getProviderSlashCommandsForSlashMenu(
 }
 
 export function resolveProviderSkillSourceKind(
-  skill: Pick<ServerProviderSkill, "path" | "scope">,
+  skill: Pick<ServerProviderSkill, "path" | "scope" | "source">,
 ): ProviderSkillSourceKind {
+  if (skill.source === "test-rig") return "app";
   const normalizedPath = normalizePathSeparators(skill.path);
   if (normalizedPath.includes("/.codex/plugins/") || normalizedPath.includes("/.agents/plugins/")) {
     return "app";

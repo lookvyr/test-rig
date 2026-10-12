@@ -42,11 +42,15 @@ import type {
   ProviderAdapterV2SessionRuntime,
 } from "../ProviderAdapter.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { listMcpRuntimeStatuses } from "../../mcp/ProviderMcpRuntime.ts";
+import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
+import { t3OrchestrationSystemPrompt } from "../../provider/T3OrchestrationInstructions.ts";
+import { appMcpRuntimeName } from "../../mcp/AppMcpConfig.ts";
 import * as IdAllocator from "../IdAllocator.ts";
 import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
 import * as ProviderContinuationRequests from "../ProviderContinuationRequests.ts";
 import { OPENCODE_PROVIDER } from "./OpenCodeCommon.ts";
-import { OPENCODE_2_STILL_STOPPING } from "./OpenCode2AdapterV2.ts";
+import { OPENCODE_2_STILL_STOPPING, openCodeSessionRules } from "./OpenCode2AdapterV2.ts";
 import { openCode2ReplayRuntime } from "./OpenCode2AdapterV2.testkit.ts";
 
 const SESSION = "ses_f148ca2deffeJcwCnRQtb0YFNX";
@@ -76,8 +80,13 @@ const durable = { durable: { aggregateID: SESSION, seq: 1, version: 1 } };
 /** The rules T3 gives every session it runs, with only this thread's own T3 MCP server allowed. */
 const mcpRules = [
   { action: "test_rig-*", resource: "*", effect: "deny" },
+  { action: "tru-????????-*", resource: "*", effect: "deny" },
+  { action: `${appMcpRuntimeName("*", threadId)}_*`, resource: "*", effect: "allow" },
   { action: "test_rig-c26f2f1fb6fbbcc2da5f69c036cefddc_*", resource: "*", effect: "allow" },
 ];
+const supervisedMcpRules = mcpRules.map((entry) =>
+  entry.action === `${appMcpRuntimeName("*", threadId)}_*` ? { ...entry, effect: "ask" } : entry,
+);
 const t3Rules = [{ action: "*", resource: "*", effect: "allow" }, ...mcpRules];
 const sessionInfo = (overrides: Record<string, unknown> = {}) => ({
   id: SESSION,
@@ -275,7 +284,7 @@ const supervisedRules = [
   { action: "edit", resource: "*", effect: "ask" },
   { action: "external_directory", resource: "*", effect: "ask" },
   ...buildPaths,
-  ...mcpRules,
+  ...supervisedMcpRules,
 ];
 
 // The first ask and question form the spike recorded (recordings/permission, question).
@@ -802,7 +811,7 @@ describe("OpenCode2 adapter", () => {
         // A subagent's session may use its thread's T3 MCP server.
         out("session.update", {
           sessionID: CHILD,
-          permissions: [...supervisedRules.slice(0, 3), ...mcpRules],
+          permissions: [...supervisedRules.slice(0, 3), ...supervisedMcpRules],
         }),
         reply("session.update", null),
         out("session.prompt", { sessionID: SESSION, text: "<any>" }),
@@ -1921,7 +1930,7 @@ describe("OpenCode2 adapter", () => {
               ...supervisedRules.slice(0, 3),
               { action: "shell", resource: "echo *", effect: "allow" },
               // A subagent's session may use its thread's T3 MCP server.
-              ...mcpRules,
+              ...supervisedMcpRules,
             ],
           }),
           reply("session.update", null),
@@ -2096,7 +2105,7 @@ describe("OpenCode2 adapter", () => {
         // The subagent gets them too before its execution runs anything.
         out("session.update", {
           sessionID: CHILD,
-          permissions: [...supervisedRules.slice(0, 3), ...mcpRules],
+          permissions: [...supervisedRules.slice(0, 3), ...supervisedMcpRules],
         }),
         reply("session.update", null),
         event("session.execution.started", { sessionID: CHILD }),
@@ -2722,6 +2731,12 @@ describe("OpenCode2 adapter", () => {
                     permissions: [
                       { action: "*", resource: "*", effect: "allow" },
                       { action: "test_rig-*", resource: "*", effect: "deny" },
+                      { action: "tru-????????-*", resource: "*", effect: "deny" },
+                      {
+                        action: `${appMcpRuntimeName("*", scenario.threadId)}_*`,
+                        resource: "*",
+                        effect: "allow",
+                      },
                       { action: `${server}_*`, resource: "*", effect: "allow" },
                     ],
                   }),
@@ -3650,6 +3665,12 @@ describe("OpenCode2 adapter", () => {
           permissions: [
             { action: "*", resource: "*", effect: "allow" },
             { action: "test_rig-*", resource: "*", effect: "deny" },
+            { action: "tru-????????-*", resource: "*", effect: "deny" },
+            {
+              action: `${appMcpRuntimeName("*", "thread:opencode2-adapter:fork")}_*`,
+              resource: "*",
+              effect: "allow",
+            },
             {
               action: "test_rig-7c81f4ba96860743baebd01c07478498_*",
               resource: "*",
@@ -3979,4 +4000,187 @@ describe("OpenCode reported model variants", () => {
         );
       }).pipe(Effect.scoped),
   );
+});
+
+it.effect(
+  "OpenCode2 injects app stdio/http tools, reports attributed active status, delivers catalogue and removes registrations",
+  () =>
+    Effect.gen(function* () {
+      const nativeBuiltin = "test_rig-c26f2f1fb6fbbcc2da5f69c036cefddc";
+      const local = appMcpRuntimeName("local", threadId);
+      const remote = appMcpRuntimeName("remote", threadId);
+      const catalogue = "Read /app/skills/library-id/SKILL.md for test-rig:library-id.";
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("opencode-app-tools-env"),
+        threadId,
+        providerSessionId: "credential",
+        providerInstanceId: instanceId,
+        endpoint: "http://localhost/mcp",
+        authorizationHeader: "Bearer builtin",
+        browserToolsAvailable: false,
+        skillCatalogue: catalogue,
+        appMcpServers: [
+          {
+            name: "local",
+            transport: {
+              type: "stdio",
+              command: "node",
+              args: ["server.js"],
+              env: [{ name: "TOKEN", value: "local-secret", sensitive: true }],
+            },
+          },
+          {
+            name: "remote",
+            transport: {
+              type: "http",
+              url: "https://remote.example.test/mcp",
+              headers: [{ name: "Authorization", value: "Bearer remote-secret", sensitive: true }],
+            },
+          },
+        ],
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
+      );
+      const runtime = yield* openCode2ReplayRuntime([
+        ...opening,
+        out("session.get", { sessionID: SESSION }),
+        replyData("session.get", sessionInfo()),
+        ...noOpenRequests,
+        out("mcp.add", {
+          server: nativeBuiltin,
+          "location[directory]": WORK,
+          config: {
+            type: "remote",
+            url: "http://localhost/mcp",
+            headers: { Authorization: "Bearer builtin" },
+            oauth: false,
+          },
+        }),
+        reply("mcp.add", null),
+        out("mcp.add", {
+          server: local,
+          "location[directory]": WORK,
+          config: {
+            type: "local",
+            command: ["node", "server.js"],
+            environment: { TOKEN: "local-secret" },
+          },
+        }),
+        reply("mcp.add", null),
+        out("mcp.add", {
+          server: remote,
+          "location[directory]": WORK,
+          config: {
+            type: "remote",
+            url: "https://remote.example.test/mcp",
+            headers: { Authorization: "Bearer remote-secret" },
+          },
+        }),
+        reply("mcp.add", null),
+        out("session.instructions.entry.put", {
+          sessionID: SESSION,
+          key: "test_rig",
+          value: [
+            catalogue,
+            buildRuntimeInstructions({ harness: "OpenCode", model: bigPickle.model }),
+            t3OrchestrationSystemPrompt(true),
+          ].join("\n\n"),
+        }),
+        reply("session.instructions.entry.put", null),
+        out("session.prompt", { sessionID: SESSION, text: "<any>" }),
+        promptAccepted,
+        event("session.execution.succeeded", { sessionID: SESSION }),
+        out("mcp.list", { "location[directory]": WORK }),
+        reply("mcp.list", {
+          location: { directory: WORK },
+          data: [
+            { name: local, status: { status: "connected" } },
+            { name: remote, status: { status: "needs_auth", error: "provider secret withheld" } },
+          ],
+        }),
+        out("mcp.remove", { server: local, "location[directory]": WORK }),
+        reply("mcp.remove", null),
+        out("mcp.remove", { server: remote, "location[directory]": WORK }),
+        reply("mcp.remove", null),
+        out("mcp.remove", { server: nativeBuiltin, "location[directory]": WORK }),
+        reply("mcp.remove", null),
+      ]);
+      const thread = yield* runtime.resumeThread({
+        providerThread: providerThread(yield* DateTime.now),
+        threadId,
+        modelSelection: bigPickle,
+        runtimePolicy: policy(),
+      });
+      const terminal = yield* terminalOf(runtime).pipe(Effect.forkScoped);
+      yield* runtime.startTurn(turnInput(thread));
+      assert.equal((yield* Fiber.join(terminal))?.status, "completed");
+      const statuses = yield* listMcpRuntimeStatuses({});
+      assert.deepEqual(
+        statuses.map((status) => [status.serverName, status.state]),
+        [
+          ["local", "connected"],
+          ["remote", "needs-auth"],
+        ],
+      );
+      assert.isTrue(
+        statuses.every((status) => status.provider === "opencode" && !status.authenticateSupported),
+      );
+      yield* runtime.unloadThread!({ providerThread: thread });
+      assert.deepEqual(yield* listMcpRuntimeStatuses({}), []);
+    }).pipe(Effect.scoped),
+);
+
+it.each([
+  { runtimeMode: "full-access" as const, interactionMode: "default" as const, expected: "allow" },
+  {
+    runtimeMode: "approval-required" as const,
+    interactionMode: "default" as const,
+    expected: "ask",
+  },
+  {
+    runtimeMode: "auto-accept-edits" as const,
+    interactionMode: "default" as const,
+    expected: "ask",
+  },
+  { runtimeMode: "full-access" as const, interactionMode: "plan" as const, expected: "ask" },
+])(
+  "OpenCode app MCP approval follows $runtimeMode/$interactionMode",
+  ({ runtimeMode, interactionMode, expected }) => {
+    const rules = openCodeSessionRules({ runtimeMode, interactionMode }, [], [], threadId);
+    const own = rules.find((rule) => rule.action === `${appMcpRuntimeName("*", threadId)}_*`);
+    assert.equal(own?.effect, expected);
+    assert.equal(rules.find((rule) => rule.action === "tru-????????-*")?.effect, "deny");
+    const initial = rules.find((rule) => rule.action === "*");
+    if (runtimeMode === "full-access") {
+      assert.equal(initial?.effect, "allow");
+      assert.isAbove(rules.indexOf(own!), rules.indexOf(initial!));
+    }
+  },
+);
+
+it("OpenCode preserves explicit app-tool grants in manual mode while denying sibling registrations", () => {
+  const ownGrant = {
+    action: `${appMcpRuntimeName("local", threadId)}_write`,
+    resource: "*",
+    effect: "allow" as const,
+  };
+  const siblingGrant = {
+    action: `${appMcpRuntimeName("local", "sibling-thread")}_write`,
+    resource: "*",
+    effect: "allow" as const,
+  };
+  const rules = openCodeSessionRules(
+    { runtimeMode: "approval-required", interactionMode: "default" },
+    [],
+    [ownGrant, siblingGrant],
+    threadId,
+  );
+  const ownDefaultIndex = rules.findIndex(
+    (rule) => rule.action === `${appMcpRuntimeName("*", threadId)}_*`,
+  );
+  assert.isAbove(rules.lastIndexOf(ownGrant), ownDefaultIndex);
+  const siblingGuardIndex = rules.findIndex((rule) => rule.action === "tru-????????-*");
+  assert.isAbove(siblingGuardIndex, rules.lastIndexOf(siblingGrant));
+  assert.equal(rules[ownDefaultIndex]?.effect, "ask");
 });

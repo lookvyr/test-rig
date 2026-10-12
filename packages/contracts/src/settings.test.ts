@@ -16,6 +16,48 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
+describe("MCP settings contracts", () => {
+  it("defaults provider eligibility and treats variables as secrets", () => {
+    const settings = decodeServerSettings({
+      mcpServers: {
+        docs: {
+          transport: {
+            type: "stdio",
+            command: "node",
+            env: [{ name: "TOKEN", value: "test-token" }],
+          },
+        },
+      },
+    });
+    expect(settings.mcpServers.docs?.providers).toEqual(["codex", "claudeAgent", "opencode"]);
+    expect(settings.mcpServers.docs?.transport).toMatchObject({ env: [{ sensitive: true }] });
+    expect(decodeServerSettingsPatch({ mcpServers: { docs: null } }).mcpServers?.docs).toBeNull();
+  });
+
+  it("rejects reserved server names and excluded providers", () => {
+    const transport = { type: "http", url: "https://example.test/mcp" };
+    for (const name of ["test_rig", "test-rig", "t3-code", "tru-other"]) {
+      expect(() => decodeServerSettings({ mcpServers: { [name]: { transport } } })).toThrow();
+    }
+    expect(() =>
+      decodeServerSettings({ mcpServers: { docs: { transport, providers: ["cursor"] } } }),
+    ).toThrow();
+  });
+
+  it("rejects duplicate environment names and header names regardless of header case", () => {
+    for (const transport of [
+      { type: "stdio", command: "node", env: [{ name: "TOKEN" }, { name: "TOKEN" }] },
+      {
+        type: "http",
+        url: "https://example.test/mcp",
+        headers: [{ name: "Authorization" }, { name: "authorization" }],
+      },
+    ]) {
+      expect(() => decodeServerSettings({ mcpServers: { docs: { transport } } })).toThrow();
+    }
+  });
+});
+
 describe("ClientSettings side chat discard", () => {
   it("prompts for existing installations and preserves an explicit opt-out", () => {
     expect(decodeClientSettings({}).confirmSideChatDiscard).toBe(true);

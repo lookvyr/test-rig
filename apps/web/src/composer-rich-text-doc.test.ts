@@ -45,6 +45,21 @@ const doc = (value: string, terminalContexts?: TerminalContextDraft[]) =>
   );
 const roundTrip = (value: string) => serializeEditorDoc(doc(value)).value;
 
+it("keeps the library alias when a skill chip displays its friendly name", () => {
+  const name = "test-rig:12345678-1234-4234-8234-123456789abc";
+  const value = `Use $${name} please`;
+  const document = schema.nodeFromJSON(
+    buildDocJson(value, () => ({ label: "Review Follow-up", description: null })),
+  );
+  const chips: Array<{ name: string; label: string }> = [];
+  document.descendants((node) => {
+    if (node.type.name === "composer-skill")
+      chips.push({ name: node.attrs.skillName, label: node.attrs.skillLabel });
+  });
+  expect(chips).toEqual([{ name, label: "Review Follow-up" }]);
+  expect(serializeEditorDoc(document).value).toBe(value);
+});
+
 describe("caret stops at styled edges", () => {
   function stateAt(value: string, position: number) {
     const document = doc(value);
