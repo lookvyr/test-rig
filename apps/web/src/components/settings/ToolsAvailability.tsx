@@ -90,7 +90,7 @@ export function ToolsSelect({
       >
         <SelectValue />
       </SelectTrigger>
-      <SelectPopup>
+      <SelectPopup alignItemWithTrigger={false}>
         {options.map((entry) => (
           <SelectItem key={entry.value} value={entry.value}>
             {entry.label}

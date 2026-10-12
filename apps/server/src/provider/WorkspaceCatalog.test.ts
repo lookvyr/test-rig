@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EventId,
   ProjectId,
@@ -8,6 +9,7 @@ import {
   ToolsScopeId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -20,6 +22,7 @@ import { ToolsProjectScopesService } from "../skills/ToolsProjectScopes.ts";
 import {
   mergeLibrarySkills,
   readProviderWorkspaceCatalog,
+  resolveSkillSourcePaths,
   resolveLibraryWorkspaceScope,
 } from "./WorkspaceCatalog.ts";
 
@@ -46,7 +49,7 @@ const libraryLayer = Layer.succeed(SkillLibraryService, {
 
 it.layer(
   Layer.mergeAll(
-    Path.layer,
+    NodeServices.layer,
     Layer.succeed(ToolsProjectScopesService, {
       list: () => Effect.succeed({ scopes: [] }),
       resolve: (id) =>
@@ -267,6 +270,59 @@ it.layer(
       yield* sql`UPDATE projection_projects SET deleted_at = ${assigned.updatedAt} WHERE project_id = ${second}`;
       assert.strictEqual((yield* read("/skill-picker/ambiguity/worktree")).skills.length, 1);
       assert.strictEqual((yield* read("/skill-picker/ambiguity/shared")).skills.length, 1);
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("native skill source paths", (it) => {
+  it.effect("resolves shared directory and file symlinks while retaining provider paths", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "native-skill-paths-" });
+      const agents = path.join(root, ".agents", "skills");
+      yield* fs.makeDirectory(path.join(agents, "review"), { recursive: true });
+      yield* fs.makeDirectory(path.join(root, ".claude"));
+      const source = path.join(agents, "review", "SKILL.md");
+      yield* fs.writeFileString(source, "Review the changes.");
+      yield* fs.symlink(agents, path.join(root, ".claude", "skills"));
+      const fileAlias = path.join(root, "SKILL.md");
+      yield* fs.symlink(source, fileAlias);
+      const providerPaths = [
+        source,
+        path.join(root, ".claude", "skills", "review", "SKILL.md"),
+        fileAlias,
+      ];
+      const skills = yield* resolveSkillSourcePaths(
+        providerPaths.map((path) => ({ name: "review", enabled: true, path })),
+      );
+      assert.deepEqual(
+        skills.map((skill) => skill.path),
+        providerPaths,
+      );
+      assert.deepEqual(
+        skills.map((skill) => skill.canonicalPath),
+        Array(3).fill(yield* fs.realPath(source)),
+      );
+    }),
+  );
+  it.effect("keeps an unavailable source visible and same-name files independent", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "native-skill-files-" });
+      const first = path.join(root, "first.md");
+      const second = path.join(root, "second.md");
+      yield* fs.writeFileString(first, "Same instructions.");
+      yield* fs.writeFileString(second, "Same instructions.");
+      const missing = { name: "review", enabled: true, path: path.join(root, "missing.md") };
+      const skills = yield* resolveSkillSourcePaths([
+        { ...missing, path: first },
+        { ...missing, path: second },
+        missing,
+      ]);
+      assert.notEqual(skills[0]?.canonicalPath, skills[1]?.canonicalPath);
+      assert.deepEqual(skills[2], missing);
     }),
   );
 });

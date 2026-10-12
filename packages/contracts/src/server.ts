@@ -93,6 +93,8 @@ export const ServerProviderSkill = Schema.Struct({
   name: TrimmedNonEmptyString,
   description: Schema.optional(TrimmedNonEmptyString),
   path: TrimmedNonEmptyString,
+  /** Resolved source file identity; the provider's original path stays available. */
+  canonicalPath: Schema.optional(TrimmedNonEmptyString),
   scope: Schema.optional(TrimmedNonEmptyString),
   enabled: Schema.Boolean,
   displayName: Schema.optional(TrimmedNonEmptyString),

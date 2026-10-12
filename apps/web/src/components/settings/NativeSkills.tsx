@@ -10,6 +10,7 @@ import {
   formatProviderSkillDisplayName,
   resolveProviderSkillSourceKind,
 } from "@t3tools/client-runtime/providerSkills";
+import { groupNativeSkills } from "./NativeSkills.logic";
 
 /** Provider discovery stays read-only; opening a source verifies it on the server. */
 export function NativeSkills({
@@ -41,13 +42,11 @@ export function NativeSkills({
     [expanded, environmentId, cwd, enabledProviders],
   );
   const catalogues = useEnvironmentQueries(queries);
-  const seen = new Set<string>();
-  const skills = catalogues.flatMap((catalogue, index) =>
-    (catalogue.data?.skills ?? []).flatMap((skill) => {
-      if (skill.source === "test-rig" || seen.has(skill.path)) return [];
-      seen.add(skill.path);
-      return [{ skill, provider: enabledProviders[index]! }];
-    }),
+  const skills = groupNativeSkills(
+    catalogues.map((catalogue, index) => ({
+      provider: enabledProviders[index]!,
+      skills: catalogue.data?.skills ?? [],
+    })),
   );
   return (
     <details
@@ -58,17 +57,20 @@ export function NativeSkills({
         Found outside Test Rig
       </summary>
       <div className="space-y-1 pt-2">
-        {skills.map(({ skill, provider }) => (
+        {skills.map(({ skill, providers }) => (
           <button
-            key={skill.path}
+            key={skill.canonicalPath ?? skill.path}
             type="button"
             className="block w-full rounded-lg px-3 py-3 text-left hover:bg-muted/30 focus-visible:outline-2 focus-visible:outline-ring"
-            onClick={() => onOpen({ instanceId: provider.instanceId, cwd, sourcePath: skill.path })}
+            onClick={() =>
+              onOpen({ instanceId: providers[0]!.instanceId, cwd, sourcePath: skill.path })
+            }
           >
             <span className="flex flex-wrap items-baseline gap-2">
               <span className="font-medium">{formatProviderSkillDisplayName(skill)}</span>
               <span className="text-xs text-muted-foreground">
-                {resolveProviderSkillSourceKind(skill)} · {provider.displayName ?? provider.driver}
+                {resolveProviderSkillSourceKind(skill)} ·{" "}
+                {providers.map((provider) => provider.displayName ?? provider.driver).join(", ")}
               </span>
             </span>
             <span className="mt-1 block text-xs text-muted-foreground">{skill.description}</span>

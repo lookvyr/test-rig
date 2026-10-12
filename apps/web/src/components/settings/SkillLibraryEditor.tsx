@@ -17,6 +17,7 @@ import type {
 } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { toastManager } from "../ui/toast";
 import {
   Dialog,
   DialogFooter,
@@ -100,7 +101,6 @@ export function SkillLibraryEditor({
   const [view, setView] = useState("edit");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [baseline, setBaseline] = useState(() => JSON.stringify(draft));
   const dirty = !readOnly && JSON.stringify(draft) !== baseline;
@@ -117,7 +117,6 @@ export function SkillLibraryEditor({
   const update = (patch: Partial<SkillLibraryUpsertInput>) => {
     navigationAfterSave.current = false;
     setDraft({ ...draft, ...patch });
-    setSaved(false);
   };
   const assignment = draft.assignment;
   const mode = assignment.allProjects
@@ -166,7 +165,17 @@ export function SkillLibraryEditor({
       const canonical = await onSave({ ...draft, name: draft.name.trim() });
       navigationAfterSave.current = true;
       setBaseline(JSON.stringify(draft));
-      setSaved(true);
+      toastManager.add({
+        type: "success",
+        title: "Skill saved",
+        description:
+          !canonical.assignment.allProjects &&
+          canonical.assignment.projectIds.length === 0 &&
+          !canonical.assignment.scopeIds?.length
+            ? "Saved to the library; not enabled in any project."
+            : undefined,
+        timeout: 3000,
+      });
       if (!draft.id) onCreated?.(canonical.id);
     });
   return (
@@ -182,6 +191,11 @@ export function SkillLibraryEditor({
               onClick={() =>
                 void run(async () => {
                   await onCopy?.();
+                  toastManager.add({
+                    type: "success",
+                    title: "Skill copied to library",
+                    timeout: 3000,
+                  });
                 })
               }
               disabled={busy || disabled || !onCopy}
@@ -422,17 +436,6 @@ export function SkillLibraryEditor({
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
-        </p>
-      ) : null}
-      {saved ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          Skill saved
-          {!assignment.allProjects &&
-          assignment.projectIds.length === 0 &&
-          !assignment.scopeIds?.length
-            ? " to the library; not enabled in any project"
-            : ""}
-          .
         </p>
       ) : null}
       {confirmDelete ? (

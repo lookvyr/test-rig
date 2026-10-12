@@ -7,6 +7,7 @@ import {
   type ToolsScopeId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -95,9 +96,13 @@ export const readProviderWorkspaceCatalog = Effect.fn("readProviderWorkspaceCata
   if (!instance?.enabled || input.cwd.trim().length === 0) {
     return { skills: [], slashCommands: [] };
   }
-  const catalog: ServerProviderWorkspaceCatalog = instance.getWorkspaceCatalog
+  const nativeCatalog: ServerProviderWorkspaceCatalog = instance.getWorkspaceCatalog
     ? yield* instance.getWorkspaceCatalog(input.cwd)
     : { skills: [], slashCommands: [] };
+  const catalog = {
+    ...nativeCatalog,
+    skills: yield* resolveSkillSourcePaths(nativeCatalog.skills),
+  };
   return yield* Effect.gen(function* () {
     const library = yield* SkillLibraryService;
     const workspace = yield* resolveLibraryWorkspaceScope(input.cwd);
@@ -118,5 +123,23 @@ export const readProviderWorkspaceCatalog = Effect.fn("readProviderWorkspaceCata
         errorMessage: catalog.errorMessage ?? `Unable to read the skill library: ${String(error)}`,
       }),
     ),
+  );
+});
+
+/** Identify shared files without conflating independent skills with the same name. */
+export const resolveSkillSourcePaths = Effect.fn("resolveSkillSourcePaths")(function* (
+  skills: ServerProviderWorkspaceCatalog["skills"],
+) {
+  const fs = yield* FileSystem.FileSystem;
+  return yield* Effect.forEach(
+    skills,
+    (skill) =>
+      fs.realPath(skill.path).pipe(
+        Effect.match({
+          onSuccess: (canonicalPath) => ({ ...skill, canonicalPath }),
+          onFailure: () => skill,
+        }),
+      ),
+    { concurrency: 8 },
   );
 });

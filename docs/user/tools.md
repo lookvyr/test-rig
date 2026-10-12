@@ -47,6 +47,7 @@ Save a skill without assigning it to keep it in your library for later. In
 Availability, choose all projects or selected projects and select the providers
 that can use it. Turning a skill off for one project preserves its assignments
 elsewhere. Editing a library skill updates its one shared copy.
+A brief toast confirms when a skill is saved or copied into the library.
 
 Assigned skills appear in the selected provider's `$` picker. Test Rig also gives
 new or restarted agent sessions a catalogue of those skills and their file
@@ -56,6 +57,8 @@ An agent that rereads a skill's file can see instruction edits immediately.
 
 For a selected project, expand the discovered skills section to inspect skills
 provided by the repository or provider. These sources are read-only here.
+When providers discover the same file through symlinks, it appears once with
+each provider listed. Separate files remain separate even when their names match.
 **Copy to library** creates a separate, initially unassigned copy, including its
 supporting files. It leaves the original intact and does not merge skills that
 share a name. Provider-specific hooks or tool restrictions in copied metadata
