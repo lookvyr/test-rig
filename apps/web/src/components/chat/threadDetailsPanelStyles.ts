@@ -37,7 +37,7 @@ export const THREAD_DETAILS_PANEL_LINK_SPLIT_PRIMARY_CLASS = `${THREAD_DETAILS_P
 /** The trailing half of a link split row when it carries a word ("Merge") rather than an icon. */
 export const THREAD_DETAILS_PANEL_LINK_SPLIT_ACTION_CLASS = `${THREAD_DETAILS_PANEL_CONTROL_CLASS} shrink-0 justify-center rounded-s-none text-primary ${THREAD_DETAILS_PANEL_SPLIT_BUTTON_SURFACE_CLASS}`;
 
-export const THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS = `h-9 w-full min-w-0 justify-start rounded-lg border border-transparent ${THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS} text-[13px] font-medium text-foreground/80 sm:h-9 sm:text-[13px]`;
+export const THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS = `h-9 w-full min-w-0 items-center justify-start rounded-lg border border-transparent ${THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS} text-[13px] font-medium text-foreground/80 sm:h-9 sm:text-[13px]`;
 
 export const THREAD_DETAILS_PANEL_ICON_CLASS = "size-4 shrink-0 text-muted-foreground";
 
