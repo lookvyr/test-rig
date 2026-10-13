@@ -1,12 +1,25 @@
 # Source control
 
-Use **Thread details** in the chat header for workspace and branch selection,
-editor access, project actions, and Git commands. On wide windows, details sit
+Use **Thread details** in the chat header for editor or Finder access, project
+actions, Changes, linked PR details, PR watches, and subagents. Branch, worktree,
+and linked PR context remain below the composer. On wide windows, details sit
 beside the conversation. On narrower windows, the same controls open in a
 popover. Hiding the wide details card is remembered for that conversation.
 
-The workspace control names the current directory. Hover to see its full path,
-or open its context menu to copy the path. **Changes** shows uncommitted addition
+The title at the top names the workspace directory. Hover over it to see the
+full path.
+
+The **Subagents** section shows each agent's title, model, status, and elapsed
+time. Completed agents stay in place; follow-up work updates the same row.
+Select the **Subagents** heading to collapse or expand the list.
+Select an agent to open its conversation, hover for details, or use its separate
+Stop button to interrupt an app-owned child. Forks and parent conversations are
+not included in this section. The full Agents panel remains available.
+
+**Open PR details** appears when the conversation has a linked PR and opens the
+existing PR sidebar. Active PR watches retain their indicator and Stop control.
+
+**Changes** shows uncommitted addition
 and deletion totals, including untracked files. When the checkout is clean, it
 shows the committed branch totals instead. Clicking it opens the matching
 **Uncommitted** or **Branch** view. You can inspect existing changes in a new chat

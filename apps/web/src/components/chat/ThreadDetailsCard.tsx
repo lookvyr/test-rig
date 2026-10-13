@@ -183,7 +183,7 @@ export function ThreadDetailsCard({
         collisionAvoidance={inline ? { side: "none", align: "none" } : undefined}
         padding="none"
         className="w-70 rounded-3xl bg-transparent shadow-none transition-none before:hidden data-starting-style:scale-100 data-starting-style:opacity-100 [backdrop-filter:none]"
-        positionerClassName={inline ? "z-20 transition-none" : "transition-none"}
+        positionerClassName={inline ? "z-20 transition-none" : "z-40 transition-none"}
         role={inline ? "complementary" : "dialog"}
         aria-label="Thread details"
         initialFocus={false}

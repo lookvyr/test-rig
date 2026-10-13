@@ -8,11 +8,10 @@ import type {
   ResolvedKeybindingsConfig,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { FileDiffIcon, GitPullRequestIcon } from "lucide-react";
+import { FileDiffIcon, FolderIcon, GitPullRequestIcon } from "lucide-react";
+import { fileBasename } from "@t3tools/client-runtime/markdown-links";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
-import { BranchToolbar, type BranchToolbarProps } from "../BranchToolbar";
-import GitActionsControl from "../GitActionsControl";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
@@ -24,6 +23,7 @@ import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadPullRequestWatches } from "./ThreadPullRequestWatches";
+import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 
 export function ThreadDetailsPanel(props: {
   threadRef: ScopedThreadRef;
@@ -35,7 +35,7 @@ export function ThreadDetailsPanel(props: {
   openInCwd: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
-  branchToolbar: BranchToolbarProps | null;
+  isDraft: boolean;
   onOpenChanges: () => void;
   onShowPullRequest?: (() => void) | undefined;
   onRunScript: (script: ProjectScript) => void;
@@ -60,6 +60,8 @@ export function ThreadDetailsPanel(props: {
     props.scripts ? props.openInCwd : null,
   );
   const shortcutLabel = shortcutLabelForCommand(props.keybindings, "threadPanel.toggle");
+  const workspaceTitle =
+    (props.openInCwd ? fileBasename(props.openInCwd) : null) || props.projectName || "Workspace";
   return (
     <ThreadDetailsCard
       threadRef={props.threadRef}
@@ -67,17 +69,19 @@ export function ThreadDetailsPanel(props: {
       {...(shortcutLabel ? { shortcutLabel } : {})}
       contentKey={`${Boolean(props.gitCwd)}:${props.scripts?.map((script) => script.id).join(",")}:${fileScripts.map((script) => script.name).join(",")}:${props.availableEditors.length}`}
     >
+      <h2
+        className="flex min-w-0 items-center gap-2 px-4.5 pt-3 pb-1 text-xs font-medium text-muted-foreground"
+        title={props.openInCwd ?? props.projectName}
+      >
+        <FolderIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
+        <span className="truncate">{workspaceTitle}</span>
+      </h2>
       <ThreadDetailsSection
         title="Workspace"
         headingId="thread-details-workspace"
         separated={false}
         showHeading={false}
       >
-        {props.branchToolbar ? (
-          <div data-details-full>
-            <BranchToolbar {...props.branchToolbar} layout="panel" panelSection="workspace" />
-          </div>
-        ) : null}
         {shouldShowOpenInPicker({
           activeProjectName: props.projectName,
           activeThreadEnvironmentId: props.threadRef.environmentId,
@@ -113,15 +117,6 @@ export function ThreadDetailsPanel(props: {
           headingId="thread-details-git"
           showHeading={false}
         >
-          {props.branchToolbar ? (
-            <BranchToolbar {...props.branchToolbar} layout="panel" panelSection="branch" />
-          ) : null}
-          <GitActionsControl
-            displayMode="panel"
-            gitCwd={props.gitCwd}
-            activeThreadRef={props.threadRef}
-            {...(props.branchToolbar?.draftId ? { draftId: props.branchToolbar.draftId } : {})}
-          />
           <ThreadDetailsControl
             onClick={props.onOpenChanges}
             onPointerEnter={preloadDiffPanel}
@@ -137,7 +132,7 @@ export function ThreadDetailsPanel(props: {
           {props.onShowPullRequest ? (
             <ThreadDetailsControl onClick={props.onShowPullRequest}>
               <GitPullRequestIcon />
-              Pull request details
+              Open PR details
             </ThreadDetailsControl>
           ) : null}
           <ThreadPullRequestWatches threadRef={props.threadRef} />
@@ -147,6 +142,14 @@ export function ThreadDetailsPanel(props: {
         environmentId={props.threadRef.environmentId}
         threadId={props.threadRef.threadId}
       />
+      {!props.isDraft ? (
+        <ThreadRelationshipsPanel
+          environmentId={props.threadRef.environmentId}
+          threadId={props.threadRef.threadId}
+          mode="subagents"
+          hideWhenEmpty
+        />
+      ) : null}
     </ThreadDetailsCard>
   );
 }

@@ -6958,7 +6958,7 @@ function ChatViewContent(props: ChatViewProps) {
                 gitCwd={isScratch ? null : gitCwd}
                 keybindings={keybindings}
                 availableEditors={availableEditors}
-                branchToolbar={showComposerContextStrip ? branchToolbarProps : null}
+                isDraft={Boolean(branchToolbarProps.draftId)}
                 onOpenChanges={() => {
                   useThreadDetailsStore.getState().setPopoverOpen(activeThreadRef, false);
                   if (initialDiffPanelGitScope === "branch") {
@@ -6972,7 +6972,10 @@ function ChatViewContent(props: ChatViewProps) {
                 }}
                 onShowPullRequest={
                   pullRequestSelection
-                    ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
+                    ? () => {
+                        useThreadDetailsStore.getState().setPopoverOpen(activeThreadRef, false);
+                        useRightPanelStore.getState().open(activeThreadRef, "pull-request");
+                      }
                     : undefined
                 }
                 onRunScript={runProjectScript}

@@ -47,9 +47,13 @@ afterEach(async () => {
   state.projection = null;
 });
 
-it.each(["codex", "claudeAgent", "opencode2"])(
-  "stops only active app-owned %s subagents without opening their thread",
-  async (driver) => {
+it.each(
+  ["codex", "claudeAgent", "opencode2"].flatMap((driver) =>
+    (["lineage", "subagents"] as const).map((mode) => ({ driver, mode })),
+  ),
+)(
+  "$mode stops only active app-owned $driver subagents without opening their thread",
+  async ({ driver, mode }) => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     const parent = {
       id: "parent",
@@ -59,6 +63,7 @@ it.each(["codex", "claudeAgent", "opencode2"])(
     const child = {
       id: "child",
       title: "Worker",
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-4-6" },
       lineage: { parentThreadId: "parent", relationshipToParent: "subagent" },
     };
     const agent = {
@@ -91,12 +96,20 @@ it.each(["codex", "claudeAgent", "opencode2"])(
       <ThreadRelationshipsPanel
         environmentId={EnvironmentId.make("test")}
         threadId={ThreadId.make("parent")}
+        mode={mode}
       />
     );
     await act(async () => {
       renderer = create(panel);
     });
     const stopButton = () => renderer.root.findByProps({ "aria-label": "Stop subagent Worker" });
+    const originalRow = renderer.root.findByType("li");
+    if (mode === "subagents") {
+      const content = JSON.stringify(renderer.toJSON());
+      expect(content).toContain("5.4");
+      expect(content).not.toContain("Sonnet");
+      expect(content).not.toContain("Previous agents");
+    }
     await act(async () => stopButton().props.onClick());
     expect(state.command).toHaveBeenCalledWith({
       environmentId: "test",
@@ -126,6 +139,7 @@ it.each(["codex", "claudeAgent", "opencode2"])(
       );
       state.projection = { ...projection, subagents: [{ ...agent, status: "completed" }] };
       await act(async () => renderer.update(cloneElement(panel)));
+      if (mode === "subagents") expect(renderer.root.findByType("li")).toBe(originalRow);
       await act(async () => stopButton().props.onClick());
       expect(state.command).toHaveBeenCalledTimes(1);
       expect(state.command).toHaveBeenLastCalledWith({
@@ -137,6 +151,10 @@ it.each(["codex", "claudeAgent", "opencode2"])(
     for (const status of ["completed", "failed", "interrupted"]) {
       state.projection = { ...projection, subagents: [{ ...agent, status }] };
       await act(async () => renderer.update(cloneElement(panel)));
+      if (mode === "subagents") {
+        expect(renderer.root.findByType("li")).toBe(originalRow);
+        expect(JSON.stringify(renderer.toJSON())).toContain("Worker");
+      }
       expect(renderer.root.findAllByProps({ "aria-label": "Stop subagent Worker" })).toHaveLength(
         0,
       );

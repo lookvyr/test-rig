@@ -44,7 +44,11 @@ delivery does not interrupt its tools. You can still explicitly steer the parent
 while it works.
 
 Open the child from its task row in the conversation, or from the right panel's
-Agents tab. Completed children appear under Previous agents. Inside the child,
+Agents tab. Thread details also has a compact **Subagents** section with the
+agent title, model, status, elapsed time, hover details, and Stop controls. It
+shows up to three agents before **Show more** and leaves forks and parent
+conversations out. Completed agents stay in place in Thread details; the full
+Agents tab groups them under Previous agents. Inside the child,
 use Open parent thread to return to the conversation that delegated the work.
 
 Working children remain visible after the parent finishes its response, including
@@ -55,9 +59,10 @@ Completion updates identify the child and show its result preview. Open the
 update to visit that child. The update keeps its reported outcome and time even
 if the child starts more work.
 
-If a child receives a follow-up, it returns to the active agents list. Its status,
-elapsed time, and preview follow the new work instead of the original completed
-task.
+If a child receives a follow-up, its existing row in Thread details updates to
+show the new work. Its status, elapsed time, and preview follow the new run
+instead of the original completed task. In the full Agents tab it returns to
+the active list.
 
 When a parent stops waiting after a timeout, the delegated task can still be
 running. Ask the parent to inspect or cancel that task instead of launching a
