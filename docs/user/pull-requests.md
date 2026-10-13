@@ -100,8 +100,11 @@ conversation’s details panel.
 When an agent starts watching a linked pull request, the conversation's details
 panel shows an eye beside it. Choose **Stop watching** to stop that monitor.
 The pull request stays linked to the conversation.
-Settling the conversation pauses its watch; the details panel shows that paused
-state and still lets you stop watching.
+Settling or archiving the conversation ends its watches. Restoring the conversation
+does not restart them; start a new watch explicitly. Subagents report PR work to
+their parent conversation, which owns the watch. While a watch is active, the
+conversation stays in Working between updates. Stop watching when handing the
+work back so it returns to your inbox.
 
 Choosing **Stop** for the conversation ends its watches and recursively stops
 its app-owned delegated conversations and their watches. The pull request links
@@ -124,8 +127,15 @@ state; it does not authorize the agent to merge. Readiness follows GitHub's merg
 rules, so optional checks may still be non-passing. Merge queue updates distinguish
 being ready for the queue from being in it or being ready for a direct merge.
 
-The monitor checks about once a minute and combines changes found in one pass into
-one update. It reports a PR that is already ready on the first read, reports when
+The monitor checks for changes about every two minutes and combines changes found
+in one pass into one update. Threads watching the same PR in a project share reads.
+On GitHub, unchanged activity is read again at least every 30 minutes, including
+edits inside review threads that the quick change check cannot see. Other hosts
+with no quick change check reread quiet PRs every 10 minutes. It reports a PR that is already ready on the first read, reports when
 readiness changes again, and reassesses new commits. Unknown or unavailable status
 is never treated as ready. GitHub can publish a review before recalculating merge
 readiness, so related changes may arrive in successive updates.
+
+A closed PR ends its watch and sends a closure update. You can watch it again if
+it reopens, even before the saved PR card refreshes. Eight consecutive failed host
+reads end a watch with an explanation; rate-limit pauses do not count.

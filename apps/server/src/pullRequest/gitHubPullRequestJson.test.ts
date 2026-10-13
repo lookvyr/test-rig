@@ -3,8 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildPullRequestSummariesGraphQlQuery,
+  buildPullRequestWatchFingerprintsGraphQlQuery,
   decodePullRequestSummariesJson,
   buildReviewSubmission,
+  decodePullRequestWatchFingerprintsJson,
   buildPullRequestStackMembershipsGraphQlQuery,
   decodePullRequestStackMembershipsJson,
   buildReviewerRequest,
@@ -2109,4 +2111,139 @@ describe("batched pull request summaries", () => {
     expect(decoded.get(0)?.stack).toBeNull();
     expect(decoded.get(1)?.stack).toEqual({ number: 3, size: 2, base: "main", position: 2 });
   });
+});
+
+describe("pull request watch fingerprints", () => {
+  it("asks for every pull request in one aliased read, and refuses an unsafe selector", () => {
+    const query = buildPullRequestWatchFingerprintsGraphQlQuery([
+      { repository: "pingdotgg/t3code", number: 7 },
+      { repository: "pingdotgg/lakebed", number: 8 },
+    ]);
+    expect(query).toContain(
+      'w0: repository(owner: "pingdotgg", name: "t3code") { pullRequest(number: 7)',
+    );
+    expect(query).toContain(
+      'w1: repository(owner: "pingdotgg", name: "lakebed") { pullRequest(number: 8)',
+    );
+    expect(
+      buildPullRequestWatchFingerprintsGraphQlQuery([{ repository: 'evil") { x', number: 1 }]),
+    ).toBeNull();
+  });
+
+  it("moves status with checks and remarks with comments, each without the other", () => {
+    const pullRequest = (input: {
+      readonly running: number;
+      readonly failed: number;
+      readonly commentEditedAt: string | null;
+      readonly reviews: number;
+    }) => ({
+      state: "OPEN",
+      mergeable: "MERGEABLE",
+      headRefOid: "abc123",
+      isDraft: false,
+      reviewDecision: "APPROVED",
+      mergeStateStatus: "CLEAN",
+      isMergeQueueEnabled: false,
+      isInMergeQueue: false,
+      comments: { totalCount: 1, nodes: [{ lastEditedAt: input.commentEditedAt }] },
+      reviews: { totalCount: input.reviews, nodes: [] },
+      reviewThreads: { totalCount: 0 },
+      commits: {
+        nodes: [
+          {
+            commit: {
+              statusCheckRollup: {
+                contexts: {
+                  checkRunCountsByState: [
+                    { state: "IN_PROGRESS", count: input.running },
+                    { state: "FAILURE", count: input.failed },
+                    { state: "SUCCESS", count: 0 },
+                  ],
+                  statusContextCountsByState: null,
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const decode = (...pullRequests: ReadonlyArray<object | null>) => {
+      const decoded = decodePullRequestWatchFingerprintsJson(
+        JSON.stringify({
+          data: Object.fromEntries(
+            pullRequests.map((value, index) => [`w${index}`, { pullRequest: value }]),
+          ),
+        }),
+      );
+      if (!Result.isSuccess(decoded)) throw new Error("fingerprints did not decode");
+      return decoded.success;
+    };
+    const base = { running: 2, failed: 0, commentEditedAt: null, reviews: 1 };
+    const fingerprint = (input: Parameters<typeof pullRequest>[0]) =>
+      decode(pullRequest(input)).get(0)!;
+    const before = fingerprint(base);
+    const checkFinished = fingerprint({ ...base, running: 1, failed: 1 });
+    const summaryEdited = fingerprint({ ...base, commentEditedAt: "2026-10-05T23:47:43Z" });
+    const replied = fingerprint({ ...base, reviews: 2 });
+
+    expect(checkFinished.status).not.toBe(before.status);
+    expect(checkFinished.remarks).toBe(before.remarks);
+    expect(summaryEdited.remarks).not.toBe(before.remarks);
+    expect(summaryEdited.status).toBe(before.status);
+    expect(replied.remarks).not.toBe(before.remarks);
+    // A pull request GitHub had no answer for is left for a full read.
+    expect(decode(null, pullRequest(base)).has(0)).toBe(false);
+  });
+});
+
+it("watch fingerprints include every approval and merge-readiness input", () => {
+  const base = {
+    state: "OPEN",
+    mergeable: "MERGEABLE",
+    headRefOid: "head",
+    isDraft: false,
+    reviewDecision: "APPROVED",
+    mergeStateStatus: "CLEAN",
+    isMergeQueueEnabled: false,
+    isInMergeQueue: false,
+    comments: { totalCount: 0, nodes: [] },
+    reviews: { totalCount: 0, nodes: [] },
+    reviewThreads: { totalCount: 0 },
+    commits: { nodes: [] },
+  };
+  const fingerprint = (change: Record<string, unknown> = {}) => {
+    const result = decodePullRequestWatchFingerprintsJson(
+      JSON.stringify({
+        data: {
+          w0: { pullRequest: { ...base, ...change } },
+        },
+      }),
+    );
+    if (!Result.isSuccess(result)) throw new Error("decode failed");
+    return result.success.get(0)!;
+  };
+  const before = fingerprint();
+  for (const change of [
+    { reviewDecision: "REVIEW_REQUIRED" },
+    { reviewDecision: null },
+    { mergeStateStatus: "BLOCKED" },
+    { mergeStateStatus: null },
+    { isDraft: true },
+    { isMergeQueueEnabled: true },
+    { isInMergeQueue: true },
+  ]) {
+    const after = fingerprint(change);
+    expect(after.status).not.toBe(before.status);
+    expect(after.remarks).toBe(before.remarks);
+  }
+  const refs = [{ repository: "owner/repo", number: 1 }];
+  const cloud = buildPullRequestWatchFingerprintsGraphQlQuery(refs)!;
+  const enterprise = buildPullRequestWatchFingerprintsGraphQlQuery(refs, "github.example.com")!;
+  for (const field of ["isDraft", "reviewDecision", "mergeStateStatus"]) {
+    expect(cloud).toContain(field);
+    expect(enterprise).toContain(field);
+  }
+  expect(cloud).toContain("isInMergeQueue");
+  expect(enterprise).not.toContain("isInMergeQueue");
+  expect(enterprise).not.toContain("isMergeQueueEnabled");
 });

@@ -35,6 +35,7 @@ import {
   PullRequestUnlinkFailedError,
   PullRequestListFailedError,
   PullRequestNotOpenError,
+  PullRequestWatchFromSubagentError,
   type PullRequestTargetInput,
   PullRequestWatchFailedError,
   PullRequestThreadNotFoundError,
@@ -224,10 +225,13 @@ const make = Effect.gen(function* () {
       threadPullRequestsOf(shell).find(
         (link) => link.source !== "stack-dismissed" && threadPullRequestKeysEqual(link, target),
       );
+    if (watching && thread.lineage.relationshipToParent === "subagent") {
+      return yield* new PullRequestWatchFromSubagentError();
+    }
     const before = watchedLink(thread);
-    const state = before?.snapshot?.state;
-    if (watching && state !== undefined && state !== "open") {
-      return yield* new PullRequestNotOpenError({ state });
+    // A closed PR may have reopened since its saved snapshot; the first host read decides.
+    if (watching && before?.snapshot?.state === "merged") {
+      return yield* new PullRequestNotOpenError({ state: "merged" });
     }
     yield* engine
       .dispatch({

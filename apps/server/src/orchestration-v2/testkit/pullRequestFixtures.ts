@@ -11,6 +11,7 @@ import * as DateTime from "effect/DateTime";
 
 /** The thread fields pull request tests set; timestamps are ISO strings. */
 export interface PullRequestTestThread {
+  readonly lineage?: OrchestrationV2ThreadShell["lineage"];
   readonly id: ThreadId;
   readonly projectId: ProjectId;
   readonly title: string;
@@ -49,7 +50,11 @@ export function v2PullRequestThread(thread: PullRequestTestThread): Orchestratio
     createdBy: "user",
     creationSource: "web",
     activeProviderThreadId: null,
-    lineage: { rootThreadId: thread.id, parentThreadId: null, relationshipToParent: null },
+    lineage: thread.lineage ?? {
+      rootThreadId: thread.id,
+      parentThreadId: null,
+      relationshipToParent: null,
+    },
     forkedFrom: null,
     latestRunId: null,
     activeRunId: null,

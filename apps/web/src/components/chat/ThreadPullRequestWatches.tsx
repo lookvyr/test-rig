@@ -1,6 +1,6 @@
 import type { ScopedThreadRef, ThreadPullRequestLink } from "@t3tools/contracts";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
-import { EyeIcon, EyeOffIcon, GitPullRequestIcon, PauseIcon } from "lucide-react";
+import { EyeIcon, EyeOffIcon, GitPullRequestIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { useOpenPrLink } from "../../lib/openPullRequestLink";
 import { useThreadShell } from "../../state/entities";
@@ -17,9 +17,9 @@ export function ThreadPullRequestWatches({ threadRef }: { readonly threadRef: Sc
   const openPrLink = useOpenPrLink();
   const [pending, setPending] = useState(false);
   const inFlight = useRef(false);
-  const paused = thread?.settledOverride === "settled" || thread?.settledAt != null;
+  const settled = thread?.settledOverride === "settled" || thread?.settledAt != null;
   const links = visibleThreadPullRequests(thread?.pullRequests ?? []).filter(
-    (link) => link.watch != null && (link.snapshot?.state ?? "open") === "open",
+    (link) => !settled && link.watch != null && (link.snapshot?.state ?? "open") === "open",
   );
   async function stopWatching(link: ThreadPullRequestLink) {
     if (inFlight.current) return;
@@ -69,20 +69,12 @@ export function ThreadPullRequestWatches({ threadRef }: { readonly threadRef: Sc
               />
             }
           >
-            {paused ? (
-              <PauseIcon
-                aria-hidden
-                className="size-4 text-muted-foreground group-hover/watch:hidden"
-              />
-            ) : (
-              <EyeIcon aria-hidden className="size-4 group-hover/watch:hidden" />
-            )}
+            <EyeIcon aria-hidden className="size-4 group-hover/watch:hidden" />
             <EyeOffIcon aria-hidden className="hidden size-4 group-hover/watch:block" />
           </TooltipTrigger>
           <TooltipPopup>
-            {paused
-              ? "Watching paused while this thread is settled. Un-settle the thread to resume watching."
-              : "Watching: the agent wakes when checks finish, someone comments, or the branch conflicts."}
+            Watching: the agent wakes when checks finish, someone comments, the branch conflicts, or
+            approval or merge readiness changes.
           </TooltipPopup>
         </Tooltip>
       </div>

@@ -233,9 +233,6 @@ export function deriveThreadRuntime(
   const liveActivityRun = latestMatchingRun(projection, (run) =>
     ACTIVITY_RUN_STATUSES.has(run.status),
   );
-  if (latestRun === null && projection.thread.activeProviderThreadId === null) return null;
-  const activeRunId =
-    latestMatchingRun(projection, (run) => INTERRUPTIBLE_RUN_STATUSES.has(run.status))?.id ?? null;
   // Same rule as the shell runtime: only background work that holds the
   // completion parks the thread at idle; a dev server left running does not.
   const backgroundWorkHoldsRun = backgroundWorkHoldsCompletion(
@@ -245,8 +242,19 @@ export function deriveThreadRuntime(
       turnItems: projection.turnItems,
       activeProviderThreadId: projection.thread.activeProviderThreadId,
       runs: projection.runs,
+      pullRequests: projection.thread.pullRequests,
     }),
   );
+  // A pull request watch can hold a thread that never ran.
+  if (
+    latestRun === null &&
+    projection.thread.activeProviderThreadId === null &&
+    !backgroundWorkHoldsRun
+  ) {
+    return null;
+  }
+  const activeRunId =
+    latestMatchingRun(projection, (run) => INTERRUPTIBLE_RUN_STATUSES.has(run.status))?.id ?? null;
   return {
     status: usageLimitedRun
       ? "failed"
@@ -353,7 +361,7 @@ export function presentPendingBackgroundWork(
     const named = only.label !== noun;
     const title = waiting
       ? named
-        ? `Waiting on ${noun} ${only.label}`
+        ? `${only.kind === "monitor" ? "" : `Waiting on ${noun} `}${only.label}`
         : `Waiting on a ${noun}`
       : named
         ? `Running: ${only.label}`

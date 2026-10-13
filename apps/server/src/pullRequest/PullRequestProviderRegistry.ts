@@ -140,6 +140,18 @@ export function gateProvider(
           ) => guard("getChangeRequestStack", () => provider.getChangeRequestStack!(...args)),
         }
       : {}),
+    ...(provider.getChangeRequestWatchFingerprint
+      ? {
+          getChangeRequestWatchFingerprint: (
+            ...args: Parameters<
+              NonNullable<PullRequestProviderApi["getChangeRequestWatchFingerprint"]>
+            >
+          ) =>
+            guard("getChangeRequestWatchFingerprint", () =>
+              provider.getChangeRequestWatchFingerprint!(...args),
+            ),
+        }
+      : {}),
     getChangeRequestActivity: (...args) =>
       guard("getChangeRequestActivity", () => provider.getChangeRequestActivity(...args)),
     ...(provider.getReviewThreadComments

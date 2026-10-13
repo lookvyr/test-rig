@@ -164,7 +164,16 @@ it.effect("Stop ends watches, holds queues, and stops the delegated tasks under 
     yield* createWatchingThread(parentThreadId, 1);
     yield* send(parentThreadId, "first", "start_immediately");
     const childThreadId = yield* delegate(parentThreadId, "child task");
-    yield* watch(childThreadId, 2);
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(childThreadId, 2))));
+    const child = yield* projections.getThread(childThreadId);
+    const parentLink = (yield* projections.getThread(parentThreadId)).pullRequests![0]!;
+    yield* projections.apply({
+      id: EventId.make("event:legacy-child-watch"),
+      type: "thread.metadata-updated",
+      threadId: childThreadId,
+      occurredAt: yield* DateTime.now,
+      payload: { ...child, pullRequests: [{ ...parentLink, ...pullRequest(2) }] },
+    });
     const grandchildThreadId = yield* delegate(childThreadId, "grandchild task");
     yield* send(childThreadId, "child follow-up", "queue_after_active");
 
@@ -610,4 +619,47 @@ it.effect("thread.stop marks a turn it cannot interrupt so a late agent watch is
     assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 12))));
     assert.deepEqual(yield* threadState(threadId), { runs: ["running"], watched: [] });
   }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect.each(["settle", "archive"] as const)(
+  "%s ends watches and rejects new ones until restored",
+  (action) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make(`thread:watch-${action}`);
+      yield* createWatchingThread(threadId, 20);
+      const previous = (yield* orchestrator.getThreadProjection(threadId)).thread.pullRequests![0]!
+        .watch!;
+      yield* orchestrator.dispatch({
+        type: action === "settle" ? "thread.settle" : "thread.archive",
+        commandId: CommandId.make(`watch-${action}`),
+        threadId,
+      });
+      assert.deepEqual((yield* threadState(threadId)).watched, []);
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 21))));
+      assert.isTrue(
+        Exit.isFailure(
+          yield* Effect.exit(
+            orchestrator.dispatch({
+              type: "thread.pull-request-watch.sync",
+              commandId: CommandId.make(`late-${action}`),
+              threadId,
+              ...pullRequest(20),
+              startedAt: previous.startedAt,
+              watch: previous,
+            }),
+          ),
+        ),
+      );
+      yield* orchestrator.dispatch({
+        ...(action === "settle"
+          ? { type: "thread.unsettle" as const, reason: "user" as const }
+          : { type: "thread.unarchive" as const }),
+        commandId: CommandId.make(`watch-restore-${action}`),
+        threadId,
+      });
+      assert.deepEqual((yield* threadState(threadId)).watched, []);
+      yield* watch(threadId, 22);
+      assert.deepEqual((yield* threadState(threadId)).watched, [22]);
+    }).pipe(Effect.provide(testLayer)),
 );

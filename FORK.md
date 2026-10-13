@@ -140,8 +140,11 @@ stopped directly from the Agents list; this stops its descendants without
 stopping its parent or siblings. Independent historical forks remain independent.
 This replaces the earlier nonrecursive Stop decision recorded in the V2 audits.
 Explicit run-targeted requests still reject stale Stops rather than interrupting
-a newer parent run. Settling a conversation continues to pause its PR watches;
-Stop ends them.
+a newer parent run. As of October 13, PR watches follow upstream lifecycle rules:
+settling or archiving ends them, and restoring the conversation does not restart
+them. Parent conversations own watches; subagents report back instead. Active
+watches keep a conversation in Working between updates. Test Rig retains its
+additional approval-decision and merge-readiness notifications.
 
 ## Deferred decisions
 

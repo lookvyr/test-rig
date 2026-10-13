@@ -548,6 +548,11 @@ describe("presentPendingBackgroundWork", () => {
     expect(presentPendingBackgroundWork([{ taskId: "a", kind: "monitor" }])?.title).toBe(
       "Waiting on a monitor",
     );
+    expect(
+      presentPendingBackgroundWork([
+        { taskId: "pr", kind: "monitor", description: "Watching pull request #7" },
+      ])?.title,
+    ).toBe("Watching pull request #7");
     expect(presentPendingBackgroundWork([])).toBeNull();
   });
 

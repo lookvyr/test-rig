@@ -2419,13 +2419,14 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
           Layer.mergeAll(
             NodeServices.layer,
             Layer.mock(PullRequestService.PullRequestService)({
+              watchFingerprint: () => Effect.succeed(null),
               detail: () => Effect.die("host unreachable"),
               activity: () => Effect.die("host unreachable"),
             }),
           ),
         ),
       );
-      for (let pass = 0; pass < 15; pass += 1) yield* reactor.sweep;
+      for (let pass = 0; pass < 8; pass += 1) yield* reactor.sweep;
 
       const thread = yield* orchestrator.getThreadShell(threadId);
       assert.isUndefined(thread?.pullRequests?.[0]?.watch);
@@ -2533,6 +2534,7 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
           Layer.mergeAll(
             NodeServices.layer,
             Layer.mock(PullRequestService.PullRequestService)({
+              watchFingerprint: () => Effect.succeed(null),
               detail: () => Effect.succeed(detail),
               activity: () =>
                 Effect.succeed({

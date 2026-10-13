@@ -41,6 +41,10 @@ it.effect(
               calls.push("read");
               return Effect.succeed("viewer");
             },
+            getChangeRequestWatchFingerprint: () => {
+              calls.push("fingerprint");
+              return Effect.succeed({ status: "open", remarks: "none" });
+            },
             runAction: () => {
               calls.push("mutation");
               return Effect.void;
@@ -54,9 +58,19 @@ it.effect(
         ),
       ]).get("github");
       if (!provider?.withVerifiedCredential) return yield* Effect.die("Missing provider");
+      if (!provider.getChangeRequestWatchFingerprint) {
+        return yield* Effect.die("Missing watch fingerprint capability");
+      }
       const input = { cwd: "/repo", host: "github.com" };
       const operations = [
         provider.getViewer(input).pipe(Effect.asVoid),
+        provider
+          .getChangeRequestWatchFingerprint({ ...input, repository: "acme/repo", number: 1 })
+          .pipe(
+            Effect.map((fingerprint) => {
+              assert.deepEqual(fingerprint, { status: "open", remarks: "none" });
+            }),
+          ),
         provider.runAction({ ...input, repository: "acme/repo", number: 1, action: "close" }),
         provider.withVerifiedCredential(input, () => {
           calls.push("use credential");
@@ -65,7 +79,7 @@ it.effect(
       ];
 
       for (const operation of operations) yield* operation;
-      assert.deepEqual(calls, ["read", "mutation", "credential", "use credential"]);
+      assert.deepEqual(calls, ["read", "fingerprint", "mutation", "credential", "use credential"]);
       calls.length = 0;
       yield* Ref.set(enabled, false);
       for (const operation of operations) {
@@ -77,6 +91,6 @@ it.effect(
 
       yield* Ref.set(enabled, true);
       for (const operation of operations) yield* operation;
-      assert.deepEqual(calls, ["read", "mutation", "credential", "use credential"]);
+      assert.deepEqual(calls, ["read", "fingerprint", "mutation", "credential", "use credential"]);
     }),
 );

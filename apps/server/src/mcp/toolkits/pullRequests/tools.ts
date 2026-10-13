@@ -132,6 +132,15 @@ export class PullRequestNotOpenError extends Schema.TaggedError<PullRequestNotOp
   }
 }
 
+export class PullRequestWatchFromSubagentError extends Schema.TaggedError<PullRequestWatchFromSubagentError>()(
+  "PullRequestWatchFromSubagentError",
+  {},
+) {
+  override get message(): string {
+    return "This thread is a subagent, so it cannot watch pull requests. Its parent thread owns the pull request: finish your task and report back instead.";
+  }
+}
+
 export class PullRequestListFailedError extends Schema.TaggedError<PullRequestListFailedError>()(
   "PullRequestListFailedError",
   { cause: Schema.Defect() },
@@ -152,6 +161,7 @@ export const PullRequestToolError = Schema.Union([
   PullRequestListFailedError,
   PullRequestWatchFailedError,
   PullRequestNotOpenError,
+  PullRequestWatchFromSubagentError,
 ]);
 export type PullRequestToolError = typeof PullRequestToolError.Type;
 
@@ -264,7 +274,7 @@ const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
 
 const WatchPullRequestTool = Tool.make("watch_pull_request", {
   description:
-    "Have T3 Code watch an open pull request for this thread, linking it first if needed. T3 Code checks it every minute and wakes you with a message when a check fails, the required checks pass, someone else comments or reviews, or the branch starts to conflict with its base. For GitHub, it also reports changes to the host review decision and merge readiness, including merge queue status. Changes found together arrive in one update; readiness is tied to the reported head commit. Use this to monitor or babysit a pull request instead of polling, sleeping, or running a watcher. Only comments posted after this call wake you, so handle the existing ones first, then end your turn. A wake is news, not a merge decision: check readiness yourself before merging. Watching ends when the pull request merges or closes, when T3 Code cannot read it for 15 minutes, when the user stops this thread, or when you call unwatch_pull_request.",
+    "Have T3 Code watch an open pull request for this thread, linking it first if needed. T3 Code checks for changes every two minutes and wakes you with a message when a check fails, the required checks pass, someone else comments or reviews, or the branch starts to conflict with its base. For GitHub, it also reports changes to the host review decision and merge readiness, including merge queue status. Changes found together arrive in one update; readiness is tied to the reported head commit. Use this to monitor or babysit a pull request instead of polling, sleeping, or running a watcher. Only comments posted or edited after this call wake you, so handle the existing ones first, then end your turn. A wake is news, not a merge decision: check readiness yourself before merging. While watching, the thread stays in Working. Call unwatch_pull_request before handing work back to the user so it returns to their inbox. Subagents must report to their parent instead of watching. Unsettle or unarchive a thread before starting a watch. Watching ends when the pull request merges or closes, when eight consecutive host reads fail (rate-limit pauses do not count), when the user stops, settles, or archives this thread, or when you call unwatch_pull_request.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,

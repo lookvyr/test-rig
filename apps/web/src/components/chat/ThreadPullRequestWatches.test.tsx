@@ -1,5 +1,4 @@
 import { EnvironmentId, ThreadId, type ThreadPullRequestLink } from "@t3tools/contracts";
-import { PauseIcon } from "lucide-react";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { visitElements } from "../../test/reactElementTree";
 import { reactHookHarness as hooks } from "../../test/reactHookHarness";
@@ -93,24 +92,11 @@ describe("thread PR watch controls", () => {
     expect(render()).toEqual([]);
   });
   it.each(["override", "timestamp"] as const)(
-    "shows a paused watch for settlement by %s while keeping Stop available",
+    "hides ended watches when settled by %s",
     (settlement) => {
       if (settlement === "override") mocks.settledOverride = "settled";
       else mocks.settledAt = "2026-10-06T12:30:00Z";
-      const tree = render();
-      expect(visitElements(tree, (element) => element.type === PauseIcon)).not.toBeNull();
-      expect(
-        visitElements(
-          tree,
-          (element) =>
-            element.props.children ===
-            "Watching paused while this thread is settled. Un-settle the thread to resume watching.",
-        ),
-      ).not.toBeNull();
-      expect(
-        visitElements(tree, (element) => element.props["aria-label"] === "Stop watching #7")?.props
-          .disabled,
-      ).toBe(false);
+      expect(render()).toEqual([]);
     },
   );
 });

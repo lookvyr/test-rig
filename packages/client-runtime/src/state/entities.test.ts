@@ -153,6 +153,28 @@ describe("V2 client presentation", () => {
     ]);
   });
 
+  it("parks a thread that never ran at idle while a pull request watch holds it", () => {
+    const watch = { taskId: "pull-request-watch:github.com/acme/app#1", kind: "monitor" as const };
+    const watched = presentThreadShell(environmentId, {
+      ...v2ThreadShell,
+      latestRunId: null,
+      activeProviderThreadId: null,
+      activeRunId: null,
+      status: "idle",
+      pendingBackgroundTasks: [watch],
+    });
+    expect(watched.runtime).toMatchObject({ status: "idle", activeRunId: null });
+    expect(
+      presentThreadShell(environmentId, {
+        ...v2ThreadShell,
+        latestRunId: null,
+        activeProviderThreadId: null,
+        status: "idle",
+        pendingBackgroundTasks: [],
+      }).runtime,
+    ).toBeNull();
+  });
+
   it("keeps a failed latest run failed while background tasks are still pending", () => {
     const shell = presentThreadShell(environmentId, {
       ...v2ThreadShell,

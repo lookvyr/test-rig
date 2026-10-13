@@ -26,6 +26,7 @@ import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
+  interruptThreadTurn,
   createProject,
   settleThread,
   stopThreadSession,
@@ -229,3 +230,66 @@ describe("environment commands", () => {
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 });
+
+it.effect("Stop with no run ends visible PR watches", () =>
+  Effect.gen(function* () {
+    const commands: OrchestrationV2Command[] = [];
+    const link = {
+      host: "github.com",
+      repository: "owner/repo",
+      url: "https://github.com/owner/repo/pull/7",
+      linkedAt: "2026-10-13T00:00:00.000Z",
+      snapshot: null,
+      stack: null,
+      source: "agent",
+    };
+    const watch = {
+      startedAt: "2026-10-13T00:00:00.000Z",
+      headSha: null,
+      failedChecks: [],
+      passed: false,
+      passedChecks: [],
+      remarksThrough: "2026-10-13T00:00:00.000Z",
+      remarkIds: [],
+      conflicting: false,
+      wakes: 0,
+    };
+    const client = {
+      [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
+        Effect.sync(() => {
+          commands.push(command);
+          return { sequence: commands.length };
+        }),
+      [ORCHESTRATION_V2_WS_METHODS.getThreadProjection]: () =>
+        Effect.succeed({
+          thread: {
+            id: ThreadId.make("watched"),
+            activeProviderThreadId: null,
+            pullRequests: [
+              { ...link, number: 7, watch },
+              { ...link, number: 8 },
+              { ...link, number: 9, source: "stack-dismissed", watch },
+            ],
+          },
+          runs: [],
+          turnItems: [],
+          providerThreads: [],
+        }),
+    } as unknown as WsRpcProtocolClient;
+    const supervisor = yield* makeSupervisor([], client);
+    yield* interruptThreadTurn({ threadId: ThreadId.make("watched") }).pipe(
+      Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+    );
+    expect(commands).toEqual([
+      {
+        type: "thread.pull-request.watch",
+        commandId: expect.any(String),
+        threadId: "watched",
+        host: "github.com",
+        repository: "owner/repo",
+        number: 7,
+        watching: false,
+      },
+    ]);
+  }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+);

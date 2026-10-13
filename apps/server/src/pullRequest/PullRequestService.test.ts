@@ -6749,3 +6749,65 @@ it.effect("carries authoritative approval and readiness through the detail servi
     assert.deepEqual(result.mergeReadiness, mergeReadiness);
   }),
 );
+
+it.effect("watch fingerprints use provider reads and share the host rate-limit pause", () =>
+  Effect.gen(function* () {
+    let calls = 0;
+    let detailCalls = 0;
+    const service = yield* makeService({
+      projects: [
+        project({ id: "p1", title: "cloud", workspaceRoot: "/cloud", repository: "acme/web" }),
+      ],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequestWatchFingerprint: () =>
+            Effect.sync(() => {
+              calls++;
+            }).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new PullRequestProviderError({
+                    provider: "github",
+                    operation: "getChangeRequestWatchFingerprint",
+                    reason: "rate-limited",
+                    detail: "paused",
+                  }),
+                ),
+              ),
+            ),
+          getChangeRequest: () =>
+            Effect.sync(() => {
+              detailCalls++;
+              throw new Error("must not read");
+            }),
+        }),
+      ],
+    });
+    const ref = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    yield* service.watchFingerprint(ref).pipe(Effect.flip);
+    yield* service.watchFingerprint({ ...ref, number: 2 }).pipe(Effect.flip);
+    yield* service.detail({ ...ref, allowStale: false }).pipe(Effect.flip);
+    assert.equal(calls, 1);
+    assert.equal(detailCalls, 0);
+  }),
+);
+
+it.effect("hosts without fingerprints fall back without an extra detail read", () =>
+  Effect.gen(function* () {
+    const service = yield* makeService({
+      projects: [
+        project({ id: "p1", title: "cloud", workspaceRoot: "/cloud", repository: "acme/web" }),
+      ],
+      providers: [
+        fakeProvider("github", { getChangeRequest: () => Effect.die("unexpected detail") }),
+      ],
+    });
+    assert.isNull(
+      yield* service.watchFingerprint({
+        projectId: "p1" as ProjectId,
+        repository: "acme/web",
+        number: 1,
+      }),
+    );
+  }),
+);

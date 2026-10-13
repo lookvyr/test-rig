@@ -110,6 +110,11 @@ const crypto = Crypto.make({
 
 const harness = Effect.fn("PullRequestWatchTest.harness")(function* (
   options: {
+    watchFingerprint?: PullRequestService.PullRequestService["Service"]["watchFingerprint"];
+    invalidate?: PullRequestService.PullRequestService["Service"]["invalidate"];
+    dispatch?: (
+      command: SyncCommand,
+    ) => Effect.Effect<void, Orchestrator.OrchestratorDispatchError>;
     detail?: PullRequestService.PullRequestService["Service"]["detail"];
     activity?: PullRequestService.PullRequestService["Service"]["activity"];
     threadComments?: PullRequestService.PullRequestService["Service"]["threadComments"];
@@ -119,6 +124,11 @@ const harness = Effect.fn("PullRequestWatchTest.harness")(function* (
     {
       id: ThreadId.make("watch-thread"),
       projectId: ProjectId.make("watch-project"),
+      lineage: {
+        rootThreadId: ThreadId.make("watch-thread"),
+        parentThreadId: null,
+        relationshipToParent: null,
+      },
       settledAt: null,
       settledOverride: null,
       pullRequestAssociation: null,
@@ -138,12 +148,18 @@ const harness = Effect.fn("PullRequestWatchTest.harness")(function* (
     },
   ]);
   const commands = yield* Ref.make<ReadonlyArray<SyncCommand>>([]);
+  let fingerprintRead = 0;
   const dependencies = Layer.mergeAll(
     Layer.succeed(Crypto.Crypto, crypto),
     Layer.mock(ProjectionStore.ProjectionStoreV2)({
       getThreadsWithPullRequests: () => Ref.get(threads),
     }),
     Layer.mock(PullRequestService.PullRequestService)({
+      watchFingerprint:
+        options.watchFingerprint ??
+        (() =>
+          Effect.succeed({ status: String(fingerprintRead++), remarks: String(fingerprintRead) })),
+      invalidate: options.invalidate ?? (() => Effect.void),
       detail: options.detail ?? (() => Effect.succeed(detail)),
       activity: options.activity ?? (() => Effect.succeed(activity())),
       threadComments: options.threadComments ?? (() => Effect.die("unexpected reply page")),
@@ -152,17 +168,22 @@ const harness = Effect.fn("PullRequestWatchTest.harness")(function* (
       dispatch: (command) => {
         if (command.type !== "thread.pull-request-watch.sync")
           return Effect.die("unexpected command");
-        return Ref.update(commands, (current) => [...current, command]).pipe(
+        return (options.dispatch?.(command) ?? Effect.void).pipe(
+          Effect.andThen(Ref.update(commands, (current) => [...current, command])),
           Effect.andThen(
             Ref.update(threads, (current) =>
-              current.map((thread) => ({
-                ...thread,
-                pullRequests: thread.pullRequests!.map((link) => {
-                  if (link.watch?.startedAt !== command.startedAt) return link;
-                  const { watch: _previous, ...rest } = link;
-                  return command.watch ? { ...rest, watch: command.watch } : rest;
-                }),
-              })),
+              current.map((thread) =>
+                thread.id !== command.threadId
+                  ? thread
+                  : {
+                      ...thread,
+                      pullRequests: thread.pullRequests!.map((link) => {
+                        if (link.watch?.startedAt !== command.startedAt) return link;
+                        const { watch: _previous, ...rest } = link;
+                        return command.watch ? { ...rest, watch: command.watch } : rest;
+                      }),
+                    },
+              ),
             ),
           ),
           Effect.as({ sequence: 1, storedEvents: [] }),
@@ -344,7 +365,7 @@ it.effect("rate-limit pauses retain the watch and retry after the reported reset
   }),
 );
 
-it.effect("settling pauses a watch without discarding it and unsetting resumes its reads", () =>
+it.effect("settling ends a watch without a host read and unsetting does not restore it", () =>
   Effect.gen(function* () {
     let reads = 0;
     const fixture = yield* harness({
@@ -359,13 +380,13 @@ it.effect("settling pauses a watch without discarding it and unsetting resumes i
     );
     yield* fixture.reactor.sweep;
     assert.equal(reads, 0);
-    assert.isEmpty(yield* Ref.get(fixture.commands));
-    assert.isDefined((yield* Ref.get(fixture.threads))[0]?.pullRequests?.[0]?.watch);
+    assert.isNull((yield* Ref.get(fixture.commands))[0]?.watch);
+    assert.isUndefined((yield* Ref.get(fixture.threads))[0]?.pullRequests?.[0]?.watch);
     yield* Ref.update(fixture.threads, (threads) =>
       threads.map((thread) => ({ ...thread, settledOverride: null })),
     );
     yield* fixture.reactor.sweep;
-    assert.equal(reads, 1);
+    assert.equal(reads, 0);
   }),
 );
 
@@ -419,5 +440,249 @@ it.effect("persists readiness with one combined wake and no repeat on the next s
     current = { ...current, state: "closed" };
     yield* fixture.reactor.sweep;
     assert.isNull((yield* Ref.get(fixture.commands)).at(-1)!.watch);
+  }),
+);
+
+it.effect("shares reads within a project, isolates projects, and wakes each watching thread", () =>
+  Effect.gen(function* () {
+    const reads: ProjectId[] = [];
+    let activities = 0;
+    const fixture = yield* harness({
+      watchFingerprint: () => Effect.succeed(null),
+      detail: (ref) =>
+        Effect.sync(() => {
+          reads.push(ref.projectId);
+          return { ...detail, approvalDecision: "approved" as const };
+        }),
+      activity: () =>
+        Effect.sync(() => {
+          activities++;
+          return activity();
+        }),
+    });
+    yield* Ref.update(fixture.threads, ([first]) => [
+      first!,
+      { ...first!, id: ThreadId.make("second") },
+      { ...first!, id: ThreadId.make("other-project"), projectId: ProjectId.make("other") },
+    ]);
+    yield* fixture.reactor.sweep;
+    assert.equal(reads.length, 2);
+    assert.equal(activities, 2);
+    assert.equal((yield* Ref.get(fixture.commands)).filter((command) => command.wake).length, 3);
+    yield* fixture.reactor.sweep;
+    assert.equal(reads.length, 2);
+    yield* TestClock.adjust("10 minutes");
+    yield* fixture.reactor.sweep;
+    assert.equal(reads.length, 4);
+  }),
+);
+
+it.effect("fingerprints gate reads without losing approval and queue-readiness updates", () =>
+  Effect.gen(function* () {
+    let current: PullRequestDetail = {
+      ...detail,
+      approvalDecision: "review-required",
+      mergeReadiness: { status: "blocked", reason: "GitHub merge state: BLOCKED" },
+    };
+    let status = "blocked";
+    let remarks = "quiet";
+    let reads = 0;
+    let activities = 0;
+    let invalidations = 0;
+    const fixture = yield* harness({
+      watchFingerprint: () => Effect.succeed({ status, remarks }),
+      invalidate: () =>
+        Effect.sync(() => {
+          invalidations++;
+        }),
+      detail: () =>
+        Effect.sync(() => {
+          reads++;
+          return current;
+        }),
+      activity: () =>
+        Effect.sync(() => {
+          activities++;
+          return activity();
+        }),
+    });
+    yield* fixture.reactor.sweep;
+    yield* fixture.reactor.sweep;
+    assert.equal(reads, 1);
+    assert.equal(activities, 1);
+    current = {
+      ...current,
+      approvalDecision: "approved",
+      mergeReadiness: { status: "queue-required", reason: "GitHub merge state: CLEAN" },
+    };
+    status = "queue-required";
+    yield* fixture.reactor.sweep;
+    const update = (yield* Ref.get(fixture.commands)).at(-1)!;
+    assert.include(update.wake!.text, "approved");
+    assert.include(update.wake!.text, "ready for the merge queue");
+    assert.equal(reads, 2);
+    assert.equal(activities, 1);
+    remarks = "new-review";
+    yield* fixture.reactor.sweep;
+    assert.equal(activities, 2);
+    assert.equal(invalidations, 3);
+    yield* TestClock.adjust("30 minutes");
+    yield* fixture.reactor.sweep;
+    assert.equal(activities, 3);
+  }),
+);
+
+it.effect("unknown readiness keeps detail polling even with a stable fingerprint", () =>
+  Effect.gen(function* () {
+    let reads = 0;
+    let activities = 0;
+    const fixture = yield* harness({
+      watchFingerprint: () => Effect.succeed({ status: "stable", remarks: "stable" }),
+      detail: () =>
+        Effect.sync(() => {
+          reads++;
+          return {
+            ...detail,
+            mergeReadiness: { status: "unknown" as const, reason: "Host is computing readiness" },
+          };
+        }),
+      activity: () =>
+        Effect.sync(() => {
+          activities++;
+          return activity();
+        }),
+    });
+    yield* fixture.reactor.sweep;
+    yield* fixture.reactor.sweep;
+    assert.equal(reads, 2);
+    assert.equal(activities, 1);
+  }),
+);
+
+it.effect("an incomplete activity read is retried despite an unchanged fingerprint", () =>
+  Effect.gen(function* () {
+    let activities = 0;
+    const fixture = yield* harness({
+      watchFingerprint: () => Effect.succeed({ status: "stable", remarks: "stable" }),
+      activity: () =>
+        Effect.sync(() => {
+          activities++;
+          return activity({ commentsTruncated: true, reviewThreadsTruncated: true });
+        }),
+    });
+    yield* fixture.reactor.sweep;
+    yield* fixture.reactor.sweep;
+    assert.equal(activities, 2);
+    assert.equal(
+      (yield* Ref.get(fixture.threads))[0]!.pullRequests![0]!.watch!.remarksThrough,
+      NOW,
+    );
+  }),
+);
+
+it.effect("a new or restarted watch gets a full read despite a quiet PR", () =>
+  Effect.gen(function* () {
+    let activities = 0;
+    const fixture = yield* harness({
+      watchFingerprint: () => Effect.succeed({ status: "stable", remarks: "stable" }),
+      activity: () =>
+        Effect.sync(() => {
+          activities++;
+          return activity();
+        }),
+    });
+    yield* fixture.reactor.sweep;
+    yield* Ref.update(fixture.threads, ([first]) => [
+      first!,
+      { ...first!, id: ThreadId.make("new") },
+    ]);
+    yield* fixture.reactor.sweep;
+    assert.equal(activities, 2);
+    yield* Ref.update(fixture.threads, (threads) =>
+      threads.map((thread) => ({
+        ...thread,
+        pullRequests: thread.pullRequests!.map((link) => ({
+          ...link,
+          watch: { ...link.watch!, startedAt: "2026-10-06T13:00:00.000Z" },
+        })),
+      })),
+    );
+    yield* fixture.reactor.sweep;
+    assert.equal(activities, 3);
+  }),
+);
+
+it.effect(
+  "a refused wake does not block peers and retries without waiting for the quiet interval",
+  () =>
+    Effect.gen(function* () {
+      let refuse = true;
+      const fixture = yield* harness({
+        watchFingerprint: () => Effect.succeed({ status: "stable", remarks: "stable" }),
+        detail: () => Effect.succeed({ ...detail, approvalDecision: "approved" }),
+        dispatch: (command) =>
+          refuse && command.threadId === "watch-thread"
+            ? Effect.fail(
+                new Orchestrator.OrchestratorDispatchError({
+                  commandId: command.commandId,
+                  commandType: command.type,
+                  cause: "retry",
+                }),
+              )
+            : Effect.void,
+      });
+      yield* Ref.update(fixture.threads, ([first]) => [
+        first!,
+        { ...first!, id: ThreadId.make("peer") },
+      ]);
+      yield* fixture.reactor.sweep;
+      assert.deepEqual(
+        (yield* Ref.get(fixture.commands)).map((command) => command.threadId),
+        ["peer"],
+      );
+      refuse = false;
+      yield* fixture.reactor.sweep;
+      assert.deepEqual(
+        (yield* Ref.get(fixture.commands)).map((command) => command.threadId),
+        ["peer", "watch-thread"],
+      );
+    }),
+);
+
+it.effect.each(["closed", "merged"] as const)(
+  "ends a %s PR watch and reports closure only",
+  (state) =>
+    Effect.gen(function* () {
+      const fixture = yield* harness({ detail: () => Effect.succeed({ ...detail, state }) });
+      yield* fixture.reactor.sweep;
+      const commands = yield* Ref.get(fixture.commands);
+      assert.isNull(commands[0]!.watch);
+      assert.equal(commands[0]!.wake !== undefined, state === "closed");
+      yield* fixture.reactor.sweep;
+      assert.equal((yield* Ref.get(fixture.commands)).length, 1);
+    }),
+);
+
+it.effect("a fingerprint rate-limit pause neither reads detail nor spends the failure budget", () =>
+  Effect.gen(function* () {
+    const fixture = yield* harness({
+      watchFingerprint: () =>
+        Effect.fail(
+          new PullRequestOperationError({
+            operation: "watchFingerprint",
+            detail: "paused",
+            cause: new PullRequestProviderError({
+              provider: "github",
+              operation: "fingerprint",
+              reason: "rate-limited",
+              detail: "paused",
+            }),
+          }),
+        ),
+      detail: () => Effect.die("must not read while paused"),
+    });
+    for (let i = 0; i < 10; i++) yield* fixture.reactor.sweep;
+    assert.isEmpty(yield* Ref.get(fixture.commands));
+    assert.isDefined((yield* Ref.get(fixture.threads))[0]!.pullRequests![0]!.watch);
   }),
 );

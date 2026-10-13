@@ -2276,12 +2276,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (candidate) =>
           candidate.source !== "stack-dismissed" && threadPullRequestKeysEqual(candidate, key),
       );
-      // Same rule as a direct message.dispatch: a provider-native subagent takes no messages.
+      // Subagents report to their parent; archived or settled threads take no watch wakes.
       const inactive =
         thread.archivedAt !== null ||
         thread.settledOverride === "settled" ||
         thread.settledAt !== null ||
-        isProviderNativeSubagentThread(thread);
+        thread.lineage.relationshipToParent === "subagent";
       if (link?.watch?.startedAt !== command.startedAt || (command.wake && inactive)) {
         return yield* new OrchestratorDispatchError({
           commandId: command.commandId,
@@ -2369,6 +2369,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandId: command.commandId,
         threadId: command.threadId,
       });
+    }
+    if (command.type === "thread.pull-request.watch" && command.watching) {
+      if (
+        thread.settledOverride === "settled" ||
+        thread.settledAt !== null ||
+        thread.archivedAt !== null
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} is settled or archived and cannot watch pull requests.`,
+        });
+      }
+      if (thread.lineage.relationshipToParent === "subagent") {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} is a subagent; its parent thread watches pull requests.`,
+        });
+      }
     }
     // Only the agent's watch_pull_request links as "agent". A call that raced a Stop may land
     // after its run ended, so the latest run that executed decides. A user can still watch.
@@ -2693,7 +2713,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const updatedThread: OrchestrationV2AppThread = (() => {
       switch (command.type) {
         case "thread.archive":
-          return { ...thread, archivedAt: now, titleRegeneration: null, updatedAt: now };
+          return {
+            ...thread,
+            archivedAt: now,
+            titleRegeneration: null,
+            pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
+            updatedAt: now,
+          };
         case "thread.unarchive":
           return { ...thread, archivedAt: null, updatedAt: now };
         case "thread.settle": {
@@ -2705,6 +2731,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return {
             ...thread,
             settledOverride: "settled",
+            pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             settledAt: alreadySettled ? thread.settledAt : (command.settledAt ?? now),
             unsettledAt: null,
             pinnedAt: null,

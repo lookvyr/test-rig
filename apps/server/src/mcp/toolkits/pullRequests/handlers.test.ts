@@ -504,3 +504,38 @@ it("keeps failure diagnostics as the cause rather than exposing them in the tool
   expect(failure.message).toBe("Could not link the pull request.");
   expect(failure.cause).toBe(cause);
 });
+
+it.effect("starts a watch from a stale closed snapshot so the host can confirm reopening", () =>
+  Effect.gen(function* () {
+    const link = makeLink(7, { headBranch: "feature" });
+    const fixture = yield* makeHarness({
+      thread: makeThread([{ ...link, snapshot: { ...link.snapshot!, state: "closed" } }]),
+    });
+    yield* fixture.call("watch_pull_request", { repository: "t3tools/t3code", number: 7 });
+    expect((yield* Ref.get(fixture.commands))[0]).toMatchObject({
+      type: "thread.pull-request.watch",
+      watching: true,
+    });
+  }),
+);
+
+it.effect("subagents report to their parent instead of starting a watch", () =>
+  Effect.gen(function* () {
+    const fixture = yield* makeHarness({
+      thread: {
+        ...makeThread([]),
+        lineage: {
+          rootThreadId: ThreadId.make("parent"),
+          parentThreadId: ThreadId.make("parent"),
+          relationshipToParent: "subagent",
+        },
+      },
+    });
+    const error = yield* fixture
+      .call("watch_pull_request", { repository: "t3tools/t3code", number: 7 })
+      .pipe(Effect.flip);
+    expect(error).toMatchObject({ _tag: "PullRequestWatchFromSubagentError" });
+    expect(yield* Ref.get(fixture.commands)).toEqual([]);
+    yield* fixture.call("unwatch_pull_request", { repository: "t3tools/t3code", number: 7 });
+  }),
+);
