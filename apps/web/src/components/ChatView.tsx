@@ -3905,18 +3905,21 @@ function ChatViewContent(props: ChatViewProps) {
             handleManualNavigation();
           }
         };
-        // Scrollbar drags produce no wheel/touch events; they are the only
-        // pointerdowns whose target is the scroll node itself rather than a
-        // message row. Content clicks break follow only away from the end
-        // (reading or selecting up there must hold position); clicking near
-        // the live edge keeps following.
-        const handlePointerDown = (event: PointerEvent) => {
-          if (event.target === scrollNode) {
-            if (contentScrollsUp()) {
-              handleManualNavigation();
-            }
-            return;
+        // Blank margins and the native scrollbar both target the scroll node.
+        // Wait for an actual upward scroll while pressed before treating that
+        // target as a scrollbar drag; a margin click must keep following.
+        let pointerScrollStart: number | null = null;
+        const clearPointerScroll = () => {
+          pointerScrollStart = null;
+        };
+        const handlePointerScroll = () => {
+          if (pointerScrollStart !== null && scrollNode.scrollTop < pointerScrollStart) {
+            clearPointerScroll();
+            handleManualNavigation();
           }
+        };
+        const handlePointerDown = (event: PointerEvent) => {
+          pointerScrollStart = event.target === scrollNode ? scrollNode.scrollTop : null;
           if (viewportIsAwayFromEnd()) {
             handleManualNavigation();
           }
@@ -3946,11 +3949,19 @@ function ChatViewContent(props: ChatViewProps) {
         scrollNode.addEventListener("pointerdown", handlePointerDown, {
           passive: true,
         });
+        scrollNode.addEventListener("scroll", handlePointerScroll, { passive: true });
+        window.addEventListener("pointerup", clearPointerScroll);
+        window.addEventListener("pointercancel", clearPointerScroll);
+        window.addEventListener("blur", clearPointerScroll);
         scrollNode.addEventListener("keydown", handleKeyDown);
         removeListeners = () => {
           scrollNode.removeEventListener("wheel", handleWheel);
           scrollNode.removeEventListener("touchmove", handleTouchMove);
           scrollNode.removeEventListener("pointerdown", handlePointerDown);
+          scrollNode.removeEventListener("scroll", handlePointerScroll);
+          window.removeEventListener("pointerup", clearPointerScroll);
+          window.removeEventListener("pointercancel", clearPointerScroll);
+          window.removeEventListener("blur", clearPointerScroll);
           scrollNode.removeEventListener("keydown", handleKeyDown);
         };
       });
