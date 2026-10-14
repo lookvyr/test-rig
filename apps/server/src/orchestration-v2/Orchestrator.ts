@@ -4537,6 +4537,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
       if (command.restartContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.restartContinuationOfRunId);
+        const latest = latestExecutedRun(projection.runs);
         if (
           !source ||
           (source.status !== "cancelled" &&
@@ -4544,9 +4545,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           projection.thread.archivedAt !== null ||
           projection.thread.deletedAt !== null ||
           projection.thread.providerInstanceId !== source.providerInstanceId ||
-          projection.runs.some(
-            (run) => run.id !== source.id && run.status !== "queued" && runRanAfter(run, source),
-          ) ||
+          (latest !== null && latest.id !== source.id && runRanAfter(latest, source)) ||
           (yield* stopReachedRun(command, command.threadId, source.id))
         ) {
           // Preserve the current row so stale automatic deliveries receive an

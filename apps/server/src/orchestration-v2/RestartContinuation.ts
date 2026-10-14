@@ -1,4 +1,4 @@
-import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
+import { latestExecutedRun, runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import { isNativeMaintenanceCommand } from "./Orchestrator.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
@@ -120,12 +120,8 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       source !== undefined && isRestartNoteSource(source, projection.providerTurns);
     if (!source || (source.status !== "cancelled" && !noteSource)) return;
     // A user submission after reconciliation takes precedence over an automatic prompt.
-    if (
-      projection.runs.some(
-        (run) => run.id !== source.id && run.status !== "queued" && runRanAfter(run, source),
-      )
-    )
-      return;
+    const latest = latestExecutedRun(projection.runs);
+    if (latest !== null && latest.id !== source.id && runRanAfter(latest, source)) return;
     if (projection.thread.providerInstanceId !== source.providerInstanceId) return;
     const sourceRecords = yield* threads.getThreadRecords(
       input.threadId,

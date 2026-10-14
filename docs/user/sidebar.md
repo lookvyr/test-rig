@@ -31,9 +31,9 @@ and time or a duration. **Wake thread** brings it back early. Snoozing alone
 does not send a message. Custom snooze is also available for selected sidebar
 threads.
 
-Snoozing keeps PR watches and automatic updates active. A queued PR update or
-subagent completion does not prevent snoozing; a queued message from you still
-does.
+Snoozing keeps PR watches and automatic updates active. Pending automatic
+notifications and subagent completion reports do not prevent snoozing; a queued
+message from you still does. Snoozing and waking preserve those deliveries.
 
 **Archive thread** removes a stopped thread from the usual list while keeping
 its history. Open **Settings → Archive** to unarchive it. Archive is separate

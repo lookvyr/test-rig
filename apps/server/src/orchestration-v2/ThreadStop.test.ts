@@ -664,12 +664,17 @@ it.effect.each(["settle", "archive"] as const)(
     }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect.each(["thread.stop", "run.interrupt"] as const)(
-  "%s cancels buffered wakes and preserves durable queued messages",
-  (type) =>
+it.effect.each([
+  ["thread.stop", false],
+  ["thread.stop", true],
+  ["run.interrupt", false],
+  ["run.interrupt", true],
+] as const)(
+  "%s cancels buffered wakes (already held: %s) and preserves durable queued messages",
+  ([type, queueHeld]) =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
-      const threadId = ThreadId.make(`thread:stop-buffered:${type}`);
+      const threadId = ThreadId.make(`thread:stop-buffered:${type}:${queueHeld}`);
       yield* createWatchingThread(threadId, 5);
       yield* send(threadId, "active", "start_immediately");
       yield* send(threadId, "user follow-up", "queue_after_active");
@@ -697,6 +702,17 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
           (message) => message.id === run.userMessageId && message.creationSource === "provider",
         ),
       )!;
+      if (queueHeld) {
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        yield* projections.apply({
+          id: EventId.make(`held:${type}`),
+          type: "run.updated",
+          threadId,
+          runId: buffered.id,
+          occurredAt: yield* DateTime.now,
+          payload: { ...buffered, queueHeld: true },
+        });
+      }
       const stop = { commandId: CommandId.make(`stop:${type}`), threadId };
       yield* orchestrator.dispatch(
         type === "run.interrupt"

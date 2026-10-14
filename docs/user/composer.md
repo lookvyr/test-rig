@@ -50,6 +50,11 @@ as while the agent is working. After an interrupted turn, **Resume thread** can
 continue where the agent left off when the composer is empty and the provider
 supports continuation. You can also send your own follow-up.
 
+Stop also ends pull request watches and stops delegated descendants recursively.
+It discards pending wakes whose output lived only in the provider process and
+holds durable automatic notifications until you resume. Server restart recovery
+also discards those provider wakes and holds durable notifications.
+
 ## Incoming approvals and questions
 
 A new approval or blocking question waits while you are typing in the focused

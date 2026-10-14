@@ -48,3 +48,49 @@ The browser reported no console errors in the final acceptance flow. Existing
 Legend List recycling and scroll-convergence warnings appeared during testing.
 No real external PR was created. Packaged Electron, other operating systems,
 remote connections, and an extended disk/performance soak were not tested.
+
+## Follow-on: automatic-wake recovery (#19099)
+
+Adapted [#19099](https://github.com/pingdotgg/t3code/pull/19099) on top of
+`ebc95ca745`. Queued notifications and delegated-completion reports no longer
+block snooze; snooze and unsnooze preserve delivery state. Ordinary queued
+messages still block snooze, without restoring interactive queueing to the UI.
+
+Stop, `run.interrupt` with `holdQueue`, and startup/shutdown reconciliation cancel
+queued agent notifications created by a provider, including already-held wakes.
+Their output lives in provider memory and cannot survive interruption or process
+loss. Durable server notifications remain held. Existing recursive descendant
+cancellation, stopped completion cohorts, and parent-owned PR watches retain
+their lifecycle. Recovery still selects held queues, and reconciliation is
+idempotent. Message reads are bounded to queued runs' message IDs.
+
+An independent review caught an interaction with Test Rig's restart-continuation
+feature: cancelling a buffered wake gives it a later ordinal and the source's
+recovery timestamp. Both continuation freshness checks now use the existing
+`latestExecutedRun` helper, so an unstarted cancelled placeholder cannot suppress
+valid resumed work. Actual newer work still takes precedence.
+
+Verification:
+
+- 154 focused tests across eight suites cover snooze/unsnooze, both Stop commands,
+  already-held wakes, SQLite startup/shutdown recovery and repeated recovery,
+  recursive Stop, PR-watch lifecycle, and restart continuation/replay. Both
+  continuation regressions failed before the review fix and passed afterward.
+- Server typecheck, scoped lint, formatting, and whitespace checks pass. Scoped
+  lint has only the three existing unused-variable warnings in `Orchestrator.ts`.
+- The primary agent used the retained isolated web stack and disposable project.
+  Notification inputs were prepared through orchestration commands in a fixture
+  helper, rather than impersonating providers through the web API. Browser Stop
+  cancelled the buffered wake, held the durable server wake, and ended the parent
+  PR watch. Snooze and Wake preserved that held run. Restart cancelled a pending
+  provider wake and preserved its durable counterpart; the browser reconnected.
+- A second browser pass stopped a prepared parent with a real Codex child and
+  grandchild running shell tasks. Both descendants stopped, both completion
+  deliveries were disposed, the child's buffered wake was cancelled, its durable
+  wake stayed held, and the parent's PR watch ended. The stopped grandchild was
+  visible in the child conversation.
+
+The web pass exercises the shared server behavior and desktop renderer. Packaged
+Electron and real Claude/OpenCode background notifications were not exercised.
+Provider wake payloads were fixtures; real provider-memory buffering and a forced
+process crash were not part of this acceptance pass.

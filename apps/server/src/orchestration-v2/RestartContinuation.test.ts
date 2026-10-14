@@ -12,6 +12,7 @@ import {
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 import * as ServerSettings from "../serverSettings.ts";
 import { restartContinuationRun, continueRestartedRun } from "./RestartContinuation.ts";
@@ -324,7 +325,21 @@ it.effect.each([
 it.effect("does not duplicate delivery and yields to newer user work or opt-out", () =>
   Effect.gen(function* () {
     let projection = makeProjection();
-    projection = { ...projection, runs: [{ ...projection.runs[0]!, status: "cancelled" }] };
+    const now = yield* DateTime.now;
+    projection = {
+      ...projection,
+      runs: [
+        { ...projection.runs[0]!, status: "cancelled", startedAt: now, completedAt: now },
+        {
+          ...projection.runs[0]!,
+          id: RunId.make("run:discarded-wake"),
+          ordinal: 2,
+          status: "cancelled",
+          startedAt: null,
+          completedAt: now,
+        },
+      ],
+    };
     const commands: Parameters<
       ThreadManagementService.ThreadManagementService["Service"]["dispatch"]
     >[0][] = [];
@@ -356,7 +371,7 @@ it.effect("does not duplicate delivery and yields to newer user work or opt-out"
         {
           ...projection.runs[0]!,
           id: RunId.make("run:user-newer"),
-          ordinal: 2,
+          ordinal: 3,
           status: "completed",
         },
       ],

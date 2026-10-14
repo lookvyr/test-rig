@@ -2602,6 +2602,7 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
       Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const eventSink = yield* EventSink.EventSinkV2;
+        const recovery = yield* ProviderRuntimeRecoveryService.ProviderRuntimeRecoveryService;
         const threadId = ThreadId.make("runtime-layer-restart-continuation");
         yield* orchestrator.dispatch({
           type: "thread.create",
@@ -2631,23 +2632,41 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
         });
         const original = (yield* orchestrator.getThreadProjection(threadId)).runs[0]!;
         const now = yield* DateTime.now;
-        yield* eventSink.commitCommand({
-          commandId: CommandId.make("restart-cancel"),
-          threadId,
-          commandType: "provider-runtime.reconcile",
-          acceptedAt: now,
+        yield* eventSink.write({
           events: [
             {
-              id: EventId.make("restart-cancel-event"),
+              id: EventId.make("restart-running-event"),
               type: "run.updated",
               threadId,
               runId: original.id,
               occurredAt: now,
-              payload: { ...original, status: "cancelled", completedAt: now },
+              payload: { ...original, status: "running", startedAt: now },
             },
           ],
-          effects: [],
         });
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("restart-buffered-wake"),
+          threadId,
+          messageId: MessageId.make("restart-buffered-wake"),
+          text: "Background activity updated",
+          attachments: [],
+          createdBy: "agent",
+          creationSource: "provider",
+          notification: {
+            source: { kind: "background_task" },
+            outcome: "updated",
+            summary: "Background activity updated",
+          },
+          dispatchMode: { type: "queue_after_active" },
+        });
+        yield* recovery.reconcile("startup");
+        const recovered = yield* orchestrator.getThreadProjection(threadId);
+        assert.deepEqual(
+          recovered.runs.map((run) => run.status),
+          ["cancelled", "cancelled"],
+        );
+        assert.isNull(recovered.runs[1]!.startedAt);
         const command = {
           type: "message.dispatch" as const,
           createdBy: "agent" as const,
@@ -2664,8 +2683,8 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
         yield* orchestrator.dispatch(command);
         yield* orchestrator.dispatch(command);
         const admitted = yield* orchestrator.getThreadProjection(threadId);
-        assert.lengthOf(admitted.runs, 2);
-        assert.equal(admitted.runs[1]?.restartContinuationOfRunId, original.id);
+        assert.lengthOf(admitted.runs, 3);
+        assert.equal(admitted.runs[2]?.restartContinuationOfRunId, original.id);
         // A differently identified stale delivery still must not create another run.
         yield* orchestrator.dispatch({
           ...command,
@@ -2673,7 +2692,7 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
           messageId: MessageId.make("restart-stale-race"),
         });
         const raced = yield* orchestrator.getThreadProjection(threadId);
-        assert.lengthOf(raced.runs, 2);
+        assert.lengthOf(raced.runs, 3);
         assert.isFalse(raced.messages.some((message) => message.id === "restart-stale-race"));
       }),
   );
