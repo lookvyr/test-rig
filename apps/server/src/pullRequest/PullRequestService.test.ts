@@ -237,6 +237,58 @@ it.effect("reuses only unexpired detail for previews", () =>
   }),
 );
 
+it.effect("re-reads an open pull request after a turn, but not a merged one", () =>
+  Effect.gen(function* () {
+    const reads: Array<string> = [];
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/w", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequest: ({ number }) =>
+            Effect.sync(() => {
+              reads.push(`detail #${number}`);
+              return {
+                ...hostedChangeRequest("Description"),
+                number,
+                state: number === 1 ? ("open" as const) : ("merged" as const),
+              };
+            }),
+          getChangeRequestActivity: ({ number }) =>
+            Effect.sync(() => {
+              reads.push(`activity #${number}`);
+              return {
+                comments: [],
+                commentCount: 0,
+                commentsTruncated: false,
+                reviewThreads: [],
+                commits: [],
+              };
+            }),
+        }),
+      ],
+    });
+    const merged = { projectId: "p1" as ProjectId, repository: "acme/web", number: 2 };
+    const reread = Effect.forEach([1, 2], (number) => {
+      const ref = { ...merged, number };
+      return Effect.andThen(service.detail(ref), service.activity(ref));
+    }).pipe(
+      Effect.andThen(Effect.yieldNow),
+      Effect.andThen(Effect.sync(() => reads.splice(0).toSorted())),
+    );
+
+    assert.deepStrictEqual(yield* reread, ["activity #1", "activity #2", "detail #1", "detail #2"]);
+    for (let turn = 0; turn < 3; turn++) {
+      yield* service.refreshAfterTurn(merged.projectId);
+      assert.deepStrictEqual(yield* reread, ["activity #1", "detail #1"]);
+    }
+    // The refresh button still reads a merged pull request again.
+    yield* service.invalidate({ reference: merged });
+    assert.deepStrictEqual(yield* reread, ["activity #2", "detail #2"]);
+    yield* service.update({ ...merged, title: "New title after merge" });
+    assert.deepStrictEqual(yield* reread, ["activity #2", "detail #2"]);
+  }),
+);
+
 it.effect("does not wait for an in-flight detail read to display a preview", () =>
   Effect.gen(function* () {
     const detailStarted = yield* Deferred.make<void>();
@@ -260,6 +312,74 @@ it.effect("does not wait for an in-flight detail read to display a preview", () 
     assert.strictEqual((yield* service.preview(ref)).title, "Change request 1");
     yield* Deferred.succeed(releaseDetail, undefined);
     yield* Fiber.join(detail);
+  }),
+);
+
+it.effect("preserves merged summaries across turns and refreshes them on request", () =>
+  Effect.gen(function* () {
+    let reads = 0;
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/w", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getChangeRequestSummary: () =>
+            Effect.sync(() => {
+              reads++;
+              return { ...changeRequest(1, "2026-07-02T00:00:00Z"), state: "merged" as const };
+            }),
+        }),
+      ],
+    });
+    const ref = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    yield* service.summary(ref);
+    yield* service.refreshAfterTurn(ref.projectId);
+    yield* service.summary(ref);
+    assert.strictEqual(reads, 1);
+    yield* service.invalidate({ reference: ref });
+    yield* service.summary(ref);
+    assert.strictEqual(reads, 2);
+  }),
+);
+
+it.effect("keeps merged epoch tracking separate for each credential", () =>
+  Effect.gen(function* () {
+    let credential = "merged-reader";
+    const reads: string[] = [];
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/w", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          withVerifiedCredential: (_, use) =>
+            Effect.suspend(() =>
+              use({ accountId: "101", viewer: "octocat", credentialFingerprint: credential }),
+            ),
+          getChangeRequest: () =>
+            Effect.sync(() => {
+              reads.push(credential);
+              return {
+                ...hostedChangeRequest("Description"),
+                state: credential === "merged-reader" ? ("merged" as const) : ("open" as const),
+              };
+            }),
+        }),
+      ],
+    });
+    const ref = {
+      projectId: "p1" as ProjectId,
+      repository: "acme/web",
+      number: 1,
+      expectedAccountId: "101",
+      host: "github.com",
+    };
+    const read = service.withRoutingCredential(ref, service.detail({ ...ref, allowStale: false }));
+    yield* read;
+    credential = "open-reader";
+    yield* read;
+    yield* service.refreshAfterTurn(ref.projectId);
+    yield* read;
+    credential = "merged-reader";
+    yield* read;
+    assert.deepStrictEqual(reads, ["merged-reader", "open-reader", "open-reader"]);
   }),
 );
 

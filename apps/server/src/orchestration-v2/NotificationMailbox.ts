@@ -1,4 +1,20 @@
-import type { MessageId, OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import type {
+  MessageId,
+  OrchestrationV2ConversationMessage,
+  OrchestrationV2ThreadProjection,
+} from "@t3tools/contracts";
+
+/** A wake attaches to output held in provider memory, which Stop or process loss discards. */
+export function isBufferedProviderNotification(
+  message: OrchestrationV2ConversationMessage,
+): boolean {
+  return (
+    message.createdBy === "agent" &&
+    message.creationSource === "provider" &&
+    message.notification !== undefined &&
+    message.delegatedCompletion === undefined
+  );
+}
 
 /**
  * A persisted steer without an acceptance receipt can be retried as a continuation.

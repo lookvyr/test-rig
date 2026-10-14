@@ -387,6 +387,8 @@ export const make = Effect.gen(function* () {
     yield* forkParked(
       Stream.runForEach(events, (event) => {
         switch (event.type) {
+          case "thread.pull-request-link-updated":
+            return event.payload.snapshot === null ? requestSync(event.payload) : Effect.void;
           case "thread.pull-request-synced":
             return Effect.forEach(
               visibleThreadPullRequests(threadPullRequestsOf(event.payload)).filter(

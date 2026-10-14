@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  type ThreadPullRequestLink,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
@@ -109,6 +110,80 @@ const emptyProjection = {
 } as OrchestrationV2ThreadProjection;
 
 describe("applyOrchestrationV2ProjectionEvent", () => {
+  it("applies a compact PR sync without replacing other links or thread metadata", () => {
+    const link = (number: number): ThreadPullRequestLink => ({
+      host: "github.com",
+      repository: "pingdotgg/t3code",
+      number,
+      url: `https://github.com/pingdotgg/t3code/pull/${number}`,
+      source: "manual",
+      linkedAt: DateTime.formatIso(now),
+      snapshot: null,
+      stack: null,
+    });
+    const links = [link(1), link(2)];
+    const projection = {
+      ...emptyProjection,
+      thread: { ...emptyProjection.thread, pullRequests: links },
+    };
+    const updated = { ...links[1]!, source: "agent" as const };
+    const next = applyOrchestrationV2ProjectionEvent(projection, {
+      id: "compact-sync" as OrchestrationV2DomainEvent["id"],
+      type: "thread.pull-request-link-updated",
+      threadId,
+      occurredAt: now,
+      payload: updated,
+    });
+    expect(next?.thread).toEqual({ ...projection.thread, pullRequests: [links[0], updated] });
+    expect(next?.thread.pullRequests?.[0]).toBe(links[0]);
+  });
+
+  it.each(["legacy", "association"] as const)(
+    "applies a compact PR sync while retaining the %s association",
+    (kind) => {
+      const updated: ThreadPullRequestLink = {
+        host: "github.com",
+        repository: "pingdotgg/t3code",
+        number: 1,
+        url: "https://github.com/pingdotgg/t3code/pull/1",
+        source: "manual",
+        linkedAt: DateTime.formatIso(now),
+        snapshot: null,
+        stack: null,
+      };
+      const projection = {
+        ...emptyProjection,
+        thread: {
+          ...emptyProjection.thread,
+          ...(kind === "legacy"
+            ? {
+                linkedPullRequest: {
+                  projectId: emptyProjection.thread.projectId,
+                  repository: updated.repository,
+                  number: updated.number,
+                  url: updated.url,
+                },
+              }
+            : {
+                pullRequestAssociation: {
+                  mode: "linked" as const,
+                  provider: "github" as const,
+                  reference: updated.url,
+                },
+              }),
+        },
+      };
+      const next = applyOrchestrationV2ProjectionEvent(projection, {
+        id: EventId.make(`compact-sync-${kind}`),
+        type: "thread.pull-request-link-updated",
+        threadId,
+        occurredAt: now,
+        payload: updated,
+      });
+      expect(next?.thread).toEqual({ ...projection.thread, pullRequests: [updated] });
+    },
+  );
+
   it("keeps live token usage when the terminal provider turn omits it", () => {
     const providerTurnId = ProviderTurnId.make("provider-turn-reducer");
     const running = {

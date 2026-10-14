@@ -604,9 +604,8 @@ export function useThreadActions() {
         );
       }
       const resolved = resolveThreadTarget(target);
-      // Blocked-on-you work and queued turns can't be snoozed away —
-      // client-side twin of the server invariants so the UI rejects before
-      // a round trip.
+      // Reject pending human requests locally. The server has the message
+      // records needed to distinguish queued human work from automatic wakes.
       if (resolved && !canSnooze(resolved.thread, { now: new Date().toISOString() })) {
         return AsyncResult.failure(
           Cause.fail(

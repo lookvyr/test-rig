@@ -106,6 +106,9 @@ their parent conversation, which owns the watch. While a watch is active, the
 conversation stays in Working between updates. Stop watching when handing the
 work back so it returns to your inbox.
 
+Snoozing the conversation keeps its watch active, including when a watch update
+is already queued. Wake it early through the conversation's actions menu.
+
 Choosing **Stop** for the conversation ends its watches and recursively stops
 its app-owned delegated conversations and their watches. The pull request links
 remain. Start a new watch explicitly when you want monitoring to resume.

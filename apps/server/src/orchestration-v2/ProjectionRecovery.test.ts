@@ -27,10 +27,31 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import { restartContinuationRun } from "./RestartContinuation.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as EventSink from "./EventSink.ts";
+import * as EventStore from "./EventStore.ts";
+import * as IdAllocator from "./IdAllocator.ts";
+import * as ProviderRuntimeRecovery from "./ProviderRuntimeRecoveryService.ts";
 
 const TestLayer = Layer.mergeAll(ProjectionStore.layer, EffectOutbox.layer).pipe(
   Layer.provideMerge(SqlitePersistenceMemory),
 );
+const layerRecoveryTest = ProviderRuntimeRecovery.layer.pipe(
+  Layer.provideMerge(
+    EventSink.layer.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          EventStore.layer,
+          ProjectionStore.layer,
+          EffectOutbox.layer,
+          IdAllocator.layer,
+        ).pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+      ),
+    ),
+  ),
+  Layer.provide(ServerSettings.layerTest()),
+);
+
 const providerInstanceId = ProviderInstanceId.make("codex");
 const modelSelection = { instanceId: providerInstanceId, model: "gpt-5.4" };
 const driver = ProviderDriverKind.make("codex");
@@ -460,4 +481,84 @@ it.effect("marks fork descendants unreadable when their source is missing or cor
       new Set([fork, descendant]),
     );
   }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect.each(["startup", "shutdown"] as const)(
+  "%s cancels queued buffered wakes and holds durable messages",
+  (trigger) =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const recovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
+      const now = yield* DateTime.now;
+      const bufferedThreads = [] as ThreadId[];
+      const durableThreads = [] as ThreadId[];
+      for (const kind of ["buffered", "user", "notification", "delegated"] as const) {
+        const threadId = yield* createThread(`wake:${trigger}:${kind}`);
+        const buffered = kind === "buffered";
+        (buffered ? bufferedThreads : durableThreads).push(threadId);
+        const messageId = MessageId.make(`message:${threadId}`);
+        const runId = yield* createRun(threadId, "queued", {
+          userMessageId: messageId,
+          startedAt: null,
+          queuePosition: 1,
+        });
+        yield* createRun(threadId, "completed", { ordinal: 2 });
+        yield* projections.apply({
+          id: EventId.make(`message:${threadId}`),
+          type: "message.updated",
+          threadId,
+          runId,
+          occurredAt: now,
+          payload: {
+            id: messageId,
+            threadId,
+            runId,
+            nodeId: null,
+            role: "user",
+            text: "Queued work",
+            attachments: [],
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+            createdBy: kind === "user" ? "user" : "agent",
+            creationSource: buffered ? "provider" : "server",
+            ...(kind === "user" || kind === "delegated"
+              ? {}
+              : {
+                  notification: {
+                    source: { kind: "background_task" as const },
+                    outcome: "updated" as const,
+                    summary: "Background activity updated",
+                  },
+                }),
+            ...(kind === "delegated"
+              ? { delegatedCompletion: { parentRunId: runId, generation: 1, taskIds: [] } }
+              : {}),
+          },
+        });
+      }
+      assert.deepEqual(
+        new Set(yield* projections.getRecoveryThreadIds("runtime")),
+        new Set([...bufferedThreads, ...durableThreads]),
+      );
+      const summary = yield* recovery.reconcile(trigger);
+      assert.equal(summary.terminalizedRuns, 1);
+      for (const threadId of bufferedThreads) {
+        const projection = yield* projections.getThreadProjection(threadId);
+        assert.equal(projection.runs[0]?.status, "cancelled");
+        assert.isNotNull(projection.runs[0]?.completedAt);
+        assert.isNull(projection.runs[0]?.queuePosition);
+        assert.equal(projection.runs[1]?.status, "completed");
+      }
+      for (const threadId of durableThreads) {
+        const projection = yield* projections.getThreadProjection(threadId);
+        assert.equal(projection.runs[0]?.status, "queued");
+        assert.isTrue(projection.runs[0]?.queueHeld);
+      }
+      assert.deepEqual(
+        new Set(yield* projections.getRecoveryThreadIds("runtime")),
+        new Set(durableThreads),
+      );
+      assert.equal((yield* recovery.reconcile(trigger)).terminalizedRuns, 0);
+    }).pipe(Effect.provide(layerRecoveryTest)),
 );

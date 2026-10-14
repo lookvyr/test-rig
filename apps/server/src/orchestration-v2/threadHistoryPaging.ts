@@ -149,11 +149,28 @@ export function decodeThreadHistoryCursor(cursor: string): ThreadHistoryCursorPa
   return parsed as ThreadHistoryCursorPayload;
 }
 
-export function isThreadHistoryTurnStart(item: OrchestrationV2TurnItem): boolean {
+function isThreadHistoryTurnStart(item: OrchestrationV2TurnItem): boolean {
   return (
     item.type === "user_message" &&
     (item.inputIntent === "turn_start" || item.inputIntent === "queued_turn")
   );
+}
+
+/**
+ * A notification starts a turn when it is its run's first input. Notifications
+ * steered into an existing run follow its input and consume no extra page slot.
+ * ProjectionStore's `run_starts` query applies the same rule.
+ */
+export function threadHistoryTurnStarts(
+  items: ReadonlyArray<OrchestrationV2TurnItem>,
+): ReadonlyArray<boolean> {
+  const startedRuns = new Set<string>();
+  return items.map((item) => {
+    if (item.type !== "user_message" && item.type !== "notification") return false;
+    const firstInput = item.runId !== null && !startedRuns.has(item.runId);
+    if (item.runId !== null) startedRuns.add(item.runId);
+    return item.type === "notification" ? firstInput : isThreadHistoryTurnStart(item);
+  });
 }
 
 /** Steering belongs to its existing turn and must not consume another page slot. */
@@ -186,7 +203,9 @@ function selectOlderTimelinePage(input: {
   let encodedBytes = 0;
   let userTurns = 0;
   let rawTurns = 0;
-  const turnLimit = input.items.slice(0, end).some((row) => isThreadHistoryUserTurn(row.item))
+  const candidates = input.items.slice(0, end);
+  const turnStarts = threadHistoryTurnStarts(candidates.map((row) => row.item));
+  const turnLimit = candidates.some((row) => isThreadHistoryUserTurn(row.item))
     ? policy.maxUserTurns
     : undefined;
   for (let index = end - 1; index >= 0; index -= 1) {
@@ -203,7 +222,7 @@ function selectOlderTimelinePage(input: {
     selected.push(row);
     encodedBytes += rowBytes;
     if (isThreadHistoryUserTurn(row.item)) userTurns += 1;
-    if (isThreadHistoryTurnStart(row.item)) rawTurns += 1;
+    if (turnStarts[index]) rawTurns += 1;
   }
   selected.reverse();
 

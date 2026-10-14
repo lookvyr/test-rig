@@ -708,83 +708,178 @@ export const layerWithOptions = (
           });
         });
 
-      // Session shutdown can finish after its event pump has stopped. Persist the
-      // native roster's terminal state here as well as at native event ingestion.
-      const writeReleasedBackgroundEvents = (entry: LiveSessionEntry) =>
+      // Snapshot before closing the process: a replacement may report its own
+      // native tasks while the old process is still shutting down.
+      const readReleasedBackgroundWork = (input: {
+        readonly entry: LiveSessionEntry;
+        readonly reason: ProviderSessionReleaseReason;
+      }) =>
         Effect.gen(function* () {
-          const now = yield* DateTime.now;
-          const events: Array<OrchestrationV2DomainEvent> = [];
-          for (const threadId of entry.ownedThreadIds) {
+          if (
+            input.reason === "server_shutdown" ||
+            input.entry.runtime.backgroundTasksEndWithProcess !== true
+          )
+            return [];
+          const released = [];
+          for (const threadId of input.entry.ownedThreadIds) {
             const projection = yield* projectionStore.getThreadRecords(
               threadId,
-              ["providerThreads", "subagents", "nodes", "turnItems"],
+              ["providerThreads", "nodes", "turnItems"],
               {
                 turnItemTypes: ["subagent", "command_execution", "dynamic_tool"],
                 turnItemStatuses: ["pending", "running", "waiting"],
               },
             );
-            const owned = new Set(
-              projection.providerThreads
-                .filter((thread) => thread.providerSessionId === entry.runtime.providerSessionId)
-                .map((thread) => thread.id),
-            );
-            const event = {
-              threadId,
-              driver: entry.runtime.driver,
-              providerInstanceId: entry.runtime.instanceId,
-              occurredAt: now,
-            };
-            for (const thread of projection.providerThreads) {
-              if (!owned.has(thread.id) || !thread.pendingBackgroundTasks?.length) continue;
-              events.push({
-                ...event,
-                id: yield* idAllocator.allocate.event({ threadId }),
-                type: "provider-thread.updated",
-                activate: false,
-                payload: { ...thread, pendingBackgroundTasks: [], updatedAt: now },
-              });
-            }
-            const liveNodes = projection.nodes.filter(
-              (node) =>
-                node.kind === "subagent" &&
-                node.providerThreadId != null &&
-                owned.has(node.providerThreadId) &&
-                ["pending", "running", "waiting"].includes(node.status),
-            );
-            const liveIds = new Set(liveNodes.map((node) => node.id));
-            for (const node of liveNodes)
-              events.push({
-                ...event,
-                id: yield* idAllocator.allocate.event({ threadId }),
-                type: "node.updated",
-                payload: { ...node, status: "interrupted", completedAt: now },
-              });
-            for (const task of projection.subagents) {
-              if (
-                task.origin !== "provider_native" ||
-                !liveIds.has(task.id) ||
-                !["pending", "running", "waiting"].includes(task.status)
-              )
+            for (const providerThread of projection.providerThreads) {
+              if (providerThread.providerSessionId !== input.entry.runtime.providerSessionId)
                 continue;
-              events.push({
-                ...event,
-                id: yield* idAllocator.allocate.event({ threadId }),
-                type: "subagent.updated",
-                payload: { ...task, status: "interrupted", completedAt: now, updatedAt: now },
-              });
-            }
-            for (const item of projection.turnItems) {
-              if (item.providerThreadId == null || !owned.has(item.providerThreadId)) continue;
-              events.push({
-                ...event,
-                id: yield* idAllocator.allocate.event({ threadId }),
-                type: "turn-item.updated",
-                payload: { ...item, status: "interrupted", completedAt: now, updatedAt: now },
-              });
+              const taskIds = new Set(
+                (providerThread.pendingBackgroundTasks ?? []).map((task) => task.taskId),
+              );
+              const nodeIds = new Set(
+                projection.nodes
+                  .filter(
+                    (node) =>
+                      node.kind === "subagent" &&
+                      node.providerThreadId === providerThread.id &&
+                      ["pending", "running", "waiting"].includes(node.status),
+                  )
+                  .map((node) => node.id),
+              );
+              const itemIds = new Set(
+                projection.turnItems
+                  .filter((item) => item.providerThreadId === providerThread.id)
+                  .map((item) => item.id),
+              );
+              if (taskIds.size || nodeIds.size || itemIds.size) {
+                released.push({
+                  threadId,
+                  providerThreadId: providerThread.id,
+                  taskIds,
+                  nodeIds,
+                  itemIds,
+                });
+              }
             }
           }
-          if (events.length > 0) yield* eventSink.write({ events });
-        });
+          return released;
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("orchestration-v2.provider-session-release-roster-read-failed", {
+              providerSessionId: input.entry.runtime.providerSessionId,
+              cause,
+            }).pipe(Effect.as([])),
+          ),
+        );
+      type ReleasedBackgroundWork = Effect.Success<
+        ReturnType<typeof readReleasedBackgroundWork>
+      >[number];
+
+      // Compare the whole provider row inside the write transaction: native
+      // events may change its roster without advancing updatedAt.
+      const writeReleasedBackgroundEvents = (input: {
+        readonly entry: LiveSessionEntry;
+        readonly releasedBackgroundWork: ReadonlyArray<ReleasedBackgroundWork>;
+        readonly replaced: boolean;
+      }) =>
+        Effect.forEach(
+          input.releasedBackgroundWork,
+          (released) =>
+            Effect.gen(function* () {
+              for (let attempt = 0; attempt < 3; attempt++) {
+                const projection = yield* projectionStore.getThreadRecords(
+                  released.threadId,
+                  ["providerThreads", "subagents", "nodes", "turnItems"],
+                  {
+                    turnItemTypes: ["subagent", "command_execution", "dynamic_tool"],
+                    turnItemStatuses: ["pending", "running", "waiting"],
+                  },
+                );
+                const providerThread = projection.providerThreads.find(
+                  (thread) => thread.id === released.providerThreadId,
+                );
+                if (providerThread === undefined) return;
+                const now = yield* DateTime.now;
+                const event = {
+                  threadId: released.threadId,
+                  driver: input.entry.runtime.driver,
+                  providerInstanceId: input.entry.runtime.instanceId,
+                  occurredAt: now,
+                };
+                const events: Array<OrchestrationV2DomainEvent> = [];
+                const tasks = providerThread.pendingBackgroundTasks ?? [];
+                const remaining = tasks.filter((task) => !released.taskIds.has(task.taskId));
+                if (remaining.length !== tasks.length) {
+                  events.push({
+                    ...event,
+                    id: yield* idAllocator.allocate.event({ threadId: released.threadId }),
+                    type: "provider-thread.updated",
+                    activate: false,
+                    payload: {
+                      ...providerThread,
+                      pendingBackgroundTasks: remaining,
+                      updatedAt: now,
+                    },
+                  });
+                }
+                if (
+                  !input.replaced &&
+                  providerThread.providerSessionId === input.entry.runtime.providerSessionId
+                ) {
+                  const liveNodes = projection.nodes.filter(
+                    (node) =>
+                      released.nodeIds.has(node.id) &&
+                      ["pending", "running", "waiting"].includes(node.status),
+                  );
+                  const liveIds = new Set(liveNodes.map((node) => node.id));
+                  for (const node of liveNodes)
+                    events.push({
+                      ...event,
+                      id: yield* idAllocator.allocate.event({ threadId: released.threadId }),
+                      type: "node.updated",
+                      payload: { ...node, status: "interrupted", completedAt: now },
+                    });
+                  for (const task of projection.subagents) {
+                    if (
+                      task.origin !== "provider_native" ||
+                      !liveIds.has(task.id) ||
+                      !["pending", "running", "waiting"].includes(task.status)
+                    )
+                      continue;
+                    events.push({
+                      ...event,
+                      id: yield* idAllocator.allocate.event({ threadId: released.threadId }),
+                      type: "subagent.updated",
+                      payload: { ...task, status: "interrupted", completedAt: now, updatedAt: now },
+                    });
+                  }
+                  for (const item of projection.turnItems) {
+                    if (!released.itemIds.has(item.id)) continue;
+                    events.push({
+                      ...event,
+                      id: yield* idAllocator.allocate.event({ threadId: released.threadId }),
+                      type: "turn-item.updated",
+                      payload: { ...item, status: "interrupted", completedAt: now, updatedAt: now },
+                    });
+                  }
+                }
+                if (events.length === 0) return;
+                const { committed } = yield* eventSink.writeIfProviderThreadUnchanged({
+                  expected: providerThread,
+                  events,
+                });
+                if (committed) return;
+              }
+              yield* Effect.logWarning(
+                "orchestration-v2.provider-session-release-roster-conflict",
+                {
+                  providerSessionId: input.entry.runtime.providerSessionId,
+                  providerThreadId: released.providerThreadId,
+                },
+              );
+            }),
+          { discard: true },
+        );
 
       const writeReleasedRuntimeRequestEvents = (input: {
         readonly entry: LiveSessionEntry;
@@ -901,6 +996,7 @@ export const layerWithOptions = (
         readonly reason: ProviderSessionReleaseReason;
         readonly detail?: string;
         readonly releasedAt: DateTime.Utc;
+        readonly releasedBackgroundWork: ReadonlyArray<ReleasedBackgroundWork>;
         readonly replaced: boolean;
       }) =>
         Effect.all(
@@ -910,9 +1006,7 @@ export const layerWithOptions = (
               : Effect.exit(writeReleasedSessionEvents(input)),
             // Restart recovery records the lost work before terminalizing it,
             // so the next provider turn can receive its cancellation notice.
-            input.replaced || input.reason === "server_shutdown"
-              ? Effect.succeed(Exit.void)
-              : Effect.exit(writeReleasedBackgroundEvents(input.entry)),
+            Effect.exit(writeReleasedBackgroundEvents(input)),
             Effect.exit(
               writeReleasedRuntimeRequestEvents(input).pipe(
                 input.entry.requestEventPermit.withPermits(1),
@@ -922,23 +1016,25 @@ export const layerWithOptions = (
           { concurrency: 1 },
         ).pipe(Effect.flatMap(Exit.asVoidAll));
 
+      type ReleaseRecords = Omit<Parameters<typeof writeReleaseRecords>[0], "replaced">;
+      const writeReleaseRecordsCheckingReplacement = Effect.fn(
+        "ProviderSessionManager.writeReleaseRecordsCheckingReplacement",
+      )(function* (input: ReleaseRecords) {
+        const replaced = (yield* Ref.get(sessions)).has(
+          sessionKey(input.entry.runtime.providerSessionId),
+        );
+        yield* writeReleaseRecords({ ...input, replaced });
+      });
+
       // The session already left the live map, so a later release finds
       // nothing to do. Without a retry the UI would keep a ready session and
       // answerable approvals until a server restart. Each attempt holds the
       // session's open lock, so it sees a replacement that opened meanwhile.
-      const retryReleaseRecords = (
-        input: Omit<Parameters<typeof writeReleaseRecords>[0], "replaced">,
-      ) => {
+      const retryReleaseRecords = (input: ReleaseRecords) => {
         const providerSessionId = input.entry.runtime.providerSessionId;
         const attempt = Effect.gen(function* () {
           const exit = yield* Effect.exit(
-            sessionOpen.withLock(
-              providerSessionId,
-              Effect.gen(function* () {
-                const replaced = (yield* Ref.get(sessions)).has(sessionKey(providerSessionId));
-                yield* writeReleaseRecords({ ...input, replaced });
-              }),
-            ),
+            sessionOpen.withLock(providerSessionId, writeReleaseRecordsCheckingReplacement(input)),
           );
           if (Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return yield* exit;
           yield* Effect.logWarning("orchestration-v2.provider-session-release-records-failed", {
@@ -981,9 +1077,16 @@ export const layerWithOptions = (
       // requests come after its own open.
       const removeLiveEntry = (input: {
         readonly providerSessionId: ProviderSessionId;
+        readonly reason: ProviderSessionReleaseReason;
         readonly onlyIfIdleGeneration?: number;
         readonly expectedRuntime?: ProviderAdapterV2SessionRuntime;
-      }): Effect.Effect<readonly [Option.Option<LiveSessionEntry>, DateTime.Utc]> =>
+      }): Effect.Effect<
+        readonly [
+          Option.Option<LiveSessionEntry>,
+          DateTime.Utc,
+          ReadonlyArray<ReleasedBackgroundWork>,
+        ]
+      > =>
         Effect.gen(function* () {
           const key = sessionKey(input.providerSessionId);
           const candidate = (yield* Ref.get(sessions)).get(key);
@@ -991,34 +1094,44 @@ export const layerWithOptions = (
             candidate === undefined ||
             (input.expectedRuntime !== undefined && candidate.runtime !== input.expectedRuntime)
           ) {
-            return [Option.none<LiveSessionEntry>(), yield* DateTime.now] as const;
+            return [Option.none<LiveSessionEntry>(), yield* DateTime.now, []] as const;
           }
-          const removed = yield* Effect.zip(
-            Ref.modify(sessions, (current) => {
-              const existing = current.get(key);
-              if (existing !== candidate) {
-                return [existing === undefined ? "gone" : "changed", current] as const;
-              }
-              if (
-                input.onlyIfIdleGeneration !== undefined &&
-                (existing.busyTurns.size > 0 ||
-                  existing.idleGeneration !== input.onlyIfIdleGeneration)
-              ) {
-                return ["kept", current] as const;
-              }
-              const updated = new Map(current);
-              updated.delete(key);
-              closing.add(existing);
-              return ["removed", updated] as const;
-            }),
-            DateTime.now,
-          ).pipe(candidate.requestEventPermit.withPermits(1));
-          const [outcome, releasedAt] = removed;
+          const removed = yield* Effect.gen(function* () {
+            // Until removal, another open with this id still reuses the old
+            // runtime, so its replacement cannot enter this snapshot.
+            const releasedBackgroundWork = yield* readReleasedBackgroundWork({
+              entry: candidate,
+              reason: input.reason,
+            });
+            const [outcome, releasedAt] = yield* Effect.zip(
+              Ref.modify(sessions, (current) => {
+                const existing = current.get(key);
+                if (existing !== candidate) {
+                  return [existing === undefined ? "gone" : "changed", current] as const;
+                }
+                if (
+                  input.onlyIfIdleGeneration !== undefined &&
+                  (existing.busyTurns.size > 0 ||
+                    existing.idleGeneration !== input.onlyIfIdleGeneration)
+                ) {
+                  return ["kept", current] as const;
+                }
+                const updated = new Map(current);
+                updated.delete(key);
+                closing.add(existing);
+                return ["removed", updated] as const;
+              }),
+              DateTime.now,
+            );
+            return [outcome, releasedAt, releasedBackgroundWork] as const;
+          }).pipe(candidate.requestEventPermit.withPermits(1));
+          const [outcome, releasedAt, releasedBackgroundWork] = removed;
           // Another entry took this id while the permit was held; release it instead.
           if (outcome === "changed") return yield* removeLiveEntry(input);
           return [
             outcome === "removed" ? Option.some(candidate) : Option.none<LiveSessionEntry>(),
             releasedAt,
+            releasedBackgroundWork,
           ] as const;
         });
 
@@ -1071,10 +1184,12 @@ export const layerWithOptions = (
         readonly onlyIfIdleGeneration?: number;
         readonly gracefulSubscribers?: boolean;
         readonly expectedRuntime?: ProviderAdapterV2SessionRuntime;
+        /** Attachment-write failure cleanup already holds this session's open lock. */
+        readonly sessionOpenLockHeld?: true;
       }) =>
         Effect.acquireUseRelease(
           removeLiveEntry(input),
-          ([entry, releasedAt]) =>
+          ([entry, releasedAt, releasedBackgroundWork]) =>
             Option.match(entry, {
               onNone: () => Effect.void,
               onSome: (entry) =>
@@ -1110,9 +1225,15 @@ export const layerWithOptions = (
                     reason: input.reason,
                     ...(input.detail === undefined ? {} : { detail: input.detail }),
                     releasedAt,
+                    releasedBackgroundWork,
                   };
                   const recorded = yield* Effect.exit(
-                    writeReleaseRecords({ ...records, replaced: false }),
+                    input.sessionOpenLockHeld === true
+                      ? writeReleaseRecordsCheckingReplacement(records)
+                      : sessionOpen.withLock(
+                          input.providerSessionId,
+                          writeReleaseRecordsCheckingReplacement(records),
+                        ),
                   );
                   if (Exit.isFailure(recorded)) {
                     yield* retryReleaseRecords(records);
@@ -2328,8 +2449,8 @@ export const layerWithOptions = (
                   // Released on interrupt too: this entry has no event pump or
                   // idle timer yet, so nothing else would ever release it.
                   Effect.onError((cause) =>
-                    releaseEntry(
-                      Cause.hasInterruptsOnly(cause)
+                    releaseEntry({
+                      ...(Cause.hasInterruptsOnly(cause)
                         ? {
                             providerSessionId: input.providerSessionId,
                             reason: "manual_shutdown",
@@ -2339,8 +2460,9 @@ export const layerWithOptions = (
                             providerSessionId: input.providerSessionId,
                             reason: "runtime_error",
                             detail: "Failed to persist the provider-session attachment.",
-                          },
-                    ).pipe(logReleaseFailure(input.providerSessionId)),
+                          }),
+                      sessionOpenLockHeld: true,
+                    }).pipe(logReleaseFailure(input.providerSessionId)),
                   ),
                 );
                 yield* startEventPump(entry);

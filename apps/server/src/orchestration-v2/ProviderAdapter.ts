@@ -523,6 +523,8 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly hasPendingBackgroundWorkForThread?: (
     providerThread: OrchestrationV2ProviderThread,
   ) => Effect.Effect<boolean>;
+  /** Native background tasks end when this runtime closes; omit for a shared external server. */
+  readonly backgroundTasksEndWithProcess?: true;
   /**
    * Capacity for the requested model/options, independent of native thread usage.
    * `cwd` is the thread's working directory, for providers whose project config

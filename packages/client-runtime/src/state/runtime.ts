@@ -11,6 +11,7 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { EnvironmentNotRegisteredError, EnvironmentRegistry } from "../connection/registry.ts";
 import {
   type EnvironmentRpcInput,
+  type EnvironmentRpcSuccess,
   type EnvironmentRpcStreamFailure,
   type EnvironmentRpcStreamValue,
   type EnvironmentStreamCommandRpcTag,
@@ -54,6 +55,8 @@ interface EnvironmentQueryAtomOptions<Input, A, E, R> extends EnvironmentAtomOpt
   readonly refreshIntervalMs?: number;
   /** A local mutation signal that invalidates queries within one environment. */
   readonly refreshSignal?: (environmentId: EnvironmentIdType) => Atom.Atom<unknown>;
+  /** Stops automatic interval and signal refreshes once this value is final. */
+  readonly isFinal?: (value: A) => boolean;
 }
 
 interface EnvironmentSubscriptionAtomOptions<Input, A, E, R> {
@@ -504,7 +507,42 @@ export function followStreamInEnvironment<A, E, R>(
   );
 }
 
-function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
+const refreshOnSignalWhileRead =
+  <V>(signal: Atom.Atom<unknown>, isFinal: (value: V) => boolean) =>
+  <A extends V>(self: Atom.Atom<A>): Atom.Atom<A> => {
+    const readUnder = new WeakMap<AtomRegistry.AtomRegistry, unknown>();
+    return Atom.transform(
+      self,
+      (get) => {
+        const current = get(signal);
+        const changed =
+          readUnder.has(get.registry) && !Object.is(readUnder.get(get.registry), current);
+        readUnder.set(get.registry, current);
+        if (changed && !isFinal(get.once(self))) get.refresh(self);
+        return get(self);
+      },
+      { initialValueTarget: self },
+    );
+  };
+
+const refreshEveryUntilFinal =
+  <V>(intervalMs: number, isFinal: (value: V) => boolean) =>
+  <A extends V>(self: Atom.Atom<A>): Atom.Atom<A> =>
+    Atom.transform(
+      self,
+      (get) => {
+        const value = get(self);
+        if (!isFinal(value)) {
+          // @effect-diagnostics-next-line globalTimers:off - Mirrors Atom.withRefresh outside an Effect runtime.
+          const handle = setTimeout(() => get.refresh(self), intervalMs);
+          get.addFinalizer(() => clearTimeout(handle));
+        }
+        return value;
+      },
+      { initialValueTarget: self },
+    );
+
+export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, ER>,
   options: EnvironmentQueryAtomOptions<Input, A, E, EnvironmentSupervisor | R>,
 ): (target: {
@@ -537,7 +575,9 @@ function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
     const idleTtlMs = options.idleTtlMs ?? 5 * 60_000;
     const queryAtom = runtime
       .atom((get) => {
-        if (options.refreshSignal) get(options.refreshSignal(target.environmentId));
+        if (options.refreshSignal !== undefined && options.isFinal === undefined) {
+          get(options.refreshSignal(target.environmentId));
+        }
         const generation = Option.getOrNull(
           AsyncResult.value(get(rpcGenerationAtom(target.environmentId))),
         );
@@ -556,10 +596,22 @@ function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
         }),
         Atom.setIdleTTL(0),
       );
-    return (
+    const isFinal = (result: AsyncResult.AsyncResult<A, unknown>) =>
+      options.isFinal !== undefined &&
+      AsyncResult.isSuccess(result) &&
+      options.isFinal(result.value);
+    const intervalQuery =
       options.refreshIntervalMs === undefined
         ? queryAtom
-        : queryAtom.pipe(Atom.withRefresh(options.refreshIntervalMs))
+        : options.isFinal === undefined
+          ? queryAtom.pipe(Atom.withRefresh(options.refreshIntervalMs))
+          : queryAtom.pipe(refreshEveryUntilFinal(options.refreshIntervalMs, isFinal));
+    const signal =
+      options.isFinal === undefined ? undefined : options.refreshSignal?.(target.environmentId);
+    return (
+      signal === undefined
+        ? intervalQuery
+        : intervalQuery.pipe(refreshOnSignalWhileRead(signal, isFinal))
     ).pipe(Atom.setIdleTTL(0), Atom.withLabel(`${options.label}:${key}`));
   });
   return (target) => family(environmentRpcKey(target));
@@ -630,6 +682,7 @@ export function createEnvironmentRpcQueryAtomFamily<R, ER, TTag extends Environm
     readonly idleTtlMs?: number;
     readonly refreshIntervalMs?: number;
     readonly refreshSignal?: (environmentId: EnvironmentIdType) => Atom.Atom<unknown>;
+    readonly isFinal?: (value: EnvironmentRpcSuccess<TTag>) => boolean;
   },
 ) {
   return createEnvironmentQueryAtomFamily(runtime, {
@@ -640,6 +693,7 @@ export function createEnvironmentRpcQueryAtomFamily<R, ER, TTag extends Environm
       ? {}
       : { refreshIntervalMs: options.refreshIntervalMs }),
     ...(options.refreshSignal === undefined ? {} : { refreshSignal: options.refreshSignal }),
+    ...(options.isFinal === undefined ? {} : { isFinal: options.isFinal }),
     execute: (input: EnvironmentRpcInput<TTag>) => request(options.tag, input),
   });
 }

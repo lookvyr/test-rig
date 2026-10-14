@@ -3,7 +3,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
 import {
   EnvironmentId,
+  EventId,
   type ModelSelection,
+  NodeId,
   type OrchestrationV2AppThread,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ProviderCapabilities,
@@ -16,6 +18,7 @@ import {
   ProviderSessionId,
   ThreadId,
   ToolsScopeId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -329,10 +332,16 @@ function makeProviderAdapter(
     readonly scopeCloseReached?: Deferred.Deferred<void>;
     readonly beforeUnload?: Effect.Effect<void>;
     readonly afterInterrupt?: Effect.Effect<void>;
+    readonly beforeClose?: Effect.Effect<void>;
+    readonly backgroundTasksEndWithProcess?: boolean;
   } = {},
 ): ProviderAdapterV2Shape {
   const countClose = Effect.addFinalizer(() =>
-    Ref.update(state, (current) => ({ ...current, closeCount: current.closeCount + 1 })),
+    (options.beforeClose ?? Effect.void).pipe(
+      Effect.andThen(
+        Ref.update(state, (current) => ({ ...current, closeCount: current.closeCount + 1 })),
+      ),
+    ),
   );
   const hangClose = Effect.addFinalizer(() =>
     (options.scopeCloseReached === undefined
@@ -392,6 +401,9 @@ function makeProviderAdapter(
           driver: CODEX_DRIVER,
           providerSessionId: input.providerSessionId,
           providerSession: session,
+          ...(options.backgroundTasksEndWithProcess === false
+            ? {}
+            : { backgroundTasksEndWithProcess: true as const }),
           events: options.failEventStream
             ? Stream.fail(
                 new ProviderAdapterEventStreamError({
@@ -446,6 +458,7 @@ function makeProviderAdapter(
 function makeTestLayer(input: {
   readonly state: Ref.Ref<TestProviderRuntimeState>;
   readonly idleTimeoutMs: number;
+  readonly configureMcp?: false;
   readonly maxIdlePinMs?: number;
   readonly failEventStream?: boolean;
   readonly capabilities?: OrchestrationV2ProviderCapabilities;
@@ -456,6 +469,7 @@ function makeTestLayer(input: {
     readonly providerSessionId: ProviderSessionId;
     readonly initialProviderItemIdentityVersion?: 2;
   }) => Effect.Effect<void>;
+  readonly eventSinkLayer?: typeof TestEventSinkLayer;
   readonly failReleaseEventWrites?: boolean;
   readonly flakyReleaseWrites?: FlakyReleaseWrites;
   readonly pauseAttachWrite?: Parameters<typeof layerPausingAttachEventSink>[0];
@@ -471,19 +485,23 @@ function makeTestLayer(input: {
   readonly scopeCloseReached?: Deferred.Deferred<void>;
   readonly beforeUnload?: Effect.Effect<void>;
   readonly afterInterrupt?: Effect.Effect<void>;
+  readonly beforeClose?: Effect.Effect<void>;
+  readonly backgroundTasksEndWithProcess?: boolean;
   readonly serverSettingsLayer?: ReturnType<typeof ServerSettings.layerTest>;
   readonly projectServiceLayer?: Layer.Layer<ProjectService.ProjectService>;
   readonly skillLibraryLayer?: Layer.Layer<SkillLibraryService>;
   readonly toolsProjectScopesLayer?: Layer.Layer<ToolsProjectScopesService>;
 }) {
   const configuredEventSinkLayer =
-    input.flakyReleaseWrites !== undefined
-      ? makeFlakyReleaseEventSinkLayer(input.flakyReleaseWrites)
-      : input.pauseAttachWrite !== undefined
-        ? layerPausingAttachEventSink(input.pauseAttachWrite)
-        : input.failReleaseEventWrites
-          ? FailingReleaseEventSinkLayer
-          : TestEventSinkLayer;
+    input.eventSinkLayer !== undefined
+      ? input.eventSinkLayer
+      : input.flakyReleaseWrites !== undefined
+        ? makeFlakyReleaseEventSinkLayer(input.flakyReleaseWrites)
+        : input.pauseAttachWrite !== undefined
+          ? layerPausingAttachEventSink(input.pauseAttachWrite)
+          : input.failReleaseEventWrites
+            ? FailingReleaseEventSinkLayer
+            : TestEventSinkLayer;
   const registryLayer = ProviderAdapterRegistry.makeSingleLayer(
     makeProviderAdapter(input.state, {
       failEventStream: input.failEventStream ?? false,
@@ -501,6 +519,10 @@ function makeTestLayer(input: {
         : { hangSessionScopeClose: input.hangSessionScopeClose }),
       ...(input.beforeUnload === undefined ? {} : { beforeUnload: input.beforeUnload }),
       ...(input.afterInterrupt === undefined ? {} : { afterInterrupt: input.afterInterrupt }),
+      ...(input.beforeClose === undefined ? {} : { beforeClose: input.beforeClose }),
+      ...(input.backgroundTasksEndWithProcess === undefined
+        ? {}
+        : { backgroundTasksEndWithProcess: input.backgroundTasksEndWithProcess }),
       ...(input.startTurn === undefined ? {} : { startTurn: input.startTurn }),
       ...(input.spawnBeforeOpen === undefined ? {} : { spawnBeforeOpen: input.spawnBeforeOpen }),
       ...(input.scopeCloseReached === undefined
@@ -529,6 +551,7 @@ function makeTestLayer(input: {
     layerConfiguredMcpRegistry,
     ProviderSessionManager.layerWithOptions({
       idleTimeoutMs: input.idleTimeoutMs,
+      ...(input.configureMcp === undefined ? {} : { configureMcp: input.configureMcp }),
       ...(input.maxIdlePinMs === undefined ? {} : { maxIdlePinMs: input.maxIdlePinMs }),
     }).pipe(
       Layer.provide(
@@ -4990,4 +5013,463 @@ it.effect(
         ),
       );
     }),
+);
+
+function seedNativeBackgroundWork(input: {
+  readonly sink: EventSink.EventSinkV2Shape;
+  readonly allocator: IdAllocator.IdAllocatorV2Shape;
+  readonly threadId: ThreadId;
+  readonly providerSessionId: ProviderSessionId;
+  readonly now: DateTime.Utc;
+}) {
+  return Effect.gen(function* () {
+    const providerThread = {
+      ...makeProviderThread({ idAllocator: input.allocator, ...input }),
+      pendingBackgroundTasks: [
+        { taskId: "old-task", description: "Old native work", kind: "subagent" as const },
+      ],
+    };
+    const nodeId = NodeId.make("native-background-node");
+    const node = {
+      id: nodeId,
+      threadId: input.threadId,
+      runId: null,
+      parentNodeId: null,
+      rootNodeId: nodeId,
+      kind: "subagent" as const,
+      status: "running" as const,
+      countsForRun: false,
+      providerThreadId: providerThread.id,
+      providerTurnId: null,
+      nativeItemRef: null,
+      runtimeRequestId: null,
+      checkpointScopeId: null,
+      startedAt: input.now,
+      completedAt: null,
+    };
+    const subagent = {
+      id: nodeId,
+      threadId: input.threadId,
+      runId: null,
+      parentNodeId: nodeId,
+      origin: "provider_native" as const,
+      createdBy: "agent" as const,
+      driver: CODEX_DRIVER,
+      providerInstanceId: modelSelection.instanceId,
+      providerThreadId: providerThread.id,
+      childThreadId: null,
+      nativeTaskRef: null,
+      prompt: "Work in the background",
+      title: null,
+      model: null,
+      status: "running" as const,
+      result: null,
+      startedAt: input.now,
+      completedAt: null,
+      updatedAt: input.now,
+    };
+    const item = {
+      id: TurnItemId.make("native-background-item"),
+      threadId: input.threadId,
+      runId: null,
+      nodeId,
+      providerThreadId: providerThread.id,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      status: "running" as const,
+      title: null,
+      startedAt: input.now,
+      completedAt: null,
+      updatedAt: input.now,
+      type: "command_execution" as const,
+      input: "native command",
+    };
+    const base = { threadId: input.threadId, occurredAt: input.now };
+    yield* input.sink.write({
+      events: [
+        {
+          ...base,
+          id: yield* input.allocator.allocate.event(base),
+          type: "provider-thread.updated",
+          payload: providerThread,
+        },
+        {
+          ...base,
+          id: yield* input.allocator.allocate.event(base),
+          type: "node.updated",
+          payload: node,
+        },
+        {
+          ...base,
+          id: yield* input.allocator.allocate.event(base),
+          type: "subagent.updated",
+          payload: subagent,
+        },
+        {
+          ...base,
+          id: yield* input.allocator.allocate.event(base),
+          type: "turn-item.updated",
+          payload: item,
+        },
+      ],
+    });
+    return { providerThread, node, subagent, item };
+  });
+}
+
+it.effect.each([
+  "manual_shutdown",
+  "runtime_error",
+  "idle_timeout",
+  "detach",
+  "server_shutdown",
+  "shared_server",
+] as const)("ProviderSessionManagerV2 preserves native task lifetime on release (%s)", (mode) =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    yield* Effect.gen(function* () {
+      const sink = yield* EventSink.EventSinkV2;
+      const allocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make(`native-lifetime-${mode}`);
+      const providerSessionId = yield* allocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      yield* sink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator: allocator, threadId, now })],
+      });
+      yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+      yield* seedNativeBackgroundWork({ sink, allocator, threadId, providerSessionId, now });
+      if (mode === "detach") yield* manager.detach({ providerSessionId, threadId });
+      else
+        yield* manager.release({
+          providerSessionId,
+          reason: mode === "shared_server" ? "manual_shutdown" : mode,
+        });
+      const projection = yield* store.getThreadProjection(threadId);
+      const preserved = mode === "server_shutdown" || mode === "shared_server";
+      assert.deepEqual(
+        projection.providerThreads[0]?.pendingBackgroundTasks?.map((task) => task.taskId),
+        preserved ? ["old-task"] : [],
+      );
+      assert.equal(projection.nodes[0]?.status, preserved ? "running" : "interrupted");
+      assert.equal(projection.subagents[0]?.status, preserved ? "running" : "interrupted");
+      assert.equal(projection.turnItems[0]?.status, preserved ? "running" : "interrupted");
+      assert.equal((yield* Ref.get(state)).closeCount, 1);
+    }).pipe(
+      Effect.provide(
+        makeTestLayer({
+          state,
+          idleTimeoutMs: 60_000,
+          capabilities: ExclusiveCapabilities,
+          backgroundTasksEndWithProcess: mode !== "shared_server",
+        }),
+      ),
+    );
+  }),
+);
+
+it.effect(
+  "ProviderSessionManagerV2 retries a roster conflict without erasing newer native work",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      let writes = 0;
+      const racingSink = Layer.effect(
+        EventSink.EventSinkV2,
+        Effect.gen(function* () {
+          const delegate = yield* EventSink.EventSinkV2;
+          return EventSink.EventSinkV2.of({
+            ...delegate,
+            writeIfProviderThreadUnchanged: (input) =>
+              Effect.gen(function* () {
+                writes++;
+                if (writes === 1) {
+                  yield* delegate.write({
+                    events: [
+                      {
+                        id: EventId.make("concurrent-roster"),
+                        type: "provider-thread.updated",
+                        threadId: input.expected.appThreadId!,
+                        occurredAt: input.expected.updatedAt,
+                        payload: {
+                          ...input.expected,
+                          status: "active",
+                          pendingBackgroundTasks: [
+                            ...(input.expected.pendingBackgroundTasks ?? []),
+                            {
+                              taskId: "new-task",
+                              description: "New native work",
+                              kind: "subagent",
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                  });
+                }
+                return yield* delegate.writeIfProviderThreadUnchanged(input);
+              }),
+          });
+        }),
+      ).pipe(Layer.provide(Layer.mergeAll(TestEventSinkLayer, IdAllocator.layer)));
+      yield* Effect.gen(function* () {
+        const sink = yield* EventSink.EventSinkV2;
+        const allocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const store = yield* ProjectionStore.ProjectionStoreV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("native-roster-concurrent-write");
+        const providerSessionId = yield* allocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        yield* sink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator: allocator, threadId, now })],
+        });
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+        yield* seedNativeBackgroundWork({ sink, allocator, threadId, providerSessionId, now });
+        yield* manager.close(providerSessionId);
+        const projection = yield* store.getThreadProjection(threadId);
+        assert.equal(writes, 2);
+        assert.deepEqual(
+          projection.providerThreads[0]?.pendingBackgroundTasks?.map((task) => task.taskId),
+          ["new-task"],
+        );
+        assert.equal(projection.providerThreads[0]?.status, "active");
+        assert.equal(projection.nodes[0]?.status, "interrupted");
+        assert.equal(projection.turnItems[0]?.status, "interrupted");
+      }).pipe(
+        Effect.provide(makeTestLayer({ state, idleTimeoutMs: 60_000, eventSinkLayer: racingSink })),
+      );
+    }),
+);
+
+it.effect(
+  "ProviderSessionManagerV2 removes only the closed process roster after a replacement opens",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const closing = yield* Deferred.make<void>();
+      const finishClose = yield* Deferred.make<void>();
+      const holdClose = yield* Ref.make(true);
+      const beforeClose = Effect.gen(function* () {
+        if (!(yield* Ref.getAndSet(holdClose, false))) return;
+        yield* Deferred.succeed(closing, undefined);
+        yield* Deferred.await(finishClose);
+      });
+      yield* Effect.gen(function* () {
+        const sink = yield* EventSink.EventSinkV2;
+        const allocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const store = yield* ProjectionStore.ProjectionStoreV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("native-roster-replacement");
+        const providerSessionId = yield* allocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        yield* sink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator: allocator, threadId, now })],
+        });
+        yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+        const original = yield* seedNativeBackgroundWork({
+          sink,
+          allocator,
+          threadId,
+          providerSessionId,
+          now,
+        });
+        const close = yield* manager.close(providerSessionId).pipe(Effect.forkChild);
+        yield* Deferred.await(closing);
+        const replacement = yield* manager.open({
+          threadId,
+          providerSessionId,
+          modelSelection,
+          runtimePolicy,
+        });
+        yield* sink.write({
+          events: [
+            {
+              id: yield* allocator.allocate.event({ threadId }),
+              type: "provider-thread.updated",
+              threadId,
+              occurredAt: now,
+              payload: {
+                ...original.providerThread,
+                pendingBackgroundTasks: [
+                  ...original.providerThread.pendingBackgroundTasks,
+                  {
+                    taskId: "replacement-task",
+                    description: "Replacement native work",
+                    kind: "subagent",
+                  },
+                ],
+              },
+            },
+          ],
+        });
+        yield* Deferred.succeed(finishClose, undefined);
+        yield* Fiber.join(close);
+        const projection = yield* store.getThreadProjection(threadId);
+        assert.equal(projection.providerSessions[0]?.status, replacement.providerSession.status);
+        assert.deepEqual(
+          projection.providerThreads[0]?.pendingBackgroundTasks?.map((task) => task.taskId),
+          ["replacement-task"],
+        );
+        assert.equal(projection.nodes[0]?.status, "running");
+        assert.equal(projection.subagents[0]?.status, "running");
+        assert.equal(projection.turnItems[0]?.status, "running");
+      }).pipe(Effect.provide(makeTestLayer({ state, idleTimeoutMs: 60_000, beforeClose })));
+    }),
+);
+
+it.effect("ProviderSessionManagerV2 serializes initial stopped writes with replacement opens", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const stoppedWrite = yield* Deferred.make<void>();
+    const finishStoppedWrite = yield* Deferred.make<void>();
+    const secondOpenEntered = yield* Deferred.make<void>();
+    const armed = yield* Ref.make(true);
+    const pausingSink = Layer.effect(
+      EventSink.EventSinkV2,
+      Effect.gen(function* () {
+        const delegate = yield* EventSink.EventSinkV2;
+        return EventSink.EventSinkV2.of({
+          ...delegate,
+          write: (input) =>
+            Effect.gen(function* () {
+              if (
+                input.events.some(
+                  (event) =>
+                    event.type === "provider-session.updated" && event.payload.status === "stopped",
+                ) &&
+                (yield* Ref.getAndSet(armed, false))
+              ) {
+                yield* Deferred.succeed(stoppedWrite, undefined);
+                yield* Deferred.await(finishStoppedWrite);
+              }
+              return yield* delegate.write(input);
+            }),
+        });
+      }),
+    ).pipe(Layer.provide(TestEventSinkLayer));
+    yield* Effect.gen(function* () {
+      const sink = yield* EventSink.EventSinkV2;
+      const allocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("release-record-open-lock");
+      const providerSessionId = yield* allocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      const open = manager.open({
+        threadId,
+        providerSessionId,
+        modelSelection,
+        runtimePolicy: { ...runtimePolicy, cwd: null },
+      });
+      yield* sink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator: allocator, threadId, now })],
+      });
+      yield* open;
+      const close = yield* manager.close(providerSessionId).pipe(Effect.forkChild);
+      yield* Deferred.await(stoppedWrite);
+      // No filesystem or MCP setup precedes the adapter in this fixture.
+      // Immediate start parks at the held open lock before starting a replacement.
+      const opening = yield* open.pipe(Effect.forkChild({ startImmediately: true }));
+      const enteredBeforeCommit = yield* Deferred.isDone(secondOpenEntered);
+      const openCountBeforeCommit = (yield* Ref.get(state)).openCount;
+      yield* Deferred.succeed(finishStoppedWrite, undefined);
+      yield* Fiber.join(close);
+      const replacement = yield* Fiber.join(opening);
+      assert.isFalse(enteredBeforeCommit);
+      assert.equal(openCountBeforeCommit, 1);
+      assert.isTrue(yield* Deferred.isDone(secondOpenEntered));
+      assert.equal((yield* Ref.get(state)).openCount, 2);
+      assert.equal(
+        (yield* store.getThreadProjection(threadId)).providerSessions[0]?.status,
+        replacement.providerSession.status,
+      );
+    }).pipe(
+      Effect.provide(
+        makeTestLayer({
+          state,
+          idleTimeoutMs: 60_000,
+          configureMcp: false,
+          eventSinkLayer: pausingSink,
+          beforeOpen: () =>
+            Ref.get(state).pipe(
+              Effect.flatMap((current) =>
+                current.openCount === 0
+                  ? Effect.void
+                  : Deferred.succeed(secondOpenEntered, undefined).pipe(Effect.asVoid),
+              ),
+            ),
+        }),
+      ),
+    );
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 cleans up a failed attachment write inside the open lock", () =>
+  Effect.gen(function* () {
+    const state = yield* Ref.make(emptyState);
+    const failAttach = yield* Ref.make(true);
+    const failingSink = Layer.effect(
+      EventSink.EventSinkV2,
+      Effect.gen(function* () {
+        const delegate = yield* EventSink.EventSinkV2;
+        return EventSink.EventSinkV2.of({
+          ...delegate,
+          write: (input) =>
+            Effect.gen(function* () {
+              if (
+                input.events.some((event) => event.type === "provider-session.attached") &&
+                (yield* Ref.getAndSet(failAttach, false))
+              ) {
+                return yield* new EventSink.EventSinkWriteError({
+                  eventCount: input.events.length,
+                });
+              }
+              return yield* delegate.write(input);
+            }),
+        });
+      }),
+    ).pipe(Layer.provide(TestEventSinkLayer));
+    yield* Effect.gen(function* () {
+      const sink = yield* EventSink.EventSinkV2;
+      const allocator = yield* IdAllocator.IdAllocatorV2;
+      const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("failed-attachment-open-lock");
+      const providerSessionId = yield* allocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId,
+      });
+      yield* sink.write({
+        events: [yield* makeThreadCreatedEvent({ idAllocator: allocator, threadId, now })],
+      });
+      const open = manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(open)));
+      assert.equal((yield* Ref.get(state)).closeCount, 1);
+      assert.isTrue(Option.isNone(yield* manager.get(providerSessionId)));
+      const replacement = yield* open;
+      assert.equal((yield* Ref.get(state)).openCount, 2);
+      assert.equal(
+        (yield* store.getThreadProjection(threadId)).providerSessions[0]?.status,
+        replacement.providerSession.status,
+      );
+    }).pipe(
+      Effect.provide(makeTestLayer({ state, idleTimeoutMs: 60_000, eventSinkLayer: failingSink })),
+    );
+  }),
 );

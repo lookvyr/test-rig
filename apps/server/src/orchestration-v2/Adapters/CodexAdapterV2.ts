@@ -1228,8 +1228,13 @@ export class CodexAppServerClientFactory extends Context.Service<
  * Config overrides sent with every `thread/start`, `thread/resume` and `thread/fork`.
  * Codex 0.152 made the `update_plan` checklist tool opt-in; T3 renders it as the
  * todo list. Codex layers these above the user's and project's `config.toml`.
+ * The MCP startup grace gives cold servers up to 10 seconds to expose their tools
+ * before the first model request, rather than Codex's one-second default.
  */
-export const CODEX_THREAD_CONFIG = { "tools.update_plan.enabled": true } as const;
+export const CODEX_THREAD_CONFIG = {
+  "tools.update_plan.enabled": true,
+  mcp_optional_startup_grace_ms: 10_000,
+} as const;
 
 export function codexThreadRuntimeParams(input: {
   readonly threadId: ThreadId | null;
@@ -5621,6 +5626,7 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
           providerSessionId: input.providerSessionId,
           providerSession: session,
           events: Stream.fromEffectRepeat(Queue.take(events)),
+          backgroundTasksEndWithProcess: true,
           canReuseContextUsage: canReuseCodexContextUsage,
           // Known gap: a subagent that Codex resumes later reads as completed
           // (not pending) between turns, so idle release can win the race

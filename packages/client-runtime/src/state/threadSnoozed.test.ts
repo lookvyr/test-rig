@@ -182,16 +182,21 @@ describe("canSnooze", () => {
     ).toBe(false);
   });
 
-  it("refuses explicitly queued work independently of message age", () => {
-    const base = makeShell({ turnCompletedAt: NOW });
-    const queued = {
-      ...base,
-      latestRun: { ...base.latestRun!, status: "queued" as const },
-      latestUserMessageAt: SNOOZED_AT,
-    };
-    expect(canSnooze(queued, { now: NOW })).toBe(false);
-    expect(canSnooze({ ...base, latestUserMessageAt: NOW }, { now: NOW })).toBe(true);
-  });
+  it.each(["queued", "preparing", "starting"] as const)(
+    "defers %s work to the server while still blocking pending user requests",
+    (status) => {
+      const base = makeShell({ turnCompletedAt: NOW });
+      const queued = {
+        ...base,
+        latestRun: { ...base.latestRun!, status },
+        runtime: { status },
+        latestUserMessageAt: SNOOZED_AT,
+      };
+      expect(canSnooze(queued, { now: NOW })).toBe(true);
+      expect(canSnooze({ ...queued, hasPendingApprovals: true }, { now: NOW })).toBe(false);
+      expect(canSnooze({ ...queued, hasPendingUserInput: true }, { now: NOW })).toBe(false);
+    },
+  );
 });
 
 describe("threadWokeAt", () => {

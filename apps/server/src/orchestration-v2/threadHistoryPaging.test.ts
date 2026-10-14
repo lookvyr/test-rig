@@ -1,6 +1,7 @@
 import {
   MessageId,
   NodeId,
+  PlanId,
   RunId,
   ThreadId,
   TurnItemId,
@@ -21,6 +22,7 @@ import {
   projectedRowEncodedBytes,
   selectHistoryPageFromCursor,
   selectRecentTimelineWindow,
+  threadHistoryTurnStarts,
   THREAD_HISTORY_CURSOR_MAX_LENGTH,
   THREAD_HISTORY_PAGE_POLICY,
 } from "./threadHistoryPaging.ts";
@@ -32,10 +34,7 @@ const THREAD = ThreadId.make("thread-1");
 const RUN = RunId.make("run-interrupt-1");
 const NODE = NodeId.make("node-interrupt-1");
 
-function makeRow(
-  index: number,
-  options?: { readonly outputBytes?: number },
-): OrchestrationV2ProjectedTurnItem {
+function makeRow(index: number, options?: { readonly outputBytes?: number }) {
   const id = TurnItemId.make(`item-${index}`);
   const output =
     options?.outputBytes !== undefined ? "x".repeat(options.outputBytes) : `output-${index}`;
@@ -64,7 +63,7 @@ function makeRow(
       completedAt: NOW,
       updatedAt: NOW,
     },
-  };
+  } satisfies OrchestrationV2ProjectedTurnItem;
 }
 
 function interruptItem(
@@ -206,6 +205,83 @@ describe("threadHistoryPaging", () => {
     expect(older.hasMoreHistory).toBe(false);
     expect([...older.items, ...first.items].map((row) => row.sourceItemId)).toEqual(
       items.map((row) => row.sourceItemId),
+    );
+  });
+
+  it("counts notification-started runs toward the 150-turn ceiling and preserves older pages", () => {
+    const notification = (index: number) => {
+      const row = makeRow(index);
+      return {
+        ...row,
+        item: {
+          ...row.item,
+          type: "notification",
+          source: { kind: index % 2 === 0 ? "monitor" : "background_task" },
+          outcome: "completed",
+          summary: `Wake ${index}`,
+        },
+      } satisfies OrchestrationV2ProjectedTurnItem;
+    };
+    const items = Array.from({ length: 161 }, (_, run) => {
+      const start = notification(run * 4 + 1);
+      const input: OrchestrationV2ProjectedTurnItem =
+        run === 0
+          ? {
+              ...start,
+              item: {
+                ...start.item,
+                type: "user_message",
+                createdBy: "user",
+                creationSource: "web",
+                inputIntent: "turn_start",
+                messageId: MessageId.make("prompt-0"),
+                text: "Watch the pull request",
+                attachments: [],
+              },
+            }
+          : start;
+      // Handoffs can precede the first input. A second notification steers the
+      // same run rather than starting another turn.
+      return [makeRow(run * 4), input, notification(run * 4 + 2), makeRow(run * 4 + 3)].map(
+        (row) => ({ ...row, item: { ...row.item, runId: RunId.make(`run-${run}`) } }),
+      );
+    }).flat();
+    const first = selectRecentTimelineWindow({ items, snapshotSequence: 1 });
+    expect(first.items).toHaveLength(150 * 4 - 1);
+    expect(first.items[0]?.sourceItemId).toBe("item-45");
+    const older = selectHistoryPageFromCursor({
+      items,
+      cursor: first.nextCursor!,
+      snapshotSequence: 1,
+    });
+    expect(older.hasMoreHistory).toBe(false);
+    expect([...older.items, ...first.items].map((row) => row.sourceItemId)).toEqual(
+      items.map((row) => row.sourceItemId),
+    );
+  });
+
+  it("does not treat notifications without a run or after a user steer as turn starts", () => {
+    const row = makeRow(0);
+    const notification: OrchestrationV2TurnItem = {
+      ...row.item,
+      type: "notification",
+      source: { kind: "monitor" },
+      outcome: "completed",
+      summary: "Pull request updated",
+    };
+    const steer: OrchestrationV2TurnItem = {
+      ...row.item,
+      type: "user_message",
+      runId: RUN,
+      createdBy: "user",
+      creationSource: "web",
+      messageId: MessageId.make("steer"),
+      inputIntent: "steer",
+      text: "Keep watching",
+      attachments: [],
+    };
+    expect(threadHistoryTurnStarts([notification, steer, { ...notification, runId: RUN }])).toEqual(
+      [false, false, false],
     );
   });
 
@@ -712,10 +788,10 @@ describe("threadHistoryPaging", () => {
     const item = {
       ...makeRow(0).item,
       type: "proposed_plan",
-      planId: "plan-historical-visible",
+      planId: PlanId.make("plan-historical-visible"),
       markdown: detail,
       streaming: false,
-    } as OrchestrationV2TurnItem;
+    } satisfies OrchestrationV2TurnItem;
     const row = {
       ...makeRow(0),
       sourceItemId: item.id,

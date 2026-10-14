@@ -2654,11 +2654,28 @@ export const make = Effect.gen(function* () {
       ref.repository.toLowerCase(),
       ref.number,
     ]);
-  const refEpoch = (ref: PullRequestRef) =>
+  const mergedEpochs = new Map<string, number>();
+  const mergedScope = (ref: CredentialRef) =>
+    JSON.stringify([
+      refScope(ref),
+      ref.expectedAccountId ?? null,
+      ref[credentialNamespace] ?? null,
+    ]);
+  const refEpoch = (ref: CredentialRef) =>
     Math.max(
-      projectEpochs.get(ref.projectId) ?? projectEpochFloor,
+      mergedEpochs.get(mergedScope(ref)) ?? projectEpochs.get(ref.projectId) ?? projectEpochFloor,
       refEpochs.get(refScope(ref)) ?? 0,
     );
+  // Turns no longer invalidate a merged PR. Explicit refreshes and mutations still bump its epoch.
+  const noteMerged = (ref: CredentialRef) => {
+    const scope = mergedScope(ref);
+    if (mergedEpochs.has(scope)) return;
+    if (mergedEpochs.size >= REF_EPOCH_CAPACITY) {
+      const oldest = mergedEpochs.keys().next().value;
+      if (oldest !== undefined) mergedEpochs.delete(oldest);
+    }
+    mergedEpochs.set(scope, projectEpochs.get(ref.projectId) ?? projectEpochFloor);
+  };
   // Keys carry the reference back out of the cache loader, so the slot layout is shared with
   // `refOfCacheKey` rather than read positionally at every loader.
   const refCacheKey = (ref: CredentialRef) =>
@@ -2799,9 +2816,12 @@ export const make = Effect.gen(function* () {
       (options?.recoverTransientFailure !== false || held.state === "merged")
       ? Effect.succeed(held)
       : cached.pipe(
-          Effect.tap((value) =>
-            shouldReplaceHeldSummary(key, value) ? lastGoodSummary.record(key, value) : Effect.void,
-          ),
+          Effect.tap((value) => {
+            if (value.state === "merged") noteMerged(input);
+            return shouldReplaceHeldSummary(key, value)
+              ? lastGoodSummary.record(key, value)
+              : Effect.void;
+          }),
         );
   };
 
@@ -3005,6 +3025,7 @@ export const make = Effect.gen(function* () {
     // regression and never ask the host again.
     const read = Cache.get(detailCache, key).pipe(
       Effect.tap((value) => {
+        if (value.state === "merged") noteMerged(input);
         const summary = summaryFromDetail(value, lastGoodSummary.peek(key));
         return shouldReplaceHeldSummary(key, summary)
           ? lastGoodSummary.record(key, summary)

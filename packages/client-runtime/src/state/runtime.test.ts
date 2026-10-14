@@ -7,12 +7,19 @@ import * as Fiber from "effect/Fiber";
 import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { vi } from "vite-plus/test";
+
+import { AVAILABLE_CONNECTION_STATE, type SupervisorConnectionState } from "../connection/model.ts";
+import { EnvironmentRegistry } from "../connection/registry.ts";
+import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 
 import {
   environmentRpcKey,
   createAtomCommandScheduler,
   createRuntimeCommand,
+  createEnvironmentQueryAtomFamily,
   scheduleAtomCommandEffect,
   executeAtomCommand,
   executeAtomQuery,
@@ -23,6 +30,115 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "./runtime.ts";
+
+const makeEnvironmentQueryHarness = Effect.fn("makeEnvironmentQueryHarness")(function* <A, E>(
+  execute: Effect.Effect<A, E>,
+  options: {
+    readonly refreshSignal?: Atom.Atom<unknown>;
+    readonly refreshIntervalMs?: number;
+    readonly isFinal?: (value: A) => boolean;
+  } = {},
+) {
+  const supervisor = {
+    state: yield* SubscriptionRef.make<SupervisorConnectionState>({
+      ...AVAILABLE_CONNECTION_STATE,
+      phase: "connected",
+      generation: 1,
+    }),
+  } as EnvironmentSupervisor["Service"];
+  const run: EnvironmentRegistry["Service"]["run"] = (_environmentId, effect) =>
+    Effect.provideService(effect, EnvironmentSupervisor, supervisor);
+  const followStream: EnvironmentRegistry["Service"]["followStream"] = (_environmentId, stream) =>
+    Stream.provideService(stream, EnvironmentSupervisor, supervisor);
+  const runtime = Atom.runtime(
+    Layer.succeed(EnvironmentRegistry, { run, followStream } as EnvironmentRegistry["Service"]),
+  );
+  const atom = createEnvironmentQueryAtomFamily(runtime, {
+    label: "test:environment-query",
+    execute: () => execute,
+    ...(options.refreshSignal === undefined ? {} : { refreshSignal: () => options.refreshSignal! }),
+    ...(options.refreshIntervalMs === undefined
+      ? {}
+      : { refreshIntervalMs: options.refreshIntervalMs }),
+    ...(options.isFinal === undefined ? {} : { isFinal: options.isFinal }),
+  })({ environmentId: EnvironmentId.make("environment-1"), input: {} });
+  const registry = yield* Effect.acquireRelease(Effect.sync(AtomRegistry.make), (registry) =>
+    Effect.sync(() => registry.dispose()),
+  );
+  registry.mount(atom);
+  return {
+    registry,
+    atom,
+    read: AtomRegistry.getResult(registry, atom, { suspendOnWaiting: true }),
+  };
+});
+
+describe("final environment query values", () => {
+  it.effect("stops signal rereads once final and keeps manual refresh forceful", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let executions = 0;
+        const signal = Atom.make(0).pipe(Atom.keepAlive);
+        const { registry, atom, read } = yield* makeEnvironmentQueryHarness(
+          Effect.sync(() => ++executions),
+          { refreshSignal: signal, isFinal: (value) => value >= 2 },
+        );
+        expect(yield* read).toBe(1);
+        registry.set(signal, 1);
+        expect(yield* read).toBe(2);
+        registry.set(signal, 2);
+        expect(yield* read).toBe(2);
+        expect(executions).toBe(2);
+        registry.refresh(atom);
+        expect(yield* read).toBe(3);
+        expect(executions).toBe(3);
+      }),
+    ),
+  );
+
+  it.effect("stops interval rereads once final", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        yield* Effect.addFinalizer(() => Effect.sync(() => vi.useRealTimers()));
+        let executions = 0;
+        const { read } = yield* makeEnvironmentQueryHarness(
+          Effect.sync(() => ++executions),
+          {
+            refreshIntervalMs: 1_000,
+            isFinal: (value) => value >= 2,
+          },
+        );
+        expect(yield* read).toBe(1);
+        vi.advanceTimersByTime(1_000);
+        expect(yield* read).toBe(2);
+        vi.advanceTimersByTime(10_000);
+        expect(yield* read).toBe(2);
+        expect(executions).toBe(2);
+      }),
+    ),
+  );
+
+  it.effect("retries a failed refresh instead of treating its previous final value as final", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let executions = 0;
+        const signal = Atom.make(0).pipe(Atom.keepAlive);
+        const { registry, atom, read } = yield* makeEnvironmentQueryHarness(
+          Effect.suspend(() =>
+            ++executions === 2 ? Effect.fail("retry me") : Effect.succeed(executions),
+          ),
+          { refreshSignal: signal, isFinal: () => true },
+        );
+        expect(yield* read).toBe(1);
+        registry.refresh(atom);
+        expect(yield* Effect.flip(read)).toBe("retry me");
+        registry.set(signal, 1);
+        expect(yield* read).toBe(3);
+      }),
+    ),
+  );
+});
 
 describe("settleAsyncResult", () => {
   it("preserves successful values and typed failures", async () => {
