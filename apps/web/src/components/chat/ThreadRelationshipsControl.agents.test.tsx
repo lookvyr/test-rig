@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   projection: null as unknown,
+  readDetail: vi.fn(),
   navigate: vi.fn(),
   shells: [] as unknown[],
   projects: [] as unknown[],
@@ -16,7 +17,10 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => state.navigate }));
 vi.mock("../../state/entities", () => ({
-  useThreadDetail: () => ({ projection: state.projection }),
+  useThreadDetail: (ref: unknown) => {
+    state.readDetail(ref);
+    return ref === null ? null : { projection: state.projection };
+  },
   useThreadShells: () => state.shells,
   useProjects: () => state.projects,
   useServerConfigs: () => state.configs,
@@ -45,6 +49,24 @@ afterEach(async () => {
   state.showTooltips = false;
   state.command.mockClear();
   state.projection = null;
+  state.readDetail.mockClear();
+});
+
+it("does not request draft history and starts loading after promotion", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const threadRef = {
+    environmentId: EnvironmentId.make("test"),
+    threadId: ThreadId.make("draft-thread"),
+  };
+  await act(async () => {
+    renderer = create(<ThreadRelationshipsPanel {...threadRef} isDraft />);
+  });
+  expect(state.readDetail).toHaveBeenLastCalledWith(null);
+
+  await act(async () => {
+    renderer.update(<ThreadRelationshipsPanel {...threadRef} isDraft={false} />);
+  });
+  expect(state.readDetail).toHaveBeenLastCalledWith(threadRef);
 });
 
 it.each(

@@ -6462,6 +6462,7 @@ function ChatViewContent(props: ChatViewProps) {
         <ThreadRelationshipsPanel
           environmentId={activeThreadRef.environmentId}
           threadId={activeThreadRef.threadId}
+          isDraft={isLocalDraftThread}
         />
       ) : null
     ) : activeRightPanelSurface?.kind === "file" && activeRightPanelSurface.attachment ? (

@@ -192,13 +192,15 @@ export function liveSubagent<Agent extends RuntimeSubagent>(
 export function ThreadRelationshipsPanel(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly isDraft?: boolean;
   readonly hideWhenEmpty?: boolean;
   readonly mode?: "lineage" | "subagents";
 }) {
   const compact = props.mode === "subagents";
   const headingId = useId();
   const ref = scopeThreadRef(props.environmentId, props.threadId);
-  const projection = useThreadDetail(ref)?.projection ?? null;
+  // Draft ids do not exist on the server yet; a 404 would cache them as deleted.
+  const projection = useThreadDetail(props.isDraft ? null : ref)?.projection ?? null;
   const providers = useServerConfigs().get(props.environmentId)?.providers;
   const subagentsByThreadId = useMemo(
     () =>

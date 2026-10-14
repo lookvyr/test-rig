@@ -498,7 +498,7 @@ export function SideChatPanel(props: {
           </Menu>
         </div>
       </div>
-      {showAgents ? (
+      {showAgents && thread ? (
         <div className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border/50">
           <ThreadRelationshipsPanel
             environmentId={threadRef.environmentId}
