@@ -94,3 +94,48 @@ The web pass exercises the shared server behavior and desktop renderer. Packaged
 Electron and real Claude/OpenCode background notifications were not exercised.
 Provider wake payloads were fixtures; real provider-memory buffering and a forced
 process crash were not part of this acceptance pass.
+
+## Follow-on: running setup terminals (#18740)
+
+Adapted [#18740](https://github.com/pingdotgg/t3code/pull/18740) to the V2 sidebar.
+Its running-terminal indicator now opens the existing session and activates its
+conversation. Both full and compact rows use the same button. Drawer splits and
+right-panel splits keep their layout and select the requested terminal. The
+command palette's trailing status remains informational inside its selectable
+thread row.
+
+The drawer toggle (toolbar and `terminal.toggle` keybinding) reuses an existing
+server session when its client state is empty, preferring a running process and
+excluding terminals owned by the right panel. It only allocates a shell when no
+drawer-owned server session is known. The existing POSIX `t3.json` setup hook
+passes `--yes` through Vite+ to pnpm and closes only the installer's stdin. Its
+environment link and dependency-cache warmup remain in place; no additional
+setup runner was introduced.
+
+Verification:
+
+- 69 focused tests across five suites passed: terminal reveal, drawer state,
+  right-panel state, drawer helpers, and client-runtime terminal metadata. They
+  cover server-created sessions, hidden drawer/right-panel splits, and identical
+  thread IDs in separate environments.
+- Web typecheck, formatting, and whitespace checks passed. Scoped lint's 73
+  warnings exactly match the same files at the previous commit.
+- In the retained isolated web app, the primary agent imported a disposable
+  project's setup action, launched worktrees, and opened the real setup PTY from
+  the V2 indicator. An initially empty drawer reused `setup-waiting-setup` with
+  the same PID (64907) and created no additional PTY. Hide/reopen retained the
+  session. After splitting the drawer, the indicator restored both panes and
+  focused the setup pane. Closing that pane stopped its pending setup process;
+  terminal metadata confirmed no fixture subprocess remained running.
+- An offline install fixture completed with `vp i -- --yes` and stdin closed,
+  including a node-linker layout change. The installed pnpm version accepted the
+  forwarded flag. This fixture did not reproduce the original confirmation hang.
+- Independent review found no required changes or worthwhile simplification.
+  An 18-second browser screencast demonstrates indicator activation, session
+  reuse, split preservation, and closing the setup pane.
+
+Web automation did not deliver Ctrl+C to the Ghostty terminal, so cancellation
+was verified with the pane's close control. Packaged Electron, remote browser
+connections, and other operating systems were not runtime-tested. These changes
+use the shared renderer and provider-neutral terminal APIs; provider adapters,
+server contracts, and shell input encoding are unchanged.

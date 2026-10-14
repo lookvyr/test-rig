@@ -77,6 +77,7 @@ import {
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { JumpHintBadge } from "./JumpHintBadge";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { revealThreadTerminal } from "../lib/revealThreadTerminal";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isMacPlatform } from "~/lib/utils";
@@ -864,14 +865,23 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
       </button>
     ) : null;
   const terminalStatusIcon = terminalStatus ? (
-    <span
-      role="img"
-      aria-label={terminalProcessLabel(terminalProcessCount)}
+    <button
+      type="button"
+      aria-label={`${terminalProcessLabel(terminalProcessCount)}. Open terminal`}
       data-testid={`sidebar-v2-terminal-status-${thread.id}`}
-      className={cn("inline-flex shrink-0 items-center justify-center", terminalStatus.colorClass)}
+      className={cn(
+        "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-sm outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        terminalStatus.colorClass,
+      )}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        revealThreadTerminal(threadRef, runningTerminalIds[0]!);
+        onThreadActivate(threadRef);
+      }}
     >
       <TerminalIcon className={cn("size-3.5", terminalStatus.pulse && "animate-status-pulse")} />
-    </span>
+    </button>
   ) : null;
 
   if (variant === "slim") {
