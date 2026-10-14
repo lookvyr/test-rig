@@ -83,6 +83,7 @@ export interface ThreadLaunchInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
+  readonly runSetupScript?: boolean | undefined;
   readonly initialMessage?: ThreadLaunchInitialMessage | undefined;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -444,78 +445,79 @@ const make = Effect.gen(function* () {
         );
       }
 
-      const cwd = worktreePath ?? project.workspaceRoot;
-      if (runId !== null) {
-        yield* threads
-          .dispatch({
-            type: "prepared-run.progress",
-            commandId: CommandId.make(`${input.commandId}:progress:setup`),
-            threadId,
-            runId,
-            phase: "setup",
-          })
-          .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
-      }
-      yield* setupTracker.stageStatus(threadId, "setup-script", "running");
-      const setup = yield* setupScripts
-        .runForThread({
-          threadId,
-          projectId: input.projectId,
-          projectCwd: project.workspaceRoot,
-          worktreePath: cwd,
-          observeCompletion: tracked
-            ? {
-                onOutputLine: (line: string) =>
-                  setupTracker.appendTail(threadId, "setup-script", line),
-              }
-            : {},
-          project: {
-            id: project.id,
-            workspaceRoot: project.workspaceRoot,
-            scripts: project.scripts,
-          },
-        })
-        .pipe(Effect.mapError(mapError(input, "run-setup-script", threadId)));
-
       let awaitAsyncSetup = Effect.void;
-      if (setup.status === "started") {
-        setupTerminalId = setup.terminalId;
-        yield* setupTracker.update(threadId, (snapshot) => ({
-          ...snapshot,
-          setupScript: {
-            name: setup.scriptName,
-            command: setup.scriptCommand,
-            terminalId: setup.terminalId,
-          },
-        }));
-        if (setup.completion) {
-          const awaitCompletion = Effect.gen(function* () {
-            const completion = yield* setup.completion!;
-            yield* setupTracker.stage(threadId, "setup-script", {
-              status: completion.exitCode === 0 ? "done" : "failed",
-              detail: `exited with ${completion.exitCode ?? "no exit code"}`,
+      if (tracked && input.runSetupScript !== false) {
+        if (runId !== null) {
+          yield* threads
+            .dispatch({
+              type: "prepared-run.progress",
+              commandId: CommandId.make(`${input.commandId}:progress:setup`),
+              threadId,
+              runId,
+              phase: "setup",
+            })
+            .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
+        }
+        yield* setupTracker.stageStatus(threadId, "setup-script", "running");
+        const setup = yield* setupScripts
+          .runForThread({
+            threadId,
+            projectId: input.projectId,
+            projectCwd: project.workspaceRoot,
+            worktreePath: worktreePath!,
+            observeCompletion: {
+              onOutputLine: (line: string) =>
+                setupTracker.appendTail(threadId, "setup-script", line),
+            },
+            project: {
+              id: project.id,
+              workspaceRoot: project.workspaceRoot,
+              scripts: project.scripts,
+            },
+          })
+          .pipe(Effect.mapError(mapError(input, "run-setup-script", threadId)));
+
+        if (setup.status === "started") {
+          setupTerminalId = setup.terminalId;
+          yield* setupTracker.update(threadId, (snapshot) => ({
+            ...snapshot,
+            setupScript: {
+              name: setup.scriptName,
+              command: setup.scriptCommand,
+              terminalId: setup.terminalId,
+            },
+          }));
+          if (setup.completion) {
+            const awaitCompletion = Effect.gen(function* () {
+              const completion = yield* setup.completion!;
+              yield* setupTracker.stage(threadId, "setup-script", {
+                status: completion.exitCode === 0 ? "done" : "failed",
+                detail: `exited with ${completion.exitCode ?? "no exit code"}`,
+              });
+              if (completion.exitCode !== 0 && !setup.async)
+                return yield* mapError(
+                  input,
+                  "run-setup-script",
+                  threadId,
+                )(`Setup script exited with ${completion.exitCode ?? "no exit code"}.`);
             });
-            if (completion.exitCode !== 0 && !setup.async)
-              return yield* mapError(
-                input,
-                "run-setup-script",
-                threadId,
-              )(`Setup script exited with ${completion.exitCode ?? "no exit code"}.`);
-          });
-          if (setup.async) {
-            awaitAsyncSetup = awaitCompletion.pipe(
-              Effect.catchCause((cause) =>
-                setupTracker.stage(threadId, "setup-script", {
-                  status: "failed",
-                  detail: failureDetail(Cause.squash(cause)),
-                }),
-              ),
-            );
+            if (setup.async) {
+              awaitAsyncSetup = awaitCompletion.pipe(
+                Effect.catchCause((cause) =>
+                  setupTracker.stage(threadId, "setup-script", {
+                    status: "failed",
+                    detail: failureDetail(Cause.squash(cause)),
+                  }),
+                ),
+              );
+            } else {
+              yield* awaitCompletion;
+            }
           } else {
-            yield* awaitCompletion;
+            yield* setupTracker.stageStatus(threadId, "setup-script", "done");
           }
         } else {
-          yield* setupTracker.stageStatus(threadId, "setup-script", "done");
+          yield* setupTracker.stageStatus(threadId, "setup-script", "skipped");
         }
       } else {
         yield* setupTracker.stageStatus(threadId, "setup-script", "skipped");

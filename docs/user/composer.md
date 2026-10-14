@@ -94,12 +94,12 @@ can send or discard them.
 
 ## Agent-prepared project launches
 
-When an agent starts a project conversation, Test Rig prepares its selected
-checkout before starting the new agent. A synchronous setup script must succeed
-first, including when using the project root or an existing worktree. Setup
-failure leaves the conversation with its original message and an error; it
-does not start the agent in another checkout. Scripts explicitly configured
-to run asynchronously may continue after the agent starts.
+When an agent starts a project conversation in a new worktree, Test Rig runs
+the project's automatic setup action before starting the new agent. A synchronous
+setup action must succeed first. Setup failure leaves the conversation with its
+original message and an error. Actions configured to run asynchronously may
+continue after the agent starts. Launching in the project checkout or an existing
+worktree does not run the automatic worktree setup action.
 
 Deleting a project removes its conversations from the app and keeps the
 repository files.

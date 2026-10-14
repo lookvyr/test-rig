@@ -307,6 +307,70 @@ function waitUntil<E, R>(predicate: () => Effect.Effect<boolean, E, R>): Effect.
 }
 
 it.effect.each(
+  (["root", "existing_worktree", "worktree"] as const).flatMap((workspaceType) =>
+    [undefined, true, false].map((runSetupScript) => ({ workspaceType, runSetupScript })),
+  ),
+)(
+  "limits automatic setup to new worktrees ($workspaceType, runSetupScript=$runSetupScript)",
+  ({ workspaceType, runSetupScript }) => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const input = {
+        ...launchInput({
+          command: "command:launch:automatic-setup",
+          thread: "thread:launch:automatic-setup",
+          message: "Start in the selected checkout",
+          workspace:
+            workspaceType === "worktree"
+              ? { type: "worktree", baseRef: "main", branch: "explicit-name" }
+              : workspaceType === "existing_worktree"
+                ? { type: "existing_worktree", worktreePath: "/existing-worktree" }
+                : { type: "root" },
+        }),
+        ...(runSetupScript === undefined ? {} : { runSetupScript }),
+      };
+      const launched = yield* launches.launch(input);
+      yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+        Stream.filter(
+          (stored) =>
+            stored.commandId === CommandId.make(`${input.commandId}:release`) &&
+            stored.event.type === "run.updated",
+        ),
+        Stream.runHead,
+      );
+      const shouldRunSetup = workspaceType === "worktree" && runSetupScript !== false;
+      assert.equal(harness.runSetup.mock.calls.length, shouldRunSetup ? 1 : 0);
+      assert.equal(harness.createWorktree.mock.calls.length, workspaceType === "worktree" ? 1 : 0);
+      if (shouldRunSetup) {
+        assert.equal(harness.runSetup.mock.calls[0]?.[0]?.worktreePath, "/repo-worktrees/feature");
+      }
+      const projection = yield* threads.getThreadProjection(launched.threadId);
+      assert.equal(projection.runs[0]?.status, "starting");
+      assert.equal(
+        projection.thread.worktreePath,
+        workspaceType === "worktree"
+          ? "/repo-worktrees/feature"
+          : workspaceType === "existing_worktree"
+            ? "/existing-worktree"
+            : null,
+      );
+      assert.lengthOf(
+        yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)),
+        1,
+      );
+      if (workspaceType === "worktree" && runSetupScript === false) {
+        const setup = yield* tracker.get(launched.threadId);
+        assert.equal(setup?.stages.find((stage) => stage.id === "setup-script")?.status, "skipped");
+      }
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
+it.effect.each(
   (["new", "existing"] as const).flatMap((target) =>
     (["user", "agent"] as const).map((createdBy) => ({ target, createdBy })),
   ),
@@ -375,6 +439,7 @@ it.effect("retains automation and sender attribution while a message waits in th
         command: "command:automation:queue",
         thread: "thread:automation:queue",
         message: "First message",
+        workspace: { type: "worktree", baseRef: "main" },
       }),
     );
     const scheduledTaskId = ScheduledTaskId.make("scheduled-task:queued");
@@ -492,6 +557,7 @@ it.effect("provisions independent launches concurrently instead of behind a glob
               command: "command:launch:concurrent-a",
               thread: "thread:launch:concurrent-a",
               message: "First",
+              workspace: { type: "worktree", baseRef: "main" },
             }),
           ),
           launches.launch(
@@ -499,6 +565,7 @@ it.effect("provisions independent launches concurrently instead of behind a glob
               command: "command:launch:concurrent-b",
               thread: "thread:launch:concurrent-b",
               message: "Second",
+              workspace: { type: "worktree", baseRef: "main" },
             }),
           ),
         ],
@@ -1084,8 +1151,15 @@ it.effect("runs a Scratch thread launched at the root in its own folder", () =>
       const launched = yield* launches.launch(input);
       assert.deepEqual(claimed, [{ threadId: launched.threadId, text: "Convert these PNGs" }]);
       assert.equal(launched.projection.thread.worktreePath, "/scratch/folder-1");
-      yield* waitUntil(() => Effect.sync(() => harness.runSetup.mock.calls.length === 1));
-      assert.equal(harness.runSetup.mock.calls[0]?.[0]?.worktreePath, "/scratch/folder-1");
+      yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+        Stream.filter(
+          (stored) =>
+            stored.commandId === CommandId.make(`${input.commandId}:release`) &&
+            stored.event.type === "run.updated",
+        ),
+        Stream.runHead,
+      );
+      assert.equal(harness.runSetup.mock.calls.length, 0);
       assert.equal(harness.createWorktree.mock.calls.length, 0);
 
       // A retry replays the first attempt and claims no second folder.
@@ -1650,6 +1724,7 @@ it.effect("replays a server-allocated launch", () =>
         command: "command:launch:allocated-retry",
         thread: "unused",
         message: "Only once",
+        workspace: { type: "worktree", baseRef: "main" },
       });
       const first = yield* launches.launch(rest);
       yield* Deferred.await(setupEntered);
@@ -1812,6 +1887,7 @@ it.effect("bounds concurrent first launches to one thread per command", () =>
         command: "command:launch:concurrent-allocated",
         thread: "unused",
         message: "Race me",
+        workspace: { type: "worktree", baseRef: "main" },
       });
       // The command receipt is reserved atomically with the winning create, so
       // a loser either replays the winner's stored events or surfaces a
@@ -1868,6 +1944,7 @@ it.effect("deduplicates retried launch side effects in-process", () =>
         command: "command:launch:retry",
         thread: "thread:launch:retry",
         message: "Only once",
+        workspace: { type: "worktree", baseRef: "main" },
       });
       const [first, retry] = yield* Effect.all([launches.launch(input), launches.launch(input)], {
         concurrency: "unbounded",
@@ -1904,6 +1981,7 @@ it.effect("does not let a failing same-command caller strand a concurrent durabl
                 command,
                 thread: "thread:launch:failed-owner-race",
                 message: "This invalid reuse fails",
+                workspace: { type: "worktree", baseRef: "main" },
               }),
               reuseExistingThread: true,
             })
@@ -1913,6 +1991,7 @@ it.effect("does not let a failing same-command caller strand a concurrent durabl
               command,
               thread: "thread:launch:successful-peer",
               message: "This peer persists",
+              workspace: { type: "worktree", baseRef: "main" },
             }),
           ),
         ],
@@ -1948,6 +2027,7 @@ it.effect("schedules an accepted preparing message exactly once across concurren
         command: "command:launch:accepted-before-fork",
         thread: "thread:launch:accepted-before-fork",
         message: "Resume preparation",
+        workspace: { type: "worktree", baseRef: "main" },
       });
       const messageId = MessageId.make("message:launch:accepted-before-fork");
 
@@ -2395,91 +2475,70 @@ it.effect.each([0, 1])("releases an async setup before its completion with exit 
   }),
 );
 
-it.effect.each(["worktree", "existing_worktree", "root"] as const)(
-  "a synchronous setup failure in %s never releases provider execution",
-  (workspaceType) =>
-    Effect.gen(function* () {
-      const setupEntered = yield* Deferred.make<void>();
-      const completeSetup = yield* Deferred.make<{ exitCode: number | null; durationMs: number }>();
-      const harness = makeHarness({
-        runSetup: (input) =>
-          Deferred.succeed(setupEntered, undefined).pipe(
-            Effect.as({
-              status: "started" as const,
-              async: false,
-              scriptId: "setup",
-              scriptName: "Setup",
-              scriptCommand: "prepare-project",
-              terminalId: "setup",
-              cwd: input.worktreePath,
-              // Match the real runner: callers must request completion to see failures.
-              ...(input.observeCompletion ? { completion: Deferred.await(completeSetup) } : {}),
-            }),
-          ),
+it.effect("a synchronous setup failure in a new worktree never releases provider execution", () =>
+  Effect.gen(function* () {
+    const setupEntered = yield* Deferred.make<void>();
+    const completeSetup = yield* Deferred.make<{ exitCode: number | null; durationMs: number }>();
+    const harness = makeHarness({
+      runSetup: (input) =>
+        Deferred.succeed(setupEntered, undefined).pipe(
+          Effect.as({
+            status: "started" as const,
+            async: false,
+            scriptId: "setup",
+            scriptName: "Setup",
+            scriptCommand: "prepare-project",
+            terminalId: "setup",
+            cwd: input.worktreePath,
+            // Match the real runner: callers must request completion to see failures.
+            ...(input.observeCompletion ? { completion: Deferred.await(completeSetup) } : {}),
+          }),
+        ),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const input = launchInput({
+        command: "command:launch:sync-setup-failure",
+        thread: "thread:launch:sync-setup-failure",
+        message: "Start only after setup succeeds",
+        workspace: { type: "worktree", baseRef: "main", branch: "explicit-name" },
       });
-      yield* Effect.gen(function* () {
-        const launches = yield* ThreadLaunch.ThreadLaunchService;
-        const threads = yield* ThreadManagement.ThreadManagementService;
-        const outbox = yield* EffectOutbox.EffectOutboxV2;
-        const input = launchInput({
-          command: `command:launch:sync-setup-failure:${workspaceType}`,
-          thread: `thread:launch:sync-setup-failure:${workspaceType}`,
-          message: "Start only after setup succeeds",
-          workspace:
-            workspaceType === "worktree"
-              ? { type: "worktree", baseRef: "main", branch: "explicit-name" }
-              : workspaceType === "existing_worktree"
-                ? {
-                    type: "existing_worktree",
-                    worktreePath: "/existing-worktree",
-                    branch: "existing",
-                  }
-                : { type: "root" },
-        });
-        const launched = yield* launches.launch(input);
-        yield* Deferred.await(setupEntered);
-        const setupInput = harness.runSetup.mock.calls[0]?.[0];
-        assert.isDefined(setupInput?.observeCompletion);
-        assert.equal(
-          setupInput?.worktreePath,
-          workspaceType === "worktree"
-            ? "/repo-worktrees/feature"
-            : workspaceType === "existing_worktree"
-              ? "/existing-worktree"
-              : "/repo",
-        );
-        assert.equal(
-          (yield* threads.getThreadProjection(launched.threadId)).runs[0]?.status,
-          "preparing",
-        );
-        assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
-        yield* Deferred.succeed(completeSetup, { exitCode: 17, durationMs: 1 });
-        yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
-          Stream.filter(
-            (stored) =>
-              stored.event.type === "run.updated" && stored.event.payload.status === "failed",
-          ),
-          Stream.runHead,
-        );
-        const failed = yield* threads.getThreadProjection(launched.threadId);
-        assert.equal(failed.runs[0]?.status, "failed");
-        assert.equal(failed.messages[0]?.text, input.initialMessage?.text);
-        assert.include(
-          failed.turnItems.find((item) => item.type === "error")?.failure.message ?? "",
-          "Setup script exited with 17",
-        );
-        assert.isEmpty(
-          yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:initial-message`)),
-        );
-        assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
-        assert.isEmpty(failed.providerSessions);
-        assert.isEmpty(failed.providerTurns);
-        assert.equal(
-          failed.thread.worktreePath,
-          workspaceType === "root" ? null : setupInput?.worktreePath,
-        );
-      }).pipe(Effect.provide(harness.layer));
-    }),
+      const launched = yield* launches.launch(input);
+      yield* Deferred.await(setupEntered);
+      const setupInput = harness.runSetup.mock.calls[0]?.[0];
+      assert.isDefined(setupInput?.observeCompletion);
+      assert.equal(setupInput?.worktreePath, "/repo-worktrees/feature");
+      assert.equal(
+        (yield* threads.getThreadProjection(launched.threadId)).runs[0]?.status,
+        "preparing",
+      );
+      assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
+      yield* Deferred.succeed(completeSetup, { exitCode: 17, durationMs: 1 });
+      yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+        Stream.filter(
+          (stored) =>
+            stored.event.type === "run.updated" && stored.event.payload.status === "failed",
+        ),
+        Stream.runHead,
+      );
+      const failed = yield* threads.getThreadProjection(launched.threadId);
+      assert.equal(failed.runs[0]?.status, "failed");
+      assert.equal(failed.messages[0]?.text, input.initialMessage?.text);
+      assert.include(
+        failed.turnItems.find((item) => item.type === "error")?.failure.message ?? "",
+        "Setup script exited with 17",
+      );
+      assert.isEmpty(
+        yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:initial-message`)),
+      );
+      assert.isEmpty(yield* outbox.listByCommandId(CommandId.make(`${input.commandId}:release`)));
+      assert.isEmpty(failed.providerSessions);
+      assert.isEmpty(failed.providerTurns);
+      assert.equal(failed.thread.worktreePath, "/repo-worktrees/feature");
+    }).pipe(Effect.provide(harness.layer));
+  }),
 );
 
 it.effect("uses project semantic naming without adding a temporary or global prefix", () =>

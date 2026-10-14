@@ -171,6 +171,9 @@ When **Start from origin** is enabled for a new worktree, Test Rig fetches origi
 ## Worktree setup progress
 
 When a new worktree is prepared, the conversation shows its setup progress.
+The action marked **Run automatically on worktree creation** runs in that new
+worktree. Starting a chat in the project checkout or an existing worktree does
+not run this action.
 Expand **Details** to inspect the stages and output. If a setup action fails,
 the failed outcome remains visible; **Open terminal** opens its terminal when
 one is available. An asynchronous setup action can continue while the agent
