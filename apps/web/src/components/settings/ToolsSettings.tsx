@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import { resolveToolsScopeMcpServers } from "@t3tools/shared/projectSettings";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import { AtomRegistry } from "effect/unstable/reactivity";
@@ -109,7 +110,11 @@ export function ToolsSettings() {
   const projectIds = [
     ...new Set(
       physicalProjects
-        .filter((project) => project.environmentId === id)
+        .filter(
+          (project) =>
+            project.environmentId === id &&
+            !isScratchProject(project, environment?.serverConfig?.scratchWorkspaceRoot),
+        )
         .map((project) => project.id),
     ),
   ].sort();

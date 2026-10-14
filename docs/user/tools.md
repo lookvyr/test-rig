@@ -1,8 +1,9 @@
 # Tools and skills
 
 Open **Settings → Tools** to manage MCP servers and your Test Rig skill library.
-Choose an environment and either **All projects** or a specific project. Tools
-belong to that environment, including when you connect from another device.
+Choose an environment and either **All projects** or a specific project. The
+project choices exclude **No project**. Tools belong to that environment,
+including when you connect from another device.
 
 A repository has one Tools entry across its linked worktrees. Availability applies
 to its current and future worktrees, even if you added a worktree separately.
