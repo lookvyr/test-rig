@@ -4091,6 +4091,122 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       ),
   );
 
+  for (const scenario of [
+    { name: "empty completion", status: "completed", finalText: "", streaming: false },
+    {
+      name: "authoritative completion",
+      status: "completed",
+      finalText: "Final plan",
+      streaming: false,
+    },
+    { name: "turn completion", status: "completed", finalText: undefined, streaming: false },
+    { name: "interruption", status: "interrupted", finalText: undefined, streaming: true },
+    { name: "failure", status: "failed", finalText: undefined, streaming: true },
+  ] as const) {
+    it.effect(`coalesces proposed plan deltas and preserves ${scenario.name}`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const nativeThreadId = `plan-${scenario.name}-thread`;
+          const nativeTurnId = `plan-${scenario.name}-turn`;
+          const prompt = "Plan the change.";
+          const deltas = Array.from({ length: 100 }, (_, index) => `step ${index}\n`);
+          const transcript = makeCodexReplayTranscript({
+            scenario: `plan-${scenario.name}`,
+            entries: [
+              ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt }),
+              ...deltas.map((delta): CodexReplay.CodexAppServerReplayEntry => ({
+                type: "emit_inbound",
+                frame: {
+                  method: "item/plan/delta",
+                  params: { threadId: nativeThreadId, turnId: nativeTurnId, itemId: "plan", delta },
+                },
+              })),
+              {
+                type: "emit_inbound",
+                frame: {
+                  method: "item/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turnId: nativeTurnId,
+                    item: {
+                      type: "commandExecution",
+                      id: "later-command",
+                      command: "pwd",
+                      cwd: "/repo",
+                      processId: null,
+                      commandActions: [],
+                      status: "completed",
+                      aggregatedOutput: "/repo",
+                      exitCode: 0,
+                      durationMs: 1,
+                    },
+                  },
+                },
+              },
+              ...(scenario.finalText === undefined
+                ? []
+                : [
+                    {
+                      type: "emit_inbound" as const,
+                      frame: {
+                        method: "item/completed",
+                        params: {
+                          threadId: nativeThreadId,
+                          turnId: nativeTurnId,
+                          item: { type: "plan", id: "plan", text: scenario.finalText },
+                        },
+                      },
+                    },
+                  ]),
+              {
+                type: "emit_inbound",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({ id: nativeTurnId, status: scenario.status }),
+                  },
+                },
+              },
+            ],
+          });
+          const harness = yield* makeCodexReplayHarness(transcript);
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make(`attempt-plan-${scenario.name}`),
+              text: prompt,
+            }),
+          );
+          yield* harness.firstTerminal;
+          const plans = harness.events.flatMap((event) =>
+            event.type === "plan.updated" && event.plan.kind === "proposed_plan"
+              ? [event.plan]
+              : [],
+          );
+          const items = harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" && event.turnItem.type === "proposed_plan"
+              ? [event.turnItem]
+              : [],
+          );
+          assert.lengthOf(plans, 1);
+          assert.lengthOf(items, 1);
+          const command = harness.events.find(
+            (event) =>
+              event.type === "turn_item.updated" && event.turnItem.type === "command_execution",
+          );
+          assert(command?.type === "turn_item.updated");
+          assert.isBelow(items[0]!.ordinal, command.turnItem.ordinal);
+          assert.equal(plans[0]?.markdown, scenario.finalText || deltas.join(""));
+          assert.equal(items[0]?.streaming, scenario.streaming);
+          assert.equal(items[0]?.status, scenario.streaming ? "running" : "completed");
+        }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      ),
+    );
+  }
+
   const finalAnswerTranscript = (
     scenario: string,
     answers: ReadonlyArray<{
@@ -7364,6 +7480,94 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       childTurnCompleted(RESUME_CHILD_TURN_2),
     ],
   });
+
+  for (const childStatus of ["completed", "interrupted"] as const) {
+    it.effect(`keeps parent and ${childStatus} child plans separate`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const entries = resumeSubagentTranscript.entries
+            .slice(
+              0,
+              resumeSubagentTranscript.entries.findIndex(
+                (entry) =>
+                  entry.type === "emit_inbound" &&
+                  entry.label === `turn/started/${RESUME_CHILD_TURN_2}`,
+              ),
+            )
+            .flatMap((entry): Array<CodexReplay.CodexAppServerReplayEntry> => {
+              if (
+                entry.type === "emit_inbound" &&
+                entry.label === `turn/started/${RESUME_CHILD_TURN_1}`
+              ) {
+                return [
+                  entry,
+                  ...(
+                    [
+                      [RESUME_NATIVE_THREAD, RESUME_NATIVE_TURN, "Parent plan"],
+                      [RESUME_CHILD_THREAD, RESUME_CHILD_TURN_1, "Child plan"],
+                    ] as const
+                  ).map(([threadId, turnId, delta]) => ({
+                    type: "emit_inbound" as const,
+                    frame: {
+                      method: "item/plan/delta",
+                      params: { threadId, turnId, itemId: "shared-plan-id", delta },
+                    },
+                  })),
+                ];
+              }
+              if (
+                entry.type === "emit_inbound" &&
+                entry.label === `turn/completed/${RESUME_CHILD_TURN_1}`
+              ) {
+                return [
+                  {
+                    type: "emit_inbound",
+                    frame: {
+                      method: "turn/completed",
+                      params: {
+                        threadId: RESUME_CHILD_THREAD,
+                        turn: makeCodexReplayTurn({ id: RESUME_CHILD_TURN_1, status: childStatus }),
+                      },
+                    },
+                  },
+                ];
+              }
+              return entry.type === "emit_inbound" ? [{ ...entry, afterMs: 0 }] : [entry];
+            });
+          const harness = yield* makeCodexReplayHarness(
+            makeCodexReplayTranscript({
+              scenario: `nested-plans-${childStatus}`,
+              entries,
+            }),
+          );
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make(`nested-plans-${childStatus}`),
+              text: RESUME_PROMPT,
+            }),
+          );
+          yield* harness.firstTerminal;
+          const plans = harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" && event.turnItem.type === "proposed_plan"
+              ? [event.turnItem]
+              : [],
+          );
+          assert.lengthOf(plans, 2);
+          const parent = plans.find((plan) => plan.threadId === harness.threadId);
+          const child = plans.find(
+            (plan) => plan.threadId === harness.subagentUpdates()[0]?.subagent.childThreadId,
+          );
+          assert.equal(parent?.markdown, "Parent plan");
+          assert.equal(parent?.streaming, false);
+          assert.equal(child?.markdown, "Child plan");
+          assert.equal(child?.streaming, childStatus === "interrupted");
+        }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      ),
+    );
+  }
 
   it.effect.each([
     { name: "current Codex Sol", model: "gpt-6-sol" },

@@ -2069,6 +2069,80 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("remote operations", () => {
+    for (const refName of [undefined, "main"]) {
+      for (const scenario of [
+        {
+          name: "reference lock",
+          stderr: "error: cannot lock ref 'refs/remotes/origin/main': is at abc but expected def",
+          recovers: true,
+          attempts: 2,
+        },
+        {
+          name: "lock file",
+          stderr: "fatal: Unable to create '/repo/.git/FETCH_HEAD.lock': File exists.",
+          recovers: true,
+          attempts: 2,
+        },
+        {
+          name: "Git 2.53 reference race",
+          stderr:
+            "error: fetching ref refs/remotes/origin/main failed: incorrect old value provided",
+          recovers: true,
+          attempts: 2,
+        },
+        {
+          name: "Git 2.53 held lock",
+          stderr: "error: fetching ref refs/remotes/origin/main failed: reference already exists",
+          recovers: true,
+          attempts: 2,
+        },
+        {
+          name: "persistent lock",
+          stderr: "error: cannot lock ref 'refs/remotes/origin/main'",
+          recovers: false,
+          attempts: 2,
+        },
+        {
+          name: "missing repository",
+          stderr: "fatal: repository not found",
+          recovers: false,
+          attempts: 1,
+        },
+      ]) {
+        it.effect(`bounds ${refName ?? "all refs"} fetch attempts for ${scenario.name}`, () =>
+          Effect.gen(function* () {
+            const attempts = yield* Ref.make(0);
+            const spawner = ChildProcessSpawner.make((command) =>
+              Effect.gen(function* () {
+                if (!ChildProcess.isStandardCommand(command) || command.args[0] !== "fetch")
+                  return makeNonRepositoryHandle();
+                const attempt = yield* Ref.updateAndGet(attempts, (count) => count + 1);
+                return scenario.recovers && attempt > 1
+                  ? makeSuccessfulHandle("")
+                  : ChildProcessSpawner.makeHandle({
+                      ...makeNonRepositoryHandle(),
+                      exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+                      stderr: Stream.encodeText(Stream.make(scenario.stderr)),
+                    });
+              }),
+            );
+            const driver = yield* makeGitVcsDriverCore().pipe(
+              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+              Effect.provide(ServerConfigLayer),
+            );
+            const fetch = driver.fetchRemote({
+              cwd: yield* makeTmpDir(),
+              remoteName: "origin",
+              ...(refName === undefined ? {} : { refName }),
+            });
+            if (scenario.recovers) yield* fetch;
+            else assert.equal((yield* fetch.pipe(Effect.flip))._tag, "GitCommandError");
+            assert.equal(yield* Ref.get(attempts), scenario.attempts);
+          }),
+        );
+      }
+    }
+
     it.effect("ensureRemote reuses an existing remote across ssh/https transport variants", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
@@ -2250,6 +2324,94 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
   });
 
   describe("remote operations", () => {
+    it.effect.each(["commit", "short-commit", "tag", "revision"] as const)(
+      "creates a worktree from a %s without recording it as a PR base",
+      (kind) =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          yield* initRepoWithCommit(cwd);
+          const commit = yield* git(cwd, ["rev-parse", "HEAD"]);
+          yield* git(cwd, ["tag", "v1"]);
+          const baseRef =
+            kind === "commit"
+              ? commit
+              : kind === "short-commit"
+                ? commit.slice(0, 12)
+                : kind === "tag"
+                  ? "v1"
+                  : "HEAD~0";
+          const path = yield* Path.Path;
+          const worktreePath = path.join(yield* makeTmpDir("git-worktrees-"), "revision");
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          yield* driver.createWorktree({
+            cwd,
+            path: worktreePath,
+            refName: baseRef,
+            newRefName: "feature/revision",
+            baseRefName: baseRef,
+          });
+
+          assert.equal(yield* git(worktreePath, ["rev-parse", "HEAD"]), commit);
+          assert.equal(
+            yield* driver.readConfigValue(cwd, "branch.feature/revision.gh-merge-base"),
+            null,
+          );
+        }),
+    );
+
+    it.effect.each(["release/v2", "refs/heads/release/v2", "deadbeef"])(
+      "records the branch name when creating a worktree from %s",
+      (baseRef) =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          yield* initRepoWithCommit(cwd);
+          const baseBranch = baseRef.replace(/^refs\/heads\//, "");
+          yield* git(cwd, ["branch", baseBranch]);
+          const path = yield* Path.Path;
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          yield* driver.createWorktree({
+            cwd,
+            path: path.join(yield* makeTmpDir("git-worktrees-"), "branch"),
+            refName: baseRef,
+            newRefName: "feature/branch",
+            baseRefName: baseRef,
+          });
+
+          assert.equal(
+            yield* driver.readConfigValue(cwd, "branch.feature/branch.gh-merge-base"),
+            baseBranch,
+          );
+        }),
+    );
+
+    it.effect.each(["release/v2", "origin/release/v2", "refs/remotes/origin/release/v2"])(
+      "records a remote-only PR base when creating a worktree from %s",
+      (baseRef) =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          yield* initRepoWithCommit(cwd);
+          const remote = yield* makeTmpDir("git-remote-");
+          yield* git(remote, ["init", "--bare"]);
+          yield* git(cwd, ["remote", "add", "origin", remote]);
+          yield* git(cwd, ["push", "origin", "HEAD:refs/heads/release/v2"]);
+          const commit = yield* git(cwd, ["rev-parse", "origin/release/v2"]);
+          const path = yield* Path.Path;
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          yield* driver.createWorktree({
+            cwd,
+            path: path.join(yield* makeTmpDir("git-worktrees-"), "remote"),
+            refName: commit,
+            newRefName: "feature/remote",
+            baseRefName: baseRef,
+          });
+
+          assert.equal(
+            yield* driver.readConfigValue(cwd, "branch.feature/remote.gh-merge-base"),
+            "release/v2",
+          );
+        }),
+    );
+
     it.effect("creates a worktree from the latest fetched remote commit", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

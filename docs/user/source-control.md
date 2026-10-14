@@ -70,6 +70,12 @@ Existing `NODE_EXTRA_CA_CERTS` configuration is also preserved. Certificate and
 hostname validation remain enabled. Git and provider CLIs use their own network
 configuration; this setting applies to requests made by Test Rig itself.
 
+## Pull request base branches
+
+Pull requests target a branch, even when their worktree started at a commit, tag,
+or other revision. Test Rig keeps a valid configured target branch; otherwise it
+uses the normal target-branch selection.
+
 ## Generated writing defaults
 
 Generating a commit message keeps your existing staged and unstaged selections intact. The general Git commit workflow stages its selected changes when the commit runs. A failed or cancelled message-generation step leaves staging unchanged, including partially staged files.

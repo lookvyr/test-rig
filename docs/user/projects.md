@@ -18,3 +18,6 @@ Worktree removal checks for uncommitted tracked changes and nonignored untracked
 files, even if your Git settings hide untracked files from status. Files covered
 by Git ignore rules, such as ignored dependencies and build output, do not block
 removal.
+
+If a worktree launch encounters a concurrent Git reference update, Test Rig retries
+the fetch once automatically.
