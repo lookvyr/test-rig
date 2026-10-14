@@ -342,6 +342,7 @@ const nextZoomLevel = (current: number, direction: "in" | "out"): number => {
 };
 
 type Listener = (tabId: string, state: PreviewTabState) => Effect.Effect<void>;
+type WindowOpenListener = (tabId: string, url: string) => Effect.Effect<void>;
 type RecordingFrameListener = (frame: DesktopPreviewRecordingFrame) => Effect.Effect<void>;
 
 interface ManagedListeners {
@@ -449,6 +450,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const tabsRef = yield* SynchronizedRef.make<ReadonlyMap<string, PreviewTabState>>(new Map());
   const attachedRef = yield* Ref.make<ReadonlyMap<number, ManagedListeners>>(new Map());
   const listenersRef = yield* Ref.make<ReadonlySet<Listener>>(new Set());
+  const windowOpenListenersRef = yield* Ref.make<ReadonlySet<WindowOpenListener>>(new Set());
   const pointerEventListenersRef = yield* Ref.make<ReadonlySet<PointerEventListener>>(new Set());
   const recordingFrameListenersRef = yield* Ref.make<ReadonlySet<RecordingFrameListener>>(
     new Set(),
@@ -561,7 +563,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   });
 
   const deliverEvent = (
-    eventKind: "state-change" | "recording-frame" | "pointer-event",
+    eventKind: "state-change" | "recording-frame" | "pointer-event" | "window-open",
     tabId: string,
     delivery: () => Effect.Effect<void>,
   ) =>
@@ -1342,9 +1344,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.on("did-fail-load", failed as never);
         wc.setWindowOpenHandler(({ url }) => {
           runFork(
-            attemptPromise({ operation: "openPreviewWindow", tabId, webContentsId: wc.id }, () =>
-              wc.loadURL(url),
-            ).pipe(Effect.ignore),
+            Ref.get(windowOpenListenersRef).pipe(
+              Effect.flatMap((listeners) =>
+                Effect.forEach(
+                  listeners,
+                  (listener) => deliverEvent("window-open", tabId, () => listener(tabId, url)),
+                  { discard: true },
+                ),
+              ),
+            ),
           );
           return { action: "deny" };
         });
@@ -3256,6 +3264,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     yield* Effect.all(
       [
         Ref.set(listenersRef, new Set()),
+        Ref.set(windowOpenListenersRef, new Set()),
         Ref.set(pointerEventListenersRef, new Set()),
         Ref.set(recordingFrameListenersRef, new Set()),
       ],
@@ -3304,6 +3313,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     subscribeRecordingFrames: (listener: RecordingFrameListener) =>
       subscribe(recordingFrameListenersRef, listener),
     subscribeStateChanges: (listener: Listener) => subscribe(listenersRef, listener),
+    subscribeWindowOpen: (listener: WindowOpenListener) =>
+      subscribe(windowOpenListenersRef, listener),
     zoomIn: (tabId: string) => applyZoom(tabId, (current) => nextZoomLevel(current, "in")),
     zoomOut: (tabId: string) => applyZoom(tabId, (current) => nextZoomLevel(current, "out")),
   };
@@ -3648,6 +3659,9 @@ export class PreviewManager extends Context.Service<
       input: PreviewAutomationWaitForInput,
     ) => Effect.Effect<void, PreviewManagerError>;
     readonly subscribeStateChanges: (listener: Listener) => Effect.Effect<void, never, Scope.Scope>;
+    readonly subscribeWindowOpen: (
+      listener: WindowOpenListener,
+    ) => Effect.Effect<void, never, Scope.Scope>;
     readonly subscribePointerEvents: (
       listener: PointerEventListener,
     ) => Effect.Effect<void, never, Scope.Scope>;
@@ -3739,6 +3753,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     automationEvaluate: operations.automationEvaluate,
     automationWaitFor: operations.automationWaitFor,
     subscribeStateChanges: operations.subscribeStateChanges,
+    subscribeWindowOpen: operations.subscribeWindowOpen,
     subscribePointerEvents: operations.subscribePointerEvents,
     subscribeRecordingFrames: operations.subscribeRecordingFrames,
   });

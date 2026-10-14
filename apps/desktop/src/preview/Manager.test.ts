@@ -309,6 +309,44 @@ describe("PreviewManager", () => {
     webviewSend.mockClear();
   });
 
+  effectIt.effect("forwards popup URLs without navigating the opener", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const requested = yield* Deferred.make<{ tabId: string; url: string }>();
+        const wc = makeTestPreviewWebContents(async () => ({
+          toJPEG: () => Buffer.from("image"),
+          getSize: () => ({ width: 100, height: 100 }),
+        })) as Electron.WebContents;
+        const loadURL = vi.fn(async () => undefined);
+        Object.assign(wc, { loadURL });
+        fromId.mockReturnValue(wc as never);
+        yield* manager.createTab("opener");
+        yield* manager.registerWebview("opener", wc.id);
+        yield* manager.subscribeWindowOpen((tabId, url) =>
+          Deferred.succeed(requested, { tabId, url }).pipe(Effect.asVoid),
+        );
+        const handler = vi.mocked(wc.setWindowOpenHandler).mock.calls[0]![0];
+        expect(
+          handler({
+            url: "https://example.com/new-tab",
+            frameName: "_blank",
+            features: "",
+            disposition: "foreground-tab",
+            referrer: { url: "https://example.com", policy: "default" },
+          }),
+        ).toEqual({ action: "deny" });
+        expect(yield* Deferred.await(requested)).toEqual({
+          tabId: "opener",
+          url: "https://example.com/new-tab",
+        });
+        expect(loadURL).not.toHaveBeenCalled();
+        expect(yield* manager.automationStatus("opener")).toMatchObject({
+          url: "https://example.com",
+        });
+      }),
+    ),
+  );
+
   effectIt.effect("reports an unregistered webview as temporarily unavailable", () =>
     withManager((manager) =>
       Effect.gen(function* () {

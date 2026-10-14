@@ -76,8 +76,8 @@ control to the Files tree using its existing model and native directory handles.
 
 [#10670](https://github.com/pingdotgg/t3code/pull/10670) shares the desktop native
 context menu with embedded browser tabs and targets the clicked contents and
-frame. Test Rig keeps its existing same-tab handling of popup links, so this port
-does not add separate popup-window handling.
+frame. A later Test Rig change routes desktop popup links into new integrated
+browser tabs; the original context-menu port did not include that behavior.
 
 [#10501](https://github.com/pingdotgg/t3code/pull/10501) adapts browser snapshots
 for agent use. MCP text and structured metadata share a 60 KB encoded JSON cap,

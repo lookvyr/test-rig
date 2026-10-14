@@ -73,4 +73,5 @@ export const PREVIEW_RECORDING_STOP_CHANNEL = "desktop:preview-recording-stop";
 export const PREVIEW_RECORDING_SAVE_CHANNEL = "desktop:preview-recording-save";
 export const PREVIEW_RECORDING_FRAME_CHANNEL = "desktop:preview-recording-frame";
 export const PREVIEW_STATE_CHANGE_CHANNEL = "desktop:preview-state-change";
+export const PREVIEW_WINDOW_OPEN_CHANNEL = "desktop:preview-window-open";
 export const PREVIEW_POINTER_EVENT_CHANNEL = "desktop:preview-pointer-event";

@@ -35,6 +35,9 @@ interface ElectronWebview extends HTMLElement {
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<unknown>;
 }
 
+// Electron reads this before the guest attaches; React needs a string HTML attribute.
+const WEBVIEW_POPUP_ATTRIBUTES: Record<string, string> = { allowpopups: "true" };
+
 declare global {
   interface HTMLElementTagNameMap {
     webview: ElectronWebview;
@@ -94,7 +97,6 @@ export function HostedBrowserWebview(props: {
 
   const setWebviewRef = useCallback((node: HTMLElement | null) => {
     webviewRef.current = node as ElectronWebview | null;
-    if (node && !node.hasAttribute("allowpopups")) node.setAttribute("allowpopups", "true");
   }, []);
 
   useEffect(() => {
@@ -260,6 +262,7 @@ export function HostedBrowserWebview(props: {
           />
         ) : null}
         <webview
+          {...WEBVIEW_POPUP_ATTRIBUTES}
           key={webviewGeneration}
           ref={setWebviewRef}
           src={webviewGeneration === 0 ? initialSrc : recoverySrc}

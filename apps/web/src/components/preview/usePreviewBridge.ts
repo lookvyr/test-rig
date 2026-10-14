@@ -9,11 +9,17 @@ import type {
 import { useEffect, useRef } from "react";
 
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";
-import { applyPreviewDesktopState, type DesktopPreviewOverlay } from "~/previewStateStore";
+import {
+  applyPreviewDesktopState,
+  readThreadPreviewState,
+  type DesktopPreviewOverlay,
+} from "~/previewStateStore";
+import { useRightPanelStore } from "~/rightPanelStore";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { previewBridge } from "./previewBridge";
+import { openPreviewSession } from "./openPreviewSession";
 
 /**
  * Mirrors low-latency desktop state into the store and reflects navigation
@@ -27,7 +33,28 @@ export function usePreviewBridge(input: {
   const { threadRef, tabId, runtimeTabId } = input;
   const clearBrowserPointer = useBrowserPointerStore((state) => state.clear);
   const reportStatus = useAtomCommand(previewEnvironment.reportStatus, "preview status report");
+  const open = useAtomCommand(previewEnvironment.open, "open browser tab");
   const bridge = previewBridge;
+
+  useEffect(() => {
+    if (!bridge) return;
+    return bridge.onWindowOpen((sourceTabId, url) => {
+      if (sourceTabId !== runtimeTabId) return;
+      const source = readThreadPreviewState(threadRef).sessions[tabId];
+      if (!source) return;
+      return openPreviewSession({
+        openPreview: open,
+        threadRef,
+        url,
+        profileId: source.profileId ?? "default",
+        ...(source.viewport ? { viewport: source.viewport } : {}),
+      }).then((result) => {
+        if (result._tag === "Success") {
+          useRightPanelStore.getState().openBrowser(threadRef, result.value.tabId);
+        }
+      });
+    });
+  }, [open, runtimeTabId, tabId, threadRef]);
 
   // One bridge subscription does both jobs (mirror state + forward to
   // server) so the desktop bridge keeps a single listener entry per tab.

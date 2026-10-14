@@ -1057,6 +1057,7 @@ export interface DesktopPreviewBridge {
     waitFor: (tabId: string, input: PreviewAutomationWaitForInput) => Promise<void>;
   };
   onStateChange: (listener: (tabId: string, state: DesktopPreviewTabState) => void) => () => void;
+  onWindowOpen: (listener: (tabId: string, url: string) => void) => () => void;
   onPointerEvent: (listener: (event: DesktopPreviewPointerEvent) => void) => () => void;
 }
 
