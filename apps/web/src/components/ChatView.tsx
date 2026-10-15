@@ -207,7 +207,7 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isPreviewFocused } from "../lib/previewFocus";
-import { getTerminalFocusOwner } from "../lib/terminalFocus";
+import { getTerminalFocusOwner, useTerminalFocusStore } from "../lib/terminalFocus";
 import { preventRepeatedTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
@@ -570,6 +570,7 @@ interface PersistentThreadTerminalDrawerProps {
   visible: boolean;
   launchContext: PersistentTerminalLaunchContext | null;
   focusRequestId: number;
+  suppressAutoFocus: boolean;
   splitShortcutLabel: string | undefined;
   splitVerticalShortcutLabel: string | undefined;
   newShortcutLabel: string | undefined;
@@ -584,6 +585,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   visible,
   launchContext,
   focusRequestId,
+  suppressAutoFocus,
   splitShortcutLabel,
   splitVerticalShortcutLabel,
   newShortcutLabel,
@@ -707,6 +709,10 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
     reconcileTerminalIds(threadRef, serverOrderedTerminalIds);
   }, [reconcileTerminalIds, serverOrderedTerminalIds, terminalUiState.terminalIds, threadRef]);
   const [localFocusRequestId, setLocalFocusRequestId] = useState(0);
+  const [navigationFocus, setNavigationFocus] = useState({ visible, localFocusRequestId });
+  if (navigationFocus.visible !== visible) {
+    setNavigationFocus({ visible, localFocusRequestId });
+  }
   const worktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
   const effectiveWorktreePath = useMemo(() => {
     if (launchContext !== null) {
@@ -908,7 +914,11 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         activeTerminalId={terminalUiState.activeTerminalId}
         terminalGroups={terminalUiState.terminalGroups}
         activeTerminalGroupId={terminalUiState.activeTerminalGroupId}
-        focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
+        focusRequestId={focusRequestId + localFocusRequestId}
+        suppressAutoFocus={
+          !visible ||
+          (suppressAutoFocus && localFocusRequestId === navigationFocus.localFocusRequestId)
+        }
         onSplitTerminal={splitTerminal}
         onSplitTerminalVertical={splitTerminalVertical}
         onNewTerminal={createNewTerminal}
@@ -934,6 +944,7 @@ interface PersistentThreadTerminalPanelProps {
   surface: Extract<RightPanelSurface, { kind: "terminal" }>;
   launchContext: PersistentTerminalLaunchContext | null;
   focusRequestId: number;
+  suppressAutoFocus: boolean;
   keybindings: ResolvedKeybindingsConfig;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
   onSplitTerminal: () => void;
@@ -952,6 +963,7 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
   surface,
   launchContext,
   focusRequestId,
+  suppressAutoFocus,
   keybindings,
   onAddTerminalContext,
   onSplitTerminal,
@@ -1080,6 +1092,7 @@ const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPane
       ]}
       activeTerminalGroupId={surface.id}
       focusRequestId={focusRequestId}
+      suppressAutoFocus={suppressAutoFocus}
       onSplitTerminal={onSplitTerminal}
       onSplitTerminalVertical={onSplitTerminalVertical}
       onNewTerminal={onNewTerminal}
@@ -1286,6 +1299,15 @@ function ChatViewContent(props: ChatViewProps) {
   >([]);
   const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
+  // Restoring a thread keeps typing in the composer until an explicit terminal action.
+  const [navigationTerminalFocus, setNavigationTerminalFocus] = useState({
+    threadKey: routeThreadKey,
+    requestId: terminalFocusRequestId,
+  });
+  if (navigationTerminalFocus.threadKey !== routeThreadKey) {
+    setNavigationTerminalFocus({ threadKey: routeThreadKey, requestId: terminalFocusRequestId });
+  }
+  const suppressTerminalAutoFocus = terminalFocusRequestId === navigationTerminalFocus.requestId;
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
   const [terminalUiLaunchContext, setTerminalUiLaunchContext] =
@@ -4125,14 +4147,24 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThread?.id]);
 
   useEffect(() => {
-    if (!activeThread?.id || terminalUiState.terminalOpen) return;
+    if (!activeThreadKey) return;
+    const terminalFocusRequest = useTerminalFocusStore.getState().request;
+    if (
+      terminalFocusRequest !== null &&
+      scopedThreadKey(terminalFocusRequest.threadRef) === activeThreadKey
+    ) {
+      return;
+    }
+    if (terminalFocusRequest !== null) {
+      useTerminalFocusStore.getState().completeRequest(terminalFocusRequest);
+    }
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, terminalUiState.terminalOpen]);
+  }, [activeThreadKey, focusComposer]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -4817,8 +4849,8 @@ function ChatViewContent(props: ChatViewProps) {
 
   useEffect(() => {
     if (!activeThreadKey) return;
-    const previous = terminalUiOpenByThreadRef.current[activeThreadKey] ?? false;
     const current = Boolean(terminalUiState.terminalOpen);
+    const previous = terminalUiOpenByThreadRef.current[activeThreadKey] ?? current;
 
     if (!previous && current) {
       terminalUiOpenByThreadRef.current[activeThreadKey] = current;
@@ -6446,6 +6478,7 @@ function ChatViewContent(props: ChatViewProps) {
         surface={activeRightPanelSurface}
         launchContext={activeTerminalLaunchContext ?? null}
         focusRequestId={terminalFocusRequestId}
+        suppressAutoFocus={suppressTerminalAutoFocus}
         keybindings={keybindings}
         onAddTerminalContext={addTerminalContextToDraft}
         onSplitTerminal={splitPanelTerminal}
@@ -7066,7 +7099,8 @@ function ChatViewContent(props: ChatViewProps) {
             launchContext={
               mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
             }
-            focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
+            focusRequestId={terminalFocusRequestId}
+            suppressAutoFocus={suppressTerminalAutoFocus}
             splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
             splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
             newShortcutLabel={newTerminalShortcutLabel ?? undefined}

@@ -1,5 +1,10 @@
 # Composer drafts and stashed prompts
 
+Switching conversations focuses the destination composer, including with
+**Cmd+1–9** on macOS or **Ctrl+1–9** on Windows/Linux. Existing terminal panels
+stay open. Choose a terminal tab, pane, or running-terminal indicator to type
+in that terminal instead.
+
 ## Markdown while editing
 
 The composer renders headings, bullet and numbered lists, blockquotes, bold,

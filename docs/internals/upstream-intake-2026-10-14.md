@@ -139,3 +139,44 @@ was verified with the pane's close control. Packaged Electron, remote browser
 connections, and other operating systems were not runtime-tested. These changes
 use the shared renderer and provider-neutral terminal APIs; provider adapters,
 server contracts, and shell input encoding are unchanged.
+
+## Follow-on: conversation and terminal focus
+
+Ordinary conversation navigation now focuses the destination composer even when
+its terminal drawer or right-panel terminal is restored. Explicit terminal
+actions retain priority: the sidebar indicator focuses its existing terminal on
+every click, including when it is already visible. Requests are scoped to the
+environment, conversation, and terminal, and finish after focus is delivered.
+Hidden viewports cannot consume them. Leaving for a different conversation
+discards an interrupted request.
+
+The renderer suppresses automatic terminal focus while restoring a conversation;
+existing terminal-control focus requests override that suppression. This also
+applies when Ghostty finishes mounting asynchronously, without timers or retries.
+
+Verification: 72 focused tests passed across terminal reveal, focus ownership,
+drawer helpers, and keybindings, along with web typecheck, scoped formatting,
+and whitespace checks. Scoped lint adds no warnings. Browser checks covered
+Cmd+2/Cmd+1 navigation, immediate composer typing, restored drawer and cold
+right-panel mounts, repeated terminal-icon clicks, cross-conversation terminal
+navigation, split panes, and toolbar/tab focus. Independent review identified
+and resolved hidden-viewport and interrupted-request races. The app remains open
+with a harmless waiting `cat` process for manual verification.
+
+## Integration with parallel main changes
+
+Rebased the four intake commits over `origin/main` at `060e7442aa`. Parallel PR-watch
+work in `b0c38ddb41` already included most #19099 behavior and #19368's ten-second
+Codex MCP startup grace for start, resume, and fork. The rebase retains that shared
+implementation, the continuation freshness fix, and the stronger already-held
+buffer regressions. Duplicate tests were consolidated into the existing suites,
+including their project setup. Independent integration review found no remaining
+issues. All 731 tests across 14 relevant suites passed after integration, together
+with server/web typechecks, scoped lint and formatting, and whitespace checks.
+
+The original batch now leaves #17561 (fullscreen HTML replies and zoom) and #19102
+(optional delegated-task worktrees). Fullscreen/zoom is the smaller next step;
+adapt it to the existing document sandbox and panel maximization, with explicit
+handling of interactive page state. Delegated worktree isolation still requires
+launch, retry, Stop, and cleanup integration; ordinary child tasks continue to
+share their parent's checkout.

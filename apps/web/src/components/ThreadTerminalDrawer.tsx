@@ -69,6 +69,7 @@ import { terminalEnvironment } from "../state/terminal";
 import { openTerminalLinkInPreview } from "./preview/openTerminalLinkInPreview";
 import { useAtomCommand } from "../state/use-atom-command";
 import { preventTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
+import { useTerminalFocusStore } from "../lib/terminalFocus";
 import { resolveTerminalFontPreference, TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "../appearanceFonts";
 
 const MIN_DRAWER_HEIGHT = 180;
@@ -282,6 +283,7 @@ interface TerminalViewportProps {
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
   focusRequestId: number;
   autoFocus: boolean;
+  suppressAutoFocus: boolean;
   resizeEpoch: number;
   drawerHeight: number;
   keybindings: ResolvedKeybindingsConfig;
@@ -306,12 +308,29 @@ export function TerminalViewport({
   onAddTerminalContext,
   focusRequestId,
   autoFocus,
+  suppressAutoFocus,
   resizeEpoch,
   drawerHeight,
   keybindings,
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<GhosttyTerminalSurface | null>(null);
+  const focusRequest = useTerminalFocusStore((state) =>
+    state.request?.threadRef.environmentId === threadRef.environmentId &&
+    state.request.threadRef.threadId === threadRef.threadId &&
+    state.request.terminalId === terminalId
+      ? state.request
+      : null,
+  );
+  const focusAfterMount = useEffectEvent((terminal: GhosttyTerminalSurface) => {
+    if (!autoFocus) return;
+    if (focusRequest !== null) {
+      terminal.focus();
+      useTerminalFocusStore.getState().completeRequest(focusRequest);
+    } else if (!suppressAutoFocus) {
+      terminal.focus();
+    }
+  });
   const environmentId = threadRef.environmentId;
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const openInPreferredEditor = useOpenInPreferredEditor(
@@ -470,7 +489,7 @@ export function TerminalViewport({
       // never started, so only "exited" triggers the message — as with xterm.)
       synchronizedStatusRef.current = "closed";
       synchronizeTerminalStatus(terminal, latestSession.status);
-      if (autoFocus) window.requestAnimationFrame(() => terminal.focus());
+      window.requestAnimationFrame(() => focusAfterMount(terminal));
 
       const clearSelectionAction = () => {
         selectionActionRequestIdRef.current += 1;
@@ -888,16 +907,23 @@ export function TerminalViewport({
       writeSystemMessage(terminal, current.error);
     }
 
-    if (previous.version === 0 && autoFocus) {
+    if (previous.version === 0 && autoFocus && !suppressAutoFocus) {
       window.requestAnimationFrame(() => {
         terminal.focus();
       });
     }
     previousSessionRef.current = current;
-  }, [autoFocus, terminalBuffer, terminalError, terminalStatus, terminalVersion]);
+  }, [
+    autoFocus,
+    suppressAutoFocus,
+    terminalBuffer,
+    terminalError,
+    terminalStatus,
+    terminalVersion,
+  ]);
 
   useEffect(() => {
-    if (!autoFocus) return;
+    if (!autoFocus || suppressAutoFocus) return;
     const terminal = terminalRef.current;
     if (!terminal) return;
     const frame = window.requestAnimationFrame(() => {
@@ -906,7 +932,18 @@ export function TerminalViewport({
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [autoFocus, focusRequestId]);
+  }, [autoFocus, focusRequestId, suppressAutoFocus]);
+
+  useEffect(() => {
+    if (!autoFocus || focusRequest === null) return;
+    const frame = window.requestAnimationFrame(() => {
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+      terminal.focus();
+      useTerminalFocusStore.getState().completeRequest(focusRequest);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocus, focusRequest]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -946,6 +983,7 @@ interface ThreadTerminalDrawerProps {
   terminalGroups: ThreadTerminalGroup[];
   activeTerminalGroupId: string;
   focusRequestId: number;
+  suppressAutoFocus?: boolean;
   onSplitTerminal: () => void;
   onSplitTerminalVertical: () => void;
   onNewTerminal: () => void;
@@ -1008,6 +1046,7 @@ export default function ThreadTerminalDrawer({
   terminalGroups,
   activeTerminalGroupId,
   focusRequestId,
+  suppressAutoFocus = false,
   onSplitTerminal,
   onSplitTerminalVertical,
   onNewTerminal,
@@ -1586,7 +1625,8 @@ export default function ThreadTerminalDrawer({
                             onSessionExited={() => onCloseTerminal(terminalId)}
                             onAddTerminalContext={onAddTerminalContext}
                             focusRequestId={focusRequestId}
-                            autoFocus={terminalId === resolvedActiveTerminalId}
+                            autoFocus={visible && terminalId === resolvedActiveTerminalId}
+                            suppressAutoFocus={suppressAutoFocus}
                             resizeEpoch={resizeEpoch}
                             drawerHeight={drawerHeight}
                             keybindings={keybindings}
@@ -1616,7 +1656,8 @@ export default function ThreadTerminalDrawer({
                   onSessionExited={() => onCloseTerminal(resolvedActiveTerminalId)}
                   onAddTerminalContext={onAddTerminalContext}
                   focusRequestId={focusRequestId}
-                  autoFocus
+                  autoFocus={visible}
+                  suppressAutoFocus={suppressAutoFocus}
                   resizeEpoch={resizeEpoch}
                   drawerHeight={drawerHeight}
                   keybindings={keybindings}

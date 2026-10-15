@@ -1,3 +1,22 @@
+import type { ScopedThreadRef } from "@t3tools/contracts";
+import { create } from "zustand";
+
+interface TerminalFocusRequest {
+  threadRef: ScopedThreadRef;
+  terminalId: string;
+}
+
+export const useTerminalFocusStore = create<{
+  request: TerminalFocusRequest | null;
+  requestFocus: (threadRef: ScopedThreadRef, terminalId: string) => void;
+  completeRequest: (request: TerminalFocusRequest) => void;
+}>((set) => ({
+  request: null,
+  requestFocus: (threadRef, terminalId) => set({ request: { threadRef, terminalId } }),
+  completeRequest: (request) =>
+    set((state) => (state.request === request ? { request: null } : state)),
+}));
+
 export type TerminalFocusOwner = "drawer" | "right-panel";
 
 export function getTerminalFocusOwner(): TerminalFocusOwner | null {

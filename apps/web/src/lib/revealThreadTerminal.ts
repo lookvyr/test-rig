@@ -2,8 +2,9 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
+import { useTerminalFocusStore } from "./terminalFocus";
 
-/** Reveal an existing terminal in the panel that owns it, without opening another PTY. */
+/** Reveal and focus an existing terminal in its owning panel, without opening another PTY. */
 export function revealThreadTerminal(threadRef: ScopedThreadRef, terminalId: string) {
   const panels = useRightPanelStore.getState();
   const surface = selectThreadRightPanelState(panels.byThreadKey, threadRef).surfaces.find(
@@ -12,10 +13,11 @@ export function revealThreadTerminal(threadRef: ScopedThreadRef, terminalId: str
   if (surface) {
     panels.activateTerminal(threadRef, surface.id, terminalId);
     panels.activateSurface(threadRef, surface.id);
-    return;
+  } else {
+    useTerminalUiStateStore.getState().ensureTerminal(threadRef, terminalId, {
+      open: true,
+      active: true,
+    });
   }
-  useTerminalUiStateStore.getState().ensureTerminal(threadRef, terminalId, {
-    open: true,
-    active: true,
-  });
+  useTerminalFocusStore.getState().requestFocus(threadRef, terminalId);
 }

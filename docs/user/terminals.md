@@ -5,10 +5,10 @@ Its terminal tabs sit above the output. Select a tab to focus that terminal; **+
 opens another terminal in the current checkout. Session names, including setup
 and project actions, appear on their tabs.
 
-Choose a conversation's running-terminal indicator in the sidebar to open its
-existing terminal. If it belongs to a split pane or the right panel, that layout
-is preserved. Opening an empty bottom panel also reuses an existing session,
-preferring one with a running process.
+Choose a conversation's running-terminal indicator in the sidebar to open and
+focus its existing terminal, including when it is already visible. If it belongs
+to a split pane or the right panel, that layout is preserved. Opening an empty
+bottom panel also reuses an existing session, preferring one with a running process.
 
 With a terminal focused, **Cmd+Option+Up/Down** on macOS or **Ctrl+Alt+Up/Down** on
 Windows/Linux switches to the previous or next terminal tab. The selection wraps
