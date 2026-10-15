@@ -14,7 +14,7 @@ const selection = (
 });
 
 describe("compileClaudeModelSelection", () => {
-  it("compiles context, effort, and settings together", () => {
+  it("preserves fixed context models when compiling saved context options and effort", () => {
     expect(
       compileClaudeModelSelection(
         selection("claude-fable-5", [
@@ -23,7 +23,7 @@ describe("compileClaudeModelSelection", () => {
         ]),
       ),
     ).toMatchObject({
-      apiModelId: "claude-fable-5[1m]",
+      apiModelId: "claude-fable-5",
       effort: "xhigh",
       settings: { ultracode: true },
     });

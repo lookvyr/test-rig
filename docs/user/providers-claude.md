@@ -3,9 +3,19 @@
 This guide is for people who want to use more than one Claude setup in Test Rig. For Codex, see
 [Codex](./providers-codex.md). For first-time setup, see [Install Test Rig](./install.md).
 
-The model picker includes **Claude Opus 5.5** with Medium reasoning by default, Fast Mode,
-and an explicit 1M context option. It requires Claude Code v2.1.280 or later. After upgrading
-Claude Code, use **Refresh provider status** in Settings to update the available choices.
+The current model list includes **Claude Fable 5.1**, **Claude Opus 5.5**,
+**Claude Sonnet 5.5**, and **Claude Haiku 5.5**. Opus 5.5 is the default for new
+chats; Haiku 5.5 is the default for text generation. Saved model selections still
+take precedence. Older models remain available under **Legacy models**.
+
+These models use a fixed 1M context window. Opus 5.5 also offers Fast Mode.
+Fable 5.1, Opus 5.5, and Haiku 5.5 default to Medium reasoning; Sonnet 5.5 defaults
+to High.
+
+Claude Code v2.1.293 or later supports the full current list. Fable 5.1 requires
+v2.1.257, Opus 5.5 requires v2.1.280, and Sonnet 5.5 requires v2.1.284.
+After upgrading Claude Code, use **Refresh provider status** in Settings to
+update the available choices.
 
 Common reasons:
 

@@ -148,7 +148,7 @@ export const DEFAULT_TEXT_GENERATION_REASONING_EFFORT = "low";
 
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
-  [CLAUDE_DRIVER_KIND]: "claude-sonnet-5",
+  [CLAUDE_DRIVER_KIND]: "claude-opus-5-5",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
 };
 
@@ -157,7 +157,7 @@ export const DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   Record<ProviderDriverKind, string>
 > = {
   [CODEX_DRIVER_KIND]: DEFAULT_TEXT_GENERATION_MODEL,
-  [CLAUDE_DRIVER_KIND]: "claude-haiku-4-5",
+  [CLAUDE_DRIVER_KIND]: "claude-haiku-5-5",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
 };
 
@@ -173,6 +173,10 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
   [CLAUDE_DRIVER_KIND]: {
+    fable: "claude-fable-5-1",
+    "fable-5.1": "claude-fable-5-1",
+    "fable-5-1": "claude-fable-5-1",
+    "claude-fable-5.1": "claude-fable-5-1",
     opus: "claude-opus-5-5",
     "opus-5.5": "claude-opus-5-5",
     "opus-5-5": "claude-opus-5-5",
@@ -187,14 +191,20 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
     "opus-4.6": "claude-opus-4-6",
     "claude-opus-4.6": "claude-opus-4-6",
     "claude-opus-4-6-20251117": "claude-opus-4-6",
-    sonnet: "claude-sonnet-5",
+    sonnet: "claude-sonnet-5-5",
+    "sonnet-5.5": "claude-sonnet-5-5",
+    "sonnet-5-5": "claude-sonnet-5-5",
+    "claude-sonnet-5.5": "claude-sonnet-5-5",
     "sonnet-5": "claude-sonnet-5",
     "claude-sonnet-5.0": "claude-sonnet-5",
     "claude-sonnet-5-0": "claude-sonnet-5",
     "sonnet-4.6": "claude-sonnet-4-6",
     "claude-sonnet-4.6": "claude-sonnet-4-6",
     "claude-sonnet-4-6-20251117": "claude-sonnet-4-6",
-    haiku: "claude-haiku-4-5",
+    haiku: "claude-haiku-5-5",
+    "haiku-5.5": "claude-haiku-5-5",
+    "haiku-5-5": "claude-haiku-5-5",
+    "claude-haiku-5.5": "claude-haiku-5-5",
     "haiku-4.5": "claude-haiku-4-5",
     "claude-haiku-4.5": "claude-haiku-4-5",
     "claude-haiku-4-5-20251001": "claude-haiku-4-5",
