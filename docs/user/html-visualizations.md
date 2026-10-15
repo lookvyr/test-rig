@@ -4,7 +4,9 @@ Ask your agent for an interactive chart, table, diagram, or small HTML dashboard
 
 Visualizations follow your current theme and fonts. Buttons, sliders, and other page controls work inside the conversation. Select **Expand** above a visualization for a larger view. Zoom from 50% to 200%, or select the percentage to reset to 100%. Close the viewer or press Escape to return to the conversation. Your inputs and other interactive state stay with the page when expanding and closing; each expansion starts at 100% zoom.
 
-The expanded viewer hides its scrollbars. You can still scroll in either direction to move around a zoomed page.
+Increasing zoom above 100% automatically turns on the **Hand tool**. Drag to pan the zoomed view in any direction with a mouse. Turn the Hand tool off to select text, follow links, or use the page's controls; turn it back on to pan again. For long pages, turn Hand off to scroll inside the HTML content. Returning to 100% or resetting zoom turns it off.
+
+The expanded viewer hides its scrollbars. You can still scroll in either direction with a trackpad or scroll wheel.
 
 Select **Open in panel** to open a separate copy in a side-panel tab, with HTML source and download controls. Both actions stay outside the page so they cannot cover its content or controls.
 

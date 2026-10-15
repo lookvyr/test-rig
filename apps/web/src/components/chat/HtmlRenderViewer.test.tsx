@@ -59,6 +59,9 @@ function button(label: string) {
 function click(label: string) {
   act(() => button(label).props.onClick());
 }
+function panArea() {
+  return renderer.root.findByProps({ "aria-label": "Visualization pan area" });
+}
 
 beforeEach(() => {
   modal = false;
@@ -134,5 +137,66 @@ describe("HTML visualization viewer", () => {
     expect(modal).toBe(false);
     expect(frame.props.onEscape).toBeUndefined();
     expect(expandFocus).toHaveBeenCalledOnce();
+  });
+
+  it("enables the Hand tool when zooming in and lets the reader return to page interaction", () => {
+    render();
+    const frame = renderer.root.findByType("iframe");
+    click("Expand Launch planner");
+    expect(button("Hand tool").props.disabled).toBe(true);
+    click("Zoom in");
+    expect(button("Hand tool").props["aria-pressed"]).toBe(true);
+    expect(renderer.root.findAllByProps({ inert: true })).toHaveLength(1);
+    click("Hand tool");
+    expect(renderer.root.findAllByProps({ inert: true })).toHaveLength(0);
+    click("Zoom in");
+    expect(button("Hand tool").props["aria-pressed"]).toBe(true);
+    click("Hand tool");
+    click("Zoom out");
+    expect(button("Hand tool").props["aria-pressed"]).toBe(false);
+    click("Hand tool");
+    click("Reset zoom");
+    expect(button("Hand tool").props["aria-pressed"]).toBe(false);
+    expect(button("Hand tool").props.disabled).toBe(true);
+    expect(renderer.root.findByType("iframe")).toBe(frame);
+    expect(panArea().props.onPointerDown).toBeUndefined();
+  });
+
+  it("pans both axes with a captured primary-button drag and stops when released", () => {
+    render();
+    click("Expand Launch planner");
+    click("Zoom in");
+    const viewport = {
+      scrollLeft: 150,
+      scrollTop: 90,
+      focus: vi.fn(),
+      setPointerCapture: vi.fn(),
+      hasPointerCapture: () => true,
+      releasePointerCapture: vi.fn(),
+    };
+    const event = {
+      currentTarget: viewport,
+      pointerId: 1,
+      button: 0,
+      clientX: 400,
+      clientY: 300,
+      preventDefault: vi.fn(),
+    };
+    act(() => panArea().props.onPointerDown({ ...event, button: 2 }));
+    expect(viewport.setPointerCapture).not.toHaveBeenCalled();
+    act(() => panArea().props.onPointerDown(event));
+    expect(viewport.setPointerCapture).toHaveBeenCalledWith(1);
+    act(() => panArea().props.onPointerMove({ ...event, pointerId: 2, clientX: 250 }));
+    expect(viewport.scrollLeft).toBe(150);
+    act(() => panArea().props.onPointerMove({ ...event, clientX: 250, clientY: 200 }));
+    expect([viewport.scrollLeft, viewport.scrollTop]).toEqual([300, 190]);
+    act(() => panArea().props.onPointerUp(event));
+    expect(viewport.releasePointerCapture).toHaveBeenCalledWith(1);
+    act(() => panArea().props.onPointerMove(event));
+    expect([viewport.scrollLeft, viewport.scrollTop]).toEqual([300, 190]);
+    act(() => panArea().props.onPointerDown(event));
+    act(() => panArea().props.onLostPointerCapture(event));
+    act(() => panArea().props.onPointerMove({ ...event, clientX: 100 }));
+    expect(viewport.scrollLeft).toBe(300);
   });
 });
