@@ -10,6 +10,8 @@ The side chat receives a snapshot of the parent’s context when it opens. If th
 
 Side chats use the same checkout as their parent. Both can work at the same time, and both see file changes made by either conversation. Their later messages are separate.
 
+New replies stay in view as they arrive. Scroll up to read earlier messages without being pulled back down. Returning to the bottom, choosing **Scroll to end**, or sending a message resumes following the conversation.
+
 - Switching tabs, changing the main conversation, or hiding the right panel preserves each conversation and draft. Reopen the panel and select the existing tab to return to it; `/side` creates another chat.
 - Closing the Side chat tab with its **×**, the close-tab shortcut (**Ctrl+W** on Windows/Linux, **Cmd+W** on macOS), or a tab menu close action discards it. The shortcut closes the active right-panel tab when the panel is open; a focused terminal retains its own close shortcut.
 - **Discard side chat** in the side-chat actions menu does the same thing. Discarding stops the side chat and its entire subagent tree, ends their PR watches, and removes those conversations and drafts from the app. Discarded chats cannot be reopened through closed-tab history. File changes, messages already delivered to other chats, and explicitly created independent threads or historical forks remain. Stored history is retained internally. Other side chats and the main conversation are unaffected.

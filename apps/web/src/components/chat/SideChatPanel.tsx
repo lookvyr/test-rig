@@ -18,7 +18,7 @@ import {
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, MoreHorizontal } from "lucide-react";
+import { Bot, ChevronDownIcon, MoreHorizontal } from "lucide-react";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { useComposerDraftStore, type ComposerImageAttachment } from "../../composerDraftStore";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
@@ -55,6 +55,7 @@ import { parseStandaloneComposerSlashCommand } from "../../composer-logic";
 import type { Thread, TurnDiffSummary } from "../../types";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { MessagesTimeline } from "./MessagesTimeline";
+import { useTimelineScroll } from "./useTimelineScroll";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { useLocalDispatchState } from "./useLocalDispatchState";
 import { usePersistThreadSettings } from "./usePersistThreadSettings";
@@ -111,7 +112,7 @@ export function SideChatPanel(props: {
   const [showAgents, setShowAgents] = useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<RuntimeRequestId[]>([]);
   const [respondingInputIds, setRespondingInputIds] = useState<RuntimeRequestId[]>([]);
-  const [liveFollow, setLiveFollow] = useState(true);
+  const scroll = useTimelineScroll({ threadKey: scopedThreadKey(threadRef), listRef });
   const runtimeModeDraft = useComposerDraftStore(
     (store) => store.getComposerDraft(threadRef)?.runtimeMode,
   );
@@ -223,6 +224,7 @@ export function SideChatPanel(props: {
       return;
     sending.current = true;
     dispatch.beginLocalDispatch();
+    scroll.scrollToEnd();
     setError(null);
     try {
       const createdAt = new Date().toISOString();
@@ -319,6 +321,7 @@ export function SideChatPanel(props: {
     sending.current = true;
     setError(null);
     dispatch.beginLocalDispatch();
+    scroll.scrollToEnd();
     const draftStore = useComposerDraftStore.getState();
     const submittedDraft = draftStore.getComposerDraft(threadRef);
     draftStore.clearComposerContent(threadRef);
@@ -393,7 +396,6 @@ export function SideChatPanel(props: {
         if (!isAtomCommandInterrupted(result)) setError(String(squashAtomCommandFailure(result)));
       } else {
         for (const image of context.images) URL.revokeObjectURL(image.previewUrl);
-        setLiveFollow(true);
       }
     } catch (cause) {
       restoreDraft();
@@ -511,62 +513,78 @@ export function SideChatPanel(props: {
           {shownError}
         </div>
       ) : null}
-      {timelineEntries.length === 0 ? (
-        <div className="flex min-h-24 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-          <p className="text-sm">Explore a side question</p>
-          <p className="max-w-xs text-xs text-muted-foreground">
-            Starts with the parent’s context from when you opened it.
-          </p>
-        </div>
-      ) : (
-        <MessagesTimeline
-          isWorking={isWorking}
-          activeTurnInProgress={
-            isWorking || !isLatestRunSettled(thread?.latestRun ?? null, thread?.runtime ?? null)
-          }
-          activeTurnStartedAt={deriveActiveWorkStartedAt(
-            thread?.latestRun ?? null,
-            thread?.runtime ?? null,
-            dispatch.localDispatchStartedAt,
-          )}
-          listRef={listRef}
-          timelineEntries={timelineEntries}
-          latestRun={thread?.latestRun ?? null}
-          runningRunId={thread?.runtime?.activeRunId ?? null}
-          turnDiffSummaries={[...diffs.values()]}
-          providerStatuses={providers}
-          runs={projection?.runs ?? []}
-          onOpenThread={props.onOpenThread}
-          onForkFromRun={props.onForkFromRun}
-          routeThreadKey={scopedThreadKey(threadRef)}
-          onOpenTurnDiff={props.onOpenTurnDiff}
-          onImageExpand={props.onExpandImage}
-          activeThreadEnvironmentId={threadRef.environmentId}
-          markdownCwd={cwd}
-          resolvedTheme={resolvedTheme}
-          timestampFormat={settings.timestampFormat}
-          workspaceRoot={cwd}
-          anchorMessageId={null}
-          onAnchorReady={() => undefined}
-          onAnchorSizeChanged={() => undefined}
-          contentInsetEndAdjustment={0}
-          liveFollowEnabled={liveFollow}
-          onIsAtEndChange={setLiveFollow}
-          onManualNavigation={() => setLiveFollow(false)}
-          loadEarlier={
-            page.history.hasMoreHistory || page.history.error !== null
-              ? {
-                  loading: page.history.loading,
-                  onLoadEarlier: () =>
-                    void loadEarlierHistory({
-                      environmentId: threadRef.environmentId,
-                      input: { threadId: threadRef.threadId },
-                    }),
-                }
-              : null
-          }
-        />
-      )}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {timelineEntries.length === 0 ? (
+          <div className="flex min-h-24 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+            <p className="text-sm">Explore a side question</p>
+            <p className="max-w-xs text-xs text-muted-foreground">
+              Starts with the parent’s context from when you opened it.
+            </p>
+          </div>
+        ) : (
+          <MessagesTimeline
+            isWorking={isWorking}
+            activeTurnInProgress={
+              isWorking || !isLatestRunSettled(thread?.latestRun ?? null, thread?.runtime ?? null)
+            }
+            activeTurnStartedAt={deriveActiveWorkStartedAt(
+              thread?.latestRun ?? null,
+              thread?.runtime ?? null,
+              dispatch.localDispatchStartedAt,
+            )}
+            listRef={listRef}
+            timelineEntries={timelineEntries}
+            latestRun={thread?.latestRun ?? null}
+            runningRunId={thread?.runtime?.activeRunId ?? null}
+            turnDiffSummaries={[...diffs.values()]}
+            providerStatuses={providers}
+            runs={projection?.runs ?? []}
+            onOpenThread={props.onOpenThread}
+            onForkFromRun={props.onForkFromRun}
+            routeThreadKey={scopedThreadKey(threadRef)}
+            onOpenTurnDiff={props.onOpenTurnDiff}
+            onImageExpand={props.onExpandImage}
+            activeThreadEnvironmentId={threadRef.environmentId}
+            markdownCwd={cwd}
+            resolvedTheme={resolvedTheme}
+            timestampFormat={settings.timestampFormat}
+            workspaceRoot={cwd}
+            anchorMessageId={null}
+            onAnchorReady={() => undefined}
+            onAnchorSizeChanged={() => undefined}
+            contentInsetEndAdjustment={0}
+            liveFollowEnabled={scroll.liveFollowEnabled}
+            onIsAtEndChange={scroll.onIsAtEndChange}
+            onManualNavigation={scroll.cancelForUserNavigation}
+            onScrollElementChange={scroll.onScrollElementChange}
+            loadEarlier={
+              page.history.hasMoreHistory || page.history.error !== null
+                ? {
+                    loading: page.history.loading,
+                    onLoadEarlier: () =>
+                      void loadEarlierHistory({
+                        environmentId: threadRef.environmentId,
+                        input: { threadId: threadRef.threadId },
+                      }),
+                  }
+                : null
+            }
+          />
+        )}
+        {scroll.showScrollToBottom && (
+          <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
+            <button
+              type="button"
+              aria-label="Scroll to end"
+              title="Scroll to end"
+              onClick={() => scroll.scrollToEnd(true)}
+              className="chat-composer-glass pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
+            >
+              <ChevronDownIcon className="size-3.5" /> Scroll to end
+            </button>
+          </div>
+        )}
+      </div>
       <div className="shrink-0 px-2 pb-2 pt-1">
         {nonBlockingUserInputs.length > 0 && (
           <AsyncUserInputPanel

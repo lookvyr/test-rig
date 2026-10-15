@@ -462,6 +462,7 @@ interface MessagesTimelineProps {
   onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
   contentInsetEndAdjustment: number;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onScrollElementChange?: (element: HTMLElement | null) => void;
   /**
    * Whether the timeline should keep pinning to the live edge as content
    * grows. Off while the user is reading history; LegendList's own
@@ -536,6 +537,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onAnchorSizeChanged,
   contentInsetEndAdjustment,
   onIsAtEndChange,
+  onScrollElementChange,
   onContentOverflowChange,
   liveFollowEnabled,
   onToolOutputCollapsedAtEnd,
@@ -1277,8 +1279,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     (list: LegendListRef | null) => {
       listRef.current = list;
       registerTimeline?.(list?.getScrollableNode() ?? null);
+      onScrollElementChange?.(list?.getScrollableNode() ?? null);
     },
-    [listRef, registerTimeline],
+    [listRef, registerTimeline, onScrollElementChange],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
