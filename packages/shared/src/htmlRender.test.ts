@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import * as NodeVM from "node:vm";
 
 import {
   HTML_RENDER_MAX_HEIGHT,
@@ -7,6 +8,8 @@ import {
   htmlRenderTheme,
   htmlRenderThemeFragment,
   injectHtmlRenderBootstrap,
+  injectHtmlRenderEscapeBridge,
+  HTML_RENDER_ESCAPE_MESSAGE,
   htmlRenderThemeMessage,
   readHtmlRenderContentHeight,
   readHtmlRenderLinkRequest,
@@ -16,6 +19,37 @@ import { T3_CODE_DARK_THEME_COLORS, T3_CODE_LIGHT_THEME_COLORS } from "./themePa
 import { htmlRenderFromToolItem } from "./toolOutput.ts";
 
 const reference = { attachmentId: "thread-abc-123.html", title: "Chart", height: 420 };
+
+describe("HTML render Escape bridge", () => {
+  it("adds keyboard handling before a saved page's scripts without replacing its bootstrap", () => {
+    const saved = injectHtmlRenderBootstrap(
+      "<html><head><script>page()</script></head><body>saved</body></html>",
+    );
+    const served = injectHtmlRenderEscapeBridge(saved);
+    expect(served).toContain(saved.slice(saved.indexOf('<style id="t3-theme">')));
+    expect(served.indexOf(HTML_RENDER_ESCAPE_MESSAGE)).toBeLessThan(served.indexOf("page()"));
+    let keydown: (event: {
+      key: string;
+      isTrusted: boolean;
+      defaultPrevented?: boolean;
+    }) => void = () => {};
+    const messages: unknown[] = [];
+    NodeVM.runInNewContext(served.match(/<script>([\s\S]*?)<\/script>/)![1]!, {
+      window: {
+        addEventListener: (_: string, listener: typeof keydown) => {
+          keydown = listener;
+        },
+        parent: { postMessage: (message: unknown) => messages.push(message) },
+      },
+    });
+    keydown({ key: "Escape", isTrusted: false });
+    keydown({ key: "Enter", isTrusted: true });
+    keydown({ key: "Escape", isTrusted: true, defaultPrevented: true });
+    expect(messages).toEqual([]);
+    keydown({ key: "Escape", isTrusted: true });
+    expect(messages).toEqual([HTML_RENDER_ESCAPE_MESSAGE]);
+  });
+});
 
 describe("injectHtmlRenderBootstrap", () => {
   it("puts the theme ahead of the page's own head content", () => {

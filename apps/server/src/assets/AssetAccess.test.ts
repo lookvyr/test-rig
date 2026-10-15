@@ -352,6 +352,25 @@ describe("AssetAccess", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
+  it.effect("identifies saved HTML attachments for viewer keyboard support", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const attachmentId = "thread-1-00000000-0000-4000-8000-000000000001-html";
+      const attachmentPath = path.join(config.attachmentsDir, `${attachmentId}.html`);
+      yield* fs.makeDirectory(config.attachmentsDir, { recursive: true });
+      yield* fs.writeFileString(attachmentPath, "<p>Saved visualization</p>");
+      const result = yield* issueAssetUrl({ resource: { _tag: "attachment", attachmentId } });
+      const token = result.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length).split("/")[0]!;
+      expect(yield* resolveAsset(token, "page.html")).toMatchObject({
+        kind: "file",
+        path: attachmentPath,
+        htmlRender: true,
+      });
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("issues project favicon capabilities with a signed fallback", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

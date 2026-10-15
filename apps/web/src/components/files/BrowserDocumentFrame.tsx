@@ -1,4 +1,5 @@
 import {
+  HTML_RENDER_ESCAPE_MESSAGE,
   htmlRenderThemeFragment,
   htmlRenderThemeMessage,
   htmlRenderResult,
@@ -92,6 +93,7 @@ export function HtmlRenderDocument(props: {
   readonly onLoad?: () => void;
   /** Receives the page's content height whenever it changes, so an inline frame can fit it. */
   readonly onContentHeight?: (height: number) => void;
+  readonly onEscape?: () => void;
 }) {
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -139,6 +141,20 @@ export function HtmlRenderDocument(props: {
     window.addEventListener("message", resize);
     return () => window.removeEventListener("message", resize);
   }, [onContentHeight]);
+  const { onEscape } = props;
+  useEffect(() => {
+    if (onEscape === undefined) return;
+    const escape = (event: MessageEvent) => {
+      if (
+        event.source === frameRef.current?.contentWindow &&
+        event.data === HTML_RENDER_ESCAPE_MESSAGE
+      ) {
+        onEscape();
+      }
+    };
+    window.addEventListener("message", escape);
+    return () => window.removeEventListener("message", escape);
+  }, [onEscape]);
   return (
     <iframe
       ref={frameRef}

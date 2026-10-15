@@ -1,5 +1,4 @@
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
-import * as Stream from "effect/Stream";
 import * as Mime from "effect/unstable/http/Mime";
 import {
   AuthOrchestrationOperateScope,
@@ -7,6 +6,7 @@ import {
   EnvironmentHttpApi,
 } from "@t3tools/contracts";
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
+import { injectHtmlRenderEscapeBridge } from "@t3tools/shared/htmlRender";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -270,12 +270,22 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
     readonly fileName?: string;
     readonly mimeType?: string;
     readonly file?: OpenMediaFile;
+    readonly htmlRender?: true;
   },
   rangeHeader?: string,
   ifRangeHeader?: string,
   method: "GET" | "HEAD" = "GET",
 ) {
   const headers = assetResponseHeaders(asset.path, asset);
+  if (asset.htmlRender && !asset.download) {
+    if (method === "HEAD") return HttpServerResponse.empty({ headers });
+    const fs = yield* FileSystem.FileSystem;
+    const html = yield* fs.readFileString(asset.path);
+    return HttpServerResponse.text(injectHtmlRenderEscapeBridge(html), {
+      contentType: "text/html; charset=utf-8",
+      headers,
+    });
+  }
   const mediaFile = asset.file;
   const mediaInfo = mediaFile ? yield* statMediaFile(asset.path, mediaFile) : undefined;
   const isMedia = /^(?:audio|video)\//i.test(headers["Content-Type"] ?? "");

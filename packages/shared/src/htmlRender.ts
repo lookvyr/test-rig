@@ -397,7 +397,18 @@ const blankNonMarkup = (html: string) => {
  */
 export function injectHtmlRenderBootstrap(html: string): string {
   const scan = blankNonMarkup(html);
-  const markup = bootstrapMarkup(scan);
+  return insertHeadMarkup(html, scan, bootstrapMarkup(scan));
+}
+
+export const HTML_RENDER_ESCAPE_MESSAGE = "test-rig:html-render:escape";
+
+/** Added when serving a saved page, so older visualizations also support Escape. */
+export function injectHtmlRenderEscapeBridge(html: string): string {
+  const markup = `<script>window.addEventListener("keydown",function(e){if(e.isTrusted&&!e.defaultPrevented&&e.key==="Escape"&&window.parent!==window)window.parent.postMessage(${JSON.stringify(HTML_RENDER_ESCAPE_MESSAGE)},"*");});</script>`;
+  return insertHeadMarkup(html, blankNonMarkup(html), markup);
+}
+
+function insertHeadMarkup(html: string, scan: string, markup: string): string {
   const headOpen = /<head(?:\s[^>]*)?>/i.exec(scan);
   if (headOpen) {
     const at = headOpen.index + headOpen[0].length;

@@ -2,7 +2,11 @@
 
 Ask your agent for an interactive chart, table, diagram, or small HTML dashboard. The agent can preview a page first, inspect its screenshot, console messages, and measured height, then publish the finished page directly into the conversation. It stays visible when the surrounding tool activity is collapsed.
 
-Visualizations follow your current theme and fonts. Buttons, sliders, and other page controls work inside the conversation. Select **Open in panel** above the visualization to view it in a side-panel tab. This button stays outside the page so it cannot cover the page's content or controls. The panel also offers HTML source and download controls.
+Visualizations follow your current theme and fonts. Buttons, sliders, and other page controls work inside the conversation. Select **Expand** above a visualization for a larger view. Zoom from 50% to 200%, or select the percentage to reset to 100%. Close the viewer or press Escape to return to the conversation. Your inputs and other interactive state stay with the page when expanding and closing; each expansion starts at 100% zoom.
+
+The expanded viewer hides its scrollbars. You can still scroll in either direction to move around a zoomed page.
+
+Select **Open in panel** to open a separate copy in a side-panel tab, with HTML source and download controls. Both actions stay outside the page so they cannot cover its content or controls.
 
 Each published page is saved with its conversation and survives reloading the app. Changes made with the page's controls are temporary and reset when that page reloads. Local images are embedded when the page is published; external resources still require a network connection.
 

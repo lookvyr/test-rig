@@ -5,15 +5,12 @@ import {
   htmlRenderFrameHeight,
   type HtmlRenderReference,
 } from "@t3tools/shared/htmlRender";
-import { Maximize2Icon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import type { ChatFileAttachment } from "~/types";
 
-import { HtmlRenderDocument } from "../files/BrowserDocumentFrame";
-import { Button } from "../ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { HtmlRenderViewer } from "./HtmlRenderViewer";
 import { flushSync } from "react-dom";
 
 // A frame may load its URL a little after mounting.
@@ -94,48 +91,23 @@ export function HtmlRenderFrame(props: {
 
   return (
     <div ref={boxRef}>
-      <div className="flex justify-end pb-1">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                aria-label="Open in panel"
-                size="icon-xs"
-                variant="ghost"
-                disabled={src === null}
-                onClick={() =>
-                  props.onOpen({
-                    type: "file",
-                    id: attachmentId,
-                    name: fileName,
-                    mimeType: "text/html",
-                    // Unknown here; the preview leaves it out.
-                    sizeBytes: 0,
-                    htmlRender: true,
-                  })
-                }
-              />
-            }
-          >
-            <Maximize2Icon className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipPopup side="left">Open in panel</TooltipPopup>
-        </Tooltip>
-      </div>
-      <div style={{ height }}>
-        {src !== null ? (
-          <HtmlRenderDocument
-            src={src}
-            title={title}
-            className="block size-full"
-            onContentHeight={setContentHeight}
-          />
-        ) : failed ? (
-          <p className="flex size-full items-center justify-center text-muted-foreground text-xs">
-            Unable to load {title}
-          </p>
-        ) : null}
-      </div>
+      <HtmlRenderViewer
+        src={src}
+        title={title}
+        height={height}
+        failed={failed}
+        onContentHeight={setContentHeight}
+        onOpenInPanel={() =>
+          props.onOpen({
+            type: "file",
+            id: attachmentId,
+            name: fileName,
+            mimeType: "text/html",
+            sizeBytes: 0,
+            htmlRender: true,
+          })
+        }
+      />
     </div>
   );
 }

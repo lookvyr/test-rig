@@ -171,6 +171,7 @@ export type ResolvedAsset =
       readonly fileName?: string;
       readonly mimeType?: string;
       readonly file?: OpenMediaFile;
+      readonly htmlRender?: true;
     };
 
 function decodeClaims(encodedPayload: string): AssetClaims | null {
@@ -811,6 +812,9 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       ? ({
           kind: "file",
           path: attachmentPath,
+          ...(parseAttachmentFileExtension(claims.attachmentId) === "html"
+            ? { htmlRender: true as const }
+            : {}),
           ...(claims.download ? { download: true } : {}),
           ...(claims.fileName !== undefined ? { fileName: claims.fileName } : {}),
           ...(claims.mimeType !== undefined ? { mimeType: claims.mimeType } : {}),
