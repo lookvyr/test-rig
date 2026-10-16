@@ -78,11 +78,9 @@ function useMediaActions(source: MediaActionSource) {
 /** Discoverable actions for media embedded in a reply; context-menu actions remain available. */
 export function MediaActionBar({
   source,
-  duration,
   onExpand,
 }: {
   readonly source: MediaActionSource;
-  readonly duration?: string | undefined;
   readonly onExpand?: (() => void) | undefined;
 }) {
   const { save } = useMediaActions(source);
@@ -109,7 +107,6 @@ export function MediaActionBar({
       <span className="min-w-0 flex-1 truncate" title={source.name}>
         {source.name}
       </span>
-      {duration ? <span className="shrink-0 tabular-nums">{duration}</span> : null}
       <Tooltip>
         <TooltipTrigger
           render={

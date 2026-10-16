@@ -315,10 +315,8 @@ function ChatMarkdownVideo(props: {
   readonly sourceFailed?: boolean | undefined;
   readonly style?: CSSProperties | undefined;
   readonly mediaIdentity?: string | undefined;
-  readonly srcFragment?: string | undefined;
   readonly actionsSource?: MediaActionSource | undefined;
   readonly onRetry?: (() => Promise<unknown>) | undefined;
-  readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }) {
   return (
     <MediaVideoPlayer
@@ -341,25 +339,6 @@ function ChatMarkdownVideo(props: {
       onRetry={props.onRetry}
       actionsSource={props.actionsSource}
       inline
-      onExpand={
-        props.onImageExpand
-          ? () =>
-              props.onImageExpand?.({
-                images: [
-                  {
-                    src: props.src,
-                    name: props.alt.trim() || "video",
-                    type: "video",
-                    autoPlay: false,
-                    ...(props.srcFragment ? { srcFragment: props.srcFragment } : {}),
-                    ...(props.originalUrl ? { originalUrl: props.originalUrl } : {}),
-                    ...(props.actionsSource ? { actionsSource: props.actionsSource } : {}),
-                  },
-                ],
-                index: 0,
-              })
-          : undefined
-      }
     />
   );
 }
@@ -467,10 +446,8 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
         originalUrl={props.originalUrl}
         style={props.style}
         mediaIdentity={JSON.stringify([props.environmentId, props.resource, props.srcFragment])}
-        srcFragment={props.srcFragment}
         onRetry={refreshAssetUrl}
         actionsSource={actionsSource}
-        onImageExpand={props.onImageExpand}
       />
     );
   }
@@ -524,7 +501,6 @@ export function ChatMarkdownDirectMedia(props: {
       copyMarkdown={props.copyMarkdown}
       originalUrl={originalUrl}
       actionsSource={actionsSource}
-      onImageExpand={props.onImageExpand}
     />
   ) : (
     <ChatMarkdownImage

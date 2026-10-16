@@ -37,7 +37,7 @@ describe("reply media", () => {
     expect(markup).toContain('src="https://environment.test/api/assets/screenshot.png"');
   });
 
-  it("renders remote video embeds as playable media with visible expansion", () => {
+  it("renders remote video embeds with native controls and no duplicate action bar", () => {
     const markup = renderToStaticMarkup(
       <ChatMarkdownDirectMedia
         src="https://example.test/demo.mp4?token=abc#t=2"
@@ -50,7 +50,8 @@ describe("reply media", () => {
     expect(markup).toContain("<video");
     expect(markup).toContain('src="https://example.test/demo.mp4?token=abc#t=2"');
     expect(markup).toContain('controls=""');
-    expect(markup).toContain("Save Expand");
+    expect(markup).not.toContain("Save Expand");
+    expect(markup).not.toContain("<button");
     expect(markup).not.toContain("<img");
   });
 

@@ -5,7 +5,7 @@ import { cn } from "../../lib/utils";
 import { prepareVideoFirstFrame } from "../../lib/videoFirstFrame";
 import { Button } from "../ui/button";
 import { OpenMediaLink } from "./OpenMediaLink";
-import { MediaActionBar, MediaActions, type MediaActionSource } from "./MediaActions";
+import { MediaActions, type MediaActionSource } from "./MediaActions";
 
 interface MediaVideoPlayerProps {
   readonly src: string | null;
@@ -19,7 +19,6 @@ interface MediaVideoPlayerProps {
   readonly onOpen?: (() => void) | undefined;
   /** Fits reply embeds to their natural shape within a 30rem square. */
   readonly inline?: boolean | undefined;
-  readonly onExpand?: (() => void) | undefined;
   readonly className?: string | undefined;
   readonly videoClassName?: string | undefined;
   /** Styles the loading and failure panels, which otherwise assume an inline light surface. */
@@ -41,7 +40,6 @@ export function MediaVideoPlayer({
   autoPlay = false,
   onOpen,
   inline = false,
-  onExpand,
   className,
   videoClassName,
   stateClassName,
@@ -62,16 +60,9 @@ export function MediaVideoPlayer({
   const [metadata, setMetadata] = useState<{
     width: number;
     height: number;
-    duration: number;
   } | null>(null);
   const aspectRatio = metadata ? metadata.width / metadata.height : 16 / 9;
   const frameStyle = inline ? { aspectRatio } : undefined;
-  const duration =
-    metadata && Number.isFinite(metadata.duration)
-      ? `${Math.floor(metadata.duration / 60)}:${Math.floor(metadata.duration % 60)
-          .toString()
-          .padStart(2, "0")}`
-      : undefined;
   const src = playbackSource?.src ?? latestSrc;
   const sourceRevision = playbackSource === null ? revision : playbackSource.revision;
   const failed = src !== null ? failedSrc === src : sourceFailed;
@@ -205,16 +196,9 @@ export function MediaVideoPlayer({
               setMetadata({
                 width: video.videoWidth,
                 height: video.videoHeight,
-                duration: video.duration,
               });
             }
             prepareVideoFirstFrame(video);
-          }}
-          onDurationChange={(event) => {
-            const duration = event.currentTarget.duration;
-            setMetadata((current) =>
-              current && current.duration !== duration ? { ...current, duration } : current,
-            );
           }}
           onPlay={() => setPlaybackSource({ src, revision: sourceRevision })}
           onPause={refreshPausedRevision}
@@ -243,20 +227,6 @@ export function MediaVideoPlayer({
             <PlayIcon aria-hidden className="size-4 fill-current" />
           </span>
         </button>
-      ) : null}
-      {inline && actionsSource ? (
-        <MediaActionBar
-          source={actionsSource}
-          duration={duration}
-          onExpand={
-            onExpand
-              ? () => {
-                  videoRef.current?.pause();
-                  onExpand();
-                }
-              : undefined
-          }
-        />
       ) : null}
     </span>
   );
