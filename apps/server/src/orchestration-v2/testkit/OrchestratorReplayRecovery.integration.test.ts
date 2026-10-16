@@ -372,7 +372,6 @@ describe("orchestrator replay recovery", () => {
         const [launchPrompt, resumePrompt] = yield* decodePromptPair(transcript.metadata?.prompts);
         const workspace = yield* checkpointWorkspace(transcript.scenario);
         const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
         const tempDir = yield* Effect.acquireRelease(
           fs.makeTempDirectory({ prefix: "t3-orchestration-v2-claude-recovery-" }),
           (directory) => fs.remove(directory, { recursive: true, force: true }).pipe(Effect.orDie),

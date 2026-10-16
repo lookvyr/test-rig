@@ -11,6 +11,8 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  ProviderSessionId,
+  RuntimeRequestId,
   RunId,
   ThreadId,
   type OrchestrationV2ThreadProjection,
@@ -19,6 +21,7 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
@@ -1785,11 +1788,23 @@ describe("OrchestratorMcpService provider resolution", () => {
         if (["live-question", "async-question", "approval"].includes(outcome)) {
           requests = [
             {
+              id: RuntimeRequestId.make("request:wait-question"),
+              nodeId: parentNodeId,
+              providerTurnId: null,
+              nativeRequestRef: null,
               kind: outcome === "approval" ? "command" : "user_input",
               status: "pending",
-              responseCapability: { type: outcome === "async-question" ? "message" : "live" },
+              responseCapability:
+                outcome === "async-question"
+                  ? { type: "message" }
+                  : {
+                      type: "live",
+                      providerSessionId: ProviderSessionId.make("session:wait-question"),
+                    },
+              createdAt: yield* DateTime.now,
+              resolvedAt: null,
             },
-          ] as OrchestrationV2ThreadProjection["runtimeRequests"];
+          ];
           yield* Deferred.succeed(updated, {
             sequence: 2,
             event: { type: "runtime-request.updated", threadId: childThreadId },
