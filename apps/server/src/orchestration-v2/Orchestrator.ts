@@ -2140,6 +2140,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.driver": command.modelSelection.instanceId,
     });
 
+    // Stale draft clients can submit another create for a saved thread. Replacing
+    // its row would clear the active native session and silently lose context.
+    // Exact command retries are already handled by dispatchWithReceiptEffect.
+    const exists = yield* projectionStore.getThread(command.threadId).pipe(
+      Effect.map(() => true),
+      Effect.catchTag("ProjectionStoreThreadNotFoundError", () => Effect.succeed(false)),
+      mapDispatchError(command),
+    );
+    if (exists) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "This thread already exists. Reload the conversation before sending another message.",
+      });
+    }
+
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {

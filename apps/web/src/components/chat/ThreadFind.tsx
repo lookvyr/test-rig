@@ -12,6 +12,7 @@ import { orchestrationEnvironment } from "../../state/orchestration";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { useEnvironmentThread } from "../../state/threads";
+import { useThreadShell } from "../../state/entities";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   findMessageRanges,
@@ -61,7 +62,13 @@ export function ThreadFind({
   const textCache = useRef(
     new Map<string, { source: string; cwd: string | undefined; text: string }>(),
   );
-  const state = useEnvironmentThread(threadRef.environmentId, threadRef.threadId);
+  // The optimistic first message mounts this even before thread creation.
+  // A premature detail request would cache its 404 as a deleted conversation.
+  const shell = useThreadShell(threadRef);
+  const state = useEnvironmentThread(
+    shell === null ? null : threadRef.environmentId,
+    shell === null ? null : threadRef.threadId,
+  );
   const normalizedQuery = normalizeFindText(query);
   const runSearch = useAtomQueryRunner(orchestrationEnvironment.threadSearchMessages, {
     reportFailure: false,

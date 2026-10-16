@@ -49,6 +49,50 @@ const testLayer = Layer.mergeAll(
   ),
 );
 
+it.effect.each(["active", "archived", "deleted"] as const)(
+  "cannot recreate a %s thread with another command id",
+  (state) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make(`thread:create-once:${state}`);
+      const create = {
+        type: "thread.create" as const,
+        commandId: CommandId.make(`create-once:${state}`),
+        threadId,
+        projectId: ProjectId.make("project:create-once"),
+        title: "Original conversation",
+        modelSelection,
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+        branch: null,
+        worktreePath: null,
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+      };
+      yield* orchestrator.dispatch(create);
+      if (state !== "active") {
+        yield* orchestrator.dispatch({
+          type: state === "archived" ? "thread.archive" : "thread.delete",
+          commandId: CommandId.make(`close-create-once:${state}`),
+          threadId,
+        });
+      }
+      const before = yield* projections.getThread(threadId);
+      const duplicate = yield* Effect.result(
+        orchestrator.dispatch({
+          ...create,
+          commandId: CommandId.make(`duplicate-create:${state}`),
+          title: "Unexpected replacement",
+        }),
+      );
+      assert.equal(duplicate._tag, "Failure");
+      assert.deepEqual(yield* projections.getThread(threadId), before);
+      yield* orchestrator.dispatch(create);
+      assert.deepEqual(yield* projections.getThread(threadId), before);
+    }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect(
   "dispatches metadata, queue resume and request controls without hydrating unrelated history",
   () =>

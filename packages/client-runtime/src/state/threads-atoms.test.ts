@@ -3,6 +3,9 @@ import {
   EventId,
   MessageId,
   ORCHESTRATION_V2_WS_METHODS,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
   TurnItemId,
   type OrchestrationV2ThreadHistoryPage,
   type OrchestrationV2ThreadProjection,
@@ -58,6 +61,7 @@ const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?
   readonly snapshotUnavailable?: boolean;
 }) {
   const subscriptions = yield* Queue.unbounded<{
+    readonly threadId: ThreadId;
     readonly afterSequence: number | undefined;
     readonly events: Queue.Queue<OrchestrationV2ThreadStreamItem>;
     readonly closed: Deferred.Deferred<void>;
@@ -73,7 +77,10 @@ const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?
   let opened = 0;
   let active = 0;
   const client = {
-    [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input: { readonly afterSequence?: number }) =>
+    [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: (input: {
+      readonly threadId: ThreadId;
+      readonly afterSequence?: number;
+    }) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const events = yield* Queue.unbounded<OrchestrationV2ThreadStreamItem>();
@@ -88,7 +95,12 @@ const makeHarness = Effect.fn("TestThreadAtoms.makeHarness")(function* (options?
                 active -= 1;
               }).pipe(Effect.andThen(Deferred.succeed(closed, undefined))),
           );
-          yield* Queue.offer(subscriptions, { afterSequence: input.afterSequence, events, closed });
+          yield* Queue.offer(subscriptions, {
+            threadId: input.threadId,
+            afterSequence: input.afterSequence,
+            events,
+            closed,
+          });
           return Stream.fromQueue(events);
         }),
       ),
@@ -302,6 +314,161 @@ describe("createEnvironmentThreadStateAtoms", () => {
       remount();
       yield* Deferred.await(next.closed);
     }),
+  );
+
+  it.effect.each([
+    { synchronized: false, status: "starting" as const },
+    { synchronized: true, status: "starting" as const },
+    { synchronized: false, status: "running" as const },
+    { synchronized: true, status: "running" as const },
+  ])(
+    "retains a $status Claude conversation across a Codex review (synchronized: $synchronized)",
+    ({ synchronized, status }) =>
+      Effect.gen(function* () {
+        const claude = ProviderInstanceId.make("claudeAgent");
+        const modelSelection = { instanceId: claude, model: "claude-opus-4-6" };
+        const runId = RunId.make("claude-run");
+        const messageId = MessageId.make("claude-prompt");
+        const message = {
+          id: messageId,
+          threadId: THREAD_ID,
+          runId,
+          nodeId: null,
+          role: "user" as const,
+          text: "Keep working while I review another PR",
+          streaming: false,
+          attachments: [],
+          createdBy: "user" as const,
+          creationSource: "web" as const,
+          createdAt: THREAD.thread.createdAt,
+          updatedAt: THREAD.thread.createdAt,
+        };
+        const item = {
+          id: TurnItemId.make("claude-command"),
+          type: "command_execution" as const,
+          threadId: THREAD_ID,
+          runId,
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 1,
+          status: "running" as const,
+          title: "Running tests",
+          input: "test",
+          output: "Tests started",
+          startedAt: THREAD.thread.createdAt,
+          completedAt: null,
+          updatedAt: THREAD.thread.createdAt,
+        };
+        const original: OrchestrationV2ThreadProjection = {
+          ...THREAD,
+          thread: { ...THREAD.thread, providerInstanceId: claude, modelSelection },
+          runs: [
+            {
+              id: runId,
+              threadId: THREAD_ID,
+              ordinal: 1,
+              providerInstanceId: claude,
+              modelSelection,
+              providerThreadId: null,
+              userMessageId: messageId,
+              rootNodeId: null,
+              activeAttemptId: null,
+              status,
+              requestedAt: THREAD.thread.createdAt,
+              startedAt: THREAD.thread.createdAt,
+              completedAt: null,
+              checkpointId: null,
+              contextHandoffId: null,
+            },
+          ],
+          messages: [message],
+          turnItems: status === "starting" ? [] : [item],
+          visibleTurnItems:
+            status === "starting"
+              ? []
+              : [
+                  {
+                    position: 0,
+                    visibility: "local",
+                    sourceThreadId: THREAD_ID,
+                    sourceItemId: item.id,
+                    item,
+                  },
+                ],
+        };
+        const h = yield* makeHarness({ snapshotUnavailable: true });
+        const unmount = h.registry.mount(h.stateAtom);
+        const first = yield* Queue.take(h.subscriptions);
+        yield* Queue.offer(first.events, {
+          kind: "snapshot",
+          snapshotSequence: 8,
+          projection: original,
+        });
+        if (synchronized) yield* Queue.offer(first.events, { kind: "synchronized" });
+        yield* observeState(
+          h.registry,
+          h.stateAtom,
+          (state) =>
+            Option.getOrNull(state.data) === original &&
+            state.status === (synchronized ? "live" : "synchronizing"),
+        );
+        unmount();
+        yield* Deferred.await(first.closed);
+
+        const reviewId = ThreadId.make("codex-review");
+        const reviewAtom = h.details.stateAtom({ ...h.ref, threadId: reviewId });
+        const unmountReview = h.registry.mount(reviewAtom);
+        const review = yield* Queue.take(h.subscriptions);
+        expect(review.threadId).toBe(reviewId);
+        expect(review.afterSequence).toBeUndefined();
+        const reviewProjection = {
+          ...THREAD,
+          thread: { ...THREAD.thread, id: reviewId, worktreePath: "/worktrees/review" },
+        };
+        yield* Queue.offerAll(review.events, [
+          { kind: "snapshot", snapshotSequence: 20, projection: reviewProjection },
+          { kind: "synchronized" },
+        ]);
+        yield* observeState(h.registry, reviewAtom, (state) => state.status === "live");
+        unmountReview();
+        yield* Deferred.await(review.closed);
+
+        const remount = h.registry.mount(h.stateAtom);
+        expect(currentThread(h.registry, h.stateAtom)).toBe(original);
+        const resumed = yield* Queue.take(h.subscriptions);
+        expect(resumed.threadId).toBe(THREAD_ID);
+        expect(resumed.afterSequence).toBe(8);
+        yield* Queue.offerAll(resumed.events, [
+          {
+            kind: "event",
+            sequence: 21,
+            event: {
+              id: EventId.make("claude-progress"),
+              type: "turn-item.updated",
+              threadId: THREAD_ID,
+              occurredAt: THREAD.thread.createdAt,
+              payload: { ...item, output: "Tests still running" },
+            },
+          },
+          { kind: "synchronized" },
+        ]);
+        yield* observeState(
+          h.registry,
+          h.stateAtom,
+          (state) => state.status === "live" && Option.getOrNull(state.data)?.turnItems[0] !== item,
+        );
+        const restored = currentThread(h.registry, h.stateAtom);
+        expect(restored.messages).toEqual([message]);
+        expect(restored.runs[0]?.status).toBe(status);
+        expect(restored.thread.modelSelection).toEqual(modelSelection);
+        expect(restored.visibleTurnItems[0]?.item).toMatchObject({ output: "Tests still running" });
+        expect(h.counts()).toEqual({ httpLoads: 2, diskLoads: 2, opened: 3, active: 1 });
+        remount();
+        yield* Deferred.await(resumed.closed);
+      }),
   );
 
   it.effect("keeps warm data when the raw atom family's weak entry is collected", () =>

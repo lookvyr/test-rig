@@ -1266,6 +1266,41 @@ describe("EnvironmentThreads", () => {
     }),
   );
 
+  it.effect("retains an HTTP miss across navigation but a fresh client can load the thread", () =>
+    Effect.gen(function* () {
+      const resumeCache: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]> = {
+        snapshot: undefined,
+        owner: undefined,
+      };
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const first = yield* makeHarness({ resumeCache, httpSnapshot: { _tag: "missing" } });
+          yield* awaitThreadState(first.observed, (state) => state.status === "deleted");
+        }),
+      );
+
+      // A draft lookup before creation has the same definitive 404 as a
+      // deleted thread. Callers must wait for creation before loading details.
+      const httpSnapshot = {
+        _tag: "present" as const,
+        snapshot: { snapshotSequence: 8, projection: BASE_PROJECTION },
+      };
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const returned = yield* makeHarness({ resumeCache, httpSnapshot });
+          const state = yield* awaitThreadState(returned.observed, (s) => s.status === "deleted");
+          expect(Option.isNone(state.data)).toBe(true);
+          expect(yield* Ref.get(returned.loaderCalls)).toBe(0);
+        }),
+      );
+
+      const reloaded = yield* makeHarness({ httpSnapshot });
+      const state = yield* awaitThreadState(reloaded.observed, (s) => s.status === "live");
+      expect(Option.getOrNull(state.data)).toBe(BASE_PROJECTION);
+      expect(yield* Ref.get(reloaded.loaderCalls)).toBe(1);
+    }),
+  );
+
   it.effect("falls back to the socket when the HTTP snapshot is only unavailable", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({

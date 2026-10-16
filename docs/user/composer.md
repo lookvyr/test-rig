@@ -5,6 +5,11 @@ Switching conversations focuses the destination composer, including with
 stay open. Choose a terminal tab, pane, or running-terminal indicator to type
 in that terminal instead.
 
+You can switch conversations while the first response is starting. Returning to
+the conversation loads its saved messages and current activity without a reload.
+Sending a follow-up after switching threads continues the existing provider
+conversation and keeps its title and context.
+
 ## Markdown while editing
 
 The composer renders headings, bullet and numbered lists, blockquotes, bold,

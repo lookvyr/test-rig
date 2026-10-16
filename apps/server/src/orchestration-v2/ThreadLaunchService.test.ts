@@ -291,6 +291,49 @@ function launchInput(input: {
   };
 }
 
+it.effect("rejects a new launch of an existing conversation without resetting its context", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const input = launchInput({
+      command: "command:launch:original-context",
+      thread: "thread:launch:original-context",
+      message: "Remember the original context",
+    });
+    yield* launches.launch(input);
+    yield* threads.streamStoredEventsFrom({ threadId: input.threadId }).pipe(
+      Stream.filter(
+        (stored) =>
+          stored.commandId === CommandId.make(`${input.commandId}:release`) &&
+          stored.event.type === "run.updated",
+      ),
+      Stream.runHead,
+    );
+    const before = yield* threads.getThreadProjection(input.threadId);
+    assert.isNotNull(before.thread.activeProviderThreadId);
+
+    const result = yield* Effect.result(
+      launches.launch({
+        ...input,
+        commandId: CommandId.make("command:launch:stale-draft"),
+        title: "Resume message mistaken for a new conversation",
+        initialMessage: {
+          messageId: MessageId.make("message:stale-draft"),
+          text: "Do you remember the original context?",
+          attachments: [],
+        },
+      }),
+    );
+    assert.equal(result._tag, "Failure");
+    assert.deepEqual(yield* threads.getThreadProjection(input.threadId), before);
+
+    // Retrying the original command remains idempotent after the thread exists.
+    yield* launches.launch(input);
+    assert.deepEqual(yield* threads.getThreadProjection(input.threadId), before);
+  }).pipe(Effect.provide(harness.layer));
+});
+
 function waitUntil<E, R>(predicate: () => Effect.Effect<boolean, E, R>): Effect.Effect<void, E, R> {
   return Effect.gen(function* () {
     for (let attempt = 0; attempt < 200; attempt += 1) {
