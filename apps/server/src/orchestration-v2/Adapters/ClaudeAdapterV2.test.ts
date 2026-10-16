@@ -859,6 +859,30 @@ describe("ClaudeAdapterV2 native protocol logging", () => {
 });
 
 describe("ClaudeAdapterV2 context usage", () => {
+  it.each([
+    { model: "claude-opus-5-5", contextWindow: undefined, maxTokens: 1_000_000 },
+    { model: "claude-haiku-4-5", contextWindow: undefined, maxTokens: 200_000 },
+    { model: "claude-opus-4-6", contextWindow: "200k", maxTokens: 200_000 },
+    { model: "claude-sonnet-4-6", contextWindow: "1m", maxTokens: 1_000_000 },
+    { model: "custom-claude-model", contextWindow: undefined, maxTokens: null },
+  ])(
+    "uses the catalog ceiling for $model with contextWindow=$contextWindow",
+    ({ model, contextWindow, maxTokens }) => {
+      const usage = ClaudeAdapterV2.claudeProviderTurnTokenUsage(
+        { input_tokens: 98_000, output_tokens: 189 },
+        {
+          instanceId: CLAUDE_TEST_MODEL_SELECTION.instanceId,
+          model,
+          options: contextWindow === undefined ? [] : [{ id: "contextWindow", value: contextWindow }],
+        },
+        "2026-08-29T00:00:00.000Z",
+      );
+
+      assert.equal(usage.usedTokens, 98_189);
+      assert.equal(usage.maxTokens, maxTokens);
+    },
+  );
+
   it("projects assistant usage against the selected context window", () => {
     const usage = ClaudeAdapterV2.claudeProviderTurnTokenUsage(
       {
@@ -3046,6 +3070,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             providerThread: harness.providerThread,
             now,
             attemptId: RunAttemptId.make("claude-native-compact-attempt"),
+            modelSelection: { ...CLAUDE_TEST_MODEL_SELECTION, model: "claude-opus-5-5" },
             text: " /COMPACT ",
             attachments: [],
           }),
@@ -3085,6 +3110,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             event.providerTurn.tokenUsage?.usedTokens === 400,
         );
         assert.isDefined(watermark);
+        if (watermark?.type === "provider_turn.updated") {
+          assert.equal(watermark.providerTurn.tokenUsage?.maxTokens, 1_000_000);
+        }
         const completed = harness.events.findLast(
           (event) => event.type === "provider_turn.updated",
         );
