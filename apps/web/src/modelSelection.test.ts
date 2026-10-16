@@ -1,4 +1,9 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
+import {
+  DEFAULT_TEXT_GENERATION_MODEL,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
 import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "./providerInstances";
@@ -55,6 +60,31 @@ function settingsWithProviderInstances(): UnifiedSettings {
 }
 
 describe("instance-scoped model selection", () => {
+  it.each(["removed", "disabled-instance"])(
+    "uses the text generation default after %s fallback",
+    (reason) => {
+      const codex = provider({
+        instanceId: "codex",
+        models: ["gpt-6-astra", DEFAULT_TEXT_GENERATION_MODEL],
+      });
+      const providers = [
+        { ...provider({ instanceId: "disabled", models: ["removed-model"] }), enabled: false },
+        { ...codex, models: codex.models.map((model, i) => ({ ...model, isDefault: i === 0 })) },
+      ];
+      const settings: UnifiedSettings = {
+        ...settingsWithProviderInstances(),
+        textGenerationModelSelection: {
+          instanceId: ProviderInstanceId.make(reason === "removed" ? "codex" : "disabled"),
+          model: "removed-model",
+        },
+      };
+      expect(resolveAppModelSelectionState(settings, providers)).toMatchObject({
+        instanceId: "codex",
+        model: DEFAULT_TEXT_GENERATION_MODEL,
+      });
+    },
+  );
+
   it("preserves server-provided legacy model metadata", () => {
     const baseProvider = provider({
       instanceId: "claudeAgent",
