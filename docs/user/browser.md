@@ -76,8 +76,9 @@ Saved recordings remain available after the browser closes. When the browser
 runs on another machine, the recording is transferred to the agent's environment
 before it is presented. Recording transfers support files up to 50 MiB.
 
-Images and videos in replies have bounded previews. Choose **Expand** to inspect
-them in the larger viewer, or **Save** to download a copy. Videos keep their
+Images and videos in replies have bounded previews. Use the expand icon to inspect
+them in the larger viewer, or the download icon to save a copy. Hover over an icon
+to see its action. Videos keep their
 original proportions and offer inline playback, seeking, and fullscreen.
 
 When no desktop browser is available, agents can use the environment's server

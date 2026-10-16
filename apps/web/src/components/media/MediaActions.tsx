@@ -105,33 +105,45 @@ export function MediaActionBar({
     }
   };
   return (
-    <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
-      <span className="w-full min-w-0 truncate" title={source.name}>
+    <span className="mt-1 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate" title={source.name}>
         {source.name}
       </span>
-      <span className="min-w-0 flex-1 tabular-nums">{duration}</span>
-      <Button
-        type="button"
-        size="xs"
-        variant="ghost"
-        aria-label={`Save ${noun}`}
-        disabled={saving || (source.src === null && !source.asset)}
-        onClick={() => void saveMedia()}
-      >
-        <DownloadIcon aria-hidden />
-        {saving ? "Saving…" : "Save"}
-      </Button>
-      {onExpand ? (
-        <Button
-          type="button"
-          size="xs"
-          variant="ghost"
-          aria-label={`Expand ${noun}`}
-          onClick={onExpand}
+      {duration ? <span className="shrink-0 tabular-nums">{duration}</span> : null}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost-muted"
+              aria-label={saving ? `Saving ${noun}` : `Save ${noun}`}
+              disabled={saving || (source.src === null && !source.asset)}
+              onClick={() => void saveMedia()}
+            />
+          }
         >
-          <Maximize2Icon aria-hidden />
-          Expand
-        </Button>
+          <DownloadIcon aria-hidden />
+        </TooltipTrigger>
+        <TooltipPopup>{saving ? "Saving…" : `Save ${noun}`}</TooltipPopup>
+      </Tooltip>
+      {onExpand ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost-muted"
+                aria-label={`Expand ${noun}`}
+                onClick={onExpand}
+              />
+            }
+          >
+            <Maximize2Icon aria-hidden />
+          </TooltipTrigger>
+          <TooltipPopup>{`Expand ${noun}`}</TooltipPopup>
+        </Tooltip>
       ) : null}
     </span>
   );
