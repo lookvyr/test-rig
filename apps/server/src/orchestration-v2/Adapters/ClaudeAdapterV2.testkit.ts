@@ -811,6 +811,7 @@ function makeReplayQueryRunner(
               model,
             });
           }),
+        backgroundTasks: () => Effect.succeed(false),
         interrupt: replayEffect(() => {
           assertNextOutboundFrame({ type: "query.interrupt" });
         }),

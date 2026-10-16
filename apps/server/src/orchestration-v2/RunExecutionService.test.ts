@@ -3308,9 +3308,11 @@ it.effect("does not refresh pull requests for auxiliary or stale provider termin
             { ...ids, rootProviderTurnId: ProviderTurnId.make("turn:previous") },
             "interrupted",
           ),
+          rootTerminalEvent(ids, "cancelled"),
         ]),
     });
-    assert.deepEqual(observed, []);
+    // Only the root terminal settles the run and refreshes pull requests.
+    assert.deepEqual(observed, ["run:cancelled", "pull-requests-refreshed"]);
   }),
 );
 
@@ -3335,6 +3337,33 @@ it.effect("refreshes pull requests after a provider stream exits with an error",
     );
     const error = written.find((item) => item.type === "error");
     assert.include(error?.failure.message ?? "", "provider event stream closed unexpectedly");
+  }),
+);
+
+it.effect("fails the run when its event stream ends without a root terminal", () =>
+  Effect.gen(function* () {
+    const { observed, finalEvents } = yield* captureRootRunTermination({
+      key: "stream-end-without-terminal",
+      shouldFinalizeRun: () => Effect.succeed(true),
+      events: () => Stream.empty,
+    });
+    assert.deepEqual(observed, ["run:failed", "pull-requests-refreshed"]);
+    assert.equal(
+      finalEvents.find((event) => event.type === "provider-thread.updated")?.payload.status,
+      "idle",
+    );
+  }),
+);
+
+it.effect("leaves the run to restart recovery when shutdown interrupts its event stream", () =>
+  Effect.gen(function* () {
+    const { written, observed } = yield* captureRootRunTermination({
+      key: "stream-end:shutdown",
+      shouldFinalizeRun: () => Effect.succeed(true),
+      events: () => Stream.failCause(Cause.interrupt()),
+    });
+    assert.deepEqual(written, []);
+    assert.deepEqual(observed, []);
   }),
 );
 
@@ -3502,12 +3531,14 @@ function captureRootRunTermination(input: {
       status: "running",
     });
     const writtenItems = yield* Ref.make<ReadonlyArray<OrchestrationV2TurnItem>>([]);
+    const finalEvents = yield* Ref.make<ReadonlyArray<OrchestrationV2DomainEvent>>([]);
     const observed = yield* Ref.make<ReadonlyArray<string>>([]);
     const ingestionDone = yield* Deferred.make<void>();
     const captureTurnItem = (payload: OrchestrationV2TurnItem) =>
       Ref.update(writtenItems, (current) => [...current, payload]);
     const captureFinalEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
       Effect.gen(function* () {
+        yield* Ref.update(finalEvents, (current) => [...current, ...events]);
         for (const event of events) {
           if (event.type === "turn-item.updated") {
             yield* captureTurnItem(event.payload);
@@ -3645,7 +3676,11 @@ function captureRootRunTermination(input: {
     }).pipe(Effect.provide(testLayer));
 
     yield* Deferred.await(ingestionDone);
-    return { written: yield* Ref.get(writtenItems), observed: yield* Ref.get(observed) };
+    return {
+      written: yield* Ref.get(writtenItems),
+      observed: yield* Ref.get(observed),
+      finalEvents: yield* Ref.get(finalEvents),
+    };
   });
 }
 
