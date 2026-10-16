@@ -17,7 +17,7 @@ interface MediaVideoPlayerProps {
   readonly autoPlay?: boolean | undefined;
   /** Presents a still thumbnail whose full surface opens the video in a viewer. */
   readonly onOpen?: (() => void) | undefined;
-  /** Fits reply embeds to their natural shape within a 30rem square. */
+  /** Fits reply embeds to the message width and caps their natural height at 30rem. */
   readonly inline?: boolean | undefined;
   readonly className?: string | undefined;
   readonly videoClassName?: string | undefined;

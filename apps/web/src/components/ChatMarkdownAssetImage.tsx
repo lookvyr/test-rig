@@ -327,15 +327,8 @@ function ChatMarkdownVideo(props: {
       originalUrl={props.originalUrl}
       style={props.style}
       copyMarkdown={props.copyMarkdown}
-      className={cn(
-        CHAT_MARKDOWN_MEDIA_LAYOUT_CLASS_NAME,
-        CHAT_MARKDOWN_MEDIA_MAX_WIDTH_CLASS_NAME,
-        "w-full",
-      )}
-      videoClassName={cn(
-        CHAT_MARKDOWN_MEDIA_BOUNDS_CLASS_NAME,
-        CHAT_MARKDOWN_MEDIA_FRAME_CLASS_NAME,
-      )}
+      className={cn(CHAT_MARKDOWN_MEDIA_LAYOUT_CLASS_NAME, "w-full")}
+      videoClassName={cn("max-h-[30rem]", CHAT_MARKDOWN_MEDIA_FRAME_CLASS_NAME)}
       onRetry={props.onRetry}
       actionsSource={props.actionsSource}
       inline
