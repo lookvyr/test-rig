@@ -1,3 +1,4 @@
+import * as DelegatedTaskQuestionReactor from "./orchestration-v2/DelegatedTaskQuestionReactor.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import {
   ProjectServiceLayerLive,
@@ -330,6 +331,11 @@ const PullRequestServiceLive = PullRequestService.layer.pipe(
 );
 
 const OrchestrationWorkersLive = Layer.mergeAll(
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      yield* (yield* DelegatedTaskQuestionReactor.DelegatedTaskQuestionReactor).start();
+    }),
+  ).pipe(Layer.provide(DelegatedTaskQuestionReactor.layer)),
   Layer.effectDiscard(
     ThreadSettlementService.make.pipe(Effect.flatMap((service) => service.start())),
   ),

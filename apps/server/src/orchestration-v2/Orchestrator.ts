@@ -2152,7 +2152,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: "This thread already exists. Reload the conversation before sending another message.",
+        cause:
+          "This thread already exists. Reload the conversation before sending another message.",
       });
     }
 
@@ -4481,6 +4482,37 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   ) =>
     Effect.gen(function* () {
       let projection = yield* getProjectionWithPendingEvents(command.threadId, events);
+      const source = command.notification?.source;
+      if (
+        source?.kind === "delegated_task" &&
+        (projection.thread.archivedAt !== null ||
+          projection.thread.deletedAt !== null ||
+          source.taskIds.length === 0 ||
+          source.taskIds.some((id) => {
+            const task = projection.subagents.find((candidate) => candidate.id === id);
+            return (
+              task?.origin !== "app_owned" ||
+              (source.childThreadId !== undefined && task.childThreadId !== source.childThreadId) ||
+              task.completionDelivery?.state === "disposed" ||
+              task.status === "cancelled" ||
+              task.status === "interrupted"
+            );
+          }))
+      ) {
+        // Recheck under the parent lock: Stop may have won after the reactor's read.
+        // A stale notification receives an accepted no-op receipt, just like other wakes.
+        yield* emit(
+          events,
+          command,
+        )({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          occurredAt: yield* DateTime.now,
+          payload: projection.thread,
+        });
+        return;
+      }
+
       if (command.manualContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.manualContinuationOfRunId);
         const limited = latestRootProviderFailure(source ?? null, projection.turnItems);
@@ -9228,6 +9260,53 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (task === undefined) {
         return;
       }
+      if (terminalStatus === "cancelled" || terminalStatus === "interrupted") {
+        // Cancelled or interrupted tasks must not leave async questions that resume the child.
+        // Callers hold the parent lock; dismiss takes the child lock, as follow-up intake does.
+        const { runtimeRequests } = yield* projectionStore.getThreadRecords(childThreadId, [
+          "runtimeRequests",
+        ]);
+        const pendingQuestions = runtimeRequests.filter(
+          (request) =>
+            request.status === "pending" &&
+            request.kind === "user_input" &&
+            request.responseCapability.type === "message",
+        );
+        const { nodes } = yield* projectionStore.getThreadRecords(childThreadId, ["nodes"]);
+        const resultRunIds = new Set<RunId>();
+        let run: OrchestrationV2Run | undefined = childRun;
+        while (run !== undefined && !resultRunIds.has(run.id)) {
+          resultRunIds.add(run.id);
+          const previousRunId: RunId | undefined = run.restartContinuationOfRunId;
+          run =
+            previousRunId === undefined
+              ? undefined
+              : childControls.runs.find((candidate) => candidate.id === previousRunId);
+        }
+        for (const request of pendingQuestions) {
+          if (
+            nodes.some(
+              (node) =>
+                node.id === request.nodeId && node.runId !== null && resultRunIds.has(node.runId),
+            )
+          ) {
+            yield* dispatchWithReceipt({
+              type: "thread.user-input.dismiss",
+              commandId: CommandId.make(`command:system:delegated-task-question:${request.id}`),
+              threadId: childThreadId,
+              requestId: request.id,
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Failed to dismiss task question", {
+                  requestId: request.id,
+                  cause,
+                }),
+              ),
+            );
+          }
+        }
+      }
+
       const existingResultTransfer = parentProjection.contextTransfers.find(
         (transfer) =>
           transfer.type === "subagent_result" &&

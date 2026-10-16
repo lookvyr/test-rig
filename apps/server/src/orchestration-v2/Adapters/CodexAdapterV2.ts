@@ -1261,6 +1261,8 @@ export function codexThreadRuntimeParams(input: {
               ...codexAppMcpConfig(mcpSession.appMcpServers ?? []),
               test_rig: {
                 url: mcpSession.endpoint,
+                // Internal wait tools can block for an hour; let their own deadline end the call.
+                tool_timeout_sec: 65 * 60,
                 http_headers: {
                   Authorization: mcpSession.authorizationHeader,
                 },

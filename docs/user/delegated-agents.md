@@ -6,6 +6,19 @@ Claude, or OpenCode, including a different provider or model from the parent.
 Provider-native subagents are a separate workflow and follow their provider's
 context and workspace behavior.
 
+## Questions
+
+A delegated child's question notifies its parent. The parent can answer from your
+instructions or ask you for the missing information. If the parent is waiting
+for the child, a blocking question ends that wait so it can respond; completion
+still delivers the child's result afterward. Questions the child asks while it
+continues working also notify the parent. Approval requests still need your
+approval.
+
+Answering or dismissing a question cancels a parent notification that has not
+started yet. Canceling or interrupting a delegated task dismisses its unanswered
+async questions, so answering an old question cannot restart canceled work.
+
 ## Workspace
 
 App-owned delegated agents use the parent's current checkout, including its
