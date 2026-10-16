@@ -50,7 +50,7 @@ Server browser views currently stream images without sound. Native desktop
 browser tabs retain their sound, context menus, DevTools, and separate preview
 windows.
 
-## Agent inspection and screenshots
+## Agent inspection, screenshots, and recordings
 
 The agent cursor shows where the agent is interacting with the page, without
 control badges. Clicking or typing in the browser does not interrupt agent
@@ -66,11 +66,35 @@ a screenshot as evidence. Saved screenshots can appear directly in the reply and
 remain available after the browser navigates or closes. They stay in Test Rig's
 local data directory; saving them does not add files to your repository.
 
+Ask the agent to record a walkthrough when you want to review a browser flow.
+It can start recording, interact with the page, and include a playable video in
+its reply. Recordings capture the page without sound. For a desktop walkthrough,
+ask for a desktop viewport; mobile and responsive checks can keep their chosen
+device size.
+
+Saved recordings remain available after the browser closes. When the browser
+runs on another machine, the recording is transferred to the agent's environment
+before it is presented. Recording transfers support files up to 50 MiB.
+
+Images and videos in replies have bounded previews. Choose **Expand** to inspect
+them in the larger viewer, or **Save** to download a copy. Videos keep their
+original proportions and offer inline playback, seeking, and fullscreen.
+
 When no desktop browser is available, agents can use the environment's server
 browser without an open web client. Agent sessions use isolated browser storage;
 they do not inherit your named profile's logins. A session stays on its assigned
 browser when another client connects. You can interact with an agent's revealed
 page while its actions run in order with yours.
+
+## Capture from the desktop browser
+
+Open the browser's capture menu and choose **Screenshot** or **Record video**.
+While recording, choose **Stop recording** to save the clip. The control shows
+when recording is starting or saving; wait for saving to finish before starting
+another capture.
+
+These manual controls apply to native desktop browser tabs. In the web app, ask
+the agent to take a screenshot or record a walkthrough.
 
 ## Profiles and sound
 

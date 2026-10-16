@@ -176,6 +176,21 @@ export function htmlRenderFromToolItem(item: {
   return output?.isError ? undefined : output?.htmlRender;
 }
 
+/** The retained recording ID in a successful browser recording tool result. */
+export function previewRecordingIdFromToolItem(item: {
+  readonly toolName: string | null | undefined;
+  readonly output?: unknown;
+}): string | undefined {
+  if (resolveT3McpToolId(item.toolName) !== "preview_recording_stop") return undefined;
+  const budget: ResultReadBudget = {
+    remainingBytes: MAX_PARSED_BYTES,
+    remainingNodes: MAX_ENVELOPE_NODES,
+    exceeded: false,
+  };
+  const result = readResult(item.output, budget);
+  return result.failed || budget.exceeded ? undefined : boundedId(result.data?.id);
+}
+
 /** Some providers report completion even when command output describes a failure. */
 export function toolOutputIndicatesFailure(text: string): boolean {
   return (

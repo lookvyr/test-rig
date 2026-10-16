@@ -2,10 +2,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Camera,
+  ChevronDown,
   ExternalLink,
   MousePointerClick,
   PictureInPicture2,
   RotateCw,
+  Square,
+  Video,
 } from "lucide-react";
 import {
   type FormEvent,
@@ -18,8 +21,11 @@ import {
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "~/components/ui/input-group";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { cn } from "~/lib/utils";
+
+export type PreviewCaptureState = "idle" | "capturing" | "starting" | "recording" | "stopping";
 
 interface Props {
   url: string;
@@ -40,7 +46,7 @@ interface Props {
   onOpenInBrowser?: (() => void) | undefined;
   onCapture?: ((record: boolean) => void) | undefined;
   captureDisabled?: boolean | undefined;
-  recording?: boolean | undefined;
+  captureState?: PreviewCaptureState | undefined;
   onPictureInPicture?: (() => void) | undefined;
   pictureInPicture?: boolean | undefined;
   pictureInPictureDisabled?: boolean | undefined;
@@ -62,6 +68,12 @@ interface Props {
 }
 
 const NOOP = () => {};
+const CAPTURE_LABELS = {
+  capturing: { action: "Saving screenshot", text: "Saving…" },
+  starting: { action: "Starting recording", text: "Starting…" },
+  recording: { action: "Stop recording", text: "Stop" },
+  stopping: { action: "Saving recording", text: "Saving…" },
+} as const;
 
 export function PreviewChromeRow({
   url,
@@ -79,7 +91,7 @@ export function PreviewChromeRow({
   onOpenInBrowser,
   onCapture,
   captureDisabled,
-  recording,
+  captureState = "idle",
   onPictureInPicture,
   pictureInPicture,
   pictureInPictureDisabled,
@@ -255,29 +267,59 @@ export function PreviewChromeRow({
           </Tooltip>
         ) : null}
         {onCapture ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant={recording ? "secondary" : "ghost"}
-                  size="icon-xs"
-                  onClick={(event) => onCapture(event.shiftKey)}
-                  aria-label={recording ? "Stop recording" : "Capture screenshot"}
-                  type="button"
-                  className="relative"
-                  disabled={captureDisabled}
-                />
-              }
+          captureState === "idle" ? (
+            <Menu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <MenuTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          aria-label="Capture screenshot or video"
+                          type="button"
+                          disabled={captureDisabled}
+                        />
+                      }
+                    />
+                  }
+                >
+                  <Camera />
+                  <ChevronDown className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup>Capture screenshot or video</TooltipPopup>
+              </Tooltip>
+              <MenuPopup align="end" sideOffset={6}>
+                <MenuItem onClick={() => onCapture(false)} disabled={captureDisabled}>
+                  <Camera />
+                  Screenshot
+                </MenuItem>
+                <MenuItem onClick={() => onCapture(true)} disabled={captureDisabled}>
+                  <Video />
+                  Record video
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          ) : (
+            <Button
+              variant="secondary"
+              size="xs"
+              onClick={() => onCapture(true)}
+              aria-label={CAPTURE_LABELS[captureState].action}
+              type="button"
+              disabled={captureState !== "recording"}
             >
-              <Camera className={cn(recording && "text-destructive")} />
-              {recording ? (
-                <span className="absolute right-0.5 top-0.5 size-1.5 animate-status-pulse rounded-full bg-destructive" />
-              ) : null}
-            </TooltipTrigger>
-            <TooltipPopup>
-              {recording ? "Stop recording" : "Screenshot · Shift-click to record"}
-            </TooltipPopup>
-          </Tooltip>
+              {captureState === "recording" ? (
+                <Square className="fill-destructive text-destructive" />
+              ) : captureState === "capturing" ? (
+                <Camera />
+              ) : (
+                <Video />
+              )}
+              {CAPTURE_LABELS[captureState].text}
+            </Button>
+          )
         ) : null}
         {onPictureInPicture ? (
           <Tooltip>

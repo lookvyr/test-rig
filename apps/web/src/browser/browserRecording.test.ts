@@ -94,6 +94,7 @@ import {
   readActiveBrowserRecordingTargets,
   startBrowserRecording,
   stopBrowserRecording,
+  stopBrowserRecordingForUpload,
 } from "./browserRecording";
 import { previewRuntimeTabId } from "./previewRuntimeTabId";
 
@@ -177,10 +178,39 @@ describe("browser recording", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uploads the saved recording blob once for overlapping stops", async () => {
+    await startBrowserRecording("transfer-tab");
+    const upload = vi.fn(async (_artifact: unknown, blob: Blob) => {
+      expect(blob.type).toContain("video/");
+      return "pending-recording";
+    });
+    const first = stopBrowserRecordingForUpload("transfer-tab", upload);
+    const second = stopBrowserRecordingForUpload("transfer-tab", upload);
+    expect(await first).toEqual(await second);
+    expect((await first)?.uploadedAttachmentId).toBe("pending-recording");
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(readActiveBrowserRecordingTabIds().size).toBe(0);
+  });
+
+  it("keeps the desktop artifact after upload fails and clears recording state", async () => {
+    await startBrowserRecording("failed-transfer-tab");
+    await expect(
+      stopBrowserRecordingForUpload("failed-transfer-tab", async () => {
+        throw new Error("Upload unavailable");
+      }),
+    ).rejects.toThrow("Upload unavailable");
+    expect(save).toHaveBeenCalledWith(
+      "failed-transfer-tab",
+      expect.any(String),
+      expect.any(Uint8Array),
+    );
+    expect(readActiveBrowserRecordingTabIds().size).toBe(0);
+  });
+
   it("starts recording for a visible tab", async () => {
     await startBrowserRecording("recording-tab");
 
-    expect(events).toEqual(["start-screencast", "publish:recording-tab"]);
+    expect(events).toEqual(["publish:recording-tab", "start-screencast", "publish:recording-tab"]);
 
     await stopBrowserRecording("recording-tab");
   });
@@ -197,7 +227,7 @@ describe("browser recording", () => {
     await startBrowserRecording("recording-tab");
 
     expect(startScreencast).toHaveBeenCalledWith("recording-tab");
-    expect(events).toEqual(["start-screencast", "publish:recording-tab"]);
+    expect(events).toEqual(["publish:recording-tab", "start-screencast", "publish:recording-tab"]);
 
     await stopBrowserRecording("recording-tab");
   });

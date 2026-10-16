@@ -1,5 +1,8 @@
 import {
   EnvironmentId,
+  PreviewAutomationRecordingTransferError,
+  PreviewAutomationRecordingDeadlineExpiredError,
+  PreviewAutomationRecordingTooLargeError,
   type PreviewAutomationRequest,
   type PreviewAutomationResponse,
   type PreviewAutomationStreamEvent,
@@ -403,5 +406,25 @@ describe("previewAutomationRequestConsumer", () => {
     });
     expect(JSON.stringify(responses[0])).not.toContain("do-not-return");
     registry.dispose();
+  });
+});
+
+describe("recording transfer errors", () => {
+  it.each([
+    PreviewAutomationRecordingTransferError,
+    PreviewAutomationRecordingDeadlineExpiredError,
+    PreviewAutomationRecordingTooLargeError,
+  ])("preserves the public failure tag without leaking the cause", (ErrorType) => {
+    const error = new ErrorType({ threadId, cause: new Error("private upload token") });
+    const result = serializePreviewAutomationError(error, {
+      requestId: "request-recording",
+      operation: "recordingStop",
+      environmentId,
+      threadId,
+      tabId,
+    });
+    expect(result._tag).toBe(error._tag);
+    expect(result.message).toBe(error.message);
+    expect(JSON.stringify(result)).not.toContain("private upload token");
   });
 });

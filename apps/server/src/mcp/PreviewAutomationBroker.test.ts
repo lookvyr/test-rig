@@ -1164,3 +1164,45 @@ it.effect("accepts responses only from the host that received the request", () =
     }),
   ),
 );
+
+it.effect.each([
+  "PreviewAutomationRecordingTransferError",
+  "PreviewAutomationRecordingDesktopUpdateRequiredError",
+  "PreviewAutomationRecordingTooLargeError",
+  "PreviewAutomationRecordingDeadlineExpiredError",
+] as const)("preserves recording failure %s", (tag) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const remoteError = {
+        _tag: tag,
+        message: "remote recording details",
+        detail: { reason: "untrusted-reason", threadId: "untrusted-thread" },
+      };
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: false,
+          error: remoteError,
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      const error = yield* broker
+        .invoke<void>({
+          scope,
+          operation: "recordingStop",
+          input: {},
+        })
+        .pipe(Effect.flip);
+      expect(error).toMatchObject({
+        _tag: tag,
+        threadId: scope.threadId,
+      });
+      expect(error.cause).toBe(remoteError);
+      expect(error.message).not.toContain("remote recording details");
+    }),
+  ),
+);

@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  threadHtmlRenderAttachmentIds,
+  threadToolAttachmentIds,
   attachmentFileExtension,
   createAttachmentId,
   createDeterministicAttachmentId,
@@ -221,7 +221,7 @@ describe("attachmentStore", () => {
   });
 });
 
-describe("threadHtmlRenderAttachmentIds", () => {
+describe("threadToolAttachmentIds", () => {
   it("returns pages this thread published and skips other threads' and failed calls", () => {
     const own = createAttachmentId("thread-a", "html")!;
     const other = createAttachmentId("thread-b", "html")!;
@@ -235,12 +235,51 @@ describe("threadHtmlRenderAttachmentIds", () => {
       ],
     });
     expect(
-      threadHtmlRenderAttachmentIds("thread-a", [
+      threadToolAttachmentIds("thread-a", [
         render(own),
         render(other),
         render(createAttachmentId("thread-a", "html")!, { isError: true }),
         { toolName: "mcp__test_rig__html_preview", output: render(own).output },
       ]),
     ).toEqual([own]);
+  });
+});
+
+describe("thread recording attachments", () => {
+  it("collects retained recording IDs from supported tool envelopes and preserves other threads", () => {
+    const own = createAttachmentId("thread-a", "webm")!;
+    const other = createAttachmentId("thread-b", "webm")!;
+    const output = {
+      id: own,
+      path: "/retained/recording.webm",
+      mimeType: "video/webm",
+      sizeBytes: 6,
+    };
+    const recording = (value: unknown, toolName = "mcp__test_rig__preview_recording_stop") => ({
+      toolName,
+      output: value,
+    });
+    for (const value of [
+      output,
+      JSON.stringify(output),
+      { structuredContent: output },
+      { content: [{ type: "text", text: JSON.stringify(output) }] },
+      [{ type: "text", text: JSON.stringify(output) }],
+    ]) {
+      expect(threadToolAttachmentIds("thread-a", [recording(value)])).toEqual([own]);
+    }
+    expect(
+      threadToolAttachmentIds("thread-a", [
+        recording({ ...output, id: other }),
+        recording({ ...output, id: createPendingAttachmentId("webm") }),
+        recording({ ...output, id: "../recording.webm" }),
+        recording({ ...output, isError: true }),
+        recording({ structuredContent: output, isError: true }),
+        recording({ id: "x".repeat(257) }),
+        recording({ content: [{ text: "x".repeat(16_385) }] }),
+        recording(output, "preview_recording_start"),
+        recording(output, "mcp__other_service__preview_recording_stop"),
+      ]),
+    ).toEqual([]);
   });
 });

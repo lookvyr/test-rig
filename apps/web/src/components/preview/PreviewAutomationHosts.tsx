@@ -35,13 +35,16 @@ import {
   readActiveBrowserRecordingTargets,
   startBrowserRecording,
   stopBrowserRecording,
+  stopBrowserRecordingForUpload,
 } from "~/browser/browserRecording";
+import { uploadBrowserRecording } from "~/browser/browserRecordingTransfer";
+import { assetEnvironment } from "~/state/assets";
 import { resolveBrowserRecordingStopTarget } from "~/browser/browserRecordingScope";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
 import { runBrowserViewportMutation } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { isElectron } from "~/env";
-import { useEnvironments } from "~/state/environments";
+import { useEnvironments, useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -266,6 +269,10 @@ export function PreviewAutomationHosts() {
 function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId }) {
   const { environmentId } = props;
   const registry = useContext(RegistryContext);
+  const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
+  const prepareRecordingUpload = useAtomCommand(assetEnvironment.createAttachmentUploadUrl, {
+    reportFailure: false,
+  });
   const [automationClientId] = useState(createPreviewAutomationClientId);
   const initialAutomationHost = useMemo<PreviewAutomationHostState>(
     () => ({
@@ -637,6 +644,10 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             };
           }
           case "recordingStop": {
+            const deadline = Date.now() + request.timeoutMs;
+            const transferToEnvironment =
+              (request.input as { readonly transferToEnvironment?: boolean })
+                .transferToEnvironment === true;
             const activeRecordings = readActiveBrowserRecordingTargets(threadRef);
             const activeTabIds = new Set(
               activeRecordings.map((recording) => recording.serverTabId),
@@ -650,7 +661,27 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             const stopRuntimeTabId =
               activeRecordings.find((recording) => recording.serverTabId === stopTabId)
                 ?.runtimeTabId ?? null;
-            const artifact = stopRuntimeTabId ? await stopBrowserRecording(stopRuntimeTabId) : null;
+            const artifact = stopRuntimeTabId
+              ? transferToEnvironment
+                ? await stopBrowserRecordingForUpload(stopRuntimeTabId, (recording, blob) =>
+                    uploadBrowserRecording({
+                      threadId: request.threadId,
+                      artifact: recording,
+                      blob,
+                      httpBaseUrl,
+                      deadline,
+                      prepare: async (upload) => {
+                        const result = await prepareRecordingUpload({
+                          environmentId,
+                          input: { threadId: request.threadId, upload },
+                        });
+                        if (result._tag === "Failure") return raiseAtomCommandFailure(result);
+                        return result.value;
+                      },
+                    }),
+                  )
+                : await stopBrowserRecording(stopRuntimeTabId)
+              : null;
             if (!artifact || !stopTabId) {
               return raisePreviewAutomationHostError(
                 new PreviewAutomationRecordingNotActiveError({
@@ -675,7 +706,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
         });
       }
     },
-    [environmentId, listPreviews, open, registry, resize],
+    [environmentId, httpBaseUrl, listPreviews, open, prepareRecordingUpload, registry, resize],
   );
   const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }));
   const setRequestHandler = useAtomSet(requestHandlerAtom);

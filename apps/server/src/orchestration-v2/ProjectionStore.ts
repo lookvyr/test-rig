@@ -1,4 +1,4 @@
-import { threadHtmlRenderAttachmentIds } from "../attachmentStore.ts";
+import { threadToolAttachmentIds } from "../attachmentStore.ts";
 import {
   latestRootProviderFailure,
   latestUnheldRun,
@@ -4721,19 +4721,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         json_each(message.payload_json, '$.attachments') AS attachment
       WHERE message.thread_id = ${threadId}
     `,
-        // Pages published by html_render live in the attachment store too.
+        // Pages and browser recordings published by tools live in the attachment store too.
         sql<{ payload_json: string }>`
       SELECT payload_json
       FROM orchestration_v2_projection_turn_items
       WHERE thread_id = ${threadId}
         AND type = 'dynamic_tool'
-        AND payload_json LIKE '%htmlRender%'
+        AND (payload_json LIKE '%htmlRender%' OR payload_json LIKE '%preview_recording_stop%')
     `,
       ]).pipe(
         Effect.map(([messages, renders]) => [
           ...new Set([
             ...messages.map((row) => row.id),
-            ...threadHtmlRenderAttachmentIds(
+            ...threadToolAttachmentIds(
               threadId,
               renders.map((row) => {
                 const item = parseEncodedPayload(row.payload_json);
@@ -6079,7 +6079,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               ...projection.messages.flatMap((message) =>
                 message.attachments.map((attachment) => attachment.id),
               ),
-              ...threadHtmlRenderAttachmentIds(
+              ...threadToolAttachmentIds(
                 threadId,
                 projection.turnItems.flatMap((item) =>
                   item.type === "dynamic_tool" ? [item] : [],

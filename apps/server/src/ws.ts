@@ -90,6 +90,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
+import { issueAttachmentUploadUrl } from "./assets/AttachmentUpload.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -1020,6 +1021,23 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.assetsPersistChatAttachments]: (input) =>
           observeRpcEffect(WS_METHODS.assetsPersistChatAttachments, persistChatAttachments(input)),
+        [WS_METHODS.assetsCreateAttachmentUploadUrl]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.assetsCreateAttachmentUploadUrl,
+            Effect.gen(function* () {
+              const thread = yield* threadManagementV2.getThreadShell(input.threadId);
+              if (thread === null) {
+                return yield* new OrchestrationDispatchCommandError({
+                  message: `Thread '${input.threadId}' was not found.`,
+                });
+              }
+              return yield* issueAttachmentUploadUrl(input.upload, input.threadId);
+            }).pipe(
+              Effect.mapError((cause) =>
+                toDispatchCommandError(cause, "Failed to prepare attachment upload."),
+              ),
+            ),
+          ),
         [WS_METHODS.assetsCreateUrl]: (input) =>
           observeRpcEffect(
             WS_METHODS.assetsCreateUrl,

@@ -1,8 +1,8 @@
-import { ChatMarkdownAssetImage } from "./ChatMarkdownAssetImage";
+import { ChatMarkdownAssetImage, ChatMarkdownDirectMedia } from "./ChatMarkdownAssetImage";
 export { ChatMarkdownAssetImage };
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
 import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
-import { videoMimeType } from "@t3tools/shared/video";
+import { resolveMediaSource } from "@t3tools/client-runtime/media-source";
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 export interface ChatMarkdownContextReference {
   kind: string;
@@ -20,7 +20,7 @@ import {
   Maximize2Icon,
   Minimize2Icon,
 } from "lucide-react";
-import type { EnvironmentId, ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
+import type { ScopedThreadRef, ServerProviderSkill } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -47,6 +47,7 @@ import { defaultUrlTransform } from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import { CHAT_MARKDOWN_SANITIZE_SCHEMA } from "./chatMarkdownSchema";
+import { markdownMediaLayout, rehypeTagMediaLayout } from "./chatMarkdownMedia";
 import {
   getChatMarkdownFileLinks,
   chatMarkdownFileLinkLabel,
@@ -88,7 +89,6 @@ import { useRightPanelStore } from "../rightPanelStore";
 import { useActiveEnvironmentId } from "../state/entities";
 import { serverEnvironment } from "../state/server";
 import { assetEnvironment } from "../state/assets";
-import { useAssetUrlState } from "../assets/assetUrls";
 import { usePreparedConnection } from "../state/session";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -101,25 +101,6 @@ import {
   openUrlInPreview,
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
-
-function MarkdownBrowserScreenshot({
-  environmentId,
-  fileName,
-  alt = "Browser screenshot",
-  ...props
-}: React.ImgHTMLAttributes<HTMLImageElement> & { environmentId: EnvironmentId; fileName: string }) {
-  const resource = useMemo(() => ({ _tag: "browser-screenshot" as const, fileName }), [fileName]);
-  const image = useAssetUrlState(environmentId, resource);
-  if (image._tag === "Failure") return <span>{alt} (screenshot unavailable)</span>;
-  return (
-    <img
-      {...props}
-      alt={alt}
-      src={image._tag === "Success" ? image.url : undefined}
-      loading="lazy"
-    />
-  );
-}
 
 interface ChatMarkdownProps {
   parseRawHtml?: boolean;
@@ -182,7 +163,9 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
 const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypeRaw,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
+  rehypeTagMediaLayout,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+const CHAT_MARKDOWN_MEDIA_REHYPE_PLUGINS = [rehypeTagMediaLayout];
 
 function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -914,8 +897,16 @@ function ChatMarkdown({
             }),
         ]),
       ),
-      img({ node: _node, src, alt = "", title: _title, ...props }) {
+      img({ node, src, alt = "", title: _title, ...props }) {
         const source = typeof src === "string" ? src : "";
+        const start = node?.position?.start.offset;
+        const end = node?.position?.end.offset;
+        const copyMarkdown =
+          start !== undefined && end !== undefined ? text.slice(start, end) : undefined;
+        const layout = markdownMediaLayout(node);
+        const standalone = layout?.mediaStandalone === true;
+        const insideLink = layout?.mediaInsideLink === true;
+        const expandImage = insideLink ? undefined : onImageExpand;
         const context = parseComposerContextHref(source);
         if (context)
           return (
@@ -927,27 +918,49 @@ function ChatMarkdown({
         const imageEnvironmentId = threadRef?.environmentId ?? environmentId;
         if (fileName && imageEnvironmentId)
           return (
-            <MarkdownBrowserScreenshot
-              {...props}
+            <ChatMarkdownAssetImage
               alt={alt}
               environmentId={imageEnvironmentId}
-              fileName={fileName}
+              resource={{ _tag: "browser-screenshot", fileName }}
+              imageProps={props}
+              copyMarkdown={copyMarkdown}
+              standalone={standalone}
+              onImageExpand={expandImage}
             />
           );
-        const classified = classifyMarkdownImageSource(source, cwd);
-        if (classified._tag === "WorkspaceFile" && threadRef)
+        const media = resolveMediaSource(source, {
+          threadId: threadRef?.threadId,
+          workspaceRoot: cwd,
+          imageEmbed: true,
+        });
+        if (insideLink && media?.kind === "video") return <span>{alt || "Video"}</span>;
+        if (media?.access === "environment" && threadRef)
           return (
             <ChatMarkdownAssetImage
               environmentId={threadRef.environmentId}
-              resource={{ _tag: "media-file", threadId: threadRef.threadId, path: classified.path }}
-              kind={videoMimeType({ name: classified.path, mimeType: "" }) ? "video" : "image"}
+              resource={media.resource}
+              kind={media.kind}
               alt={alt}
               imageProps={props}
-              onImageExpand={onImageExpand}
+              copyMarkdown={copyMarkdown}
+              standalone={standalone}
+              srcFragment={media.srcFragment}
+              onImageExpand={expandImage}
             />
           );
-        if (classified._tag === "Blocked") return <span>{alt || "Image unavailable"}</span>;
-        return <img {...props} alt={alt} src={src} loading="lazy" />;
+        if (media?.access === "direct")
+          return (
+            <ChatMarkdownDirectMedia
+              src={media.uri}
+              kind={media.kind}
+              alt={alt}
+              standalone={standalone}
+              copyMarkdown={copyMarkdown}
+              imageProps={props}
+              onImageExpand={expandImage}
+            />
+          );
+        return <span>{alt || "Image unavailable"}</span>;
       },
       p({ node: _node, children, ...props }) {
         return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
@@ -1135,7 +1148,9 @@ function ChatMarkdown({
           ...(lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS),
           ...(extraRemarkPlugins ?? []),
         ]}
-        rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
+        rehypePlugins={
+          parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : CHAT_MARKDOWN_MEDIA_REHYPE_PLUGINS
+        }
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >

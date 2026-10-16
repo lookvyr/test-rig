@@ -6,6 +6,7 @@ import {
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AssetResource, ContextMenuItem, EnvironmentId } from "@t3tools/contracts";
+import { DownloadIcon, Maximize2Icon } from "lucide-react";
 import { useCallback, useRef, useState, type ReactElement } from "react";
 
 import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
@@ -16,6 +17,7 @@ import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { downloadMedia, readMediaPng } from "./mediaContent";
+import { Button } from "../ui/button";
 
 export interface MediaActionSource {
   readonly kind: "image" | "video";
@@ -27,8 +29,12 @@ export interface MediaActionSource {
 }
 
 function mediaFileName(source: MediaActionSource): string {
+  const resource = source.asset?.resource;
   return (
-    (source.reference && mediaReferenceFileName(source.reference)) || source.name || source.kind
+    (source.reference && mediaReferenceFileName(source.reference)) ||
+    (resource && "fileName" in resource && resource.fileName) ||
+    source.name ||
+    source.kind
   );
 }
 
@@ -67,6 +73,68 @@ function useMediaActions(source: MediaActionSource) {
     ]);
   }, [actionUrl]);
   return { save, copyImage };
+}
+
+/** Discoverable actions for media embedded in a reply; context-menu actions remain available. */
+export function MediaActionBar({
+  source,
+  duration,
+  onExpand,
+}: {
+  readonly source: MediaActionSource;
+  readonly duration?: string | undefined;
+  readonly onExpand?: (() => void) | undefined;
+}) {
+  const { save } = useMediaActions(source);
+  const [saving, setSaving] = useState(false);
+  const noun = source.kind === "video" ? "video" : "image";
+  const saveMedia = async () => {
+    setSaving(true);
+    try {
+      await save();
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: `Could not save ${noun}`,
+          description: error instanceof Error ? error.message : "The media download failed.",
+        }),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+      <span className="w-full min-w-0 truncate" title={source.name}>
+        {source.name}
+      </span>
+      <span className="min-w-0 flex-1 tabular-nums">{duration}</span>
+      <Button
+        type="button"
+        size="xs"
+        variant="ghost"
+        aria-label={`Save ${noun}`}
+        disabled={saving || (source.src === null && !source.asset)}
+        onClick={() => void saveMedia()}
+      >
+        <DownloadIcon aria-hidden />
+        {saving ? "Saving…" : "Save"}
+      </Button>
+      {onExpand ? (
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          aria-label={`Expand ${noun}`}
+          onClick={onExpand}
+        >
+          <Maximize2Icon aria-hidden />
+          Expand
+        </Button>
+      ) : null}
+    </span>
+  );
 }
 
 /** Adds source-aware actions and a tooltip to the existing media element without a layout wrapper. */

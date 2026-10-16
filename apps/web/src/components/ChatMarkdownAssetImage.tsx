@@ -2,7 +2,7 @@ import React, {
   memo,
   useState,
   useCallback,
-  use,
+  useRef,
   type CSSProperties,
   type ComponentProps,
   type MouseEvent as ReactMouseEvent,
@@ -14,10 +14,11 @@ import { mediaFileReference, mediaUrlReference } from "@t3tools/client-runtime/m
 import { useAssetUrlState, useAssetUrlRefresh } from "../assets/assetUrls";
 import { useRightPanelStore } from "../rightPanelStore";
 import { cn } from "../lib/utils";
-import { MediaActions, type MediaActionSource } from "./media/MediaActions";
+import { MediaActionBar, MediaActions, type MediaActionSource } from "./media/MediaActions";
 import { MediaVideoPlayer } from "./media/MediaVideoPlayer";
 import { markdownImageGallery, markdownImageItems } from "./chat/markdownImageGallery";
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
+import { resolveProtocolRelativeMediaUrl } from "./media/mediaContent";
 const CHAT_MARKDOWN_MEDIA_MAX_WIDTH_CLASS_NAME = "max-w-[min(100%,30rem)]";
 const CHAT_MARKDOWN_MEDIA_BOUNDS_CLASS_NAME = cn(
   "max-h-[30rem]",
@@ -29,13 +30,6 @@ const CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME = cn(
   "h-auto w-auto object-contain",
   CHAT_MARKDOWN_MEDIA_BOUNDS_CLASS_NAME,
 );
-
-function markdownImageCopy(alt: string, src: string, title: string | undefined): string {
-  const escapedAlt = alt.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
-  const titleSuffix =
-    title === undefined ? "" : ` "${title.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
-  return `![${escapedAlt}](${src}${titleSuffix})`;
-}
 
 /**
  * `maxHeightRem` folds a height cap into the width bound: `max-height` alone
@@ -68,7 +62,6 @@ const CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME = cn(
   CHAT_MARKDOWN_MEDIA_LAYOUT_CLASS_NAME,
   CHAT_MARKDOWN_MEDIA_FRAME_CLASS_NAME,
 );
-const MarkdownLinkContext = React.createContext(false);
 
 function expandableMarkdownImageProps(
   onImageExpand: ((preview: ExpandedImagePreview) => void) | undefined,
@@ -170,6 +163,7 @@ function ChatMarkdownImage(props: {
 }) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
   const src = props.src ?? loadedSrc;
   const failed = props.sourceFailed === true || (src !== null && failedSrc === src);
   // A failure forgets the decoded image so the next URL loads behind the slot.
@@ -177,6 +171,7 @@ function ChatMarkdownImage(props: {
   // Cached images are complete before `onLoad` can fire.
   const markLoadedIfComplete = useCallback(
     (image: HTMLImageElement | null) => {
+      imageRef.current = image;
       if (!image) return;
       if (image.complete && image.naturalWidth > 0) setLoadedSrc(image.currentSrc || image.src);
       markdownImageItems.set(image, {
@@ -198,9 +193,45 @@ function ChatMarkdownImage(props: {
       setLoadedSrc(null);
     },
   });
+  const withActions = (content: React.ReactElement) =>
+    props.standalone ? (
+      <span
+        data-markdown-copy={props.copyMarkdown}
+        style={{ width: props.style?.width, maxWidth: props.style?.maxWidth }}
+        className={cn(
+          CHAT_MARKDOWN_MEDIA_LAYOUT_CLASS_NAME,
+          CHAT_MARKDOWN_MEDIA_MAX_WIDTH_CLASS_NAME,
+          "align-middle",
+          !settled && "w-full",
+        )}
+      >
+        {content}
+        <MediaActionBar
+          source={props.actionsSource}
+          onExpand={
+            props.onImageExpand
+              ? () => {
+                  const image = imageRef.current;
+                  const item = {
+                    src,
+                    name: props.alt.trim() || "image",
+                    actionsSource: props.actionsSource,
+                    ...(props.originalUrl ? { originalUrl: props.originalUrl } : {}),
+                  };
+                  props.onImageExpand?.(
+                    image ? markdownImageGallery(image, item) : { images: [item], index: 0 },
+                  );
+                }
+              : undefined
+          }
+        />
+      </span>
+    ) : (
+      content
+    );
 
   if (settled) {
-    return (
+    return withActions(
       <MediaActions source={props.actionsSource}>
         <img
           {...props.imageProps}
@@ -209,6 +240,7 @@ function ChatMarkdownImage(props: {
           alt={props.alt}
           data-markdown-copy={props.copyMarkdown}
           decoding="async"
+          loading="lazy"
           draggable={false}
           className={cn(
             CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME,
@@ -219,7 +251,7 @@ function ChatMarkdownImage(props: {
           {...expandableMarkdownImageProps(props.onImageExpand, props.alt)}
           {...imageEvents(src)}
         />
-      </MediaActions>
+      </MediaActions>,
     );
   }
   if (!props.standalone) {
@@ -239,7 +271,7 @@ function ChatMarkdownImage(props: {
       />
     );
   }
-  return (
+  return withActions(
     <MediaActions source={props.actionsSource}>
       <span
         id={props.imageProps?.id}
@@ -264,13 +296,14 @@ function ChatMarkdownImage(props: {
             src={src}
             alt={props.alt}
             decoding="async"
+            loading="lazy"
             draggable={false}
             className="invisible absolute inset-0 size-full"
             {...imageEvents(src)}
           />
         ) : null}
       </span>
-    </MediaActions>
+    </MediaActions>,
   );
 }
 
@@ -282,8 +315,10 @@ function ChatMarkdownVideo(props: {
   readonly sourceFailed?: boolean | undefined;
   readonly style?: CSSProperties | undefined;
   readonly mediaIdentity?: string | undefined;
+  readonly srcFragment?: string | undefined;
   readonly actionsSource?: MediaActionSource | undefined;
   readonly onRetry?: (() => Promise<unknown>) | undefined;
+  readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
 }) {
   return (
     <MediaVideoPlayer
@@ -305,6 +340,26 @@ function ChatMarkdownVideo(props: {
       )}
       onRetry={props.onRetry}
       actionsSource={props.actionsSource}
+      inline
+      onExpand={
+        props.onImageExpand
+          ? () =>
+              props.onImageExpand?.({
+                images: [
+                  {
+                    src: props.src,
+                    name: props.alt.trim() || "video",
+                    type: "video",
+                    autoPlay: false,
+                    ...(props.srcFragment ? { srcFragment: props.srcFragment } : {}),
+                    ...(props.originalUrl ? { originalUrl: props.originalUrl } : {}),
+                    ...(props.actionsSource ? { actionsSource: props.actionsSource } : {}),
+                  },
+                ],
+                index: 0,
+              })
+          : undefined
+      }
     />
   );
 }
@@ -314,11 +369,18 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
   readonly environmentId: EnvironmentId;
   readonly resource: Extract<
     AssetResource,
-    { readonly _tag: "attachment" | "workspace-file" | "media-file" | "tool-output-image" }
+    {
+      readonly _tag:
+        | "attachment"
+        | "workspace-file"
+        | "media-file"
+        | "tool-output-image"
+        | "browser-screenshot";
+    }
   >;
   readonly kind?: "image" | "video";
   readonly alt: string;
-  readonly copyMarkdown?: string;
+  readonly copyMarkdown?: string | undefined;
   readonly srcFragment?: string;
   /** Reserve a slot while loading; off for images that share a line with text. */
   readonly standalone?: boolean | undefined;
@@ -405,8 +467,10 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
         originalUrl={props.originalUrl}
         style={props.style}
         mediaIdentity={JSON.stringify([props.environmentId, props.resource, props.srcFragment])}
+        srcFragment={props.srcFragment}
         onRetry={refreshAssetUrl}
         actionsSource={actionsSource}
+        onImageExpand={props.onImageExpand}
       />
     );
   }
@@ -431,3 +495,48 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
     />
   );
 });
+
+/** Remote media uses the same player, sizing, and actions as signed environment files. */
+export function ChatMarkdownDirectMedia(props: {
+  readonly src: string;
+  readonly kind: "image" | "video";
+  readonly alt: string;
+  readonly standalone: boolean;
+  readonly copyMarkdown?: string | undefined;
+  readonly imageProps?:
+    | Omit<ComponentProps<"img">, "src" | "alt" | "className" | "style">
+    | undefined;
+  readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
+}) {
+  const src = resolveProtocolRelativeMediaUrl(props.src);
+  const reference = mediaUrlReference(props.src);
+  const originalUrl = reference?.kind === "url" ? props.src : undefined;
+  const actionsSource: MediaActionSource = {
+    kind: props.kind,
+    name: props.alt || props.kind,
+    src,
+    ...(reference ? { reference } : {}),
+  };
+  return props.kind === "video" ? (
+    <ChatMarkdownVideo
+      src={src}
+      alt={props.alt}
+      copyMarkdown={props.copyMarkdown}
+      originalUrl={originalUrl}
+      actionsSource={actionsSource}
+      onImageExpand={props.onImageExpand}
+    />
+  ) : (
+    <ChatMarkdownImage
+      key={src}
+      src={src}
+      alt={props.alt}
+      copyMarkdown={props.copyMarkdown}
+      standalone={props.standalone}
+      actionsSource={actionsSource}
+      imageProps={props.imageProps}
+      originalUrl={originalUrl}
+      onImageExpand={props.onImageExpand}
+    />
+  );
+}

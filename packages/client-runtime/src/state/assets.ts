@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
-import { createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
+import { createEnvironmentRpcCommand, createEnvironmentRpcQueryAtomFamily } from "./runtime.ts";
 
 const ASSET_URL_REFRESH_INTERVAL_MS = 30 * 60_000;
 const ASSET_URL_STALE_TIME_MS = 5 * 60_000;
@@ -108,6 +108,10 @@ export function createAssetEnvironmentAtoms<R, E>(
   });
 
   return {
+    createAttachmentUploadUrl: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:assets:create-attachment-upload-url",
+      tag: WS_METHODS.assetsCreateAttachmentUploadUrl,
+    }),
     createUrl,
     createUrls: (target: {
       readonly environmentId: EnvironmentId;

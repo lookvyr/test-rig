@@ -1,5 +1,7 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { create } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
@@ -28,6 +30,13 @@ const mocks = vi.hoisted(() => ({
   pictureInPicture: false,
   showEmptyState: false,
   controller: "none" as "none" | "human" | "agent",
+  recordingPhase: null as "starting" | "recording" | "stopping" | null,
+  captureState: "idle" as string,
+  capture: null as ((record: boolean) => void) | null,
+  captureScreenshot: vi.fn(),
+  startBrowserRecording: vi.fn(),
+  stopBrowserRecording: vi.fn(),
+  activeRecordingTabIds: new Set<string>(),
 }));
 
 vi.mock("~/state/session", () => ({
@@ -104,9 +113,10 @@ vi.mock("~/state/use-atom-command", () => ({
 
 vi.mock("~/browser/browserRecording", () => ({
   findActiveBrowserRecordingRuntimeTabId: vi.fn(() => null),
-  startBrowserRecording: vi.fn(),
-  stopBrowserRecording: vi.fn(),
-  useActiveBrowserRecordingTabIds: () => new Set(),
+  startBrowserRecording: mocks.startBrowserRecording,
+  stopBrowserRecording: mocks.stopBrowserRecording,
+  useActiveBrowserRecordingTabIds: () => mocks.activeRecordingTabIds,
+  useBrowserRecordingPhase: () => mocks.recordingPhase,
 }));
 
 vi.mock("~/browser/browserSurfaceStore", () => ({
@@ -157,6 +167,7 @@ vi.mock("~/components/ui/toast", () => ({
 vi.mock("./previewBridge", () => ({
   previewBridge: {
     navigate: mocks.navigate,
+    captureScreenshot: mocks.captureScreenshot,
     pickElement: mocks.pickElement,
     pictureInPicture: {
       open: mocks.openPictureInPicture,
@@ -171,6 +182,8 @@ vi.mock("./PreviewChromeRow", () => ({
     onPickElement?: () => void;
     onPictureInPicture?: () => void;
     pictureInPicture?: boolean;
+    captureState?: string;
+    onCapture?: (record: boolean) => void;
     trailingActions?: {
       props: { onNativePictureInPicture?: () => void };
     };
@@ -181,6 +194,8 @@ vi.mock("./PreviewChromeRow", () => ({
     mocks.toggleNativePictureInPicture =
       props.trailingActions?.props.onNativePictureInPicture ?? null;
     mocks.pictureInPicturePressed = props.pictureInPicture ?? false;
+    mocks.captureState = props.captureState ?? "idle";
+    mocks.capture = props.onCapture ?? null;
     return null;
   },
 }));
@@ -214,6 +229,14 @@ const TEST_THREAD_REF = {
 } as const;
 const TEST_RUNTIME_TAB_ID = previewRuntimeTabId(TEST_THREAD_REF, null, "tab-1");
 
+function deferredFailure() {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<never>((_resolve, rejectPromise) => {
+    reject = rejectPromise;
+  });
+  return { promise, reject };
+}
+
 describe("PreviewView navigation", () => {
   beforeEach(() => {
     mocks.navigate.mockClear();
@@ -241,6 +264,102 @@ describe("PreviewView navigation", () => {
     mocks.pictureInPicture = false;
     mocks.showEmptyState = false;
     mocks.controller = "none";
+    mocks.recordingPhase = null;
+    mocks.captureState = "idle";
+    mocks.capture = null;
+    mocks.captureScreenshot.mockReset();
+    mocks.startBrowserRecording.mockReset();
+    mocks.stopBrowserRecording.mockReset();
+    mocks.activeRecordingTabIds.clear();
+  });
+
+  it.each(["starting", "recording", "stopping"] as const)(
+    "shows the shared recording lifecycle while %s",
+    (phase) => {
+      mocks.recordingPhase = phase;
+      renderToStaticMarkup(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);
+
+      expect(mocks.captureState).toBe(phase);
+    },
+  );
+
+  it.each(["starting", "stopping"] as const)(
+    "blocks new captures during an agent recording's %s phase",
+    (phase) => {
+      mocks.recordingPhase = phase;
+      renderToStaticMarkup(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);
+      mocks.capture?.(false);
+      mocks.capture?.(true);
+
+      expect(mocks.captureScreenshot).not.toHaveBeenCalled();
+      expect(mocks.startBrowserRecording).not.toHaveBeenCalled();
+    },
+  );
+
+  it("allows only one pending capture and releases it after failure", async () => {
+    const pending = deferredFailure();
+    mocks.captureScreenshot.mockReturnValue(pending.promise);
+    mocks.startBrowserRecording.mockResolvedValue("2026-10-16T12:00:00.000Z");
+    renderToStaticMarkup(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);
+
+    mocks.capture?.(false);
+    mocks.capture?.(false);
+    mocks.capture?.(true);
+    expect(mocks.captureScreenshot).toHaveBeenCalledTimes(1);
+    expect(mocks.startBrowserRecording).not.toHaveBeenCalled();
+
+    pending.reject(new Error("Capture failed"));
+    await pending.promise.catch(() => undefined);
+    await Promise.resolve();
+    expect(mocks.toast).toHaveBeenCalledWith({
+      type: "error",
+      title: "Unable to capture screenshot",
+      description: "Capture failed",
+    });
+    mocks.capture?.(true);
+    expect(mocks.startBrowserRecording).toHaveBeenCalledWith(
+      TEST_RUNTIME_TAB_ID,
+      TEST_THREAD_REF,
+      "tab-1",
+    );
+  });
+
+  it("keeps pending captures scoped to their tab when switching to another recording", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const pendingScreenshot = deferredFailure();
+    mocks.captureScreenshot.mockReturnValue(pendingScreenshot.promise);
+    mocks.stopBrowserRecording.mockResolvedValue(null);
+    const secondRuntimeTabId = previewRuntimeTabId(TEST_THREAD_REF, null, "tab-2");
+    const renderTab = (tabId: string) => (
+      <PreviewView threadRef={TEST_THREAD_REF} tabId={tabId} visible />
+    );
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(renderTab("tab-1"));
+      });
+      await act(async () => mocks.capture?.(false));
+      expect(mocks.captureState).toBe("capturing");
+
+      mocks.activeRecordingTabIds.add(secondRuntimeTabId);
+      mocks.recordingPhase = "recording";
+      await act(async () => renderer!.update(renderTab("tab-2")));
+      expect(mocks.captureState).toBe("recording");
+      await act(async () => mocks.capture?.(true));
+      expect(mocks.stopBrowserRecording).toHaveBeenCalledWith(secondRuntimeTabId);
+
+      mocks.recordingPhase = null;
+      await act(async () => renderer!.update(renderTab("tab-1")));
+      expect(mocks.captureState).toBe("capturing");
+      await act(async () => {
+        pendingScreenshot.reject(new Error("Capture failed"));
+        await pendingScreenshot.promise.catch(() => undefined);
+      });
+      expect(mocks.captureState).toBe("idle");
+    } finally {
+      await act(async () => renderer?.unmount());
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each(["none", "human", "agent"] as const)(

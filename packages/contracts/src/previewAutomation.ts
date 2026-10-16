@@ -1087,7 +1087,50 @@ export class PreviewAutomationMalformedResponseError extends Schema.TaggedError<
   }
 }
 
+export class PreviewAutomationRecordingTransferError extends Schema.TaggedError<PreviewAutomationRecordingTransferError>()(
+  "PreviewAutomationRecordingTransferError",
+  {
+    threadId: ThreadId,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return "Preview recording could not be saved to the agent environment.";
+  }
+}
+
+export class PreviewAutomationRecordingDesktopUpdateRequiredError extends Schema.TaggedError<PreviewAutomationRecordingDesktopUpdateRequiredError>()(
+  "PreviewAutomationRecordingDesktopUpdateRequiredError",
+  { threadId: ThreadId, cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return "Update the desktop app to transfer recordings. The recording remains on the desktop.";
+  }
+}
+
+export class PreviewAutomationRecordingTooLargeError extends Schema.TaggedError<PreviewAutomationRecordingTooLargeError>()(
+  "PreviewAutomationRecordingTooLargeError",
+  { threadId: ThreadId, cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return "The recording exceeds 50 MiB. Make a shorter recording.";
+  }
+}
+
+export class PreviewAutomationRecordingDeadlineExpiredError extends Schema.TaggedError<PreviewAutomationRecordingDeadlineExpiredError>()(
+  "PreviewAutomationRecordingDeadlineExpiredError",
+  { threadId: ThreadId, cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return "The recording transfer deadline expired.";
+  }
+}
+
 export const PreviewAutomationError = Schema.Union([
+  PreviewAutomationRecordingTransferError,
+  PreviewAutomationRecordingDesktopUpdateRequiredError,
+  PreviewAutomationRecordingTooLargeError,
+  PreviewAutomationRecordingDeadlineExpiredError,
   PreviewAutomationUnavailableError,
   PreviewAutomationNoAvailableHostError,
   PreviewAutomationUnsupportedClientError,

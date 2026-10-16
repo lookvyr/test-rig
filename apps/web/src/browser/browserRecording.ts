@@ -99,6 +99,8 @@ interface ActiveRecording {
   frameSizeEstablished: boolean;
   frameSequence: number;
   lastDrawnFrameSequence: number;
+  savedBlob?: Blob;
+  uploadPromise?: Promise<string>;
   lifecycle: BrowserRecordingLifecycle;
 }
 
@@ -107,19 +109,40 @@ export interface ActiveBrowserRecordingTarget {
   readonly serverTabId: string;
 }
 
+export type BrowserRecordingPhase = BrowserRecordingLifecycle["phase"];
+
 interface ActiveBrowserRecordingIndex {
   readonly tabIds: ReadonlySet<string>;
+  readonly phaseByTabId: ReadonlyMap<string, BrowserRecordingPhase>;
 }
 
 const activeBrowserRecordingTabIdsAtom = Atom.make<ActiveBrowserRecordingIndex>({
   tabIds: new Set<string>(),
+  phaseByTabId: new Map(),
 }).pipe(Atom.keepAlive, Atom.withLabel("preview:active-browser-recording-tabs"));
 
 export function useActiveBrowserRecordingTabIds(): ReadonlySet<string> {
   return useAtomValue(activeBrowserRecordingTabIdsAtom).tabIds;
 }
 
+export function useBrowserRecordingPhase(tabId: string | null): BrowserRecordingPhase | null {
+  const { phaseByTabId } = useAtomValue(activeBrowserRecordingTabIdsAtom);
+  return tabId === null ? null : (phaseByTabId.get(tabId) ?? null);
+}
+
 const activeRecordings = new Map<string, ActiveRecording>();
+
+const publishRecordingState = (): void => {
+  appAtomRegistry.set(activeBrowserRecordingTabIdsAtom, {
+    tabIds: new Set(activeRecordings.keys()),
+    phaseByTabId: new Map(
+      Array.from(activeRecordings.values(), (recording) => [
+        recording.tabId,
+        recording.lifecycle.phase,
+      ]),
+    ),
+  });
+};
 let unsubscribeFrames: (() => void) | null = null;
 
 export const BROWSER_RECORDING_STARTUP_SETTLE_TIMEOUT_MS = 5_000;
@@ -228,9 +251,7 @@ const clearActiveRecording = (recording: ActiveRecording): void => {
     unsubscribeFrames?.();
     unsubscribeFrames = null;
   }
-  appAtomRegistry.set(activeBrowserRecordingTabIdsAtom, {
-    tabIds: new Set(activeRecordings.keys()),
-  });
+  publishRecordingState();
 };
 
 const cleanupFailedRecordingStart = async (
@@ -377,6 +398,7 @@ export async function startBrowserRecording(
     lifecycle: { phase: "starting" },
   };
   activeRecordings.set(tabId, recording);
+  publishRecordingState();
   try {
     try {
       unsubscribeFrames ??= bridge.recording.onFrame(drawFrame);
@@ -487,9 +509,7 @@ export async function startBrowserRecording(
     if (recording.lifecycle.phase === "starting") {
       recording.lifecycle = { phase: "recording" };
     }
-    appAtomRegistry.set(activeBrowserRecordingTabIdsAtom, {
-      tabIds: new Set(activeRecordings.keys()),
-    });
+    publishRecordingState();
     return startedAt;
   } finally {
     settleStartup?.();
@@ -537,6 +557,7 @@ const finalizeBrowserRecording = async (
           recording.mimeType,
           new Uint8Array(await blob.arrayBuffer()),
         );
+        recording.savedBlob = blob;
         result = { _tag: "Success", artifact };
       } catch (cause) {
         throw new BrowserRecordingOperationError({
@@ -623,5 +644,18 @@ export function stopBrowserRecording(
       throw error;
     });
   recording.lifecycle = { phase: "stopping", stopPromise };
+  publishRecordingState();
   return stopPromise;
+}
+
+export async function stopBrowserRecordingForUpload(
+  tabId: string,
+  upload: (artifact: DesktopPreviewRecordingArtifact, blob: Blob) => Promise<string>,
+): Promise<(DesktopPreviewRecordingArtifact & { uploadedAttachmentId: string }) | null> {
+  const recording = activeRecordings.get(tabId);
+  if (!recording) return null;
+  const artifact = await stopBrowserRecording(tabId);
+  if (!artifact || !recording.savedBlob) return null;
+  recording.uploadPromise ??= upload(artifact, recording.savedBlob);
+  return { ...artifact, uploadedAttachmentId: await recording.uploadPromise };
 }

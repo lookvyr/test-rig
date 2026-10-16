@@ -15,9 +15,11 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { V2SqlitePersistenceMemory as SqlitePersistenceMemory } from "../persistence/Layers/V2Sqlite.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import { createAttachmentId } from "../attachmentStore.ts";
 
 const databaseLayer = Layer.mergeAll(
   SqlitePersistenceMemory,
@@ -349,6 +351,36 @@ it.effect.each(["sqlite", "memory"] as const)(
       assert.include(
         (yield* store.getTurnStartContext(threadId, runId)).messages.map((m) => m.id),
         marker.id,
+      );
+      const encodeRecording = Schema.encodeEffect(
+        Schema.fromJsonString(Schema.Struct({ id: Schema.String, path: Schema.String })),
+      );
+      const recordingId = createAttachmentId(threadId, "webm")!;
+      const sourceRecordingId = createAttachmentId("source-thread", "webm")!;
+      for (const [index, id] of [recordingId, recordingId, sourceRecordingId].entries()) {
+        const recordingOutput = yield* encodeRecording({ id, path: "/retained/recording.webm" });
+        yield* store.apply({
+          id: EventId.make(`recording-output-event-${index}`),
+          type: "turn-item.updated",
+          threadId,
+          runId: oldRunId,
+          occurredAt: now,
+          payload: {
+            ...item,
+            type: "dynamic_tool",
+            id: TurnItemId.make(`recording-output-${index}`),
+            ordinal: 10 + index,
+            toolName: "mcp__test_rig__preview_recording_stop",
+            input: {},
+            output: {
+              content: [{ type: "text", text: recordingOutput }],
+            },
+          },
+        });
+      }
+      assert.deepEqual(
+        [...(yield* store.getThreadAttachmentIds(threadId))].sort(),
+        (storage === "sqlite" ? ["attachment:old", recordingId] : [recordingId]).sort(),
       );
       const other = ThreadId.make("other");
       yield* putThread({ ...thread, id: other });

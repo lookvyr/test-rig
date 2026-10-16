@@ -100,7 +100,13 @@ import {
   FilesystemBrowseResult,
   FilesystemBrowseError,
 } from "./filesystem.ts";
-import { AssetAccessError, AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
+import {
+  AssetAccessError,
+  AssetCreateUrlInput,
+  AssetCreateUrlResult,
+  AttachmentCreateUploadUrlInput,
+  AttachmentCreateUploadUrlResult,
+} from "./assets.ts";
 import {
   GitActionProgressEvent,
   VcsSwitchRefInput,
@@ -250,6 +256,7 @@ export const WS_METHODS = {
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
   assetsCreateUrl: "assets.createUrl",
+  assetsCreateAttachmentUploadUrl: "assets.createAttachmentUploadUrl",
   assetsPersistChatAttachments: "assets.persistChatAttachments",
   projectsMutate: "projects.mutate",
 
@@ -573,6 +580,18 @@ export const WsAssetsPersistChatAttachmentsRpc = Rpc.make(WS_METHODS.assetsPersi
   success: Schema.Struct({ attachments: Schema.Array(ChatAttachment) }),
   error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
 });
+
+export const WsAssetsCreateAttachmentUploadUrlRpc = Rpc.make(
+  WS_METHODS.assetsCreateAttachmentUploadUrl,
+  {
+    payload: Schema.Struct({
+      threadId: ThreadId,
+      upload: AttachmentCreateUploadUrlInput,
+    }),
+    success: AttachmentCreateUploadUrlResult,
+    error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+  },
+);
 
 export const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
   payload: AssetCreateUrlInput,
@@ -1142,6 +1161,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsAssetsCreateUrlRpc,
+  WsAssetsCreateAttachmentUploadUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,
   WsSubscribeVcsStatusRpc,
   WsSubscribeWorktreeSetupRpc,

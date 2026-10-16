@@ -1,9 +1,22 @@
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, WS_METHODS } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Layer from "effect/Layer";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 
-import type { EnvironmentRegistry } from "../connection/registry.ts";
+import { EnvironmentRegistry } from "../connection/registry.ts";
+import {
+  AVAILABLE_CONNECTION_STATE,
+  PrimaryConnectionTarget,
+  type NetworkStatus,
+  type PreparedConnection,
+} from "../connection/model.ts";
+import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
+import { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
+import type { RpcSession } from "../rpc/session.ts";
 import {
   createAssetEnvironmentAtoms,
   InvalidAssetCollectionKeyError,
@@ -33,6 +46,72 @@ describe("asset collection keys", () => {
 });
 
 describe("createAssetEnvironmentAtoms", () => {
+  it.effect("prepares each video upload in the requested environment without caching tickets", () =>
+    Effect.gen(function* () {
+      const environmentId = EnvironmentId.make("remote-recording");
+      const input = {
+        threadId: ThreadId.make("recording-thread"),
+        upload: {
+          type: "file" as const,
+          name: "walkthrough.webm",
+          mimeType: "video/webm",
+          sizeBytes: 1024,
+        },
+      };
+      const calls: unknown[] = [];
+      const routedEnvironments: EnvironmentId[] = [];
+      const client = {
+        [WS_METHODS.assetsCreateAttachmentUploadUrl]: (uploadInput: typeof input) =>
+          Effect.sync(() => {
+            calls.push(uploadInput);
+            return {
+              attachmentId: `pending-${calls.length}`,
+              relativeUrl: `/api/attachments/upload/token-${calls.length}`,
+              expiresAt: 1000,
+            };
+          }),
+      } as unknown as WsRpcProtocolClient;
+      const supervisor = Layer.mock(EnvironmentSupervisor)({
+        target: new PrimaryConnectionTarget({
+          environmentId,
+          label: "Remote recording",
+          httpBaseUrl: "https://recording.test",
+          wsBaseUrl: "wss://recording.test",
+        }),
+        state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
+        prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+        session: yield* SubscriptionRef.make(Option.some({ client } as RpcSession)),
+      });
+      const runtime = Atom.runtime(
+        Layer.mock(EnvironmentRegistry)({
+          entries: yield* SubscriptionRef.make<ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>>(
+            new Map(),
+          ),
+          networkStatus: yield* SubscriptionRef.make<NetworkStatus>("online"),
+          run: (requestedEnvironmentId, effect) => {
+            routedEnvironments.push(requestedEnvironmentId);
+            return effect.pipe(Effect.provide(supervisor));
+          },
+        }),
+      );
+      const assets = createAssetEnvironmentAtoms(runtime);
+      const registry = yield* Effect.acquireRelease(
+        Effect.sync(() => AtomRegistry.make()),
+        (registry) => Effect.sync(() => registry.dispose()),
+      );
+      const first = yield* Effect.promise(() =>
+        assets.createAttachmentUploadUrl.run(registry, { environmentId, input }),
+      );
+      const second = yield* Effect.promise(() =>
+        assets.createAttachmentUploadUrl.run(registry, { environmentId, input }),
+      );
+      expect(first).toMatchObject({ _tag: "Success", value: { attachmentId: "pending-1" } });
+      expect(second).toMatchObject({ _tag: "Success", value: { attachmentId: "pending-2" } });
+      expect(calls).toEqual([input, input]);
+      expect(routedEnvironments).toEqual([environmentId, environmentId]);
+    }).pipe(Effect.scoped),
+  );
+
   it("keys asset URL queries by environment and resource", () => {
     const runtime = Atom.runtime(Layer.empty) as unknown as Atom.AtomRuntime<
       EnvironmentRegistry,

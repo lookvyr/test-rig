@@ -76,6 +76,12 @@ describe("RPC authorization scopes", () => {
     }
   });
 
+  it("requires operation authority to prepare attachment uploads", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.assetsCreateAttachmentUploadUrl)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+  });
+
   it("rejects unknown RPC method names", () => {
     for (const method of ["server.notRegistered", "toString", "constructor"]) {
       expect(() => requiredScopeForRpcMethod(method)).toThrow(

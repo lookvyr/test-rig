@@ -64,6 +64,39 @@ it.effect("serves signed uploads and rejects invalid tokens or mismatched body s
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 
+it.effect("prepares video uploads with a server-local extension and thread ownership", () =>
+  Effect.gen(function* () {
+    const issued = yield* Upload.issueAttachmentUploadUrl(
+      { type: "file", name: "walkthrough.webm", mimeType: "video/webm", sizeBytes: 4 },
+      owner,
+    );
+    const claims = yield* Upload.validateAttachmentUploadToken(
+      issued.relativeUrl.split("/").at(-1)!,
+    );
+    expect(claims).toMatchObject({
+      type: "file",
+      name: "walkthrough.webm",
+      mimeType: "video/webm",
+      sizeBytes: 4,
+    });
+    if (!claims) throw new Error("Video upload token was not accepted.");
+    yield* Upload.assertPendingAttachmentOwner(issued.attachmentId, owner);
+    expect(
+      (yield* Upload.assertPendingAttachmentOwner(issued.attachmentId, other).pipe(Effect.flip))
+        ._tag,
+    ).toBe("PendingAttachmentOwnershipError");
+    expect(yield* Upload.storeAttachmentUpload(claims, new TextEncoder().encode("clip"))).toEqual({
+      ok: true,
+    });
+    const config = yield* ServerConfig.ServerConfig;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    expect(
+      yield* fs.readFileString(path.join(config.attachmentsDir, `${issued.attachmentId}.webm`)),
+    ).toBe("clip");
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("restricts pending discard to the issuing thread and preserves delivered copies", () =>
   Effect.gen(function* () {
     const issued = yield* Upload.issueAttachmentUploadUrl(input, owner);

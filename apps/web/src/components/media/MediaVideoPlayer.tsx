@@ -5,7 +5,7 @@ import { cn } from "../../lib/utils";
 import { prepareVideoFirstFrame } from "../../lib/videoFirstFrame";
 import { Button } from "../ui/button";
 import { OpenMediaLink } from "./OpenMediaLink";
-import { MediaActions, type MediaActionSource } from "./MediaActions";
+import { MediaActionBar, MediaActions, type MediaActionSource } from "./MediaActions";
 
 interface MediaVideoPlayerProps {
   readonly src: string | null;
@@ -17,6 +17,9 @@ interface MediaVideoPlayerProps {
   readonly autoPlay?: boolean | undefined;
   /** Presents a still thumbnail whose full surface opens the video in a viewer. */
   readonly onOpen?: (() => void) | undefined;
+  /** Fits reply embeds to their natural shape within a 30rem square. */
+  readonly inline?: boolean | undefined;
+  readonly onExpand?: (() => void) | undefined;
   readonly className?: string | undefined;
   readonly videoClassName?: string | undefined;
   /** Styles the loading and failure panels, which otherwise assume an inline light surface. */
@@ -37,6 +40,8 @@ export function MediaVideoPlayer({
   preload = "visible",
   autoPlay = false,
   onOpen,
+  inline = false,
+  onExpand,
   className,
   videoClassName,
   stateClassName,
@@ -54,6 +59,19 @@ export function MediaVideoPlayer({
   const [retrying, setRetrying] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [preloadedSrc, setPreloadedSrc] = useState<string | null>(null);
+  const [metadata, setMetadata] = useState<{
+    width: number;
+    height: number;
+    duration: number;
+  } | null>(null);
+  const aspectRatio = metadata ? metadata.width / metadata.height : 16 / 9;
+  const frameStyle = inline ? { aspectRatio } : undefined;
+  const duration =
+    metadata && Number.isFinite(metadata.duration)
+      ? `${Math.floor(metadata.duration / 60)}:${Math.floor(metadata.duration % 60)
+          .toString()
+          .padStart(2, "0")}`
+      : undefined;
   const src = playbackSource?.src ?? latestSrc;
   const sourceRevision = playbackSource === null ? revision : playbackSource.revision;
   const failed = src !== null ? failedSrc === src : sourceFailed;
@@ -131,18 +149,18 @@ export function MediaVideoPlayer({
   const player = (
     <span
       className={cn("relative inline-block align-middle", className)}
-      style={style}
+      style={inline ? { width: `min(100%, ${30 * aspectRatio}rem)`, ...style } : style}
       data-markdown-copy={copyMarkdown}
     >
       {failed && !onOpen ? (
         <span
           role="alert"
           className={cn(
-            // Same 16:9 slot as the loading and playing states, so a failed or
-            // retried video does not move the rows below it.
+            // Keep the last known shape when a video fails or is retried.
             "flex aspect-video max-h-full min-h-28 w-full flex-col items-center justify-center gap-3 rounded-lg border border-border/40 bg-muted/40 p-4 text-center text-sm text-muted-foreground",
             stateClassName,
           )}
+          style={frameStyle}
         >
           <span className="inline-flex items-center gap-1.5">
             <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
@@ -180,8 +198,24 @@ export function MediaVideoPlayer({
             onOpen && "pointer-events-none",
             videoClassName,
           )}
-          style={style}
-          onLoadedMetadata={(event) => prepareVideoFirstFrame(event.currentTarget)}
+          style={{ ...style, ...frameStyle }}
+          onLoadedMetadata={(event) => {
+            const video = event.currentTarget;
+            if (video.videoWidth > 0 && video.videoHeight > 0) {
+              setMetadata({
+                width: video.videoWidth,
+                height: video.videoHeight,
+                duration: video.duration,
+              });
+            }
+            prepareVideoFirstFrame(video);
+          }}
+          onDurationChange={(event) => {
+            const duration = event.currentTarget.duration;
+            setMetadata((current) =>
+              current && current.duration !== duration ? { ...current, duration } : current,
+            );
+          }}
           onPlay={() => setPlaybackSource({ src, revision: sourceRevision })}
           onPause={refreshPausedRevision}
           onEnded={refreshPausedRevision}
@@ -195,7 +229,7 @@ export function MediaVideoPlayer({
           role="status"
           aria-label={failed ? "Video preview unavailable" : "Loading video"}
           className={cn("block aspect-video w-full rounded-lg bg-muted/60", stateClassName)}
-          style={style}
+          style={{ ...style, ...frameStyle }}
         />
       )}
       {onOpen ? (
@@ -209,6 +243,20 @@ export function MediaVideoPlayer({
             <PlayIcon aria-hidden className="size-4 fill-current" />
           </span>
         </button>
+      ) : null}
+      {inline && actionsSource ? (
+        <MediaActionBar
+          source={actionsSource}
+          duration={duration}
+          onExpand={
+            onExpand
+              ? () => {
+                  videoRef.current?.pause();
+                  onExpand();
+                }
+              : undefined
+          }
+        />
       ) : null}
     </span>
   );

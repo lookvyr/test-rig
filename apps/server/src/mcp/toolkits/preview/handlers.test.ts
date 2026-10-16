@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vite-plus/test";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as ServerConfig from "../../../config.ts";
+import {
+  createPendingAttachmentId,
+  parseThreadSegmentFromAttachmentId,
+  sweepStalePendingAttachments,
+} from "../../../attachmentStore.ts";
 import { it as effectIt } from "@effect/vitest";
 import {
   EnvironmentId,
+  PREVIEW_RECORDING_STOP_TIMEOUT_MS,
   PreviewAutomationStreamEvent,
   PreviewTabId,
   ProjectId,
@@ -19,7 +29,11 @@ import * as ThreadManagementService from "../../../orchestration-v2/ThreadManage
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 
-import { normalizePreviewOpenInput, PreviewToolkitHandlersLive } from "./handlers.ts";
+import {
+  claimPreviewRecording,
+  normalizePreviewOpenInput,
+  PreviewToolkitHandlersLive,
+} from "./handlers.ts";
 import { PreviewToolkit } from "./tools.ts";
 
 describe("normalizePreviewOpenInput", () => {
@@ -62,6 +76,9 @@ effectIt.effect(
       const projectId = ProjectId.make("private-entry-project");
       const entries: unknown[] = [];
       const dependencies = Layer.mergeAll(
+        ServerConfig.layerTest(process.cwd(), { prefix: "test-rig-preview-private-" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
         Layer.succeed(McpInvocationContext.McpInvocationContext, {
           environmentId,
           threadId,
@@ -137,4 +154,201 @@ effectIt.effect(
         ]);
       }).pipe(Effect.provide(dependencies));
     }),
+);
+
+describe("claimPreviewRecording", () => {
+  effectIt.effect("overlapping and repeated claims return the same retained recording", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const uploadedAttachmentId = createPendingAttachmentId(".webm");
+      const pendingPath = path.join(config.attachmentsDir, `${uploadedAttachmentId}.webm`);
+      yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true });
+      yield* fileSystem.writeFileString(pendingPath, "video!");
+      const response = {
+        id: "desktop-recording",
+        tabId: "tab-1",
+        path: "/desktop/recording.webm",
+        mimeType: "video/webm",
+        sizeBytes: 6,
+        createdAt: "2026-09-07T00:00:00.000Z",
+        uploadedAttachmentId,
+      };
+      const claim = claimPreviewRecording(ThreadId.make("thread-1"), response);
+      const [first, second] = yield* Effect.all([claim, claim], { concurrency: "unbounded" });
+      expect(first).toEqual(second);
+      expect(yield* claim).toEqual(first);
+      expect(yield* fileSystem.readFileString(first.path)).toBe("video!");
+      expect(yield* fileSystem.exists(pendingPath)).toBe(false);
+      expect(first.recordingMarkdown).toBe(`![Browser recording](<${first.path}>)`);
+      const nowMs = 1_800_000_000_000;
+      yield* fileSystem.utimes(
+        first.path,
+        (nowMs - 25 * 60 * 60 * 1000) / 1000,
+        (nowMs - 25 * 60 * 60 * 1000) / 1000,
+      );
+      expect(
+        sweepStalePendingAttachments({ attachmentsDir: config.attachmentsDir, nowMs }).deleted,
+      ).toBe(0);
+      expect(yield* fileSystem.exists(first.path)).toBe(true);
+      expect(yield* claim).toEqual(first);
+      const wrongThread = yield* claimPreviewRecording(ThreadId.make("thread-2"), response).pipe(
+        Effect.result,
+      );
+      expect(wrongThread._tag).toBe("Failure");
+      const wrongPath = yield* claimPreviewRecording(ThreadId.make("thread-1"), {
+        ...response,
+        uploadedAttachmentId: `../${uploadedAttachmentId}`,
+      }).pipe(Effect.result);
+      expect(wrongPath._tag).toBe("Failure");
+    }).pipe(
+      Effect.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "test rig preview recording-" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  effectIt.effect.each([6, 5])(
+    "claims only a complete uploaded recording (reported bytes: %s)",
+    (sizeBytes) =>
+      Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const uploadedAttachmentId = createPendingAttachmentId(".webm");
+        const pendingPath = path.join(config.attachmentsDir, `${uploadedAttachmentId}.webm`);
+        yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true });
+        yield* fileSystem.writeFileString(pendingPath, "video!");
+        const response = {
+          id: "desktop-recording",
+          tabId: "tab-1",
+          path: "/desktop/recording.webm",
+          mimeType: "video/webm",
+          sizeBytes,
+          createdAt: "2026-09-07T00:00:00.000Z",
+          uploadedAttachmentId,
+        };
+        const result = yield* claimPreviewRecording(ThreadId.make("thread-1"), response).pipe(
+          Effect.result,
+        );
+        if (sizeBytes === 6) {
+          expect(result._tag).toBe("Success");
+          if (result._tag !== "Success") return;
+          expect(result.success.path).not.toBe(response.path);
+          expect(parseThreadSegmentFromAttachmentId(result.success.id)).toBe("thread-1");
+          expect(yield* fileSystem.readFileString(result.success.path)).toBe("video!");
+          expect(yield* fileSystem.exists(pendingPath)).toBe(false);
+        } else {
+          expect(result._tag).toBe("Failure");
+          if (result._tag !== "Failure") return;
+          expect(result.failure._tag).toBe("PreviewAutomationRecordingTransferError");
+          expect(yield* fileSystem.exists(pendingPath)).toBe(true);
+        }
+      }).pipe(
+        Effect.provide(
+          ServerConfig.layerTest(process.cwd(), { prefix: "test rig preview recording-" }).pipe(
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  effectIt.effect("reports an older desktop without returning its inaccessible path", () =>
+    Effect.gen(function* () {
+      const result = yield* claimPreviewRecording(ThreadId.make("thread-1"), {
+        id: "desktop-recording",
+        tabId: "tab-1",
+        path: "/desktop/recording.webm",
+        mimeType: "video/webm",
+        sizeBytes: 6,
+        createdAt: "2026-09-07T00:00:00.000Z",
+      }).pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag !== "Failure") return;
+      expect(result.failure._tag).toBe("PreviewAutomationRecordingDesktopUpdateRequiredError");
+      expect(result.failure.message).toContain("Update the desktop app");
+    }).pipe(
+      Effect.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "test rig preview recording-" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+});
+
+effectIt.effect(
+  "recording stop requests transfer, waits for saving, and returns retained embed Markdown",
+  () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const threadId = ThreadId.make("recording-thread");
+      const uploadedAttachmentId = createPendingAttachmentId(".webm");
+      const pendingPath = path.join(config.attachmentsDir, `${uploadedAttachmentId}.webm`);
+      yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true });
+      yield* fileSystem.writeFileString(pendingPath, "video!");
+      const requests: PreviewAutomationBroker.PreviewAutomationInvokeInput[] = [];
+      const dependencies = Layer.mergeAll(
+        Layer.succeed(McpInvocationContext.McpInvocationContext, {
+          environmentId: EnvironmentId.make("recording-environment"),
+          threadId,
+          providerSessionId: "session",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          capabilities: new Set(["preview" as const]),
+          issuedAt: 0,
+        }),
+        Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({
+          invoke: <A>(request: PreviewAutomationBroker.PreviewAutomationInvokeInput) =>
+            Effect.sync(() => {
+              requests.push(request);
+              return {
+                id: "desktop-recording",
+                tabId: "recording-tab",
+                path: "/desktop/recording.webm",
+                mimeType: "video/webm",
+                sizeBytes: 6,
+                createdAt: "2026-10-16T00:00:00.000Z",
+                uploadedAttachmentId,
+              } as A;
+            }),
+        }),
+      );
+      const output = yield* Effect.gen(function* () {
+        const toolkit = yield* PreviewToolkit.pipe(Effect.provide(PreviewToolkitHandlersLive));
+        return yield* toolkit
+          .handle("preview_recording_stop", { tabId: PreviewTabId.make("recording-tab") })
+          .pipe(Stream.unwrap, Stream.runCollect);
+      }).pipe(Effect.provide(dependencies));
+      expect(requests).toMatchObject([
+        {
+          operation: "recordingStop",
+          input: { transferToEnvironment: true },
+          tabId: "recording-tab",
+          timeoutMs: PREVIEW_RECORDING_STOP_TIMEOUT_MS,
+        },
+      ]);
+      const finalPath = path.join(
+        config.attachmentsDir,
+        `recording-thread-${uploadedAttachmentId.slice("pending-".length)}.webm`,
+      );
+      expect(output.at(-1)?.result).toMatchObject({
+        path: finalPath,
+        recordingMarkdown: `![Browser recording](<${finalPath}>)`,
+      });
+      expect(yield* fileSystem.exists(pendingPath)).toBe(false);
+      expect(yield* fileSystem.readFileString(finalPath)).toBe("video!");
+    }).pipe(
+      Effect.provide(
+        ServerConfig.layerTest(process.cwd(), { prefix: "test rig recording stop-" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
+    ),
 );

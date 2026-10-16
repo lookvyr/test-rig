@@ -29,6 +29,8 @@ import {
   PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import * as FileSystem from "effect/FileSystem";
+import * as ServerConfig from "../../../config.ts";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -215,7 +217,7 @@ export const PreviewWaitForTool = readonlyBrowserTool(
 export const PreviewRecordingStartTool = safeBrowserTool(
   Tool.make("preview_recording_start", {
     description:
-      "Start recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted.",
+      "Start recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted. For a desktop walkthrough, first use preview_resize with a fixed desktop viewport so the recording does not inherit a narrow side panel. Preserve an intentional mobile or responsive-test viewport. Recordings capture the browser without sound.",
     parameters: PreviewAutomationTabTargetInput,
     success: PreviewAutomationRecordingStatus,
     failure: PreviewAutomationError,
@@ -226,11 +228,14 @@ export const PreviewRecordingStartTool = safeBrowserTool(
 export const PreviewRecordingStopTool = safeBrowserTool(
   Tool.make("preview_recording_stop", {
     description:
-      "Stop recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted, and save it as a local evidence artifact.",
+      "Stop recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted. Save the recording in the agent environment and return its absolute path and recordingMarkdown. Include recordingMarkdown verbatim in your reply so the user can play the video in chat. Recordings must be at most 50 MiB; make shorter clips for longer workflows.",
     parameters: PreviewAutomationTabTargetInput,
-    success: PreviewAutomationRecordingArtifact,
+    success: Schema.Struct({
+      ...PreviewAutomationRecordingArtifact.fields,
+      recordingMarkdown: Schema.String,
+    }),
     failure: PreviewAutomationError,
-    dependencies,
+    dependencies: [...dependencies, ServerConfig.ServerConfig, FileSystem.FileSystem],
   }).annotate(Tool.Title, "Stop browser recording"),
 );
 

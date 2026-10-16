@@ -1,6 +1,10 @@
 import {
   PREVIEW_AUTOMATION_V1_OPERATIONS,
   PreviewAutomationClientDisconnectedError,
+  PreviewAutomationRecordingDesktopUpdateRequiredError,
+  PreviewAutomationRecordingTooLargeError,
+  PreviewAutomationRecordingDeadlineExpiredError,
+  PreviewAutomationRecordingTransferError,
   PreviewAutomationControlInterruptedError,
   PreviewAutomationControlReason,
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
@@ -199,6 +203,26 @@ const classifyResponseError = (
     cause: error,
   };
   switch (error._tag) {
+    case "PreviewAutomationRecordingDesktopUpdateRequiredError":
+      return new PreviewAutomationRecordingDesktopUpdateRequiredError({
+        threadId: context.threadId,
+        cause: error,
+      });
+    case "PreviewAutomationRecordingTooLargeError":
+      return new PreviewAutomationRecordingTooLargeError({
+        threadId: context.threadId,
+        cause: error,
+      });
+    case "PreviewAutomationRecordingDeadlineExpiredError":
+      return new PreviewAutomationRecordingDeadlineExpiredError({
+        threadId: context.threadId,
+        cause: error,
+      });
+    case "PreviewAutomationRecordingTransferError":
+      return new PreviewAutomationRecordingTransferError({
+        threadId: context.threadId,
+        cause: error,
+      });
     case "PreviewAutomationNoAvailableHostError":
       return new PreviewAutomationNoAvailableHostError({
         ...context,

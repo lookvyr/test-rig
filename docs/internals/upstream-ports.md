@@ -1,5 +1,20 @@
 # Selected upstream ports
 
+## October 16 browser media
+
+The browser recording transfer and retention flow is adapted from nightly
+`v0.1.1-nightly.20261016.3218`, commit
+[`e58a4857130a93cc58b45dd6ebee14cf08df04ec`](https://github.com/pingdotgg/t3code/commit/e58a4857130a93cc58b45dd6ebee14cf08df04ec).
+Completed recordings are transferred to the owning environment and promoted from
+pending uploads to retained thread files before the tool returns their paths.
+The port preserves Test Rig's screenshot Markdown output and adds matching
+recording Markdown guidance.
+
+Direct video URL embeds also follow nightly's behavior through Test Rig's shared
+media resolver. Intrinsic video sizing, shared screenshot previews, visible media
+actions, and discoverable desktop capture controls are Test Rig improvements
+using its existing player, expanded viewer, and asset access APIs.
+
 ## October 7 pretrial batch
 
 Selected against upstream `14fe0158ed`, adapted to Orchestrator V2 on Test Rig's

@@ -1,5 +1,9 @@
 import {
   EnvironmentId,
+  PreviewAutomationRecordingTransferError,
+  PreviewAutomationRecordingTooLargeError,
+  PreviewAutomationRecordingDeadlineExpiredError,
+  PreviewAutomationRecordingDesktopUpdateRequiredError,
   type PreviewAutomationHost,
   PreviewAutomationOperation,
   type PreviewAutomationRequest,
@@ -206,6 +210,10 @@ export class PreviewAutomationOperationError extends Schema.TaggedError<PreviewA
 }
 
 export const PreviewAutomationHostError = Schema.Union([
+  PreviewAutomationRecordingTransferError,
+  PreviewAutomationRecordingTooLargeError,
+  PreviewAutomationRecordingDeadlineExpiredError,
+  PreviewAutomationRecordingDesktopUpdateRequiredError,
   PreviewAutomationOverlayTimeoutError,
   PreviewAutomationNavigationTimeoutError,
   PreviewAutomationViewportTimeoutError,
@@ -228,7 +236,7 @@ export function serializePreviewAutomationHostError(
     ),
   );
   return {
-    _tag: error.responseTag,
+    _tag: "responseTag" in error ? error.responseTag : error._tag,
     message: error.message,
     ...(Object.keys(detail).length === 0 ? {} : { detail }),
   };
