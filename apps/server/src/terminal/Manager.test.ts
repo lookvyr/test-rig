@@ -1185,6 +1185,48 @@ it.layer(
     }),
   );
 
+  for (const requestKey of ["acceptance-stop-preparation-3", "x".repeat(256)]) {
+    it.effect(
+      `persists and cleans up long delegated terminal identities (${requestKey.length}-character request key)`,
+      () =>
+        Effect.gen(function* () {
+          const threadId = `thread:delegated-task:command%3Amcp%3A2afc9065-d513-4b38-bc57-509a7fc57e83%3Adelegate-task%3A${requestKey}`;
+          const terminalId = `setup-${threadId}`;
+          const otherThreadId = `${threadId}-other`;
+          const { manager, ptyAdapter, logsDir } = yield* createManager();
+          const fs = yield* FileSystem.FileSystem;
+
+          yield* manager.open(openInput({ threadId }));
+          yield* manager.open(openInput({ threadId, terminalId }));
+          yield* manager.open(openInput({ threadId: otherThreadId, terminalId }));
+          ptyAdapter.processes[0]!.emitData("default history\n");
+          ptyAdapter.processes[1]!.emitData("setup history\n");
+          ptyAdapter.processes[2]!.emitData("other thread history\n");
+          yield* waitFor(fs.readDirectory(logsDir).pipe(Effect.map((files) => files.length === 3)));
+          const files = yield* fs.readDirectory(logsDir);
+          assert.isTrue(files.every((name) => Buffer.byteLength(name) <= 255));
+
+          yield* manager.close({ threadId });
+          const reopenedDefault = yield* manager.open(openInput({ threadId }));
+          const reopenedSetup = yield* manager.open(openInput({ threadId, terminalId }));
+          assert.equal(reopenedDefault.history, "default history\n");
+          assert.equal(reopenedSetup.history, "setup history\n");
+
+          yield* manager.close({ threadId, terminalId, deleteHistory: true });
+          assert.lengthOf(yield* fs.readDirectory(logsDir), 2);
+          yield* manager.close({ threadId, deleteHistory: true });
+          assert.lengthOf(yield* fs.readDirectory(logsDir), 1);
+          yield* manager.close({ threadId: otherThreadId });
+          const reopenedOther = yield* manager.open(
+            openInput({ threadId: otherThreadId, terminalId }),
+          );
+          assert.equal(reopenedOther.history, "other thread history\n");
+          yield* manager.close({ threadId: otherThreadId, deleteHistory: true });
+          assert.isEmpty(yield* fs.readDirectory(logsDir));
+        }),
+    );
+  }
+
   it.effect("escalates terminal shutdown to SIGKILL when process does not exit in time", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager(5, { processKillGraceMs: 10 });
