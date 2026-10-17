@@ -926,6 +926,8 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
             threadStateEvent(`history-${index}`, "thread.visited"),
           ),
           threadStateEvent("visit-2", "thread.visited"),
+          messageEvent("message-middle", "still streaming"),
+          nodeEvent("node-middle", "running"),
           messageEvent("message-2", "final"),
           nodeEvent("node-2", "completed"),
           itemEvent("item-2", "final"),
@@ -966,13 +968,14 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
         )
         VALUES
           ('command:foundation-compact:legacy', 'thread', ${importedV1ThreadId}, ${nowIso}, 1, 'accepted', 'legacy'),
-          ('command:foundation-compact:pending', 'thread', ${pendingV1ThreadId}, ${nowIso}, 1, 'accepted', 'legacy')
+          ('command:foundation-compact:pending', 'thread', ${pendingV1ThreadId}, ${nowIso}, 1, 'accepted', 'legacy'),
+          ('command:foundation-compact:modern', 'thread', ${importedV1ThreadId}, ${nowIso}, 1, 'accepted', 'thread.turn.start')
         ON CONFLICT(command_id) DO NOTHING
       `;
 
       const summary = yield* maintenance.compactEventStore;
       // Superseded state spans several discovery pages. Both turn-item updates stay.
-      assert.isAtLeast(summary.deletedEventCount, 507);
+      assert.isAtLeast(summary.deletedEventCount, 506);
       assert.isAtLeast(summary.deletedReceiptCount, 1);
 
       const remaining = yield* sql<{ readonly event_id: string }>`
@@ -986,6 +989,9 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
         remaining.map((row) => row.event_id),
         [
           "event:foundation-compact:create",
+          "event:foundation-compact:meta",
+          "event:foundation-compact:message-1",
+          "event:foundation-compact:node-1",
           "event:foundation-compact:item-1",
           "event:foundation-compact:visit-2",
           "event:foundation-compact:message-2",
@@ -1008,11 +1014,12 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
       const remainingReceipts = yield* sql<{ readonly command_id: string }>`
         SELECT command_id
         FROM orchestration_command_receipts
-        WHERE command_id IN ('command:foundation-compact:legacy', 'command:foundation-compact:pending')
+        WHERE command_id IN ('command:foundation-compact:legacy', 'command:foundation-compact:pending', 'command:foundation-compact:modern')
+        ORDER BY command_id
       `;
       assert.deepEqual(
         remainingReceipts.map((row) => row.command_id),
-        ["command:foundation-compact:pending"],
+        ["command:foundation-compact:modern", "command:foundation-compact:pending"],
       );
 
       // Replay across the deletion gaps must still produce a valid projection.
@@ -1020,6 +1027,61 @@ it.layer(TestLayer)("orchestration V2 foundation persistence", (it) => {
       assert.isTrue((yield* maintenance.rebuild).valid);
       assert.deepEqual(yield* projections.getThreadProjection(threadId), beforeCompaction);
     }),
+  );
+
+  it.effect(
+    "retains deletion events and lets only activity supersede both thread state groups",
+    () =>
+      Effect.gen(function* () {
+        const sink = yield* EventSink.EventSinkV2;
+        const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+        const sql = yield* SqlClient.SqlClient;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread:compaction-deleted");
+        const thread = makeThread(threadId, now);
+        yield* sink.write({
+          events: [
+            threadCreatedEvent({ id: "compaction-deleted:create", thread, now }),
+            {
+              id: EventId.make("compaction-deleted:delete"),
+              type: "thread.deleted",
+              threadId,
+              occurredAt: now,
+              payload: { ...thread, deletedAt: now },
+            },
+            {
+              id: EventId.make("compaction-deleted:visit"),
+              type: "thread.visited",
+              threadId,
+              occurredAt: now,
+              payload: { ...thread, deletedAt: now, lastVisitedAt: now },
+            },
+            {
+              id: EventId.make("compaction-deleted:unread"),
+              type: "thread.marked-unread",
+              threadId,
+              occurredAt: now,
+              payload: { ...thread, deletedAt: now },
+            },
+            {
+              id: EventId.make("compaction-deleted:metadata"),
+              type: "thread.metadata-updated",
+              threadId,
+              occurredAt: now,
+              payload: { ...thread, deletedAt: now, title: "Deleted thread" },
+            },
+          ],
+        });
+        yield* maintenance.compactEventStore;
+        const events = yield* sql<{
+          readonly event_type: string;
+        }>`SELECT event_type FROM orchestration_events WHERE stream_id = ${threadId} ORDER BY sequence`;
+        assert.deepEqual(
+          events.map((event) => event.event_type),
+          ["thread.created", "thread.deleted", "thread.metadata-updated"],
+        );
+        assert.isTrue((yield* maintenance.rebuild).valid);
+      }),
   );
 
   it.effect("verifies and rebuilds projections with cross-thread subagent relations", () =>

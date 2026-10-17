@@ -1125,3 +1125,22 @@ export const resolveProviderInstanceEnabled = (
       ["codex", "claudeAgent", "opencode"].includes(instance.driver))
   );
 };
+
+/** Unused SQLite pages worth calling out in local diagnostics (1 GiB). */
+export const DATABASE_COMPACTION_RECOMMENDED_BYTES = 1024 ** 3;
+export const DatabaseStorageStatus = Schema.Struct({
+  databaseBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  reclaimableBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  inspectCommand: Schema.String,
+});
+export type DatabaseStorageStatus = typeof DatabaseStorageStatus.Type;
+export const shouldRecommendDatabaseCompaction = (status: DatabaseStorageStatus): boolean =>
+  status.reclaimableBytes >= DATABASE_COMPACTION_RECOMMENDED_BYTES;
+export class DatabaseStorageError extends Schema.TaggedError<DatabaseStorageError>()(
+  "DatabaseStorageError",
+  { cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message() {
+    return "Could not read database storage information.";
+  }
+}

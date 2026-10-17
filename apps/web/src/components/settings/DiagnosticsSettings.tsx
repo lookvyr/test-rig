@@ -37,6 +37,7 @@ import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+import { DatabaseStorageNotice } from "./DatabaseStorageNotice";
 import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
 import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -963,6 +964,12 @@ export function DiagnosticsSettingsPanel() {
 
   return (
     <SettingsPageContainer className="max-w-6xl gap-10">
+      {primaryEnvironment ? (
+        <DatabaseStorageNotice
+          environmentId={primaryEnvironment.environmentId}
+          label={primaryEnvironment.label}
+        />
+      ) : null}
       <ResourceTelemetryDiagnostics />
 
       <SettingsSection

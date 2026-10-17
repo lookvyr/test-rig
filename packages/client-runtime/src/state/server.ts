@@ -366,6 +366,11 @@ export function createServerEnvironmentAtoms<R, E>(
     configValueAtom,
     settingsValueAtom,
     providersValueAtom,
+    databaseStorage: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:database-storage",
+      tag: WS_METHODS.serverGetDatabaseStorage,
+      staleTimeMs: 0,
+    }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,

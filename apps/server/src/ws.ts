@@ -1,3 +1,5 @@
+import { readDatabaseStorage } from "./persistence/DatabaseMaintenance.ts";
+import { resolveDoctorCommand } from "./cli/invocation.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
@@ -768,6 +770,17 @@ const makeWsRpcLayer = (
             Effect.gen(function* () {
               const keybindingsConfig = yield* keybindings.removeKeybindingRule(rule);
               return { keybindings: keybindingsConfig, issues: [] };
+            }),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverGetDatabaseStorage]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetDatabaseStorage,
+            Effect.gen(function* () {
+              return yield* readDatabaseStorage(
+                config.dbPath,
+                yield* resolveDoctorCommand(config.dbPath),
+              );
             }),
             { "rpc.aggregate": "server" },
           ),

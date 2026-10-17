@@ -7,6 +7,7 @@ import { Command } from "effect/unstable/cli";
 import * as NetService from "@t3tools/shared/Net";
 import { configureSystemCertificateAuthorities } from "@t3tools/shared/systemCertificateAuthorities";
 import packageJson from "../package.json" with { type: "json" };
+import { doctorCommand } from "./cli/doctor.ts";
 import { browserCommand } from "./cli/browser.ts";
 import { authCommand } from "./cli/auth.ts";
 import { pairCommand } from "./cli/pair.ts";
@@ -27,6 +28,7 @@ export const makeCli = () =>
       authCommand,
       projectCommand,
       browserCommand,
+      doctorCommand,
     ]),
   );
 

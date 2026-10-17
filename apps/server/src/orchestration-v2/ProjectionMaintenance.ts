@@ -205,11 +205,11 @@ export const layer: Layer.Layer<
     // Thread-state events whose payload is the complete thread: only the
     // newest per thread can influence a replay or an afterSequence catch-up.
     // thread.created stays out — verify derives the expected thread set from
-    // it, and it anchors replay ordering.
+    // it, and it anchors replay ordering. Keep thread.deleted too: consumers
+    // use its event type to end subscriptions and waits.
     const SUPERSEDABLE_THREAD_EVENT_TYPES = [
       "thread.archived",
       "thread.unarchived",
-      "thread.deleted",
       "thread.settled",
       "thread.unsettled",
       "thread.snoozed",
@@ -225,15 +225,16 @@ export const layer: Layer.Layer<
       "thread.interaction-mode-updated",
       "thread.model-selection-updated",
       "thread.provider-switched",
-      "thread.visited",
-      "thread.marked-unread",
     ];
 
+    // Read-state events do not advance activity timestamps in client reducers.
+    const readStateThreadEventTypes = new Set(["thread.visited", "thread.marked-unread"]);
     const supersedableThreadEventTypes = new Set(SUPERSEDABLE_THREAD_EVENT_TYPES);
-    const COMPACTION_PAGE_SIZE = 500;
+    const COMPACTION_PAGE_SIZE = 50;
 
     /**
-     * Scan newest first to retain the newest state for each entity.
+     * Scan newest first. Keyed entities keep their first and last event so replay
+     * preserves first-seen order as well as final state.
      * Page every event, including non-candidates: filtering before LIMIT could
      * still scan the entire history when superseded events are sparse.
      * turn-item.updated stays intact because replay assigns positions on first write.
@@ -250,7 +251,8 @@ export const layer: Layer.Layer<
       let throughSequence = bounds[0]?.event_sequence ?? 0;
       let throughReceiptRowId = bounds[0]?.receipt_row_id ?? 0;
       const retainedThreadIds = new Set<string>();
-      const retainedEntityKeys = new Set<string>();
+      const retainedReadStateThreadIds = new Set<string>();
+      const oldestCandidateByEntityKey = new Map<string, number | null>();
       let deletedEventCount = 0;
       let deletedReceiptCount = 0;
 
@@ -301,10 +303,27 @@ export const layer: Layer.Layer<
             ) {
               if (retainedThreadIds.has(row.stream_id)) obsolete.push(row.sequence);
               else retainedThreadIds.add(row.stream_id);
-            } else if (row.event_type === "message.updated" || row.event_type === "node.updated") {
+            } else if (
+              row.aggregate_kind === "thread" &&
+              readStateThreadEventTypes.has(row.event_type)
+            ) {
+              if (
+                retainedThreadIds.has(row.stream_id) ||
+                retainedReadStateThreadIds.has(row.stream_id)
+              ) {
+                obsolete.push(row.sequence);
+              } else retainedReadStateThreadIds.add(row.stream_id);
+            } else if (
+              row.entity_id !== null &&
+              (row.event_type === "message.updated" || row.event_type === "node.updated")
+            ) {
               const key = encodeEntityKey([row.event_type, row.stream_id, row.entity_id]);
-              if (retainedEntityKeys.has(key)) obsolete.push(row.sequence);
-              else retainedEntityKeys.add(key);
+              const candidate = oldestCandidateByEntityKey.get(key);
+              if (candidate === undefined) oldestCandidateByEntityKey.set(key, null);
+              else {
+                if (candidate !== null) obsolete.push(candidate);
+                oldestCandidateByEntityKey.set(key, row.sequence);
+              }
             }
           }
         }
