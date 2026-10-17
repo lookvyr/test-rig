@@ -399,6 +399,10 @@
     "./state/preview-stream-access": {
       "types": "./src/state/previewStreamAccess.ts",
       "default": "./src/state/previewStreamAccess.ts"
+    },
+    "./state/command-output": {
+      "types": "./src/state/commandOutput.ts",
+      "default": "./src/state/commandOutput.ts"
     }
   },
   "scripts": {

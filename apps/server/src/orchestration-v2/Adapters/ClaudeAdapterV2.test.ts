@@ -65,6 +65,7 @@ import type { EventNdjsonLogger } from "../../provider/Layers/EventNdjsonLogger.
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2Event,
+  type ProviderAdapterV2OpenSessionInput,
   type ProviderAdapterV2TurnInput,
 } from "../ProviderAdapter.ts";
 import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
@@ -2148,6 +2149,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       toolUseId: string,
     ) => Effect.Effect<boolean, ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError>;
     readonly environment?: NodeJS.ProcessEnv;
+    readonly onCommandOutput?: ProviderAdapterV2OpenSessionInput["onCommandOutput"];
     // A CLI process opened after the first streams from its own queue, so the
     // first one can exit (Queue.shutdown) and a later turn can start another.
     readonly freshQueueOnReopen?: boolean;
@@ -2259,6 +2261,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         providerSessionId: ProviderSessionId.make("provider-session-claude-wake"),
         modelSelection: CLAUDE_TEST_MODEL_SELECTION,
         runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        ...(options?.onCommandOutput === undefined
+          ? {}
+          : { onCommandOutput: options.onCommandOutput }),
       });
       const providerThread = yield* runtime.ensureThread({
         threadId,
@@ -2309,6 +2314,200 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       };
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
+
+  type CommandOutput = Parameters<
+    NonNullable<ProviderAdapterV2OpenSessionInput["onCommandOutput"]>
+  >[0];
+  const makeForegroundBashHarness = Effect.fn("makeForegroundBashHarness")(function* (
+    fileExists: boolean,
+  ) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const temporaryRoot = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "claude-adapter-task-output-",
+    });
+    const taskId = "foreground-bash-task";
+    const toolUseId = "toolu-foreground-bash-output";
+    const outputDirectory = path.join(
+      temporaryRoot,
+      `claude-${process.getuid?.()}`,
+      "-private-tmp-project",
+      WAKE_NATIVE_SESSION,
+      "tasks",
+    );
+    const outputFile = path.join(outputDirectory, `${taskId}.output`);
+    yield* fileSystem.makeDirectory(outputDirectory, { recursive: true });
+    if (fileExists) yield* fileSystem.writeFileString(outputFile, "RAW_TASK_FILE_FIRST\n");
+    // The native task id, rather than the tool id or another task's file, selects the source.
+    yield* fileSystem.writeFileString(
+      path.join(outputDirectory, `${toolUseId}.output`),
+      "wrong task file\n",
+    );
+    const outputs: Array<CommandOutput> = [];
+    const outputReceipts = yield* Queue.unbounded<CommandOutput>();
+    const harness = yield* makeWakeHarnessWithOptions({
+      environment: { CLAUDE_CODE_TMPDIR: temporaryRoot },
+      close: (messages) => Queue.shutdown(messages),
+      onCommandOutput: (output) =>
+        Effect.sync(() => outputs.push(output)).pipe(
+          Effect.andThen(Queue.offer(outputReceipts, output)),
+        ),
+    });
+    const attemptId = RunAttemptId.make("attempt-foreground-bash-output");
+    yield* harness.runtime.startTurn(
+      makeClaudeTestTurnInput({
+        threadId: harness.threadId,
+        providerThread: harness.providerThread,
+        now: yield* DateTime.now,
+        attemptId,
+        text: "Run a foreground command.",
+        attachments: [],
+      }),
+    );
+    yield* harness.offerAndWait(
+      claudeSdkFrame({
+        type: "assistant",
+        message: {
+          model: "claude-sonnet-4-6",
+          id: "msg-foreground-bash-output",
+          type: "message",
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: toolUseId, name: "Bash", input: { command: "printf output" } },
+          ],
+        },
+        parent_tool_use_id: null,
+        uuid: "00000000-0000-4000-8000-000000000fa1",
+        session_id: WAKE_NATIVE_SESSION,
+      }),
+    );
+    yield* harness.offerAndWait(
+      claudeSdkFrame({
+        type: "system",
+        subtype: "task_started",
+        task_id: taskId,
+        tool_use_id: toolUseId,
+        description: "Foreground command",
+        task_type: "local_bash",
+        is_backgrounded: false,
+        uuid: "00000000-0000-4000-8000-000000000fa2",
+        session_id: WAKE_NATIVE_SESSION,
+      }),
+    );
+    const finishTool = harness.offerAndWait(
+      claudeSdkFrame({
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: toolUseId, content: "Authoritative final output" },
+          ],
+        },
+        parent_tool_use_id: null,
+        uuid: "00000000-0000-4000-8000-000000000fa3",
+        session_id: WAKE_NATIVE_SESSION,
+      }),
+    );
+    const commandItems = () =>
+      harness.events.flatMap((event) =>
+        event.type === "turn_item.updated" &&
+        event.turnItem.type === "command_execution" &&
+        event.turnItem.nativeItemRef?.nativeId === toolUseId
+          ? [event.turnItem]
+          : [],
+      );
+    return { ...harness, attemptId, outputFile, outputs, outputReceipts, finishTool, commandItems };
+  });
+
+  for (const outcome of ["completed", "stopped"] as const) {
+    it.effect.skipIf(process.getuid === undefined)(
+      `routes foreground Bash task-file output directly and final-drains when ${outcome}`,
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem;
+            const idAllocator = yield* IdAllocator.IdAllocatorV2;
+            const harness = yield* makeForegroundBashHarness(true);
+            const first = yield* Queue.take(harness.outputReceipts);
+            yield* awaitUntil(() => harness.commandItems().length === 1, "foreground command item");
+            assert.deepEqual(first, {
+              threadId: harness.threadId,
+              itemId: harness.commandItems()[0]!.id,
+              chunk: "RAW_TASK_FILE_FIRST\n",
+            });
+            assert.notEqual(first.itemId, "toolu-foreground-bash-output");
+            assert.notInclude(encodeJsonString(harness.events), "RAW_TASK_FILE_FIRST");
+            // No poll elapses between this append and terminalization: settling must drain it.
+            yield* fileSystem.writeFileString(
+              harness.outputFile,
+              "RAW_TASK_FILE_FIRST\nRAW_TASK_FILE_LAST\n",
+            );
+            if (outcome === "completed") {
+              yield* harness.finishTool;
+            } else {
+              yield* harness.runtime.interruptTurn({
+                providerThread: harness.providerThread,
+                providerTurnId: idAllocator.derive.providerTurn({
+                  driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+                  nativeTurnId: `turn:${harness.attemptId}`,
+                }),
+                requestRuntimeRestart: true,
+              });
+            }
+            yield* awaitUntil(
+              () => harness.commandItems().length === 2,
+              "settled foreground command",
+            );
+            assert.deepEqual(
+              harness.outputs.map((output) => output.chunk),
+              ["RAW_TASK_FILE_FIRST\n", "RAW_TASK_FILE_LAST\n"],
+            );
+            assert.isTrue(
+              harness.outputs.every(
+                (output) => output.threadId === first.threadId && output.itemId === first.itemId,
+              ),
+            );
+            assert.equal(
+              harness.commandItems()[1]?.status,
+              outcome === "completed" ? "completed" : "interrupted",
+            );
+            assert.notInclude(encodeJsonString(harness.events), "RAW_TASK_FILE_");
+            if (outcome === "completed")
+              assert.include(
+                encodeJsonString(harness.commandItems()[1]?.output),
+                "Authoritative final output",
+              );
+            yield* fileSystem.writeFileString(
+              harness.outputFile,
+              "RAW_TASK_FILE_FIRST\nRAW_TASK_FILE_LAST\nTOO_LATE\n",
+            );
+            yield* TestClock.adjust("1 second");
+            assert.lengthOf(harness.outputs, 2, "a settled command must no longer tail its file");
+          }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+        ),
+    );
+  }
+
+  it.effect.skipIf(process.getuid === undefined)(
+    "keeps authoritative final Bash output when the task file never appears",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeForegroundBashHarness(false);
+          yield* harness.finishTool;
+          yield* awaitUntil(() => harness.commandItems().length === 2, "final-output-only command");
+          assert.equal(harness.commandItems()[1]?.status, "completed");
+          assert.include(
+            encodeJsonString(harness.commandItems()[1]?.output),
+            "Authoritative final output",
+          );
+          assert.deepEqual(harness.outputs, []);
+          yield* TestClock.adjust("11 seconds");
+          assert.deepEqual(harness.outputs, []);
+        }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      ),
+  );
+
   it.effect.each([
     { backgrounding: "succeeds" },
     { backgrounding: "fails" },

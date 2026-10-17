@@ -1,3 +1,4 @@
+import * as CommandOutputHub from "./orchestration-v2/CommandOutputHub.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
@@ -656,6 +657,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(ToolsProjectScopes.layer.pipe(Layer.provide(ProcessRunner.layer))),
       Layer.provide(
         Layer.mergeAll(
+          Layer.mock(CommandOutputHub.CommandOutputHub)({ subscribe: () => Stream.empty }),
           Layer.mock(ThreadManagement.ThreadManagementService)({
             dispatch: () => Effect.succeed({ sequence: 0, storedEvents: [] }),
             readShellSnapshot: () =>

@@ -32,6 +32,7 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
@@ -374,6 +375,12 @@ export const ProviderAdapterV2Error = Schema.Union([
 export type ProviderAdapterV2Error = typeof ProviderAdapterV2Error.Type;
 
 export interface ProviderAdapterV2OpenSessionInput {
+  /** Ephemeral output goes directly to the bounded hub, never through the event queue. */
+  readonly onCommandOutput?: (output: {
+    readonly threadId: ThreadId;
+    readonly itemId: TurnItemId;
+    readonly chunk: string;
+  }) => Effect.Effect<void>;
   readonly threadId: ThreadId;
   readonly providerSessionId: ProviderSessionId;
   readonly modelSelection: ModelSelection;

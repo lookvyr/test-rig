@@ -1,3 +1,4 @@
+import * as CommandOutputHub from "./CommandOutputHub.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
@@ -122,10 +123,15 @@ const providerSwitchServiceProvided = providerSwitchServiceLayer.pipe(
   Layer.provide(providerAdapterRegistryProvided),
 );
 
+const commandOutputHubProvided = CommandOutputHub.layer.pipe(
+  Layer.provide(Layer.mergeAll(eventSinkProvided, projectionStoreLayer)),
+);
+
 const providerSessionManagerProvided = providerSessionManagerLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
       providerAdapterRegistryProvided,
+      commandOutputHubProvided,
       eventSinkProvided,
       idAllocatorLayer,
       providerEventIngestorProvided,
@@ -298,6 +304,7 @@ const providerRuntimeRecoveryProvided = providerRuntimeRecoveryLayer.pipe(
 );
 
 export const OrchestrationV2LayerLive = Layer.mergeAll(
+  commandOutputHubProvided,
   orchestratorProvided,
   threadManagementProvided,
   effectWorkerProvided,

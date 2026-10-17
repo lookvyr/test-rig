@@ -9,6 +9,7 @@ import {
 import {
   act,
   createRef,
+  useEffect,
   useLayoutEffect,
   type ReactNode,
   type Ref,
@@ -19,11 +20,36 @@ import { create, type ReactTestRenderer } from "react-test-renderer";
 import { useComposerFocusState } from "./useComposerFocusState";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { LegendListRef } from "@legendapp/list/react";
+import { deriveTimelineEntriesFromVisibleTurnItems } from "../../session-logic";
+import { makeStreamingTimelineFixture } from "../../test-fixtures";
 
 const activityTestState = vi.hoisted(() => ({
   expanded: false,
   expandedRuns: false,
   subagentTooltips: false,
+}));
+
+const commandOutputTestState = vi.hoisted(() => ({
+  enabled: false,
+  mounts: 0,
+  unmounts: 0,
+}));
+
+vi.mock("./CommandOutputPanel", () => ({
+  useCommandOutputStreaming: () => commandOutputTestState.enabled,
+  CommandOutputPanel: (props: { environmentId: string; threadId: string; itemId: string }) => {
+    useEffect(() => {
+      commandOutputTestState.mounts++;
+      return () => {
+        commandOutputTestState.unmounts++;
+      };
+    }, []);
+    return (
+      <div data-command-output-panel {...props}>
+        NOISY_BASH_OUTPUT
+      </div>
+    );
+  },
 }));
 
 // Expose tooltip contents in the renderer without requiring a browser portal.
@@ -80,6 +106,9 @@ beforeEach(() => {
   activityTestState.subagentTooltips = false;
   activityTestState.expanded = false;
   activityTestState.expandedRuns = false;
+  commandOutputTestState.enabled = false;
+  commandOutputTestState.mounts = 0;
+  commandOutputTestState.unmounts = 0;
 });
 
 vi.mock("@legendapp/list/react", async () => {
@@ -444,6 +473,91 @@ describe("MessagesTimeline", () => {
       expect(visible).not.toContain("RAW_CACHED_TOOL_OUTPUT");
       await act(() => row.props.onClick());
       expect(JSON.stringify(renderer!.toJSON())).not.toContain("KEEP_TOOL_INPUT");
+    } finally {
+      await act(() => renderer?.unmount());
+    }
+  });
+
+  it("subscribes to a projected command only while its row is intentionally expanded", async () => {
+    commandOutputTestState.enabled = true;
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    const fixture = makeStreamingTimelineFixture();
+    const command = fixture.visibleTurnItems.find((row) => row.item.type === "command_execution");
+    if (command?.item.type !== "command_execution") throw new Error("Expected command fixture");
+    const projectedItem = {
+      ...command,
+      item: {
+        ...command.item,
+        runId: fixture.runId,
+        status: "running" as const,
+        completedAt: null,
+        input: "bash -lc 'while true; do echo noisy; done'",
+        output: "",
+        outputOmitted: true,
+        exitCode: 0,
+      },
+    };
+    const props = {
+      ...buildProps(),
+      isWorking: true,
+      activeTurnInProgress: true,
+      runningRunId: fixture.runId,
+      latestRun: {
+        runId: fixture.runId,
+        status: "running" as const,
+        startedAt: fixture.time(0),
+        completedAt: null,
+      },
+      timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
+        visibleTurnItems: [projectedItem],
+        optimisticMessages: [],
+      }),
+    };
+    let renderer: ReactTestRenderer | undefined;
+    const outputPanels = () => renderer!.root.findAllByProps({ "data-command-output-panel": true });
+    const commandRow = () =>
+      renderer!.root.find(
+        (node) => node.type === "div" && node.props["data-v2-item-type"] === "command_execution",
+      );
+    try {
+      await act(() => {
+        renderer = create(<MessagesTimeline {...props} />);
+      });
+      const group = renderer!.root.find(
+        (node) => node.type === "button" && node.props.className?.includes("group/live-work"),
+      );
+      expect(group.props["aria-expanded"]).toBe(false);
+      expect(outputPanels()).toHaveLength(0);
+      expect(commandOutputTestState.mounts).toBe(0);
+      await act(() => group.props.onClick());
+      expect(commandRow().props["aria-expanded"]).toBe(false);
+      expect(outputPanels()).toHaveLength(0);
+      expect(commandOutputTestState.mounts).toBe(0);
+      expect(JSON.stringify(renderer!.toJSON())).not.toContain("NOISY_BASH_OUTPUT");
+
+      for (let cycle = 1; cycle <= 3; cycle++) {
+        await act(() => commandRow().props.onClick());
+        expect(commandRow().props["aria-expanded"]).toBe(true);
+        expect(outputPanels()).toHaveLength(1);
+        expect(outputPanels()[0]?.props).toMatchObject({
+          environmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
+          threadId: projectedItem.sourceThreadId,
+          itemId: projectedItem.sourceItemId,
+        });
+        expect(commandOutputTestState.mounts).toBe(cycle);
+        expect(commandOutputTestState.unmounts).toBe(cycle - 1);
+        expect(JSON.stringify(renderer!.toJSON())).toContain("NOISY_BASH_OUTPUT");
+        await act(() => renderer!.update(<MessagesTimeline {...props} />));
+        expect(commandOutputTestState.mounts).toBe(cycle);
+
+        await act(() => commandRow().props.onClick());
+        expect(commandRow().props["aria-expanded"]).toBe(false);
+        expect(outputPanels()).toHaveLength(0);
+        expect(commandOutputTestState.unmounts).toBe(cycle);
+        expect(JSON.stringify(renderer!.toJSON())).not.toContain("NOISY_BASH_OUTPUT");
+      }
     } finally {
       await act(() => renderer?.unmount());
     }

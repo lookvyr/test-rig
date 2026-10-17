@@ -1,3 +1,4 @@
+import * as CommandOutputHub from "../CommandOutputHub.ts";
 import type { V2DatabaseImportError } from "../../persistence/initializeV2Database.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { ProviderDriverKind, ProviderReplayTranscript } from "@t3tools/contracts";
@@ -329,6 +330,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
   }).pipe(
     Layer.provide(
       Layer.mergeAll(
+        CommandOutputHub.layer.pipe(Layer.provide(Layer.mergeAll(storesLayer, eventSinkProvided))),
         providedRegistryLayer,
         eventSinkProvided,
         IdAllocator.layer,

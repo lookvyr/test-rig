@@ -1,3 +1,4 @@
+import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
 import { SIDE_CHAT_INSTRUCTIONS } from "../../provider/SideChatInstructions.ts";
 import * as NodeCrypto from "node:crypto";
 
@@ -3038,6 +3039,24 @@ export function makeClaudeAdapterV2(
         });
         const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
         const activeTurn = yield* Ref.make<ActiveClaudeTurnContext | null>(null);
+        // Foreground Bash calls whose output file is being tailed, by tool_use_id.
+        const taskOutputTails = new Map<
+          string,
+          { readonly fiber: Fiber.Fiber<void>; readonly stop: Deferred.Deferred<void> }
+        >();
+        const taskOutputRoot = claudeTaskOutputRoot(adapterOptions.environment, path);
+        const onCommandOutput = input.onCommandOutput;
+        // Waits for the tail's last read so its output lands before the call settles.
+        const stopTaskOutputTail = (toolUseId: string) =>
+          Effect.suspend(() => {
+            const tail = taskOutputTails.get(toolUseId);
+            if (tail === undefined) return Effect.void;
+            taskOutputTails.delete(toolUseId);
+            return Deferred.succeed(tail.stop, undefined).pipe(
+              Effect.andThen(Fiber.await(tail.fiber)),
+              Effect.asVoid,
+            );
+          });
         const interruptedTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const steeredTurns = yield* Ref.make(new Set<OrchestrationV2ProviderTurn["id"]>());
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
@@ -4860,6 +4879,7 @@ export function makeClaudeAdapterV2(
           readonly completedAt: DateTime.Utc;
         }) {
           for (const toolCall of input.toolCalls) {
+            yield* stopTaskOutputTail(toolCall.nativeItemId);
             yield* emitToolCallArtifacts(
               buildToolCallArtifacts({
                 context: input.context,
@@ -6089,6 +6109,41 @@ export function makeClaudeAdapterV2(
 
           if (message.type === "system" && message.subtype === "task_started") {
             if (isClaudeNonSubagentTask(message)) {
+              const tailedCall =
+                message.tool_use_id === undefined
+                  ? undefined
+                  : findToolCall(context, message.tool_use_id);
+              if (
+                taskOutputRoot !== undefined &&
+                message.task_type === "local_bash" &&
+                // Older Claude Code builds omit the flag on foreground calls.
+                message.is_backgrounded !== true &&
+                tailedCall?.classification.itemType === "command_execution" &&
+                !taskOutputTails.has(tailedCall.nativeItemId)
+              ) {
+                const itemId = idAllocator.derive.turnItemFromProviderItem({
+                  driver: CLAUDE_PROVIDER,
+                  nativeItemId: tailedCall.nativeItemId,
+                });
+                const stop = yield* Deferred.make<void>();
+                const fiber = yield* tailClaudeTaskOutput({
+                  root: taskOutputRoot,
+                  sessionId: message.session_id,
+                  taskId: message.task_id,
+                  stop,
+                  onChunk: (chunk) =>
+                    onCommandOutput?.({
+                      threadId: tailedCall.threadId,
+                      itemId,
+                      chunk,
+                    }) ?? Effect.void,
+                }).pipe(
+                  Effect.provideService(FileSystem.FileSystem, fileSystem),
+                  Effect.provideService(Path.Path, path),
+                  Effect.forkIn(sessionScope),
+                );
+                taskOutputTails.set(tailedCall.nativeItemId, { fiber, stop });
+              }
               context.ignoredTaskIds.add(message.task_id);
               yield* applyBackgroundTaskRosterMessage({
                 nativeThreadId: liveQuery.nativeThreadId,
@@ -6337,6 +6392,7 @@ export function makeClaudeAdapterV2(
               updatedAt: completedAt,
               presentation: toolCall.presentation,
             });
+            yield* stopTaskOutputTail(toolCall.nativeItemId);
             yield* emitToolCallArtifacts(artifacts);
             toolCallsFor(context, toolCall).delete(toolCall.nativeItemId);
           }

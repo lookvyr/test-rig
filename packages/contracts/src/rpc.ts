@@ -55,6 +55,7 @@ import {
   OrchestrationV2DispatchCommandError,
   OrchestrationV2GetShellSnapshotError,
   OrchestrationV2GetThreadProjectionError,
+  OrchestrationV2CommandOutputError,
   OrchestrationV2RpcSchemas,
   OrchestrationV2ThreadLaunchError,
   OrchestrationGetWorkflowScriptError,
@@ -973,6 +974,16 @@ export const WsProjectsMutateRpc = Rpc.make("projects.mutate", {
   error: Schema.Union([ProjectMutationError, EnvironmentAuthorizationError]),
 });
 
+const WsOrchestrationV2SubscribeCommandOutputRpc = Rpc.make(
+  ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput,
+  {
+    payload: OrchestrationV2RpcSchemas.subscribeCommandOutput.input,
+    success: OrchestrationV2RpcSchemas.subscribeCommandOutput.output,
+    error: Schema.Union([OrchestrationV2CommandOutputError, EnvironmentAuthorizationError]),
+    stream: true,
+  },
+);
+
 export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -1234,6 +1245,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2GetArchivedShellSnapshotRpc,
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
+  WsOrchestrationV2SubscribeCommandOutputRpc,
   WsOrchestrationV2GetThreadProjectionRpc,
   WsOrchestrationV2LaunchThreadRpc,
   WsOrchestrationV2SubscribeArchivedShellRpc,
@@ -1253,5 +1265,6 @@ export const OrchestrationV2RpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeArchivedShellRpc,
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
+  WsOrchestrationV2SubscribeCommandOutputRpc,
   WsProjectsMutateRpc,
 );

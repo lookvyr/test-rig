@@ -1,6 +1,7 @@
 import { withWorktreeLease } from "../workspace/worktreeLifecycle.ts";
 import { resolveMcpServers, resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
+  isOrchestrationV2WorkActive,
   ModelSelection,
   OrchestrationV2DomainEvent,
   OrchestrationV2ProviderSession,
@@ -39,6 +40,7 @@ import { SkillLibraryService } from "../skills/SkillLibrary.ts";
 import { ToolsProjectScopesService } from "../skills/ToolsProjectScopes.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
+import * as CommandOutputHub from "./CommandOutputHub.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import { makeKeyedSerialExecutor } from "./KeyedSerialExecutor.ts";
@@ -333,6 +335,7 @@ export const layerWithOptions = (
 ): Layer.Layer<
   ProviderSessionManagerV2,
   never,
+  | CommandOutputHub.CommandOutputHub
   | EventSink.EventSinkV2
   | FileSystem.FileSystem
   | Path.Path
@@ -362,6 +365,7 @@ export const layerWithOptions = (
       const toolsProjectScopes = yield* Effect.serviceOption(ToolsProjectScopesService);
       const projectService = yield* Effect.serviceOption(ProjectService.ProjectService);
       const eventSink = yield* EventSink.EventSinkV2;
+      const commandOutput = yield* CommandOutputHub.CommandOutputHub;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
@@ -2114,6 +2118,16 @@ export const layerWithOptions = (
         let stoppedByProvider = false;
         return entry.runtime.events.pipe(
           Stream.runForEach((event) => {
+            // A settled item carries its final output, so its live tail can go.
+            const releaseLiveOutput =
+              event.type === "turn_item.updated" &&
+              event.turnItem.type === "command_execution" &&
+              !isOrchestrationV2WorkActive(event.turnItem.status)
+                ? commandOutput.finish({
+                    threadId: event.turnItem.threadId,
+                    itemId: event.turnItem.id,
+                  })
+                : Effect.void;
             if (
               event.type === "provider_session.updated" &&
               event.providerSession.status === "stopped"
@@ -2163,6 +2177,7 @@ export const layerWithOptions = (
                     return;
                   }
                   yield* publishToSubscribers(entry.eventSubscribers, { type: "event", event });
+                  yield* releaseLiveOutput;
                   // Idle means the terminal is already queued for every run
                   // subscriber, so an exclusive detach can safely end them.
                   if (event.type === "turn.terminal") {
@@ -2339,6 +2354,7 @@ export const layerWithOptions = (
                 const sessionScope = yield* Scope.fork(sessionScopes);
                 const runtime = yield* adapter
                   .openSession({
+                    onCommandOutput: commandOutput.append,
                     threadId: input.threadId,
                     providerSessionId: input.providerSessionId,
                     modelSelection: input.modelSelection,

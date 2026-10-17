@@ -1,3 +1,4 @@
+import * as CommandOutputHub from "./CommandOutputHub.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as ServerConfig from "../config.ts";
 import {
@@ -64,6 +65,7 @@ export const makeHandlers = Effect.fn("orchestrationV2.makeRpcHandlers")(functio
     | ProjectStore.ProjectStoreV2
     | ApplicationEvents.OrchestrationEventStore
   >();
+  const commandOutput = yield* CommandOutputHub.CommandOutputHub;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
   const search = yield* ThreadSearch.ThreadSearch;
@@ -71,6 +73,11 @@ export const makeHandlers = Effect.fn("orchestrationV2.makeRpcHandlers")(functio
   const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
   const archive = yield* makeArchivedShellStreams;
   return OrchestrationV2RpcGroup.of({
+    [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: (input) =>
+      observe.streamEffect(
+        ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput,
+        Effect.succeed(commandOutput.subscribe(input)),
+      ),
     [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
       observe.effect(
         ORCHESTRATION_V2_WS_METHODS.dispatchCommand,

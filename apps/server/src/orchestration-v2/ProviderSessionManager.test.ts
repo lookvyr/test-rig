@@ -1,3 +1,4 @@
+import * as CommandOutputHub from "./CommandOutputHub.ts";
 import * as NetAddress from "effect/unstable/net/NetAddress";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
@@ -559,6 +560,9 @@ function makeTestLayer(input: {
     }).pipe(
       Layer.provide(
         Layer.mergeAll(
+          CommandOutputHub.layer.pipe(
+            Layer.provide(Layer.mergeAll(configuredEventSinkLayer, TestStoresLayer)),
+          ),
           registryLayer,
           configuredEventSinkLayer,
           IdAllocator.layer,

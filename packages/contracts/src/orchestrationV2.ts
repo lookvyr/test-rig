@@ -3123,7 +3123,42 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   subscribeArchivedShell: "orchestration.subscribeArchivedShell",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  subscribeCommandOutput: "orchestration.subscribeCommandOutput",
 } as const;
+
+export const OrchestrationV2SubscribeCommandOutputInput = Schema.Struct({
+  threadId: ThreadId,
+  itemId: TurnItemId,
+});
+export type OrchestrationV2SubscribeCommandOutputInput =
+  typeof OrchestrationV2SubscribeCommandOutputInput.Type;
+
+/**
+ * Output of one command row, separate from the thread stream so it is never
+ * persisted as events and only reaches clients that show the row expanded.
+ * Each frame replaces the visible tail, at most four times per second. Text
+ * contains display text and canonical SGR colour/style codes only, capped at
+ * 65,536 UTF-16 code units. Clients render it without terminal normalization;
+ * the server alone owns cursor movement and unfinished escape sequences.
+ * The stream ends after a frame with `running: false`.
+ */
+export const OrchestrationV2CommandOutputFrame = Schema.Struct({
+  kind: Schema.Literal("replace"),
+  text: Schema.String,
+  /** Earlier output was dropped to keep the tail bounded. */
+  truncated: Schema.Boolean,
+  running: Schema.Boolean,
+});
+export type OrchestrationV2CommandOutputFrame = typeof OrchestrationV2CommandOutputFrame.Type;
+
+export class OrchestrationV2CommandOutputError extends Schema.TaggedError<OrchestrationV2CommandOutputError>()(
+  "OrchestrationV2CommandOutputError",
+  {
+    threadId: ThreadId,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export const OrchestrationV2ArchivedShellSnapshot = Schema.Struct({
   schemaVersion: PositiveInt,
@@ -3497,6 +3532,10 @@ export const OrchestrationV2RpcSchemas = {
   subscribeThread: {
     input: OrchestrationV2SubscribeThreadInput,
     output: OrchestrationV2ThreadStreamItem,
+  },
+  subscribeCommandOutput: {
+    input: OrchestrationV2SubscribeCommandOutputInput,
+    output: OrchestrationV2CommandOutputFrame,
   },
 } as const;
 

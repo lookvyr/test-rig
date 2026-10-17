@@ -64,6 +64,7 @@ import {
   ProviderAdapterRollbackThreadError,
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2Event,
+  type ProviderAdapterV2OpenSessionInput,
   type ProviderAdapterV2TurnInput,
 } from "../ProviderAdapter.ts";
 import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
@@ -1894,6 +1895,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     onEvent: (event: ProviderAdapterV2Event) => Effect.Effect<unknown> = () => Effect.void,
     onRequest: (method: string, params: unknown) => Effect.Effect<void> = () => Effect.void,
     readChildMetadata?: Parameters<typeof withCodexReplayChildMetadata>[2],
+    onCommandOutput?: ProviderAdapterV2OpenSessionInput["onCommandOutput"],
   ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1948,6 +1950,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       });
       const threadId = ThreadId.make(`thread-${transcript.scenario}`);
       const runtime = yield* adapter.openSession({
+        ...(onCommandOutput ? { onCommandOutput } : {}),
         threadId,
         providerSessionId: ProviderSessionId.make(`provider-session-${transcript.scenario}`),
         modelSelection: CODEX_TEST_MODEL_SELECTION,
@@ -2001,6 +2004,213 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         firstTerminal: Deferred.await(firstTerminal),
       };
     });
+
+  it.effect("delivers command output directly while the durable event consumer is blocked", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const scenario = "codex-command-output-direct";
+        const nativeThreadId = `native-${scenario}`;
+        const nativeTurnId = `turn-${scenario}`;
+        const chunks: Array<{ threadId: ThreadId; itemId: TurnItemId; chunk: string }> = [];
+        const consumerBlocked = yield* Deferred.make<void>();
+        const releaseConsumer = yield* Deferred.make<void>();
+        const transcript = makeCodexReplayTranscript({
+          scenario,
+          entries: [
+            ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "Print output." }),
+            ...Array.from({ length: 200 }, (_, index) => ({
+              type: "emit_inbound" as const,
+              label: `output-${index}`,
+              frame: {
+                method: "item/commandExecution/outputDelta",
+                params: {
+                  threadId: nativeThreadId,
+                  turnId: nativeTurnId,
+                  itemId: "command-live",
+                  delta: `line ${index}\n`,
+                },
+              },
+            })),
+            {
+              type: "emit_inbound",
+              label: "turn/completed",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                },
+              },
+            },
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(
+          transcript,
+          () =>
+            Deferred.succeed(consumerBlocked, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseConsumer)),
+            ),
+          undefined,
+          undefined,
+          (output) =>
+            Effect.sync(() => {
+              chunks.push(output);
+            }),
+        );
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-command-output-direct"),
+            text: "Print output.",
+          }),
+        );
+        yield* Deferred.await(consumerBlocked);
+        yield* awaitUntil(
+          () => chunks.length === 200,
+          "direct command output while event consumer blocks",
+        );
+        assert.equal(chunks[0]?.threadId, harness.threadId);
+        assert.equal(
+          chunks[0]?.itemId,
+          (yield* IdAllocator.IdAllocatorV2).derive.turnItemFromProviderItem({
+            driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+            nativeItemId: "command-live",
+          }),
+        );
+        assert.equal(chunks.at(-1)?.chunk, "line 199\n");
+        yield* Deferred.succeed(releaseConsumer, undefined);
+        yield* harness.firstTerminal;
+        assert.isFalse(
+          harness.events.some((event) => encodeUnknownJson(event).includes("line 199")),
+        );
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
+  it.effect.each(["response-first", "notification-first"] as const)(
+    "preserves the first command delta with %s turn registration",
+    (order) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const scenario = `codex-command-output-${order}`;
+          const nativeThreadId = `native-${scenario}`;
+          const nativeTurnId = `turn-${scenario}`;
+          const prompt = "Print two markers.";
+          const preamble = codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt });
+          const command = {
+            type: "commandExecution",
+            id: "first-command",
+            command: "printf 'marker-1\n'; printf 'marker-2\n'",
+            cwd: "/workspace",
+            processId: "42",
+            source: "unifiedExecStartup",
+            commandActions: [{ type: "unknown", command: "printf" }],
+          };
+          const lifecycle = (
+            phase: "started" | "completed",
+          ): CodexReplay.CodexAppServerReplayEntry => ({
+            type: "emit_inbound",
+            label: `item/${phase}`,
+            frame: {
+              method: `item/${phase}`,
+              params: {
+                threadId: nativeThreadId,
+                turnId: nativeTurnId,
+                ...(phase === "started"
+                  ? { startedAtMs: 1782622445000 }
+                  : { completedAtMs: 1782622445010 }),
+                item: {
+                  ...command,
+                  status: phase === "started" ? "inProgress" : "completed",
+                  aggregatedOutput: phase === "started" ? null : "marker-1\nmarker-2\n",
+                  exitCode: phase === "started" ? null : 0,
+                  durationMs: phase === "started" ? null : 10,
+                },
+              },
+            },
+          });
+          const delta = (index: number): CodexReplay.CodexAppServerReplayEntry => ({
+            type: "emit_inbound",
+            label: `marker-${index}`,
+            frame: {
+              method: "item/commandExecution/outputDelta",
+              params: {
+                threadId: nativeThreadId,
+                turnId: nativeTurnId,
+                itemId: command.id,
+                delta: `marker-${index}\n`,
+              },
+            },
+          });
+          // Both orders are valid: turn/started may register the pending root before
+          // the turn/start response, and output may immediately follow item/started.
+          const transcript = makeCodexReplayTranscript({
+            scenario,
+            entries: [
+              ...preamble.slice(0, 6),
+              ...(order === "response-first" ? [preamble[6]!] : []),
+              preamble[7]!,
+              lifecycle("started"),
+              delta(1),
+              ...(order === "notification-first" ? [preamble[6]!] : []),
+              delta(2),
+              lifecycle("completed"),
+              {
+                type: "emit_inbound",
+                label: "turn/completed",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                  },
+                },
+              },
+            ],
+          });
+          const outputs: Array<
+            Parameters<NonNullable<ProviderAdapterV2OpenSessionInput["onCommandOutput"]>>[0]
+          > = [];
+          const harness = yield* makeCodexReplayHarness(
+            transcript,
+            undefined,
+            undefined,
+            undefined,
+            (output) =>
+              Effect.sync(() => {
+                outputs.push(output);
+              }),
+          );
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make(`attempt-${scenario}`),
+              text: prompt,
+            }),
+          );
+          yield* harness.firstTerminal;
+          assert.deepEqual(
+            outputs.map((output) => output.chunk),
+            ["marker-1\n", "marker-2\n"],
+          );
+          assert.isTrue(outputs.every((output) => output.threadId === harness.threadId));
+          const runningItems = harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" &&
+            event.turnItem.type === "command_execution" &&
+            event.turnItem.status === "running"
+              ? [event.turnItem]
+              : [],
+          );
+          assert.lengthOf(runningItems, 1);
+          assert.isUndefined(runningItems[0]?.output);
+          assert.isTrue(outputs.every((output) => output.itemId === runningItems[0]?.id));
+        }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      ),
+  );
 
   it.effect.each(["supported", "unsupported", "invalid"] as const)(
     "delivers native history with %s app-server protocol",
