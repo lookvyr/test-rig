@@ -29,6 +29,8 @@ import { composerFloatingLayerProps } from "./composerEventScope";
 interface ExpandedImageDialogProps {
   preview: ExpandedImagePreview;
   onClose: () => void;
+  /** Keeps a viewer opened from native fullscreen in the browser top layer. */
+  portalContainer?: HTMLElement | undefined;
 }
 
 const EXPANDED_MEDIA_STATE_CLASS_NAME =
@@ -70,6 +72,7 @@ function ExpandedVideo({ item }: { readonly item: ExpandedImageItem }) {
 export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   preview,
   onClose,
+  portalContainer,
 }: ExpandedImageDialogProps) {
   const [imageOffset, setImageOffset] = useState(0);
   const [failedImageSrc, setFailedImageSrc] = useState<string | null>(null);
@@ -177,6 +180,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
       <DialogPopup
         {...composerFloatingLayerProps}
         variant="media"
+        portalContainer={portalContainer}
         showCloseButton={false}
         bottomStickOnMobile={false}
         className="row-start-1 max-h-[92vh] w-[92vw] max-w-[92vw] items-center overflow-visible [--media-width:92vw] [--media-height:min(86vh,calc(100vh-160px))] sm:[--media-width:calc(92vw-96px)]"

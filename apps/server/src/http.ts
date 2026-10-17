@@ -6,7 +6,7 @@ import {
   EnvironmentHttpApi,
 } from "@t3tools/contracts";
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
-import { injectHtmlRenderEscapeBridge } from "@t3tools/shared/htmlRender";
+import { injectHtmlRenderInteractionBridge } from "@t3tools/shared/htmlRender";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -281,7 +281,7 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
     if (method === "HEAD") return HttpServerResponse.empty({ headers });
     const fs = yield* FileSystem.FileSystem;
     const html = yield* fs.readFileString(asset.path);
-    return HttpServerResponse.text(injectHtmlRenderEscapeBridge(html), {
+    return HttpServerResponse.text(injectHtmlRenderInteractionBridge(html), {
       contentType: "text/html; charset=utf-8",
       headers,
     });

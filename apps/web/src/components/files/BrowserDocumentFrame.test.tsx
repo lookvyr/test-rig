@@ -12,6 +12,8 @@ vi.mock("~/hooks/useHtmlRenderTheme", () => ({
 it("accepts Escape only from its own frame while the viewer requests it", () => {
   const listeners = new Set<(event: { data: unknown; source: unknown }) => void>();
   const contentWindow = { postMessage: vi.fn() };
+  const frame = { contentWindow };
+  vi.stubGlobal("document", { activeElement: frame });
   vi.stubGlobal("window", {
     addEventListener: (_: string, listener: (event: { data: unknown; source: unknown }) => void) =>
       listeners.add(listener),
@@ -27,7 +29,7 @@ it("accepts Escape only from its own frame while the viewer requests it", () => 
   try {
     act(() => {
       renderer = create(<HtmlRenderDocument src="/page.html" title="Chart" onEscape={onEscape} />, {
-        createNodeMock: () => ({ contentWindow }),
+        createNodeMock: () => frame,
       });
     });
     message({}, HTML_RENDER_ESCAPE_MESSAGE);

@@ -312,6 +312,7 @@ interface TimelineRowSharedState {
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
   onRunShellCommand: ((command: string) => void) | undefined;
   onImageExpand: (preview: ExpandedImagePreview) => void;
+  onHtmlFullscreenChange: (rowId: string, fullscreen: boolean) => void;
   displayThreadKey?: string;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
@@ -950,7 +951,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     onManualNavigation,
   });
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
-  const alwaysRender = citationAlwaysRender ?? restoringAlwaysRender;
+  const [fullscreenRowId, setFullscreenRowId] = useState<string | null>(null);
+  const onHtmlFullscreenChange = useCallback((rowId: string, fullscreen: boolean) => {
+    setFullscreenRowId((current) => (fullscreen ? rowId : current === rowId ? null : current));
+  }, []);
+  const alwaysRender = useMemo(() => {
+    const base = citationAlwaysRender ?? restoringAlwaysRender;
+    return fullscreenRowId === null
+      ? base
+      : {
+          ...base,
+          keys: [...(base && "keys" in base ? base.keys : []), fullscreenRowId],
+        };
+  }, [citationAlwaysRender, restoringAlwaysRender, fullscreenRowId]);
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
   const [minimapCurrentIndex, setMinimapCurrentIndex] = useState<number | null>(null);
   const handleAnchorReady = useCallback(
@@ -1168,6 +1181,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRunShellCommand,
       onImageExpand,
+      onHtmlFullscreenChange,
       onFileOpen,
       onUseArtifactTemplate,
       onFileDownload,
@@ -1200,6 +1214,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRunShellCommand,
       onImageExpand,
+      onHtmlFullscreenChange,
       onFileOpen,
       onUseArtifactTemplate,
       onFileDownload,
@@ -1361,7 +1376,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             estimatedItemSize={90}
             initialScrollAtEnd={citationRequest === null && rememberedPosition?.atEnd !== false}
             // Legend needs a data refresh to mount new pins without a scroll event.
-            dataVersion={readyCitationRequest?.key ?? listIdentityKey}
+            dataVersion={`${readyCitationRequest?.key ?? listIdentityKey}:${fullscreenRowId ?? ""}`}
             {...(alwaysRender ? { alwaysRender } : {})}
             onLoad={onCitationListLoad}
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
@@ -2680,6 +2695,11 @@ function ProposedPlanTimelineRow({
 
 function HtmlRenderTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "html-render" }> }) {
   const ctx = use(TimelineRowCtx);
+  const { onHtmlFullscreenChange } = ctx;
+  const onFullscreenChange = useCallback(
+    (fullscreen: boolean) => onHtmlFullscreenChange(row.id, fullscreen),
+    [onHtmlFullscreenChange, row.id],
+  );
 
   return (
     <div className="min-w-0 px-1">
@@ -2688,6 +2708,7 @@ function HtmlRenderTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "htm
         key={row.htmlRender.attachmentId}
         environmentId={ctx.activeThreadEnvironmentId}
         htmlRender={row.htmlRender}
+        onFullscreenChange={onFullscreenChange}
         onOpen={ctx.onFileOpen}
       />
     </div>

@@ -26,6 +26,7 @@ export function HtmlRenderFrame(props: {
   readonly environmentId: EnvironmentId;
   readonly htmlRender: HtmlRenderReference;
   readonly onOpen: (attachment: ChatFileAttachment) => void;
+  readonly onFullscreenChange?: ((fullscreen: boolean) => void) | undefined;
 }) {
   const { attachmentId, title } = props.htmlRender;
   // The frame takes the page's measured height at its own width, read before
@@ -97,6 +98,7 @@ export function HtmlRenderFrame(props: {
         height={height}
         failed={failed}
         onContentHeight={setContentHeight}
+        onFullscreenChange={props.onFullscreenChange}
         onOpenInPanel={() =>
           props.onOpen({
             type: "file",

@@ -4,10 +4,13 @@ import {
   htmlRenderThemeMessage,
   htmlRenderResult,
   readHtmlRenderContentHeight,
+  readHtmlRenderImageRequest,
   readHtmlRenderLinkRequest,
 } from "@t3tools/shared/htmlRender";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { ExpandedImageDialog } from "~/components/chat/ExpandedImageDialog";
+import type { ExpandedImagePreview } from "~/components/chat/ExpandedImagePreview";
 import { useHtmlRenderTheme } from "~/hooks/useHtmlRenderTheme";
 import { cn } from "~/lib/utils";
 import { FileSurfaceLoading } from "./fileSurfaceChrome";
@@ -94,11 +97,14 @@ export function HtmlRenderDocument(props: {
   /** Receives the page's content height whenever it changes, so an inline frame can fit it. */
   readonly onContentHeight?: (height: number) => void;
   readonly onEscape?: () => void;
+  readonly onImageOpenChange?: ((open: boolean) => void) | undefined;
 }) {
   const theme = useHtmlRenderTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [src] = useState(() => `${props.src.split("#", 1)[0]}${htmlRenderThemeFragment(theme)}`);
   const [loaded, setLoaded] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
+  const [imagePortalContainer, setImagePortalContainer] = useState<HTMLElement>();
   const postTheme = () => {
     frameRef.current?.contentWindow?.postMessage(htmlRenderThemeMessage(theme), "*");
   };
@@ -127,6 +133,32 @@ export function HtmlRenderDocument(props: {
     window.addEventListener("message", openLink);
     return () => window.removeEventListener("message", openLink);
   }, []);
+  useEffect(() => {
+    const openImage = (event: MessageEvent) => {
+      const frame = frameRef.current;
+      const request = readHtmlRenderImageRequest(event.data);
+      if (
+        request === undefined ||
+        frame === null ||
+        event.source !== frame.contentWindow ||
+        document.activeElement !== frame ||
+        navigator.userActivation?.isActive === false ||
+        frame.closest("[inert]") !== null
+      )
+        return;
+      // A body portal is underneath a native modal regardless of its z-index.
+      setImagePortalContainer(frame.closest<HTMLElement>("dialog:modal") ?? undefined);
+      setExpandedImage({ images: [request], index: 0 });
+    };
+    window.addEventListener("message", openImage);
+    return () => window.removeEventListener("message", openImage);
+  }, []);
+  const { onImageOpenChange } = props;
+  useEffect(() => {
+    if (expandedImage === null) return;
+    onImageOpenChange?.(true);
+    return () => onImageOpenChange?.(false);
+  }, [expandedImage, onImageOpenChange]);
   const { onContentHeight } = props;
   // A page posts its height once per change, so listen from the commit that
   // inserts the frame; a passive effect could run after a fast page's first post.
@@ -146,6 +178,8 @@ export function HtmlRenderDocument(props: {
     if (onEscape === undefined) return;
     const escape = (event: MessageEvent) => {
       if (
+        expandedImage === null &&
+        document.activeElement === frameRef.current &&
         event.source === frameRef.current?.contentWindow &&
         event.data === HTML_RENDER_ESCAPE_MESSAGE
       ) {
@@ -154,26 +188,35 @@ export function HtmlRenderDocument(props: {
     };
     window.addEventListener("message", escape);
     return () => window.removeEventListener("message", escape);
-  }, [onEscape]);
+  }, [onEscape, expandedImage]);
   return (
-    <iframe
-      ref={frameRef}
-      src={src}
-      title={props.title}
-      // Never allow-same-origin: the opaque origin keeps the page out of the app's session.
-      sandbox="allow-scripts allow-forms"
-      loading="lazy"
-      onLoad={() => {
-        setLoaded(true);
-        props.onLoad?.();
-        // Covers a theme change that landed while the page was loading.
-        postTheme();
-      }}
-      // A frame whose color scheme differs from its document's paints an opaque
-      // canvas, so the blank document a frame starts with would flash white in
-      // dark mode. Once the page is in, its prefers-color-scheme follows the app.
-      className={cn("border-0 scheme-light", props.className)}
-      style={loaded ? { colorScheme: theme.appearance } : undefined}
-    />
+    <>
+      <iframe
+        ref={frameRef}
+        src={src}
+        title={props.title}
+        // Never allow-same-origin: the opaque origin keeps the page out of the app's session.
+        sandbox="allow-scripts allow-forms"
+        loading="lazy"
+        onLoad={() => {
+          setLoaded(true);
+          props.onLoad?.();
+          // Covers a theme change that landed while the page was loading.
+          postTheme();
+        }}
+        // A frame whose color scheme differs from its document's paints an opaque
+        // canvas, so the blank document a frame starts with would flash white in
+        // dark mode. Once the page is in, its prefers-color-scheme follows the app.
+        className={cn("border-0 scheme-light", props.className)}
+        style={loaded ? { colorScheme: theme.appearance } : undefined}
+      />
+      {expandedImage !== null ? (
+        <ExpandedImageDialog
+          preview={expandedImage}
+          portalContainer={imagePortalContainer}
+          onClose={() => setExpandedImage(null)}
+        />
+      ) : null}
+    </>
   );
 }

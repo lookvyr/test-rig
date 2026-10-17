@@ -62,14 +62,16 @@ function DialogPopup({
   showCloseButton = true,
   bottomStickOnMobile = true,
   variant = "default",
+  portalContainer,
   ...props
 }: DialogPrimitive.Popup.Props & {
+  portalContainer?: HTMLElement | undefined;
   showCloseButton?: boolean;
   bottomStickOnMobile?: boolean;
   variant?: "default" | "media";
 }) {
   return (
-    <DialogPortal>
+    <DialogPortal container={portalContainer}>
       {/* Media opens from inside other overlays (a composer chip, a popover), so it sits above them. */}
       <DialogBackdrop className={variant === "media" ? "z-[60]" : undefined} variant={variant} />
       <DialogViewport

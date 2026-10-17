@@ -8,10 +8,11 @@ import {
   htmlRenderTheme,
   htmlRenderThemeFragment,
   injectHtmlRenderBootstrap,
-  injectHtmlRenderEscapeBridge,
+  injectHtmlRenderInteractionBridge,
   HTML_RENDER_ESCAPE_MESSAGE,
   htmlRenderThemeMessage,
   readHtmlRenderContentHeight,
+  readHtmlRenderImageRequest,
   readHtmlRenderLinkRequest,
   readHtmlRenderReference,
 } from "./htmlRender.ts";
@@ -25,7 +26,7 @@ describe("HTML render Escape bridge", () => {
     const saved = injectHtmlRenderBootstrap(
       "<html><head><script>page()</script></head><body>saved</body></html>",
     );
-    const served = injectHtmlRenderEscapeBridge(saved);
+    const served = injectHtmlRenderInteractionBridge(saved);
     expect(served).toContain(saved.slice(saved.indexOf('<style id="t3-theme">')));
     expect(served.indexOf(HTML_RENDER_ESCAPE_MESSAGE)).toBeLessThan(served.indexOf("page()"));
     let keydown: (event: {
@@ -36,8 +37,8 @@ describe("HTML render Escape bridge", () => {
     const messages: unknown[] = [];
     NodeVM.runInNewContext(served.match(/<script>([\s\S]*?)<\/script>/)![1]!, {
       window: {
-        addEventListener: (_: string, listener: typeof keydown) => {
-          keydown = listener;
+        addEventListener: (type: string, listener: typeof keydown) => {
+          if (type === "keydown") keydown = listener;
         },
         parent: { postMessage: (message: unknown) => messages.push(message) },
       },
@@ -269,5 +270,84 @@ describe("htmlRenderFrameHeight", () => {
     const copy = readHtmlRenderReference(JSON.parse(JSON.stringify(measured)))!;
     expect(htmlRenderReferencesEqual(measured, copy)).toBe(true);
     expect(htmlRenderReferencesEqual(measured, { ...copy, heights: [[390, 1290]] })).toBe(false);
+  });
+});
+
+describe("HTML image notifications", () => {
+  const image = (src: unknown, name?: unknown) => ({
+    jsonrpc: "2.0",
+    method: "t3/notifications/open-image",
+    params: { src, name },
+  });
+  it.each([
+    "https://example.com/a.png",
+    "http://example.com/a.png",
+    "data:image/png;base64,AA",
+    "data:image/svg+xml,%3Csvg%3E",
+  ])("accepts %s", (src) => {
+    expect(readHtmlRenderImageRequest(image(src, " Chart "))).toEqual({ src, name: "Chart" });
+  });
+  it.each([
+    "javascript:alert(1)",
+    "file:///a.png",
+    "blob:null/1",
+    "data:text/html,a",
+    "https://",
+    "https://user:password@example.com/a.png",
+    "data:image/",
+    12,
+    null,
+  ])("rejects %s", (src) => {
+    expect(readHtmlRenderImageRequest(image(src))).toBeUndefined();
+  });
+  it("bounds labels and requires the notification envelope", () => {
+    expect(readHtmlRenderImageRequest(image("https://example.com/a.png", ""))?.name).toBe("Image");
+    expect(
+      readHtmlRenderImageRequest(image("https://example.com/a.png", "a".repeat(300)))?.name,
+    ).toHaveLength(200);
+    expect(readHtmlRenderImageRequest({ src: "https://example.com/a.png" })).toBeUndefined();
+  });
+  it("opens only trusted unmodified standalone image clicks after page handlers", () => {
+    const listeners = new Map<string, (event: unknown) => void>();
+    const messages: unknown[] = [];
+    const deferred: Array<() => void> = [];
+    const served = injectHtmlRenderInteractionBridge("<html><head></head></html>");
+    NodeVM.runInNewContext(served.match(/<script>([\s\S]*?)<\/script>/)![1]!, {
+      window: {
+        parent: { postMessage: (message: unknown) => messages.push(message) },
+        addEventListener: (type: string, listener: (event: unknown) => void) =>
+          listeners.set(type, listener),
+      },
+      setTimeout: (callback: () => void) => deferred.push(callback),
+    });
+    const img = {
+      tagName: "IMG",
+      currentSrc: "https://example.com/a.png",
+      alt: "Chart",
+      closest: () => null,
+    };
+    const event = {
+      isTrusted: true,
+      button: 0,
+      composedPath: () => [img],
+      defaultPrevented: false,
+    };
+    for (const override of [
+      { isTrusted: false },
+      { button: 1 },
+      { ctrlKey: true },
+      { defaultPrevented: true },
+      { composedPath: () => [{ ...img, closest: () => ({}) }] },
+    ])
+      listeners.get("click")?.({ ...event, ...override });
+    expect(deferred).toHaveLength(0);
+    listeners.get("click")?.(event);
+    event.defaultPrevented = true;
+    deferred.shift()?.();
+    expect(messages).toEqual([]);
+    event.defaultPrevented = false;
+    listeners.get("click")?.(event);
+    deferred.shift()?.();
+    expect(messages).toEqual([image(img.currentSrc, "Chart")]);
   });
 });

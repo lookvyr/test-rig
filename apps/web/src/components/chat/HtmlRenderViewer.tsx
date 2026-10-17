@@ -1,5 +1,5 @@
 import { ExpandIcon, HandIcon, MinusIcon, PanelRightIcon, PlusIcon, XIcon } from "lucide-react";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { HtmlRenderDocument } from "../files/BrowserDocumentFrame";
@@ -12,8 +12,17 @@ export function HtmlRenderViewer(props: {
   readonly failed: boolean;
   readonly onContentHeight: (height: number) => void;
   readonly onOpenInPanel: () => void;
+  readonly onFullscreenChange?: ((fullscreen: boolean) => void) | undefined;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [imageOpen, setImageOpen] = useState(false);
+  const fullscreen = expanded || imageOpen;
+  const { onFullscreenChange } = props;
+  useEffect(() => {
+    if (!fullscreen) return;
+    onFullscreenChange?.(true);
+    return () => onFullscreenChange?.(false);
+  }, [fullscreen, onFullscreenChange]);
   const [zoom, setZoom] = useState(1);
   const [panning, setPanning] = useState(false);
   const dragRef = useRef<{
@@ -183,6 +192,7 @@ export function HtmlRenderViewer(props: {
                 <HtmlRenderDocument
                   src={props.src}
                   title={props.title}
+                  onImageOpenChange={setImageOpen}
                   className="block size-full"
                   {...(expanded ? {} : { onContentHeight: props.onContentHeight })}
                   {...(expanded ? { onEscape: () => setExpanded(false) } : {})}

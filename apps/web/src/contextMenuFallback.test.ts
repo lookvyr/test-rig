@@ -14,6 +14,8 @@ class FakeDomEvent {
     Object.assign(this, init);
   }
 
+  stopPropagation() {}
+
   preventDefault() {
     this.defaultPrevented = true;
   }
@@ -38,6 +40,12 @@ class FakeElement {
 
   focus() {
     (document as unknown as FakeDocument).activeElement = this;
+  }
+
+  closest(selector: string): FakeElement | null {
+    return selector === "dialog:modal" && this.tagName === "dialog"
+      ? this
+      : (this.parent?.closest(selector) ?? null);
   }
 
   contains(node: unknown): boolean {
@@ -156,6 +164,10 @@ class FakeDocument {
     }
   }
 
+  dispatchEvent(event: FakeDomEvent) {
+    for (const listener of this.listeners.get(event.type) ?? []) listener(event);
+  }
+
   querySelectorAll(tagName: string) {
     return this.body.querySelectorAll(tagName);
   }
@@ -254,4 +266,27 @@ describe("showContextMenuFallback", () => {
 
     await expect(selectionPromise).resolves.toBe("rename:project-b");
   });
+});
+
+it("opens a native fullscreen menu inside its dialog and dismisses it with Escape", async () => {
+  const doc = document as unknown as FakeDocument;
+  const addListener = vi.spyOn(doc, "addEventListener");
+  const removeListener = vi.spyOn(doc, "removeEventListener");
+  const dialog = doc.createElement("dialog");
+  const opener = doc.createElement("button");
+  doc.body.appendChild(dialog);
+  dialog.appendChild(opener);
+  opener.focus();
+  const result = showContextMenuFallback([{ id: "copy", label: "Copy image" }], { x: 20, y: 20 });
+  expect(addListener).toHaveBeenCalledWith("keydown", expect.any(Function), true);
+  expect(dialog.children).toHaveLength(2);
+  expect(doc.body.children).toEqual([dialog]);
+  const event = new FakeDomEvent("keydown", { key: "Escape" });
+  const stopPropagation = vi.spyOn(event, "stopPropagation");
+  doc.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(stopPropagation).toHaveBeenCalledOnce();
+  await expect(result).resolves.toBeNull();
+  expect(removeListener).toHaveBeenCalledWith("keydown", expect.any(Function), true);
+  expect(dialog.children).toEqual([opener]);
 });

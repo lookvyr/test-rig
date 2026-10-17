@@ -274,6 +274,7 @@ export const HTML_RENDER_LAYOUT_GUIDE = [
 const HOST_CONTEXT_CHANGED_METHOD = "ui/notifications/host-context-changed";
 const OPEN_LINK_METHOD = "ui/open-link";
 const SIZE_CHANGED_METHOD = "ui/notifications/size-changed";
+const OPEN_IMAGE_METHOD = "t3/notifications/open-image";
 
 /** The content height in a framed render's `ui/notifications/size-changed` notification. */
 export function readHtmlRenderContentHeight(data: unknown): number | undefined {
@@ -298,6 +299,32 @@ export function readHtmlRenderLinkRequest(
   const url =
     typeof params === "object" && params !== null ? (params as { url?: unknown }).url : undefined;
   return typeof url === "string" && /^https?:\/\//i.test(url) ? { id, url } : undefined;
+}
+
+/** Reads an image notification without granting access to local or blob URLs. */
+export function readHtmlRenderImageRequest(
+  data: unknown,
+): { readonly src: string; readonly name: string } | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const { jsonrpc, method, params } = data as Record<string, unknown>;
+  if (jsonrpc !== "2.0" || method !== OPEN_IMAGE_METHOD) return undefined;
+  if (typeof params !== "object" || params === null) return undefined;
+  const { src, name } = params as Record<string, unknown>;
+  if (typeof src !== "string") return undefined;
+  try {
+    const url = new URL(src);
+    if (
+      url.protocol !== "http:" &&
+      url.protocol !== "https:" &&
+      !/^data:image\/[a-z0-9.+-]+[;,]/i.test(src)
+    )
+      return undefined;
+    if (url.username || url.password) return undefined;
+  } catch {
+    return undefined;
+  }
+  const label = typeof name === "string" ? name.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) : "";
+  return { src, name: label || "Image" };
 }
 
 /** The empty result a client sends back for a render's request. */
@@ -402,9 +429,22 @@ export function injectHtmlRenderBootstrap(html: string): string {
 
 export const HTML_RENDER_ESCAPE_MESSAGE = "test-rig:html-render:escape";
 
-/** Added when serving a saved page, so older visualizations also support Escape. */
-export function injectHtmlRenderEscapeBridge(html: string): string {
-  const markup = `<script>window.addEventListener("keydown",function(e){if(e.isTrusted&&!e.defaultPrevented&&e.key==="Escape"&&window.parent!==window)window.parent.postMessage(${JSON.stringify(HTML_RENDER_ESCAPE_MESSAGE)},"*");});</script>`;
+// Installed on delivery so saved visualizations gain interactions without rewriting attachments.
+const IMAGE_INTERACTION_SCRIPT = `(function(){
+  if(window.parent===window)return;
+  window.addEventListener("click",function(e){
+    var t=e.composedPath()[0];
+    if(!e.isTrusted||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||!t||t.tagName!=="IMG"||t.closest("a[href],button,[role=button]"))return;
+    var src=t.currentSrc||t.src;
+    if(src)setTimeout(function(){
+      if(!e.defaultPrevented)window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(OPEN_IMAGE_METHOD)},params:{src:src,name:t.alt||t.title||""}},"*");
+    });
+  });
+})();`;
+
+/** Adds Escape and image enlargement to new and previously saved visualizations. */
+export function injectHtmlRenderInteractionBridge(html: string): string {
+  const markup = `<script>window.addEventListener("keydown",function(e){if(e.isTrusted&&!e.defaultPrevented&&e.key==="Escape"&&window.parent!==window)window.parent.postMessage(${JSON.stringify(HTML_RENDER_ESCAPE_MESSAGE)},"*");});${IMAGE_INTERACTION_SCRIPT}</script><style>:where(img:not(a[href] img,button img,[role=button] img)){cursor:zoom-in}</style>`;
   return insertHeadMarkup(html, blankNonMarkup(html), markup);
 }
 
