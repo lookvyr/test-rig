@@ -116,6 +116,7 @@ export class OpenCodeReplayController {
 
   async expectOutbound(actual: unknown): Promise<void> {
     try {
+      this.throwFailure();
       const entry = this.transcript.entries[this.cursor];
       const expectedFrame = entry?.type === "expect_outbound" ? frameRecord(entry.frame) : null;
       const actualFrame = frameRecord(actual);
@@ -286,7 +287,7 @@ export class OpenCodeReplayController {
   }
 
   private fail(cause: unknown): void {
-    this.failure = cause;
+    if (this.failure === null) this.failure = cause;
     for (const waiter of this.waiters) waiter();
     this.waiters.clear();
   }

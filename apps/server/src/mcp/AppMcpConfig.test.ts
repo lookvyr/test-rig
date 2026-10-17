@@ -105,6 +105,7 @@ describe("app-owned provider MCP configuration", () => {
         ...codexAppMcpConfig(servers),
         test_rig: {
           url: "http://localhost/mcp",
+          tool_timeout_sec: 65 * 60,
           http_headers: { Authorization: "Bearer builtin" },
         },
       });

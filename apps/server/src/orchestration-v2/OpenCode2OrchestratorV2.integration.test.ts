@@ -38,6 +38,7 @@ import {
   readProviderReplayTranscript,
 } from "./testkit/ReplayTranscriptNdjson.ts";
 import * as IdAllocator from "./IdAllocator.ts";
+import { appMcpRuntimeName } from "../mcp/AppMcpConfig.ts";
 
 const SESSION = "ses_f148ca2deffeJcwCnRQtb0YFNX";
 /** Held until the scenario releases it, so the turn is still running meanwhile. */
@@ -73,11 +74,17 @@ const event = (type: string, data: Record<string, unknown>): ProviderReplayEntry
 const labelled = (entry: ProviderReplayEntry, label: string): ProviderReplayEntry =>
   entry.type === "runtime_exit" ? entry : { ...entry, label };
 /**
- * T3's own rules after a mode's: every thread's T3 MCP server is denied, and
- * then this thread's own is allowed again (last match wins).
+ * App MCP rules follow the mode's: deny sibling registrations, then allow this
+ * thread's tools in Full access outside Plan mode and ask in other modes.
  */
-const mcpRules = (name: string) => [
+const mcpRules = (name: string, appToolEffect: "allow" | "ask" = "allow") => [
   { action: "test_rig-*", resource: "*", effect: "deny" },
+  { action: "tru-????????-*", resource: "*", effect: "deny" },
+  {
+    action: `${appMcpRuntimeName("*", `thread:${name}`)}_*`,
+    resource: "*",
+    effect: appToolEffect,
+  },
   {
     action: `test_rig-${NodeCrypto.createHash("sha256").update(`thread:${name}`).digest("hex").slice(0, 32)}_*`,
     resource: "*",
@@ -139,21 +146,21 @@ const supervisedRules = (name: string) => [
   { action: "edit", resource: "*", effect: "ask" },
   { action: "external_directory", resource: "*", effect: "ask" },
   ...BUILD_PATHS,
-  ...mcpRules(name),
+  ...mcpRules(name, "ask"),
 ];
 const autoEditRules = (name: string) => [
   { action: "shell", resource: "*", effect: "ask" },
   { action: "edit", resource: "*", effect: "allow" },
   { action: "external_directory", resource: "*", effect: "ask" },
   ...BUILD_PATHS,
-  ...mcpRules(name),
+  ...mcpRules(name, "ask"),
 ];
 /** Plan mode on Full access: edits are denied except the plan agent's own plan files. */
 const planRules = (name: string) => [
   { action: "*", resource: "*", effect: "allow" },
   { action: "edit", resource: "*", effect: "deny" },
   ...PLAN_PATHS,
-  ...mcpRules(name),
+  ...mcpRules(name, "ask"),
 ];
 
 const sessionInfo = (directory: string, permissions: ReadonlyArray<unknown>) => ({
