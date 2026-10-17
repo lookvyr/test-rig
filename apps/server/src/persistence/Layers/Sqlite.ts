@@ -6,6 +6,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { makeV2SqlitePersistenceLive } from "./V2Sqlite.ts";
+import * as NodeSqliteClient from "../NodeSqliteClient.ts";
 import { runMigrations } from "../Migrations.ts";
 import { ServerConfig } from "../../config.ts";
 
@@ -19,7 +20,7 @@ type Loader = {
 };
 const defaultSqliteClientLoaders = {
   bun: () => import("@effect/sql-sqlite-bun/SqliteClient"),
-  node: () => import("../NodeSqliteClient.ts"),
+  node: async () => NodeSqliteClient,
 } satisfies Record<string, () => Promise<Loader>>;
 
 const makeRuntimeSqliteLayer = Effect.fn("makeRuntimeSqliteLayer")(function* (

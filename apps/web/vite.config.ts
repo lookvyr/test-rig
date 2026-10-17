@@ -171,6 +171,11 @@ export default defineConfig(() => {
     experimental: {
       bundledDev,
     },
+    css: {
+      // Tailwind uses this flag for build maps too, so sourcemapped builds
+      // need it to preserve the CSS transform's source locations.
+      devSourcemap: buildSourcemap !== false,
+    },
     server: {
       host,
       port,

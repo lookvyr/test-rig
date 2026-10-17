@@ -13,14 +13,13 @@ import * as Path from "effect/Path";
 
 import {
   DEVELOPMENT_APP_ID,
-  DEVELOPMENT_ELECTRON_PROFILE_NAME,
   PRODUCT_NAME,
   PRODUCTION_APP_ID,
-  PRODUCTION_ELECTRON_PROFILE_NAME,
 } from "@t3tools/shared/productIdentity";
 
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
+import { resolveEarlyElectronProfilePaths } from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 
@@ -174,10 +173,8 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
-  const userDataDirName = isDevelopment
-    ? DEVELOPMENT_ELECTRON_PROFILE_NAME
-    : PRODUCTION_ELECTRON_PROFILE_NAME;
-  const electronUserDataPath = path.join(appDataDirectory, userDataDirName);
+  const { userDataDirName, electronUserDataPath, electronSessionDataPath } =
+    resolveEarlyElectronProfilePaths({ isDevelopment, appDataDirectory, joinPath: path.join });
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
     "applications",
@@ -204,7 +201,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     logDir: path.join(stateDir, "logs"),
     browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
     electronUserDataPath,
-    electronSessionDataPath: path.join(electronUserDataPath, "session-data"),
+    electronSessionDataPath,
     electronCrashDumpsPath: path.join(stateDir, "crash-dumps"),
     rootDir,
     appRoot,

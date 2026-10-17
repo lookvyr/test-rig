@@ -61,6 +61,7 @@ import * as DesktopWindow from "./window/DesktopWindow.ts";
 import * as DesktopWslBackend from "./wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "./wsl/DesktopWslEnvironment.ts";
 
+DesktopPreReadyPlatform.configureStoragePathsSync();
 configureSystemCertificateAuthorities();
 
 const desktopEnvironmentLayer = Layer.unwrap(

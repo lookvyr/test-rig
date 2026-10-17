@@ -49,6 +49,22 @@ const decodeEarlyDesktopSettingsJson = Schema.decodeSync(EarlyDesktopSettingsJso
 const isDevelopmentEnvironment = (env: NodeJS.ProcessEnv): boolean =>
   trimNonEmpty(env.VITE_DEV_SERVER_URL) !== null;
 
+export function resolveEarlyElectronProfilePaths(input: {
+  readonly isDevelopment: boolean;
+  readonly appDataDirectory: string;
+  readonly joinPath: JoinPath;
+}) {
+  const userDataDirName = input.isDevelopment
+    ? DEVELOPMENT_ELECTRON_PROFILE_NAME
+    : PRODUCTION_ELECTRON_PROFILE_NAME;
+  const electronUserDataPath = input.joinPath(input.appDataDirectory, userDataDirName);
+  return {
+    userDataDirName,
+    electronUserDataPath,
+    electronSessionDataPath: input.joinPath(electronUserDataPath, "session-data"),
+  };
+}
+
 function resolveEarlyDesktopSettingsPath(input: {
   readonly env: NodeJS.ProcessEnv;
   readonly homeDirectory: string;

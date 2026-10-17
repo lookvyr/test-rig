@@ -58,6 +58,7 @@ export default defineConfig({
       entry: ["src/preview-pick-preload.ts"],
       deps: {
         alwaysBundle: (id) => id === "react-grab" || id.startsWith("react-grab/"),
+        onlyBundle: ["react-grab"],
       },
     },
     {

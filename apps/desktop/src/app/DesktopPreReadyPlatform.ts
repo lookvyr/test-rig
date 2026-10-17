@@ -12,6 +12,18 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 
+/** Set cache paths before any async startup work lets Chromium start its network sandbox. */
+export function configureStoragePathsSync(): void {
+  const paths = DesktopEarlyElectronStartup.resolveEarlyElectronProfilePaths({
+    isDevelopment: Boolean(process.env.VITE_DEV_SERVER_URL?.trim()),
+    appDataDirectory: Electron.app.getPath("appData"),
+    joinPath: NodePath.join,
+  });
+  NodeFS.mkdirSync(paths.electronSessionDataPath, { recursive: true });
+  Electron.app.setPath("userData", paths.electronUserDataPath);
+  Electron.app.setPath("sessionData", paths.electronSessionDataPath);
+}
+
 export interface DesktopPreReadyCommandLineReader {
   readonly hasSwitch: (switchName: string) => boolean;
   readonly getSwitchValue: (switchName: string) => string;
