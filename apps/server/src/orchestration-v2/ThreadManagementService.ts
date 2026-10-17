@@ -281,6 +281,7 @@ export interface ThreadManagementServiceShape {
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<Orchestrator.OrchestratorV2DispatchResult, Orchestrator.OrchestratorV2Error>;
+  readonly getCommandResult: Orchestrator.OrchestratorV2["Service"]["getCommandResult"];
   readonly getTimelinePage: Orchestrator.OrchestratorV2["Service"]["getTimelinePage"];
   readonly getMessageCount: Orchestrator.OrchestratorV2["Service"]["getMessageCount"];
   /**
@@ -844,6 +845,7 @@ const make = Effect.gen(function* () {
   return ThreadManagementService.of({
     ensureLegacyTranscript,
     dispatch,
+    getCommandResult: orchestrator.getCommandResult,
     getTimelinePage: (threadId, options) =>
       ensureProjectionTranscript(threadId).pipe(
         Effect.andThen(orchestrator.getTimelinePage(threadId, options)),

@@ -12,6 +12,7 @@ import {
   type OrchestrationV2CreationSource,
   type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadLaunchWorkspaceStrategy,
   type ProviderDriverKind,
   type ProviderInteractionMode,
   ProjectId,
@@ -24,11 +25,13 @@ import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 import {
   buildTemporaryWorktreeBranchName,
   flattenTemporaryWorktreeBranchName,
@@ -49,19 +52,7 @@ import { makeProviderFailure } from "./ProviderFailure.ts";
 import { randomUuidV4 } from "./RandomUuid.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
-export type ThreadLaunchWorkspaceStrategy =
-  | { readonly type: "root"; readonly branch?: string | undefined }
-  | {
-      readonly type: "existing_worktree";
-      readonly worktreePath: string;
-      readonly branch?: string | undefined;
-    }
-  | {
-      readonly type: "worktree";
-      readonly baseRef: string;
-      readonly branch?: string | undefined;
-      readonly startFromOrigin?: boolean | undefined;
-    };
+export type ThreadLaunchWorkspaceStrategy = OrchestrationV2ThreadLaunchWorkspaceStrategy;
 
 export interface ThreadLaunchInitialMessage {
   readonly messageId?: MessageId | undefined;
@@ -95,6 +86,12 @@ export interface ThreadLaunchInput {
   };
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
+}
+
+export interface ThreadLaunchPreparationInput {
+  readonly commandId: CommandId;
+  readonly threadId: ThreadId;
+  readonly runId: RunId;
 }
 
 export interface ThreadLaunchResult {
@@ -132,6 +129,7 @@ export class ThreadLaunchError extends Schema.TaggedError<ThreadLaunchError>()(
 export class ThreadLaunchService extends Context.Service<
   ThreadLaunchService,
   {
+    readonly prepareRun: (input: ThreadLaunchPreparationInput) => Effect.Effect<void>;
     readonly launch: (
       input: ThreadLaunchInput,
     ) => Effect.Effect<ThreadLaunchResult, ThreadLaunchError>;
@@ -227,6 +225,9 @@ const make = Effect.gen(function* () {
     const tracked = input.workspaceStrategy.type === "worktree";
     let createdWorktreePath: string | null = null;
     let setupTerminalId: string | null = null;
+    let workspaceRecorded = false;
+    let runReleased = false;
+    let branchRenameFiber: Fiber.Fiber<unknown, unknown> | null = null;
     if (tracked) {
       yield* setupTracker.begin({
         threadId,
@@ -389,7 +390,15 @@ const make = Effect.gen(function* () {
           branch,
           worktreePath,
         })
-        .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
+        .pipe(
+          Effect.mapError(mapError(input, "update-thread", threadId)),
+          Effect.tap(() =>
+            Effect.sync(() => {
+              workspaceRecorded = true;
+            }),
+          ),
+          Effect.uninterruptible,
+        );
 
       // Rename temporary branches (server-invented above, or sent by clients
       // that name worktrees themselves) in the background so generation latency
@@ -404,7 +413,7 @@ const make = Effect.gen(function* () {
       ) {
         const oldBranch = branch;
         const worktreeCwd = worktreePath;
-        yield* generateBranchNameFor(worktreeCwd, initialMessage).pipe(
+        branchRenameFiber = yield* generateBranchNameFor(worktreeCwd, initialMessage).pipe(
           Effect.flatMap(({ branch: newBranch, exactName }) =>
             git.renameBranch({
               cwd: worktreeCwd,
@@ -459,9 +468,13 @@ const make = Effect.gen(function* () {
             .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
         }
         yield* setupTracker.stageStatus(threadId, "setup-script", "running");
+        // Claim the terminal name before opening it, so Stop can close it even
+        // when cancellation arrives before the runner returns its result.
+        setupTerminalId = `setup-${threadId}`;
         const setup = yield* setupScripts
           .runForThread({
             threadId,
+            preferredTerminalId: setupTerminalId,
             projectId: input.projectId,
             projectCwd: project.workspaceRoot,
             worktreePath: worktreePath!,
@@ -532,7 +545,15 @@ const make = Effect.gen(function* () {
             threadId,
             runId,
           })
-          .pipe(Effect.mapError(mapError(input, "release-run", threadId)));
+          .pipe(
+            Effect.mapError(mapError(input, "release-run", threadId)),
+            Effect.tap(() =>
+              Effect.sync(() => {
+                runReleased = true;
+              }),
+            ),
+            Effect.uninterruptible,
+          );
       }
       yield* setupTracker.stageStatus(threadId, "agent", "done");
       yield* awaitAsyncSetup;
@@ -540,33 +561,83 @@ const make = Effect.gen(function* () {
     }).pipe(
       Effect.onError((cause) =>
         Effect.gen(function* () {
-          const cancelled = Cause.hasInterruptsOnly(cause);
+          // Stop can win the dispatch lock before release and make release fail
+          // before its event reaches the watcher. The durable run decides cleanup.
+          const stopped =
+            runId === null
+              ? false
+              : yield* threads.getThreadRecords(threadId, ["runs"], { runIds: [runId] }).pipe(
+                  Effect.map((current) =>
+                    current.runs.some(
+                      (run) =>
+                        run.id === runId &&
+                        (run.status === "interrupted" || run.status === "cancelled"),
+                    ),
+                  ),
+                  Effect.orElseSucceed(() => false),
+                );
+          const cancelled = Cause.hasInterruptsOnly(cause) || stopped;
           yield* setupTracker.finish(
             threadId,
             cancelled ? "cancelled" : "failed",
             cancelled ? null : failureDetail(Cause.squash(cause)),
           );
-          if (cancelled && tracked && createdWorktreePath) {
-            if (setupTerminalId)
-              yield* terminals
-                .close({ threadId, terminalId: setupTerminalId, deleteHistory: true })
-                .pipe(Effect.ignore);
-            yield* git
+          if (branchRenameFiber && !runReleased) yield* Fiber.interrupt(branchRenameFiber);
+          if (cancelled && setupTerminalId) {
+            yield* terminals
+              .close({ threadId, terminalId: setupTerminalId, deleteHistory: true })
+              .pipe(Effect.ignore);
+          }
+          // Never remove a checkout after releasing the agent. Failed setup keeps
+          // its recorded workspace for inspection; an unbound checkout is ours to remove.
+          if (
+            tracked &&
+            createdWorktreePath &&
+            ((cancelled && !runReleased) || !workspaceRecorded)
+          ) {
+            const removed = yield* git
               .removeWorktree({
                 cwd: project.workspaceRoot,
                 path: createdWorktreePath,
                 force: true,
               })
-              .pipe(Effect.ignore);
-            yield* threads
-              .dispatch({
-                type: "thread.metadata.update",
-                commandId: CommandId.make(`${input.commandId}:cancel-workspace`),
+              .pipe(Effect.result);
+            if (removed._tag === "Success") {
+              yield* threads
+                .dispatch({
+                  type: "thread.metadata.update",
+                  commandId: CommandId.make(`${input.commandId}:cancel-workspace`),
+                  threadId,
+                  worktreePath: null,
+                  branch: null,
+                })
+                .pipe(Effect.ignore);
+            } else {
+              if (!workspaceRecorded) {
+                yield* threads
+                  .dispatch({
+                    type: "thread.metadata.update",
+                    commandId: CommandId.make(`${input.commandId}:retain-workspace`),
+                    threadId,
+                    worktreePath: createdWorktreePath,
+                    branch: input.workspaceStrategy.branch ?? null,
+                  })
+                  .pipe(Effect.ignore);
+              }
+              yield* setupTracker.finish(
                 threadId,
-                worktreePath: null,
-                branch: null,
-              })
-              .pipe(Effect.ignore);
+                cancelled ? "cancelled" : "failed",
+                `Worktree cleanup failed; the checkout remains at ${createdWorktreePath}.`,
+              );
+              yield* Effect.logWarning(
+                "Cancelled worktree could not be removed; retaining its binding",
+                {
+                  threadId,
+                  worktreePath: createdWorktreePath,
+                  error: removed.failure,
+                },
+              );
+            }
           }
         }),
       ),
@@ -630,7 +701,28 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     runId: RunId | null,
   ) {
-    yield* prepareInBackground(input, threadId, runId).pipe(
+    const preparation = Effect.gen(function* () {
+      const prepare = prepareInBackground(input, threadId, runId);
+      if (runId === null) return yield* prepare;
+      const afterSequence = yield* threads.getThreadEventSequence(threadId);
+      const projection = yield* threads.getThreadRecords(threadId, ["runs"]);
+      if (projection.runs.find((run) => run.id === runId)?.status !== "preparing") return;
+      const interruption = threads
+        .streamStoredEventsFrom({ threadId, afterSequence, eventType: "run.updated" })
+        .pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "run.updated" &&
+              stored.event.payload.id === runId &&
+              (stored.event.payload.status === "interrupted" ||
+                stored.event.payload.status === "cancelled"),
+          ),
+          Stream.runHead,
+          Effect.flatMap((event) => (Option.isSome(event) ? Effect.interrupt : Effect.never)),
+        );
+      yield* Effect.raceFirst(prepare, interruption);
+    });
+    yield* preparation.pipe(
       Effect.onError((cause) =>
         failPreparedRun(
           input,
@@ -870,7 +962,63 @@ const make = Effect.gen(function* () {
     },
   );
 
-  return ThreadLaunchService.of({ launch });
+  const prepareRun: ThreadLaunchService["Service"]["prepareRun"] = Effect.fn(
+    "ThreadLaunchService.prepareRun",
+  )(function* (input) {
+    yield* Effect.gen(function* () {
+      const projection = yield* threads.getThreadProjection(input.threadId);
+      const run = projection.runs.find((candidate) => candidate.id === input.runId);
+      if (run?.status !== "preparing" || run.workspacePreparation === undefined) return;
+      if (!(yield* reservePreparation(input.commandId))) return;
+      const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
+      const launchInput: ThreadLaunchInput = {
+        commandId: input.commandId,
+        threadId: input.threadId,
+        projectId: projection.thread.projectId,
+        title: projection.thread.title,
+        modelSelection: run.modelSelection,
+        runtimeMode: projection.thread.runtimeMode,
+        interactionMode: projection.thread.interactionMode,
+        workspaceStrategy: run.workspacePreparation,
+        runSetupScript: run.workspacePreparationRunSetupScript,
+        ...(message === undefined
+          ? {}
+          : { initialMessage: { text: message.text, attachments: message.attachments } }),
+        createdBy: projection.thread.createdBy,
+        creationSource: projection.thread.creationSource,
+      };
+      yield* schedulePreparation(launchInput, input.threadId, input.runId).pipe(
+        Effect.onError(() => releasePreparation(input.commandId)),
+      );
+    }).pipe(
+      Effect.catchCause((cause) =>
+        threads
+          .dispatch({
+            type: "prepared-run.fail",
+            commandId: CommandId.make(`${input.commandId}:schedule-fail`),
+            threadId: input.threadId,
+            runId: input.runId,
+            failure: makeProviderFailure({
+              cause: Cause.squash(cause),
+              message: failureDetail(Cause.squash(cause)),
+              class: "validation_error",
+              retryable: false,
+            }),
+          })
+          .pipe(
+            Effect.catchCause((persistCause) =>
+              Effect.logWarning("Unable to fail delegated workspace preparation", {
+                cause,
+                persistCause,
+              }),
+            ),
+            Effect.asVoid,
+          ),
+      ),
+    );
+  });
+
+  return ThreadLaunchService.of({ launch, prepareRun });
 });
 
 export const layer = Layer.effect(ThreadLaunchService, make);

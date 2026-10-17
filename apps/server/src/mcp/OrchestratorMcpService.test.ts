@@ -39,6 +39,14 @@ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 
+import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+
+const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
+  Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+);
+
 describe("OrchestratorMcpService", () => {
   it("held child runs do not count as pending work", () => {
     const run = {
@@ -143,7 +151,7 @@ describe("OrchestratorMcpService", () => {
         assert.equal(yield* Ref.get(dispatched), 1);
       }).pipe(
         Effect.provide(
-          OrchestratorMcpService.layer
+          layerOrchestratorService
             .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
             .pipe(Layer.provide(dependencies)),
         ),
@@ -260,7 +268,7 @@ describe("OrchestratorMcpService", () => {
         assert.notEqual(commandIds[0], commandIds[1]);
       }).pipe(
         Effect.provide(
-          OrchestratorMcpService.layer
+          layerOrchestratorService
             .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
             .pipe(Layer.provide(dependencies)),
         ),
@@ -336,7 +344,7 @@ describe("OrchestratorMcpService", () => {
         assert.deepEqual(yield* Ref.get(dispatched), []);
       }).pipe(
         Effect.provide(
-          OrchestratorMcpService.layer
+          layerOrchestratorService
             .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
             .pipe(Layer.provide(dependencies)),
         ),
@@ -416,7 +424,7 @@ describe("OrchestratorMcpService", () => {
         );
       }).pipe(
         Effect.provide(
-          OrchestratorMcpService.layer
+          layerOrchestratorService
             .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
             .pipe(Layer.provide(dependencies)),
         ),
@@ -501,7 +509,7 @@ describe("OrchestratorMcpService", () => {
         assert.deepEqual(yield* Ref.get(cascaded), [childThreadId]);
         const status = yield* service.taskStatus(scope, taskId);
         assert.equal(status.summary, "Published result");
-      }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(dependencies))));
     }),
   );
 
@@ -583,7 +591,7 @@ describe("OrchestratorMcpService", () => {
         );
       }).pipe(
         Effect.provide(
-          OrchestratorMcpService.layer
+          layerOrchestratorService
             .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
             .pipe(Layer.provide(dependencies)),
         ),
@@ -815,7 +823,7 @@ describe("OrchestratorMcpService provider resolution", () => {
             ["launch-dir/model"],
           );
           assert.strictEqual(provider.status, "ready");
-        }).pipe(Effect.provide(OrchestratorMcpService.layer.pipe(Layer.provide(dependencies))));
+        }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(dependencies))));
       }),
   );
 
@@ -960,7 +968,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           );
         }).pipe(
           Effect.provide(
-            OrchestratorMcpService.layer
+            layerOrchestratorService
               .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
               .pipe(Layer.provide(dependencies)),
           ),
@@ -1063,7 +1071,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           assert.equal(request.modelSelection.model, "ant-model");
         }).pipe(
           Effect.provide(
-            OrchestratorMcpService.layer
+            layerOrchestratorService
               .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
               .pipe(Layer.provide(dependencies)),
           ),
@@ -1161,7 +1169,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         assert.equal(request.modelSelection.model, "ant-model");
       }).pipe(
         Effect.provide(
-          OrchestratorMcpService.layer
+          layerOrchestratorService
             .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
             .pipe(Layer.provide(dependencies)),
         ),
@@ -1226,7 +1234,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         );
       }).pipe(
         Effect.provide(
-          OrchestratorMcpService.layer
+          layerOrchestratorService
             .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
             .pipe(Layer.provide(dependencies)),
         ),
@@ -1345,7 +1353,7 @@ describe("OrchestratorMcpService provider resolution", () => {
           assert.equal(yield* Ref.get(dispatched), 1);
         }).pipe(
           Effect.provide(
-            OrchestratorMcpService.layer
+            layerOrchestratorService
               .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
               .pipe(Layer.provide(dependencies)),
           ),
@@ -1560,7 +1568,7 @@ describe("OrchestratorMcpService provider resolution", () => {
             }
           }).pipe(
             Effect.provide(
-              OrchestratorMcpService.layer
+              layerOrchestratorService
                 .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
                 .pipe(Layer.provide(dependencies)),
             ),
@@ -1647,7 +1655,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         assert.deepEqual(yield* Ref.get(dispatched), []);
       }).pipe(
         Effect.provide(
-          OrchestratorMcpService.layer
+          layerOrchestratorService
             .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
             .pipe(Layer.provide(dependencies)),
         ),
@@ -1831,7 +1839,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         );
       }).pipe(
         Effect.provide(
-          OrchestratorMcpService.layer
+          layerOrchestratorService
             .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
             .pipe(Layer.provide(dependencies)),
         ),

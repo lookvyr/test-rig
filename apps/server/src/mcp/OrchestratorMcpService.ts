@@ -14,6 +14,7 @@ import {
   type ModelSelection,
   NodeId,
   type OrchestrationV2Run,
+  type OrchestrationV2Command,
   type OrchestrationV2Subagent,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
@@ -75,6 +76,8 @@ import {
   subagentResultForRun,
   delegatedTaskProgress,
 } from "../orchestration-v2/SubagentProjection.ts";
+import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
@@ -781,6 +784,8 @@ function timelineItem(input: {
 
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
+  const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
+  const gitDriver = yield* GitVcsDriver.GitVcsDriver;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const providerInstances = yield* ProviderInstanceRegistry;
@@ -1706,33 +1711,74 @@ const make = Effect.gen(function* () {
           requestKey: key,
           operation: "delegate-task",
         });
-        const result = yield* threadManagement
-          .dispatch({
-            type: "delegated_task.request",
-            createdBy: "agent",
-            creationSource: "mcp",
-            commandId,
-            parentThreadId: scope.threadId,
-            parentRunId: parentRun.id,
-            parentNodeId: parentRun.rootNodeId,
-            task: taskPrompt(input),
-            ...(input.title === undefined ? {} : { title: input.title }),
-            modelSelection: target.modelSelection,
-            runtimeMode,
-            interactionMode,
-            // Async delegations wake the parent on every child terminal; wait
-            // delegations deliver through the blocking tool call, so a wake is
-            // only needed if the parent settled first (timeout, disconnect).
-            completionWake: input.mode === "wait" ? "settled_only" : "always",
-          })
-          .pipe(
-            Effect.mapError((error) =>
-              failure(
-                "orchestration_error",
-                `Unable to create delegated task: ${errorMessage(error)}`,
+        const command = {
+          type: "delegated_task.request",
+          createdBy: "agent",
+          creationSource: "mcp",
+          commandId,
+          parentThreadId: scope.threadId,
+          parentRunId: parentRun.id,
+          parentNodeId: parentRun.rootNodeId,
+          task: taskPrompt(input),
+          ...(input.title === undefined ? {} : { title: input.title }),
+          modelSelection: target.modelSelection,
+          runtimeMode,
+          interactionMode,
+          // Async delegations wake the parent on every child terminal; wait
+          // delegations deliver through the blocking tool call, so a wake is
+          // only needed if the parent settled first (timeout, disconnect).
+          completionWake: input.mode === "wait" ? "settled_only" : "always",
+        } satisfies Extract<OrchestrationV2Command, { readonly type: "delegated_task.request" }>;
+        const previous =
+          input.isolation === "worktree"
+            ? yield* threadManagement
+                .getCommandResult(command)
+                .pipe(Effect.mapError(threadManagementFailure))
+            : Option.none();
+        let workspaceStrategy: ThreadLaunchService.ThreadLaunchWorkspaceStrategy | undefined;
+        if (input.isolation === "worktree" && Option.isNone(previous)) {
+          const project = yield* projects
+            .getById(parent.thread.projectId)
+            .pipe(
+              Effect.mapError(() =>
+                failure("invalid_request", "Unable to read the parent project."),
               ),
-            ),
-          );
+            );
+          if (Option.isNone(project))
+            return yield* failure("invalid_request", "The parent project was not found.");
+          const base = yield* gitDriver
+            .resolveCommit({
+              cwd: parent.thread.worktreePath ?? project.value.workspaceRoot,
+              revision: "HEAD",
+            })
+            .pipe(
+              Effect.mapError(() =>
+                failure(
+                  "invalid_request",
+                  "Unable to resolve the parent checkout commit. Worktree isolation requires a Git repository with a commit.",
+                ),
+              ),
+            );
+          workspaceStrategy = { type: "worktree", baseRef: base.commitSha, startFromOrigin: false };
+        }
+        const result = Option.isSome(previous)
+          ? previous.value
+          : yield* threadManagement
+              .dispatch({
+                ...command,
+                ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
+                ...(input.runSetupScript === undefined
+                  ? {}
+                  : { runSetupScript: input.runSetupScript }),
+              })
+              .pipe(
+                Effect.mapError((error) =>
+                  failure(
+                    "orchestration_error",
+                    `Unable to create delegated task: ${errorMessage(error)}`,
+                  ),
+                ),
+              );
         const taskEvent = result.storedEvents.find(
           (stored) =>
             stored.event.type === "subagent.updated" && stored.event.payload.origin === "app_owned",
@@ -1744,6 +1790,22 @@ const make = Effect.gen(function* () {
           );
         }
         const taskId = taskEvent.event.payload.id;
+        const childThreadId = taskEvent.event.payload.childThreadId;
+        const childRun = result.storedEvents.find(
+          (stored) =>
+            stored.event.type === "run.created" && stored.event.threadId === childThreadId,
+        );
+        if (
+          childThreadId !== null &&
+          childRun?.event.type === "run.created" &&
+          childRun.event.payload.workspacePreparation !== undefined
+        ) {
+          yield* threadLaunch.prepareRun({
+            commandId,
+            threadId: childThreadId,
+            runId: childRun.event.payload.id,
+          });
+        }
 
         if (input.mode !== "wait") {
           return yield* readTask(scope, taskId, false, true);
@@ -2278,6 +2340,8 @@ export const layer: Layer.Layer<
   OrchestratorMcpService,
   never,
   | Crypto.Crypto
+  | ThreadLaunchService.ThreadLaunchService
+  | GitVcsDriver.GitVcsDriver
   | ProviderInstanceRegistry
   | ProjectService.ProjectService
   | ThreadManagementService.ThreadManagementService

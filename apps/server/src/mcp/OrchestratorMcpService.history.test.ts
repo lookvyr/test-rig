@@ -28,6 +28,14 @@ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 
+import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+
+const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
+  Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+);
+
 it.effect("retrieves whole omitted handoff items through paged MCP history", () =>
   Effect.gen(function* () {
     const store = yield* ProjectionStore.ProjectionStoreV2;
@@ -161,7 +169,7 @@ it.effect("retrieves whole omitted handoff items through paged MCP history", () 
       assert.equal(recovered, longText);
     }).pipe(
       Effect.provide(
-        OrchestratorMcpService.layer
+        layerOrchestratorService
           .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
           .pipe(Layer.provide(dependencies)),
       ),

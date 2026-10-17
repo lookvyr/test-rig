@@ -4513,6 +4513,24 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         return;
       }
 
+      // A cancelled/failed isolated launch has never had a usable workspace.
+      // A generic follow-up must not bypass setup or silently run at the project root.
+      const unpreparedIsolatedRun = projection.runs.find(
+        (run) =>
+          run.workspacePreparation?.type === "worktree" &&
+          run.startedAt === null &&
+          (run.status === "failed" || run.status === "interrupted" || run.status === "cancelled") &&
+          !projection.checkpointScopes.some((scope) => scope.runId === run.id),
+      );
+      if (unpreparedIsolatedRun !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause:
+            "This isolated task did not finish workspace preparation. Delegate a new task with worktree isolation to try again.",
+        });
+      }
+
       if (command.manualContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.manualContinuationOfRunId);
         const limited = latestRootProviderFailure(source ?? null, projection.turnItems);
@@ -5336,6 +5354,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           rootNodeId,
           activeAttemptId: attemptId,
           status: dispatchMode.type === "defer_start" ? "preparing" : "starting",
+          ...(dispatchMode.type === "defer_start" && dispatchMode.workspaceStrategy !== undefined
+            ? {
+                workspacePreparation: dispatchMode.workspaceStrategy,
+                ...(dispatchMode.runSetupScript === undefined
+                  ? {}
+                  : {
+                      workspacePreparationRunSetupScript: dispatchMode.runSetupScript,
+                    }),
+              }
+            : {}),
           queuePosition: null,
           requestedAt: now,
           startedAt: null,
@@ -6428,6 +6456,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
+        ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
       };
       const task: OrchestrationV2Subagent = {
         id: taskNodeId,
@@ -6545,7 +6574,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         text: command.task,
         attachments: [],
         modelSelection: command.modelSelection,
-        dispatchMode: { type: "start_immediately" },
+        dispatchMode:
+          command.workspaceStrategy === undefined
+            ? { type: "start_immediately" }
+            : {
+                type: "defer_start",
+                workspaceStrategy: command.workspaceStrategy,
+                ...(command.runSetupScript === undefined
+                  ? {}
+                  : { runSetupScript: command.runSetupScript }),
+              },
       } satisfies Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>;
       yield* dispatchMessage(childMessageCommand, events, effects);
 

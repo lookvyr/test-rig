@@ -59,6 +59,13 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import { openSideChat } from "./SideChat.ts";
 import type { ProviderAdapterV2SessionRuntime } from "./ProviderAdapter.ts";
 
+import * as ThreadLaunchService from "./ThreadLaunchService.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+const layerOrchestratorMcp = OrchestratorMcp.layer.pipe(
+  Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
+  Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+);
+
 const database = V2SqlitePersistenceMemory;
 const stores = Layer.mergeAll(
   EventStore.layer,
@@ -583,7 +590,7 @@ const mcpWorkspaceServices = Layer.merge(
   Layer.mock(ProjectService.ProjectService)({}),
 );
 
-const mcpCoordinationLayer = OrchestratorMcp.layer
+const mcpCoordinationLayer = layerOrchestratorMcp
   .pipe(Layer.provide(mcpWorkspaceServices))
   .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
   .pipe(
@@ -1044,7 +1051,7 @@ it.effect("recovers a partially accepted batch without duplicating its first con
       assert.deepEqual(yield* mcp.createThreads(coordinationScope, input), result);
     }).pipe(
       Effect.provide(
-        OrchestratorMcp.layer
+        layerOrchestratorMcp
           .pipe(Layer.provide(mcpWorkspaceServices))
           .pipe(Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})))
           .pipe(Layer.provide(dependencies)),

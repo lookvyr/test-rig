@@ -21,16 +21,27 @@ async questions, so answering an old question cannot restart canceled work.
 
 ## Workspace
 
-App-owned delegated agents use the parent's current checkout, including its
-branch, worktree, and uncommitted changes. Edits made by either agent are visible
-to the other immediately. Delegation does not create an isolated worktree or
-provide a workspace selector. Give parallel agents distinct files or tasks when
-they will edit the same checkout.
+App-owned delegated agents share the parent's current checkout by default,
+including its branch, worktree, and uncommitted changes. Edits made by either
+agent are visible to the other immediately. Give parallel agents distinct files
+or tasks when they will edit the same checkout.
 
-For isolated implementation, explicitly ask for a separate conversation in a
-new or existing worktree. That creates an independent top-level conversation,
-not a delegated child. A new worktree starts from the selected Git base;
-uncommitted edits are not copied into it.
+Ask for a delegated agent in its own worktree when the task needs a separate
+checkout. It starts from the parent's current local Git commit. Uncommitted
+changes are not copied. Project setup runs for a new worktree unless explicitly
+skipped; synchronous setup completes before the child starts. A folder without
+a Git commit cannot create an isolated child.
+
+Stopping preparation closes its setup terminal and removes the newly created
+checkout. Once the child has started, Stop preserves its worktree and edits.
+Failed setup preserves the bound checkout for inspection. If cleanup fails, its
+path stays attached so you can find it. Repeating an accepted delegation request
+returns the same task; a new attempt after failure creates a new delegated task.
+A child whose preparation failed or was stopped cannot resume through an ordinary
+follow-up, which could otherwise bypass setup or use the shared checkout.
+
+Separate top-level conversations can also use new or existing worktrees when
+you ask for an independent conversation.
 
 ## Context and results
 
