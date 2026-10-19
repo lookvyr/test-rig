@@ -1764,6 +1764,8 @@ function claudePendingBackgroundTask(input: {
   // that started it tells it apart from a background Bash command.
   readonly startedByMonitor: boolean;
   readonly description: string | undefined;
+  // Undeclared SDK field: the subagent whose own background work this is.
+  readonly parentTaskId: unknown;
 }): OrchestrationV2PendingBackgroundTask {
   return {
     taskId: input.taskId,
@@ -1774,6 +1776,9 @@ function claudePendingBackgroundTask(input: {
           : CLAUDE_OPAQUE_BACKGROUND_TASK_KINDS.get(input.taskType)) ?? "background_task"),
     ...(input.description !== undefined && input.description.trim().length > 0
       ? { description: input.description }
+      : {}),
+    ...(typeof input.parentTaskId === "string" && input.parentTaskId.trim().length > 0
+      ? { parentTaskId: input.parentTaskId }
       : {}),
   };
 }
@@ -1835,6 +1840,7 @@ function parseClaudeBackgroundTaskEntry(
     taskType,
     startedByMonitor: monitorTasks.has(taskId),
     description: typeof description === "string" ? description : undefined,
+    parentTaskId: Reflect.get(entry, "parent_task_id"),
   });
 }
 
@@ -2322,6 +2328,9 @@ function resultUserFacingError(result: SDKResultMessage): string | undefined {
   );
 }
 
+const CONTEXT_WINDOW_FULL_ERROR =
+  "Claude stopped: the prompt exceeds the model's context window. Run /compact or start a new thread.";
+
 function terminalResultError(
   reason: SDKResultMessage["terminal_reason"],
   failureHint?: string,
@@ -2340,11 +2349,11 @@ function terminalResultError(
     case "turn_setup_failed":
       return "Claude could not start the turn.";
     case "blocking_limit":
-      return "Claude stopped: a usage limit blocked the request.";
+      return failureHint ?? CONTEXT_WINDOW_FULL_ERROR;
     case "rapid_refill_breaker":
       return "Claude stopped: the context refilled too quickly after compaction.";
     case "prompt_too_long":
-      return "Claude stopped: the prompt exceeds the model's context window.";
+      return CONTEXT_WINDOW_FULL_ERROR;
     case "image_error":
       return "Claude stopped: an image in the conversation could not be processed.";
     case "model_error":
@@ -2493,9 +2502,7 @@ function providerFailureFromResult(
   usageLimited = false,
 ): OrchestrationV2ProviderFailure | null {
   const failureClass =
-    message.terminal_reason === "blocking_limit" ||
-    (message.subtype === "success" && message.api_error_status === 429) ||
-    usageLimited
+    (message.subtype === "success" && message.api_error_status === 429) || usageLimited
       ? "usage_limit"
       : "provider_error";
   const listedError = resultUserFacingError(message);
@@ -5504,6 +5511,7 @@ export function makeClaudeAdapterV2(
                 }),
                 description:
                   typeof message.description === "string" ? message.description : undefined,
+                parentTaskId: Reflect.get(message, "parent_task_id"),
               }),
             );
             rosterChanged = true;
@@ -6045,7 +6053,11 @@ export function makeClaudeAdapterV2(
             const parentToolUseId = message.parent_tool_use_id;
             const snapshotModel =
               typeof message.message.model === "string" ? message.message.model.trim() : "";
-            const model = snapshotModel.length === 0 ? undefined : snapshotModel;
+            // Claude error notices use this placeholder rather than the subagent model.
+            const model =
+              snapshotModel.length === 0 || snapshotModel === "<synthetic>"
+                ? undefined
+                : snapshotModel;
             if (parentToolUseId !== null && model !== undefined) {
               const subagent = yield* resolveSubagentByToolUseId(context, parentToolUseId);
               if (subagent === undefined) {

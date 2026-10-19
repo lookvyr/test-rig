@@ -228,3 +228,9 @@ If the preset needs different Claude files, give it a different `CLAUDE_CONFIG_D
 different API keys, base URLs, or router settings, use Environment variables.
 
 Do not put environment variable assignments in `Launch arguments`.
+
+## When The Context Window Is Full
+
+If Claude stops because the prompt exceeds its context window, run `/compact` or start a new
+thread. A full context window does not mean your usage allowance is exhausted. When Claude
+reports a usage limit, send the message again after that limit resets.

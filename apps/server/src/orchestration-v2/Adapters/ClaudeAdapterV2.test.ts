@@ -2025,7 +2025,13 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     });
   const makeAssistantErrorFrame = (input: {
     readonly uuid: string;
-    readonly error: "authentication_failed" | "rate_limit" | "server_error" | undefined;
+    readonly error:
+      | "authentication_failed"
+      | "invalid_request"
+      | "rate_limit"
+      | "server_error"
+      | undefined;
+    readonly text?: string;
     readonly parentToolUseId?: string | null;
   }) =>
     claudeSdkFrame({
@@ -2035,7 +2041,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         id: `msg_${input.uuid}`,
         type: "message",
         role: "assistant",
-        content: [{ type: "text", text: "Claude could not complete this request." }],
+        content: [{ type: "text", text: input.text ?? "Claude could not complete this request." }],
         stop_reason: null,
         stop_sequence: null,
         usage: {
@@ -4078,10 +4084,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         assert.equal(terminal.status, "failed");
         if (terminal.status !== "failed") return;
         assert.isNotEmpty(terminal.failure.message);
-        assert.equal(
-          terminal.failure.class,
-          terminalReason === "blocking_limit" ? "usage_limit" : "provider_error",
-        );
+        assert.equal(terminal.failure.class, "provider_error");
         assert.isFalse(
           harness.events.some(
             (event) =>
@@ -4139,6 +4142,33 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           assert.equal(
             (afterStart.at(-1)?.providerThread.pendingBackgroundTasks ?? [])[0]?.taskId,
             WAKE_TASK_ID,
+          );
+
+          // A subagent's own background shell keeps the subagent waiting on it.
+          yield* Queue.offer(
+            harness.sdkMessages,
+            claudeSdkFrame({
+              type: "system",
+              subtype: "background_tasks_changed",
+              tasks: [
+                {
+                  task_id: "subagent-shell",
+                  task_type: "local_bash",
+                  description: "sleep 150",
+                  parent_task_id: "agent-1",
+                },
+              ],
+              uuid: "00000000-0000-4000-8000-000000000203",
+              session_id: WAKE_NATIVE_SESSION,
+            }),
+          );
+          yield* awaitUntil(
+            () =>
+              providerThreadRosterEvents(harness.events).some(
+                (event) =>
+                  event.providerThread.pendingBackgroundTasks?.[0]?.parentTaskId === "agent-1",
+              ),
+            "subagent shell roster",
           );
 
           yield* Queue.offer(harness.sdkMessages, emptyRoster);
@@ -8102,7 +8132,74 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
-  it.effect.each(["requested", "observed-before", "observed-after", "inherit", "unknown"] as const)(
+  // Frames follow #19832: a full context window ends the turn with
+  // blocking_limit while the plan's rate-limit window is still allowed.
+  it.effect.each([
+    {
+      windowStatus: "allowed",
+      expectedClass: "provider_error",
+      expectedMessage: "Claude stopped: the prompt exceeds the model's context window.",
+    },
+    {
+      windowStatus: "rejected",
+      expectedClass: "usage_limit",
+      expectedMessage: "Claude usage limit reached. Send the message again once the limit resets.",
+    },
+  ] as const)(
+    "classifies blocking_limit by its rate-limit evidence ($windowStatus window)",
+    ({ windowStatus, expectedClass, expectedMessage }) =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make(`attempt-blocking-limit-${windowStatus}`),
+            text: "Continue.",
+            attachments: [],
+          }),
+        );
+        yield* Queue.offerAll(harness.sdkMessages, [
+          claudeSdkFrame({
+            type: "rate_limit_event",
+            rate_limit_info: { status: windowStatus, rateLimitType: "five_hour" },
+            uuid: "00000000-0000-4000-8000-000000000660",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          makeAssistantErrorFrame({
+            uuid: "00000000-0000-4000-8000-000000000661",
+            error: "invalid_request",
+            text: "Prompt is too long",
+          }),
+          makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000662",
+            result: "Prompt is too long",
+            isError: true,
+            numTurns: 189,
+            terminalReason: "blocking_limit",
+          }),
+        ]);
+        const terminal = yield* Queue.take(harness.terminalReceipts);
+        assert.equal(terminal.status, "failed");
+        if (terminal.status !== "failed") return;
+        assert.equal(terminal.failure.class, expectedClass);
+        assert.include(terminal.failure.message, expectedMessage);
+        assert.equal(terminal.failure.code, "blocking_limit");
+        if (expectedClass === "provider_error") {
+          assert.include(terminal.failure.message, "/compact");
+        }
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect.each([
+    "requested",
+    "observed-before",
+    "observed-after",
+    "synthetic-after",
+    "inherit",
+    "unknown",
+  ] as const)(
     "records the subagent model from %s without inheriting the parent override",
     (source) =>
       Effect.scoped(
@@ -8111,7 +8208,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           const now = yield* DateTime.now;
           const toolUseId = "toolu-subagent-model";
           const parentModel = "claude-opus-4-6";
-          const observedModel = "claude-haiku-4-5-20251001";
+          // Claude stamps its own error frames, such as a usage-limit notice, as
+          // "<synthetic>"; that is not the model the subagent runs on.
+          const observedModel =
+            source === "synthetic-after" ? "<synthetic>" : "claude-haiku-4-5-20251001";
           yield* harness.runtime.startTurn(
             makeClaudeTestTurnInput({
               threadId: harness.threadId,
@@ -8180,7 +8280,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               session_id: WAKE_NATIVE_SESSION,
             }),
           );
-          if (source === "observed-after") yield* Queue.offer(harness.sdkMessages, observed);
+          if (source === "observed-after" || source === "synthetic-after") {
+            yield* Queue.offer(harness.sdkMessages, observed);
+          }
           yield* Queue.offer(
             harness.sdkMessages,
             makeResultFrame({
