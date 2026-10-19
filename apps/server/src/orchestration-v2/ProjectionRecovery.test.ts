@@ -26,31 +26,35 @@ import { V2SqlitePersistenceMemory as SqlitePersistenceMemory } from "../persist
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
-import { restartContinuationRun } from "./RestartContinuation.ts";
+import { continueRestartedRun, restartContinuationRun } from "./RestartContinuation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as EventSink from "./EventSink.ts";
 import * as EventStore from "./EventStore.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import * as ProviderRuntimeRecovery from "./ProviderRuntimeRecoveryService.ts";
+import * as ThreadManagementService from "./ThreadManagementService.ts";
 
 const TestLayer = Layer.mergeAll(ProjectionStore.layer, EffectOutbox.layer).pipe(
   Layer.provideMerge(SqlitePersistenceMemory),
 );
-const layerRecoveryTest = ProviderRuntimeRecovery.layer.pipe(
-  Layer.provideMerge(
-    EventSink.layer.pipe(
-      Layer.provideMerge(
-        Layer.mergeAll(
-          EventStore.layer,
-          ProjectionStore.layer,
-          EffectOutbox.layer,
-          IdAllocator.layer,
-        ).pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+const recoveryTestLayer = (continueThreadsAfterServerUpdate = false) =>
+  ProviderRuntimeRecovery.layer.pipe(
+    Layer.provideMerge(
+      EventSink.layer.pipe(
+        Layer.provideMerge(
+          Layer.mergeAll(
+            EventStore.layer,
+            ProjectionStore.layer,
+            EffectOutbox.layer,
+            IdAllocator.layer,
+          ).pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        ),
       ),
     ),
-  ),
-  Layer.provide(ServerSettings.layerTest()),
-);
+    Layer.provide(ServerSettings.layerTest({ continueThreadsAfterServerUpdate })),
+  );
+
+const layerRecoveryTest = recoveryTestLayer();
 
 const providerInstanceId = ProviderInstanceId.make("codex");
 const modelSelection = { instanceId: providerInstanceId, model: "gpt-5.4" };
@@ -568,4 +572,243 @@ it.effect.each(["startup", "shutdown"] as const)(
       );
       assert.equal((yield* recovery.reconcile(trigger)).terminalizedRuns, 0);
     }).pipe(Effect.provide(layerRecoveryTest)),
+);
+
+it.effect.each(["startup", "graceful"] as const)(
+  "%s wakes the run whose subagent lost its shell, past a wake cut before it started",
+  (mode) =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const recovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
+      const sql = yield* SqlClient.SqlClient;
+      const now = yield* DateTime.now;
+      const threadId = yield* createThread("subagent-shell");
+      const providerThreadId = ProviderThreadId.make(`provider-thread:${threadId}`);
+      const providerSessionId = ProviderSessionId.make(`session:${threadId}`);
+      yield* projections.apply({
+        id: EventId.make(`event:${threadId}:session`),
+        type: "provider-session.attached",
+        threadId,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: {
+          id: providerSessionId,
+          driver,
+          providerInstanceId,
+          status: "ready",
+          cwd: "/workspace",
+          model: modelSelection.model,
+          capabilities: CodexProviderCapabilitiesV2,
+          createdAt: now,
+          updatedAt: now,
+          lastError: null,
+        },
+      });
+      const settledRun = yield* createRun(threadId, "completed", { providerThreadId });
+      yield* createRun(threadId, "starting", {
+        ordinal: 2,
+        providerThreadId,
+        startedAt: null,
+        completedAt: null,
+      });
+      yield* projections.apply({
+        id: EventId.make(`event:${threadId}:roster`),
+        type: "provider-thread.updated",
+        threadId,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: {
+          id: providerThreadId,
+          appThreadId: threadId,
+          ownerNodeId: null,
+          driver,
+          providerInstanceId,
+          providerSessionId,
+          nativeThreadRef: { driver, nativeId: "native-thread", strength: "strong" },
+          nativeConversationHeadRef: null,
+          status: "idle",
+          firstRunOrdinal: 1,
+          lastRunOrdinal: 2,
+          handoffIds: [],
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          pendingBackgroundTasks: [
+            { taskId: "shell", description: "sleep 150", kind: "command", parentTaskId: "agent" },
+          ],
+        },
+      });
+
+      if (mode === "graceful") {
+        yield* recovery.prepareForShutdown;
+        yield* recovery.reconcile("shutdown");
+      }
+      yield* recovery.reconcile("startup");
+
+      const effects = yield* sql<{ readonly effect_id: string }>`
+      SELECT effect_id FROM orchestration_v2_effect_outbox WHERE thread_id = ${threadId} AND status = 'pending'
+    `;
+      assert.deepEqual(effects, [{ effect_id: `effect:restart-continuation:${settledRun}` }]);
+      const projection = yield* projections.getThreadProjection(threadId);
+      assert.deepEqual(projection.runs[0]?.restartCancelledBackgroundWork, [
+        { kind: "subagent", label: "sleep 150 (subagent agent)", id: "agent" },
+      ]);
+      const prompts: string[] = [];
+      yield* continueRestartedRun({ threadId, sourceRunId: settledRun }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ServerSettings.layerTest({ continueThreadsAfterServerUpdate: true }),
+            Layer.mock(ThreadManagementService.ThreadManagementService)({
+              getThreadRecords: () => projections.getThreadProjection(threadId).pipe(Effect.orDie),
+              recoverDelegatedTask: () => Effect.void,
+              dispatch: (command) => {
+                if (command.type === "message.dispatch") prompts.push(command.text);
+                return Effect.succeed({} as never);
+              },
+            }),
+          ),
+        ),
+      );
+      assert.lengthOf(prompts, 1);
+      assert.include(prompts[0], "sleep 150 (subagent agent)");
+    }).pipe(Effect.provide(recoveryTestLayer(true))),
+);
+
+it.effect("wakes a settled run whose native subagent ran on its own provider thread", () =>
+  Effect.gen(function* () {
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const recovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
+    const sql = yield* SqlClient.SqlClient;
+    const now = yield* DateTime.now;
+    const threadId = yield* createThread("native-subagent");
+    const parentProviderThreadId = ProviderThreadId.make(`provider-thread:${threadId}`);
+    const childProviderThreadId = ProviderThreadId.make(`provider-thread:${threadId}:child`);
+    const providerSessionId = ProviderSessionId.make(`session:${threadId}`);
+    const subagentId = NodeId.make(`node:${threadId}:subagent`);
+    // An older thread on the same Codex session is recovered first and stops it.
+    const sibling = yield* createThread("a-shared-session");
+    yield* createRun(sibling, "completed");
+    for (const boundThreadId of [sibling, threadId]) {
+      yield* projections.apply({
+        id: EventId.make(`event:${boundThreadId}:session`),
+        type: "provider-session.attached",
+        threadId: boundThreadId,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: {
+          id: providerSessionId,
+          driver,
+          providerInstanceId,
+          status: "ready",
+          cwd: "/workspace",
+          model: modelSelection.model,
+          capabilities: CodexProviderCapabilitiesV2,
+          createdAt: now,
+          updatedAt: now,
+          lastError: null,
+        },
+      });
+    }
+    const settledRun = yield* createRun(threadId, "completed", {
+      providerThreadId: parentProviderThreadId,
+    });
+    for (const [id, nativeId] of [
+      [parentProviderThreadId, "native-thread"],
+      [childProviderThreadId, "agent-thread"],
+    ] as const) {
+      yield* projections.apply({
+        id: EventId.make(`event:${id}`),
+        type: "provider-thread.updated",
+        threadId,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: {
+          id,
+          appThreadId:
+            id === parentProviderThreadId ? threadId : ThreadId.make(`${threadId}:child`),
+          ownerNodeId: null,
+          driver,
+          providerInstanceId,
+          providerSessionId,
+          nativeThreadRef: { driver, nativeId, strength: "strong" },
+          nativeConversationHeadRef: null,
+          status: "idle",
+          firstRunOrdinal: id === parentProviderThreadId ? 1 : null,
+          lastRunOrdinal: id === parentProviderThreadId ? 1 : null,
+          handoffIds: [],
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    }
+    const subagent = {
+      threadId,
+      runId: settledRun,
+      origin: "provider_native",
+      driver,
+      providerInstanceId,
+      childThreadId: null,
+      prompt: "audit src",
+      status: "running",
+      result: null,
+      startedAt: now,
+      completedAt: null,
+      updatedAt: now,
+    } as const;
+    yield* projections.apply({
+      id: EventId.make(`event:${threadId}:subagent`),
+      type: "subagent.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        ...subagent,
+        id: subagentId,
+        parentNodeId: NodeId.make(`node:${threadId}:root`),
+        createdBy: "agent",
+        providerThreadId: childProviderThreadId,
+        nativeTaskRef: { driver, nativeId: "call_1:agent-thread", strength: "strong" },
+        title: null,
+        model: null,
+      },
+    });
+    yield* projections.apply({
+      id: EventId.make(`event:${threadId}:subagent-item`),
+      type: "turn-item.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        ...subagent,
+        id: TurnItemId.make(`item:${threadId}:subagent`),
+        nodeId: subagentId,
+        providerThreadId: childProviderThreadId,
+        providerTurnId: null,
+        nativeItemRef: { driver, nativeId: "call_1:agent-thread", strength: "strong" },
+        parentItemId: null,
+        ordinal: 1,
+        type: "subagent",
+        title: "audit",
+        subagentId,
+      },
+    });
+
+    yield* recovery.reconcile("startup");
+
+    const effects = yield* sql<{ readonly effect_id: string }>`
+      SELECT effect_id FROM orchestration_v2_effect_outbox WHERE thread_id = ${threadId}
+    `;
+    assert.deepEqual(effects, [{ effect_id: `effect:restart-continuation:${settledRun}` }]);
+    const projection = yield* projections.getThreadProjection(threadId);
+    assert.deepEqual(projection.runs[0]?.restartCancelledBackgroundWork, [
+      {
+        kind: "subagent",
+        label: "audit (id agent-thread)",
+        id: TurnItemId.make(`item:${threadId}:subagent`),
+      },
+    ]);
+  }).pipe(Effect.provide(recoveryTestLayer(true))),
 );

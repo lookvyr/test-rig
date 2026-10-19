@@ -75,7 +75,7 @@ import { CommandPolicyV2, resolveMessageDispatchIntent } from "./CommandPolicy.t
 import { CommandReceiptStoreV2 } from "./CommandReceiptStore.ts";
 import { ContextHandoffServiceV2 } from "./ContextHandoffService.ts";
 import { notificationTurnItem } from "./Notification.ts";
-import { isRestartNoteSource } from "./RestartBackgroundNote.ts";
+import { cancelledBeforeStart, isRestartNoteSource } from "./RestartBackgroundNote.ts";
 import {
   isBufferedProviderNotification,
   isUndeliveredMailboxSteer,
@@ -4597,7 +4597,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
       if (command.restartContinuationOfRunId !== undefined) {
         const source = projection.runs.find((run) => run.id === command.restartContinuationOfRunId);
-        const latest = latestExecutedRun(projection.runs);
+        const latest = latestExecutedRun(
+          projection.runs.filter((run) => !cancelledBeforeStart(run)),
+        );
         if (
           !source ||
           (source.status !== "cancelled" &&

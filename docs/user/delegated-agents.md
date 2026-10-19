@@ -78,6 +78,16 @@ use Open parent thread to return to the conversation that delegated the work.
 Working children remain visible after the parent finishes its response, including
 while you send a follow-up. Claude's native background children retain their tool
 activity and results as they finish.
+Background subagents can continue using conversation tools after the parent
+response ends, while their original provider account still owns the work.
+Stopping the work, archiving the conversation, or switching accounts ends that
+access.
+
+When automatic continuation after updates is enabled, a restart can resume a
+conversation that was waiting on a native subagent, including a command running
+inside that subagent. The agent receives the interrupted subagent’s identifier
+so it can resume or restart the work. A command running directly in an already
+finished conversation does not trigger an automatic continuation.
 
 Completion updates identify the child and show its result preview. Open the
 update to visit that child. The update keeps its reported outcome and time even

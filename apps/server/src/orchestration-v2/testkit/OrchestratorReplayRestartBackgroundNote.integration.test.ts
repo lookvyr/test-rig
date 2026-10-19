@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { ProviderDriverKind, type ProviderReplayEntry } from "@t3tools/contracts";
+import { EventId, ProviderDriverKind, type ProviderReplayEntry } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -11,6 +11,7 @@ import {
   makeClaudeRestartReplayHarness,
 } from "../Adapters/ClaudeAdapterV2.testkit.ts";
 import * as IdAllocator from "../IdAllocator.ts";
+import * as ProjectionStore from "../ProjectionStore.ts";
 import { makeV2SqlitePersistenceLive } from "../../persistence/Layers/V2Sqlite.ts";
 import { provideDeterministicTestRuntime } from "./DeterministicRuntime.ts";
 import { CLAUDE_BACKGROUND_SUBAGENT_AFTER_ROOT_PROMPT } from "./fixtures/claude_background_subagent_after_root/input.ts";
@@ -28,8 +29,8 @@ const SESSION_ID = "cca274e4-25ae-4171-b972-bbb31118517e";
 const FIRST_AFTER_RESTART = "Is the background subagent done yet?";
 const SECOND_AFTER_RESTART = "Thanks. Anything else?";
 const NOTE = [
-  "Note: the T3 server restarted, and this background work was cancelled before it finished. It will not report back:",
-  "- subagent: Background subagent test",
+  "Note: the T3 server restarted, and this background work was cancelled before it finished. It will not report back on its own, so resume or restart what you still need and wait for its result:",
+  "- subagent: Background subagent test (id a2995bfced8019363)",
 ].join("\n");
 
 /**
@@ -197,6 +198,24 @@ const runRestart = Effect.fn("runRestart")(function* (input: {
   assert.equal(backgroundItem?.runId, settled.runs[0]?.id);
   assert.isNotNull(settled.runs[0]?.providerThreadId);
   assert.equal(backgroundItem?.providerThreadId, settled.runs[0]?.providerThreadId);
+
+  // Scope teardown stops sessions cleanly. This fixture models process loss,
+  // so restore the live session snapshot captured before teardown; genuinely
+  // stopped sessions must not trigger restart continuation.
+  yield* Effect.gen(function* () {
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    assert.isAbove(settled.providerSessions.length, 0);
+    for (const session of settled.providerSessions) {
+      assert.notInclude(["stopped", "error"], session.status);
+      yield* projections.apply({
+        id: EventId.make(`event:simulated-process-loss:${session.id}`),
+        type: "provider-session.updated",
+        threadId,
+        occurredAt: session.updatedAt,
+        payload: session,
+      });
+    }
+  }).pipe(Effect.provide(ProjectionStore.layer.pipe(Layer.provide(databaseLayer))));
 
   const after = yield* Effect.scoped(
     runOrchestratorV2ProviderReplayScenario(scenario("after-restart", phase2Steps), harness, {

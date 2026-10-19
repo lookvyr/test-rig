@@ -823,6 +823,8 @@ function kindUnionWithFallback<
 
 const PendingBackgroundTaskFields = {
   taskId: TrimmedNonEmptyString,
+  /** The subagent task that started this work and waits on it. */
+  parentTaskId: Schema.optional(TrimmedNonEmptyString),
   /** The work's name: a subagent's title, a command's description, a monitor's. */
   description: Schema.optional(TrimmedNonEmptyString),
 };
@@ -839,6 +841,8 @@ export const OrchestrationV2PendingBackgroundTask = kindUnionWithFallback(
     Schema.Struct({
       ...PendingBackgroundTaskFields,
       kind: Schema.Literal("subagent"),
+      /** Owning provider instance, populated in derived pending work. */
+      providerInstanceId: Schema.optional(ProviderInstanceId),
       /** The subagent's own thread, when it has one. */
       childThreadId: Schema.optional(ThreadId),
     }),
@@ -847,9 +851,10 @@ export const OrchestrationV2PendingBackgroundTask = kindUnionWithFallback(
     Schema.Struct({ ...PendingBackgroundTaskFields, kind: Schema.Literal("background_task") }),
   ],
   (kind) => Schema.Struct({ ...PendingBackgroundTaskFields, kind }),
-  ({ taskId, description }) => ({
+  ({ taskId, description, parentTaskId }) => ({
     taskId,
     ...(description === undefined ? {} : { description }),
+    ...(parentTaskId === undefined ? {} : { parentTaskId }),
     kind: "background_task",
   }),
 );

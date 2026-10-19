@@ -15,6 +15,8 @@ import type { ProjectionRuntimeRecoveryState } from "./ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import {
+  cancelledBeforeStart,
+  neverStarted,
   isRestartNoteSource,
   restartCancelledBackgroundWorkNote,
 } from "./RestartBackgroundNote.ts";
@@ -34,7 +36,11 @@ export function restartContinuationRun(
   if (projection.thread.archivedAt !== null || projection.thread.deletedAt !== null) return;
   const run = projection.runs.reduce<OrchestrationV2Run | undefined>(
     (latest, candidate) =>
-      candidate.status !== "queued" && (!latest || runRanAfter(candidate, latest))
+      candidate.status !== "queued" &&
+      (!neverStarted(candidate) ||
+        candidate.status === "interrupted" ||
+        candidate.status === "failed") &&
+      (!latest || runRanAfter(candidate, latest))
         ? candidate
         : latest,
     undefined,
@@ -69,16 +75,13 @@ export function restartContinuationRun(
   const session = projection.providerSessions.find(
     (candidate) => candidate.id === providerThread.providerSessionId,
   );
-  // A settled thread's session may already be stopped and out of the recovery
-  // read; the continuation reopens it from the provider thread's native ref.
-  // Most adapters keep a live session "ready" through its turns, so only a
-  // stopped or failed session rules out a live turn.
+  // A stopped or missing session had already lost ownership before this restart.
   if (
     session === undefined
-      ? !settledWithCancelledWork
+      ? !preparedContinuation
       : session.providerInstanceId !== run.providerInstanceId ||
         session.driver !== providerThread.driver ||
-        (liveTurnRequired && (session.status === "stopped" || session.status === "error"))
+        (!preparedContinuation && (session.status === "stopped" || session.status === "error"))
   )
     return;
   if (
@@ -120,7 +123,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       source !== undefined && isRestartNoteSource(source, projection.providerTurns);
     if (!source || (source.status !== "cancelled" && !noteSource)) return;
     // A user submission after reconciliation takes precedence over an automatic prompt.
-    const latest = latestExecutedRun(projection.runs);
+    const latest = latestExecutedRun(projection.runs.filter((run) => !cancelledBeforeStart(run)));
     if (latest !== null && latest.id !== source.id && runRanAfter(latest, source)) return;
     if (projection.thread.providerInstanceId !== source.providerInstanceId) return;
     const sourceRecords = yield* threads.getThreadRecords(

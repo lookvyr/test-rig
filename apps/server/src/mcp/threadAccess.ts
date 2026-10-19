@@ -44,16 +44,14 @@ function assertLiveCaller({
   caller: OrchestrationV2ThreadShell;
   scope: McpInvocationContext.McpInvocationScope;
 }) {
-  return caller.archivedAt !== null ||
-    caller.activeRunId === null ||
-    caller.providerInstanceId !== scope.providerInstanceId
-    ? Effect.fail(
+  return OrchestrationMcp.isLiveCallerShell(caller, scope.providerInstanceId)
+    ? Effect.void
+    : Effect.fail(
         new OrchestratorMcpFailure({
           code: "parent_not_active",
           message: "The calling provider no longer owns an active thread run.",
         }),
-      )
-    : Effect.void;
+      );
 }
 export const readMutationCaller = Effect.fn("mcp.readMutationCaller")(function* () {
   const context = yield* readCaller();
