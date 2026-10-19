@@ -4,6 +4,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   ExternalLinkIcon,
   GitMergeIcon,
+  GitPullRequestDraftIcon,
   GitPullRequestIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -164,6 +165,11 @@ function ProjectPullRequests({
               <span className="flex items-center gap-2 pr-28 text-xs text-muted-foreground">
                 {pr.state === "merged" ? (
                   <GitMergeIcon className="size-3.5 shrink-0 text-purple-500" />
+                ) : pr.state === "open" && pr.isDraft ? (
+                  <GitPullRequestDraftIcon
+                    aria-hidden
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                  />
                 ) : (
                   <GitPullRequestIcon
                     className={cn(
