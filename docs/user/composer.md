@@ -18,6 +18,10 @@ Fenced code uses syntax highlighting when its language is supported. Drafts and
 sent prompts remain Markdown, and copying formatted content copies Markdown.
 Links, tables, and task checkboxes remain literal Markdown in the composer.
 
+Tables in messages offer **Expand table cells** or **Collapse table cells** only
+when a cell would be cut off without wrapping. The control updates as content or
+the available width changes. Use **Copy table** to copy as Markdown or CSV.
+
 **Enter sends the prompt**, including from a list or code block. **Shift+Enter**
 continues the current list or inserts a line in code. Use Shift+Enter on an empty
 list item to leave the list; in code, use it after two trailing blank lines to

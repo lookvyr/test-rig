@@ -10,6 +10,7 @@ export interface ChatMarkdownContextReference {
   label: string;
 }
 
+import { tableHasClippedCells } from "./chatMarkdownTable";
 import { MarkdownPre, nodeToPlainText, remarkPreserveCodeMeta } from "./MarkdownCodeBlock";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -36,6 +37,7 @@ import React, {
   useCallback,
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -171,10 +173,30 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
   const [expanded, setExpanded] = useState(() => getClientSettings().wordWrap);
+  const [hasClippedCells, setHasClippedCells] = useState(false);
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const expandLabel = expanded ? "Collapse table cells" : "Expand table cells";
   const copyLabel = copied ? "Copied" : "Copy table";
+
+  const measureClippedCells = useCallback(() => {
+    const container = containerRef.current;
+    const table = tableRef.current;
+    if (container && table) setHasClippedCells(tableHasClippedCells(container, table));
+  }, []);
+
+  // Streaming can change clipping without changing the table's dimensions.
+  useLayoutEffect(measureClippedCells);
+
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    const container = containerRef.current;
+    if (!table || !container || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measureClippedCells);
+    observer.observe(table);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [measureClippedCells]);
 
   function toggleExpanded() {
     const table = tableRef.current;
@@ -253,24 +275,32 @@ function MarkdownTable({ children, ...props }: React.ComponentProps<"table">) {
         </table>
       </ScrollArea>
       <div className="chat-markdown-table-footer select-none">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="chat-markdown-chrome-action"
-                aria-pressed={expanded}
-                onClick={toggleExpanded}
-                aria-label={expandLabel}
-              />
-            }
-          >
-            {expanded ? <Minimize2Icon className="size-3" /> : <Maximize2Icon className="size-3" />}
-          </TooltipTrigger>
-          <TooltipPopup side="top">{expandLabel}</TooltipPopup>
-        </Tooltip>
+        {hasClippedCells ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="chat-markdown-chrome-action"
+                  aria-pressed={expanded}
+                  onClick={toggleExpanded}
+                  aria-label={expandLabel}
+                />
+              }
+            >
+              {expanded ? (
+                <Minimize2Icon className="size-3" />
+              ) : (
+                <Maximize2Icon className="size-3" />
+              )}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{expandLabel}</TooltipPopup>
+          </Tooltip>
+        ) : (
+          <span />
+        )}
         <Menu>
           <Tooltip>
             <TooltipTrigger
