@@ -124,6 +124,8 @@ describe("KeybindingsSettings.logic", () => {
   it("formats static and project script command labels", () => {
     expect(commandLabel("commandPalette.toggle")).toBe("Command Palette: Toggle");
     expect(commandLabel("themeEditor.toggle")).toBe("Theme Editor: Toggle");
+    expect(commandLabel("composer.increaseEffort")).toBe("Composer: Increase Effort");
+    expect(commandLabel("composer.decreaseEffort")).toBe("Composer: Decrease Effort");
     expect(commandLabel("script.setup-db.run")).toBe("Run Script: Setup Db");
   });
 
@@ -152,7 +154,13 @@ describe("KeybindingsSettings.logic", () => {
     ] satisfies ResolvedKeybindingsConfig);
 
     expect(options).toEqual(
-      expect.arrayContaining(["chat.new", "thread.stop", "script.setup-db.run"]),
+      expect.arrayContaining([
+        "chat.new",
+        "thread.stop",
+        "composer.increaseEffort",
+        "composer.decreaseEffort",
+        "script.setup-db.run",
+      ]),
     );
   });
 
@@ -160,6 +168,14 @@ describe("KeybindingsSettings.logic", () => {
     expect(DEFAULT_RESOLVED_KEYBINDINGS.some((binding) => binding.command === "thread.stop")).toBe(
       false,
     );
+  });
+
+  it("leaves effort commands unassigned by default", () => {
+    for (const command of ["composer.increaseEffort", "composer.decreaseEffort"]) {
+      expect(DEFAULT_RESOLVED_KEYBINDINGS.some((binding) => binding.command === command)).toBe(
+        false,
+      );
+    }
   });
 
   it("reports unknown when variables without rejecting parseable expressions", () => {

@@ -419,6 +419,17 @@ export function createEnvironmentServerConfigsAtom(input: {
   }).pipe(Atom.withLabel("environment-server-configs"));
 }
 
+/** Bootstrap readiness without subscribing views to streaming shell contents. */
+export function createEnvironmentShellHasSnapshotAtom(
+  stateValueAtom: (environmentId: EnvironmentId) => Atom.Atom<EnvironmentShellState>,
+) {
+  return Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => Option.isSome(get(stateValueAtom(environmentId)).snapshot)).pipe(
+      Atom.withLabel(`environment-shell-has-snapshot:${environmentId}`),
+    ),
+  );
+}
+
 export function createEnvironmentShellAtoms<R, E>(
   runtime: Atom.AtomRuntime<
     | EnvironmentRegistry.EnvironmentRegistry
@@ -443,6 +454,7 @@ export function createEnvironmentShellAtoms<R, E>(
   return {
     stateAtom,
     stateValueAtom,
+    hasSnapshotAtom: createEnvironmentShellHasSnapshotAtom(stateValueAtom),
   };
 }
 

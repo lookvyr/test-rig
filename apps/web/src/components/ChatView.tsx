@@ -132,7 +132,7 @@ import {
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
-import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { isCommandPaletteOpen, onStepComposerEffort } from "../commandPaletteBus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import {
   RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY,
@@ -254,7 +254,7 @@ import {
   readThreadShell,
   readProject,
 } from "../state/entities";
-import { environmentShell } from "../state/shell";
+import { environmentShell, useEnvironmentShellHasSnapshot } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { useLocalDispatchState } from "./chat/useLocalDispatchState";
 import { usePersistThreadSettings } from "./chat/usePersistThreadSettings";
@@ -1277,6 +1277,13 @@ function ChatViewContent(props: ChatViewProps) {
   const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
+  useEffect(
+    () =>
+      onStepComposerEffort((direction) => {
+        composerRef.current?.stepReasoningEffort(direction);
+      }),
+    [composerRef],
+  );
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
@@ -1712,10 +1719,9 @@ function ChatViewContent(props: ChatViewProps) {
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
-  const activeEnvironmentShell = useEnvironmentQuery(
-    activeThread ? environmentShell.stateAtom(activeThread.environmentId) : null,
+  const activeEnvironmentBootstrapComplete = useEnvironmentShellHasSnapshot(
+    activeThread?.environmentId ?? null,
   );
-  const activeEnvironmentBootstrapComplete = activeEnvironmentShell.data?.snapshot._tag === "Some";
   const activeProjectKey = activeProject
     ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
     : null;
@@ -2146,17 +2152,27 @@ function ChatViewContent(props: ChatViewProps) {
     [threadProjection],
   );
   const pendingApprovals = useMemo(
-    () => derivePendingApprovals(pendingRequests.approvals),
+    () =>
+      pendingRequests.approvals.length === 0
+        ? EMPTY_PENDING_APPROVALS
+        : derivePendingApprovals(pendingRequests.approvals),
     [pendingRequests.approvals],
   );
   const allPendingUserInputs = useMemo(
-    () => derivePendingUserInputs(pendingRequests.userInputs),
+    () =>
+      pendingRequests.userInputs.length === 0
+        ? EMPTY_PENDING_USER_INPUTS
+        : derivePendingUserInputs(pendingRequests.userInputs),
     [pendingRequests.userInputs],
   );
-  const pendingUserInputs = allPendingUserInputs.filter(isBlockingUserInput);
-  const nonBlockingUserInputs = allPendingUserInputs.filter(
-    (request) => !isBlockingUserInput(request),
-  );
+  const pendingUserInputs =
+    allPendingUserInputs.length === 0
+      ? EMPTY_PENDING_USER_INPUTS
+      : allPendingUserInputs.filter(isBlockingUserInput);
+  const nonBlockingUserInputs =
+    allPendingUserInputs.length === 0
+      ? EMPTY_PENDING_USER_INPUTS
+      : allPendingUserInputs.filter((request) => !isBlockingUserInput(request));
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const {
     activePendingDraftAnswers,
@@ -4921,6 +4937,17 @@ function ChatViewContent(props: ChatViewProps) {
         return;
       }
 
+      if (
+        (command === "composer.increaseEffort" || command === "composer.decreaseEffort") &&
+        !sideChatFocused
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat)
+          composerRef.current?.stepReasoningEffort(command === "composer.increaseEffort" ? 1 : -1);
+        return;
+      }
+
       if (command === "thread.stop") {
         if (!canInterruptRunningThread || sideChatFocused) return;
         event.preventDefault();
@@ -6999,6 +7026,9 @@ function ChatViewContent(props: ChatViewProps) {
     </div>
   );
 }
+
+const EMPTY_PENDING_APPROVALS: ReturnType<typeof derivePendingApprovals> = [];
+const EMPTY_PENDING_USER_INPUTS: ReturnType<typeof derivePendingUserInputs> = [];
 
 export default function ChatView(props: ChatViewProps) {
   return (

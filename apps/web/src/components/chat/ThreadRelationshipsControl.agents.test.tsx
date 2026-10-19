@@ -21,7 +21,8 @@ vi.mock("../../state/entities", () => ({
     state.readDetail(ref);
     return ref === null ? null : { projection: state.projection };
   },
-  useThreadShells: () => state.shells,
+  useThreadRelationshipShells: () =>
+    (state.shells as ReadonlyArray<{ source: unknown }>).map((shell) => shell.source),
   useProjects: () => state.projects,
   useServerConfigs: () => state.configs,
 }));

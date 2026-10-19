@@ -1,3 +1,4 @@
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import {
@@ -122,6 +123,7 @@ import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
+  getComposerReasoningStep,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
@@ -489,6 +491,7 @@ export interface ChatComposerHandle {
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
   openModelPicker: () => void;
   toggleModelPicker: () => void;
+  stepReasoningEffort: (direction: 1 | -1) => void;
   isModelPickerOpen: () => boolean;
   readSnapshot: () => {
     value: string;
@@ -2736,6 +2739,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     event.preventDefault();
     void addComposerImages(imageFiles);
   };
+  const onComposerPasteStable = useStableCallback(onComposerPaste);
+  const onComposerCommandKeyStable = useStableCallback(onComposerCommandKey);
 
   const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes("Files")) return;
@@ -2956,6 +2961,41 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       toggleModelPicker: () => {
         setIsComposerModelPickerOpen((open) => !open);
       },
+      stepReasoningEffort: (direction) => {
+        if (
+          noProviderAvailable ||
+          isComposerApprovalState ||
+          pendingUserInputs.length > 0 ||
+          activePendingProgress !== null
+        )
+          return;
+        const change = getComposerReasoningStep({
+          provider: selectedProvider,
+          instanceId: selectedInstanceId,
+          model: selectedModel,
+          models: selectedProviderModels,
+          modelOptions: composerModelOptions?.[selectedInstanceId],
+          reportedModelSelection,
+          prompt: promptRef.current,
+          cursor: readComposerSnapshot().expandedCursor,
+          direction,
+        });
+        if (!change) return;
+        if (change.modelOptions) {
+          useComposerDraftStore
+            .getState()
+            .setProviderModelOptions(composerDraftTarget, selectedProvider, change.modelOptions, {
+              instanceId: selectedInstanceId,
+              model: selectedModel,
+              persistSticky: true,
+            });
+        }
+        if (change.prompt !== promptRef.current) {
+          applyPromptReplacement(0, promptRef.current.length, change.prompt, {
+            cursor: change.cursor,
+          });
+        }
+      },
       isModelPickerOpen: () => isComposerModelPickerOpen,
       readSnapshot: () => {
         return readComposerSnapshot();
@@ -3034,6 +3074,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activePendingProgress,
       composerDraftTarget,
       composerCursor,
+      composerModelOptions,
+      selectedInstanceId,
+      reportedModelSelection,
       composerTerminalContexts,
       insertComposerDraftTerminalContext,
       promptRef,
@@ -3548,8 +3591,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
                   onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
                   onChange={onPromptChange}
-                  onCommandKeyDown={onComposerCommandKey}
-                  onPaste={onComposerPaste}
+                  onCommandKeyDown={onComposerCommandKeyStable}
+                  onPaste={onComposerPasteStable}
                   placeholder={
                     isComposerApprovalState
                       ? (activePendingApproval?.detail ??

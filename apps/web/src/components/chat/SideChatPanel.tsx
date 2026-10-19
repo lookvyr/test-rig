@@ -446,18 +446,25 @@ export function SideChatPanel(props: {
       className="flex min-h-0 min-w-0 flex-1 flex-col"
       data-side-chat="true"
       onKeyDownCapture={(event) => {
+        const command = resolveShortcutCommand(event.nativeEvent, keybindings, {
+          context: {
+            terminalFocus: false,
+            terminalOpen: false,
+            modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
+          },
+        });
         if (
-          resolveShortcutCommand(event.nativeEvent, keybindings, {
-            context: {
-              terminalFocus: false,
-              terminalOpen: false,
-              modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
-            },
-          }) === "modelPicker.toggle"
+          command === "modelPicker.toggle" ||
+          command === "composer.increaseEffort" ||
+          command === "composer.decreaseEffort"
         ) {
           event.preventDefault();
           event.stopPropagation();
-          composerRef.current?.toggleModelPicker();
+          if (command === "modelPicker.toggle") composerRef.current?.toggleModelPicker();
+          else if (!event.repeat)
+            composerRef.current?.stepReasoningEffort(
+              command === "composer.increaseEffort" ? 1 : -1,
+            );
         }
       }}
     >

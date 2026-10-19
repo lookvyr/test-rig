@@ -1,3 +1,5 @@
+import { useAtomValue } from "@effect/atom-react";
+import type { EnvironmentId } from "@t3tools/contracts";
 import {
   AVAILABLE_CONNECTION_STATE,
   connectionProjectionPhase,
@@ -46,3 +48,12 @@ export const allEnvironmentShellsBootstrappedAtom = Atom.make((get) => {
   }
   return true;
 }).pipe(Atom.withLabel("web-all-environment-shells-bootstrapped"));
+
+const NO_SNAPSHOT_ATOM = Atom.make(false);
+
+/** Subscribe to bootstrap readiness without following streaming shell updates. */
+export function useEnvironmentShellHasSnapshot(environmentId: EnvironmentId | null): boolean {
+  return useAtomValue(
+    environmentId === null ? NO_SNAPSHOT_ATOM : environmentShell.hasSnapshotAtom(environmentId),
+  );
+}

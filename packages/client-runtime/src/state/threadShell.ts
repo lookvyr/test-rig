@@ -1,7 +1,8 @@
+import { OrchestrationV2ThreadShell } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import type {
   EnvironmentId,
   OrchestrationV2ShellSnapshot,
-  OrchestrationV2ThreadShell,
   ProjectId,
   ScopedProjectRef,
   ScopedThreadRef,
@@ -10,7 +11,7 @@ import type {
 import { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentThreadShell } from "./models.ts";
-import { presentThreadShell } from "./models.ts";
+import { presentThreadShell, threadRuntimeIsActive } from "./models.ts";
 import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
 import {
   arrayElementsEqual,
@@ -28,6 +29,37 @@ const EMPTY_THREAD_REFS_BY_PROJECT: ReadonlyMap<
   ProjectId,
   ReadonlyArray<ScopedThreadRef>
 > = new Map();
+
+const sameWireThreadShell = Schema.toEquivalence(OrchestrationV2ThreadShell);
+
+// While a run streams, the server bumps the shell's timestamps, item counts and
+// latest message several times a second. Only the zero crossing of the counts
+// says anything (whether the thread has started). Once the run stops every
+// field counts again, so snooze wakes and failure times read the current value.
+function sameApartFromStreaming(
+  previous: EnvironmentThreadShell,
+  next: EnvironmentThreadShell,
+): boolean {
+  if (previous.environmentId !== next.environmentId || !threadRuntimeIsActive(next.runtime)) {
+    return false;
+  }
+  const before = previous.source;
+  const after = next.source;
+  return (
+    before.itemCount > 0 === after.itemCount > 0 &&
+    before.visibleItemCount > 0 === after.visibleItemCount > 0 &&
+    sameWireThreadShell(
+      {
+        ...before,
+        updatedAt: after.updatedAt,
+        itemCount: after.itemCount,
+        visibleItemCount: after.visibleItemCount,
+        latestVisibleMessage: after.latestVisibleMessage,
+      },
+      after,
+    )
+  );
+}
 
 export function createEnvironmentThreadShellAtoms(input: {
   readonly catalogValueAtom: Atom.Atom<EnvironmentCatalogState>;
@@ -138,6 +170,18 @@ export function createEnvironmentThreadShellAtoms(input: {
     }).pipe(Atom.withLabel(`environment-thread-shell:${key}`));
   });
 
+  const quietThreadShellAtomFamily = Atom.family((key: string) => {
+    let previous: EnvironmentThreadShell | null = null;
+    return Atom.make((get) => {
+      const next = get(threadShellAtomFamily(key));
+      if (previous !== null && next !== null && sameApartFromStreaming(previous, next)) {
+        return previous;
+      }
+      previous = next;
+      return next;
+    }).pipe(Atom.withLabel(`environment-quiet-thread-shell:${key}`));
+  });
+
   const threadShellsForProjectRefsAtomFamily = Atom.family((key: string) => {
     const projectRefs = parseProjectRefCollectionKey(key);
     let previous: ReadonlyArray<EnvironmentThreadShell> = [];
@@ -225,5 +269,6 @@ export function createEnvironmentThreadShellAtoms(input: {
     threadShellsForProjectRefsAtom: (refs: ReadonlyArray<ScopedProjectRef>) =>
       threadShellsForProjectRefsAtomFamily(projectRefCollectionKey(refs)),
     threadShellAtom: (ref: ScopedThreadRef) => threadShellAtomFamily(threadKey(ref)),
+    quietThreadShellAtom: (ref: ScopedThreadRef) => quietThreadShellAtomFamily(threadKey(ref)),
   };
 }

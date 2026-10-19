@@ -92,7 +92,7 @@ import {
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
-import { openCommandPalette, onOpenCommandPalette } from "../commandPaletteBus";
+import { openCommandPalette, onOpenCommandPalette, stepComposerEffort } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { useThreadDetailsStore } from "../threadDetailsStore";
@@ -1505,6 +1505,21 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.newWithoutProject",
       run: () => startScratchThread(scratchTargetEnvironmentId),
     });
+  }
+
+  if (activeThread || activeDraftThread) {
+    for (const direction of [1, -1] as const) {
+      const increase = direction === 1;
+      actionItems.push({
+        kind: "action",
+        value: increase ? "action:increase-effort" : "action:decrease-effort",
+        title: increase ? "Composer: Increase Effort" : "Composer: Decrease Effort",
+        searchTerms: ["reasoning", "effort", "thinking"],
+        icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+        shortcutCommand: increase ? "composer.increaseEffort" : "composer.decreaseEffort",
+        run: async () => stepComposerEffort(direction),
+      });
+    }
   }
 
   if (projectThreadItems.length > 0) {

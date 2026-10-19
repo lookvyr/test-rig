@@ -34,6 +34,15 @@ Examples: `mod+j`, `mod+shift+d`, `ctrl+l`, `cmd+k`.
 
 ## Commands
 
+Bind `composer.increaseEffort` (**Composer: Increase Effort**) and
+`composer.decreaseEffort` (**Composer: Decrease Effort**) to step through the
+selected model's reasoning levels without opening its traits menu. Both are
+unbound by default and available in the command palette. Increase wraps from
+the highest level to the lowest; decrease wraps from the lowest to the highest.
+Changes are saved like selections in the traits menu. Models without reasoning
+levels do nothing. Claude's Ultrathink level updates its prompt prefix; slash
+commands skip that level, and Ultrathink written in the prompt body keeps control.
+
 Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refresh`, and
 `chat.new`. Project scripts are addressable as `script.{id}.run`, for example `script.test.run`.
 

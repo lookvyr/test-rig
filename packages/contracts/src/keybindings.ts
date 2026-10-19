@@ -94,6 +94,8 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "thread.find",
   "themeEditor.toggle",
   "composer.stash",
+  "composer.increaseEffort",
+  "composer.decreaseEffort",
   "chat.new",
   "chat.newLocal",
   "chat.newWithoutProject",

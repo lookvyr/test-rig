@@ -43,7 +43,7 @@ import {
   useProjects,
   useServerConfigs,
   useThreadDetail,
-  useThreadShells,
+  useThreadRelationshipShells,
 } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -219,7 +219,9 @@ export function ThreadRelationshipsPanel(props: {
       ),
     [projection?.subagents],
   );
-  const threadShells = useThreadShells();
+  const threadShells = useThreadRelationshipShells(
+    scopeThreadRef(props.environmentId, props.threadId),
+  );
   const projects = useProjects().filter((project) => project.environmentId === props.environmentId);
   const archived = useArchivedThreadSnapshots([props.environmentId]);
   const archivedShells = archived.snapshots.find(
@@ -227,9 +229,7 @@ export function ThreadRelationshipsPanel(props: {
   )?.snapshot.threads;
   const graph = useMemo(() => {
     const shells: ReadonlyArray<OrchestrationV2ThreadShell> = [
-      ...threadShells
-        .filter((thread) => thread.environmentId === props.environmentId)
-        .map((thread) => thread.source),
+      ...threadShells,
       ...(archivedShells ?? []),
     ];
     return deriveThreadRelationshipGraph({ threads: shells, projection });
