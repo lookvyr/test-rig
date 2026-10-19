@@ -3,6 +3,18 @@
 The sidebar in web and desktop shows a flat thread list,
 with active work shown as cards and settled threads as compact rows.
 
+A branching-arrow icon before the branch name marks active threads attached to
+a worktree, and search results show it too. Compact rows for settled threads
+leave it out; hover over any thread to see its worktree name under the branch.
+Threads using the project's main checkout have no worktree icon.
+
+By default, settling a thread removes its worktree. If the worktree can't be
+removed, for example because it has uncommitted changes, the icon turns
+amber, including on settled rows. Hover over it to see why. Once you commit or
+discard the changes, the worktree is removed within a minute and the icon goes
+away. The thread stays associated with its worktree after removal; a new prompt
+can recreate it.
+
 Repository grouping keeps each fork separate from its upstream repository and from other forks. Checkouts of the same fork can still group together, using that fork's repository name.
 
 ## Working section

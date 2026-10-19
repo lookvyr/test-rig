@@ -6,7 +6,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import type { VcsStatusResult } from "@t3tools/contracts";
-import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
+import { CloudIcon, SplitIcon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useRowQueryLease } from "../hooks/useRowQueryLease";
 import { useEnvironmentSettings } from "../hooks/useSettings";
@@ -19,6 +19,7 @@ import { useUiStateStore } from "../uiStateStore";
 import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
 import type { SidebarThreadSummary } from "../types";
+import { cn } from "~/lib/utils";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -127,36 +128,46 @@ export function terminalStatusFromRunningIds(
   };
 }
 
+/** Marks a thread's worktree. A worktree that cleanup had to keep turns amber
+ * and explains why on hover; that is the only worktree state settled rows
+ * show, and the only one with a tooltip. */
 export function ThreadWorktreeIndicator({
   thread,
 }: {
-  thread: Pick<SidebarThreadSummary, "id" | "branch" | "worktreePath">;
+  thread: Pick<SidebarThreadSummary, "id" | "branch" | "worktreePath" | "worktreeCleanup">;
 }) {
   const worktreePath = thread.worktreePath?.trim();
   if (!worktreePath) {
     return null;
   }
 
+  const keptReason =
+    thread.worktreeCleanup?.state === "retained" ? thread.worktreeCleanup.reason : null;
   const displayPath = formatWorktreePathForDisplay(worktreePath);
-  const tooltip = thread.branch
-    ? `Worktree: ${displayPath} (${thread.branch})`
-    : `Worktree: ${displayPath}`;
+  const label =
+    keptReason ??
+    (thread.branch ? `Worktree: ${displayPath} (${thread.branch})` : `Worktree: ${displayPath}`);
+  const glyph = (
+    <SplitIcon
+      aria-hidden
+      className={cn("size-3.5 rotate-90", keptReason ? "text-warning" : "text-muted-foreground/60")}
+    />
+  );
+  const anchorProps = {
+    role: "img",
+    "aria-label": label,
+    "data-testid": `thread-worktree-${thread.id}`,
+    className: "inline-flex shrink-0 items-center justify-center",
+  };
+
+  if (!keptReason) {
+    return <span {...anchorProps}>{glyph}</span>;
+  }
 
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            role="img"
-            aria-label={tooltip}
-            data-testid={`thread-worktree-${thread.id}`}
-            className="inline-flex items-center justify-center"
-          />
-        }
-      >
-        <FolderGit2Icon className="size-3 text-muted-foreground/40" />
-      </TooltipTrigger>
-      <TooltipPopup side="top">{tooltip}</TooltipPopup>
+      <TooltipTrigger render={<span {...anchorProps} />}>{glyph}</TooltipTrigger>
+      <TooltipPopup side="top">{keptReason}</TooltipPopup>
     </Tooltip>
   );
 }

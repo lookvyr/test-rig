@@ -41,6 +41,7 @@ import {
   PlusIcon,
   SearchIcon,
   ServerIcon,
+  SplitIcon,
   SquarePenIcon,
   TerminalIcon,
   Trash2Icon,
@@ -121,6 +122,7 @@ import {
 } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
+import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { cn } from "~/lib/utils";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
@@ -147,6 +149,7 @@ import {
   prStatusIndicator,
   settledPrHoverColorClass,
   terminalStatusFromRunningIds,
+  ThreadWorktreeIndicator,
   type TerminalStatusIndicator,
 } from "./ThreadStatusIndicators";
 import { resolveSnoozePresets, snoozeWakeDescription, snoozeWakeLabel } from "./Sidebar.snooze";
@@ -286,6 +289,17 @@ function SidebarV2ThreadTooltip({
             <div className="flex min-w-0 items-center gap-2">
               <GitBranchIcon className="size-3 shrink-0 stroke-muted-foreground" />
               <div className="min-w-0 truncate text-foreground/75">{thread.branch}</div>
+            </div>
+          ) : null}
+          {thread.worktreePath?.trim() ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <SplitIcon
+                aria-hidden
+                className="size-3 shrink-0 rotate-90 stroke-muted-foreground"
+              />
+              <div className="min-w-0 truncate text-foreground/75">
+                {formatWorktreePathForDisplay(thread.worktreePath)}
+              </div>
             </div>
           ) : null}
           {branchMismatch ? (
@@ -921,20 +935,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             </span>
             {title}
             <ThreadDraftIndicator threadRef={threadRef} isActive={props.isActive} />
-            {thread.worktreeCleanup ? (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <span
-                      className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-                      aria-label={thread.worktreeCleanup.reason}
-                    >
-                      <GitBranchIcon className="size-3" />
-                    </span>
-                  }
-                />
-                <TooltipPopup>{thread.worktreeCleanup.reason}</TooltipPopup>
-              </Tooltip>
+            {/* Settled rows stay quiet about worktrees unless cleanup had to
+              keep one: that's the only state that needs the user. */}
+            {thread.worktreeCleanup?.state === "retained" ? (
+              <ThreadWorktreeIndicator thread={thread} />
             ) : null}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1199,6 +1203,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               ) : null}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+              <ThreadWorktreeIndicator thread={thread} />
               {/* While working, the current plan step outranks the branch:
                   it's the one line that says what the thread is doing. */}
               {status === "working" && thread.planProgress ? (
@@ -1215,21 +1220,6 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               ) : (
                 <span className="flex-1" />
               )}
-              {thread.worktreeCleanup ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span
-                        className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-                        aria-label={thread.worktreeCleanup.reason}
-                      >
-                        <GitBranchIcon className="size-3" />
-                      </span>
-                    }
-                  />
-                  <TooltipPopup>{thread.worktreeCleanup.reason}</TooltipPopup>
-                </Tooltip>
-              ) : null}
               {terminalStatusIcon}
               {prBadge}
               {diff ? (
@@ -1359,6 +1349,7 @@ const SidebarV2SearchResultRow = memo(function SidebarV2SearchResultRow(props: {
             threadRef={scopeThreadRef(thread.environmentId, thread.id)}
             isActive={props.isRouteActive}
           />
+          <ThreadWorktreeIndicator thread={thread} />
           <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
             <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
           </span>
