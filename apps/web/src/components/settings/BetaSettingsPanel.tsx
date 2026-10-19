@@ -56,11 +56,25 @@ export function BetaSettingsPanel() {
     (settings) => settings.sidebarAutoSettleAfterDays,
   );
   const planModeEnabled = useClientSettings((settings) => settings.planModeEnabled);
+  const workingShelfEnabled = useClientSettings((settings) => settings.sidebarWorkingShelfEnabled);
   const updateSettings = useUpdateClientSettings();
 
   return (
     <SettingsPageContainer>
       <SettingsSection title="Beta features">
+        <SettingsRow
+          {...searchableSetting("sidebar-working-shelf")}
+          description="Move busy threads into a collapsed Working section. They return to the top when they finish or need your attention. Pinned threads stay visible."
+          control={
+            <Switch
+              checked={workingShelfEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarWorkingShelfEnabled: Boolean(checked) })
+              }
+              aria-label="Working section"
+            />
+          }
+        />
         <SettingsRow
           title={searchableSetting("auto-settle-inactive-threads").title}
           description="Threads with no activity for this long settle automatically. Threads on merged or closed PRs always settle."

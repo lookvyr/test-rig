@@ -6,6 +6,9 @@ import {
   buildBulkTitleRegenerationContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
+  createInboxReturnTracker,
+  isSidebarThreadWorking,
+  sortInboxThreadsByReturn,
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
@@ -732,6 +735,134 @@ describe("sortThreadsForSidebarV2", () => {
     ]);
 
     expect(sorted.map((thread) => thread.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("Working shelf", () => {
+  const busy = makeTestThread({
+    runtime: {
+      status: "running",
+      activeRunId: "run-1" as never,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerName: "Codex",
+      lastError: null,
+      updatedAt: "2026-06-20T12:00:00.000Z",
+    },
+  });
+
+  it("folds active and background work but keeps attention and failures visible", () => {
+    expect(isSidebarThreadWorking(busy)).toBe(true);
+    for (const status of ["queued", "preparing", "starting", "waiting"] as const) {
+      expect(isSidebarThreadWorking({ ...busy, runtime: { ...busy.runtime!, status } })).toBe(true);
+    }
+    expect(isSidebarThreadWorking({ ...busy, hasPendingApprovals: true })).toBe(false);
+    expect(isSidebarThreadWorking({ ...busy, hasPendingUserInput: true })).toBe(false);
+    const monitoring = makeTestThread({
+      pendingBackgroundTasks: [{ taskId: "watch", kind: "monitor" }],
+    });
+    expect(isSidebarThreadWorking(monitoring)).toBe(true);
+    expect(
+      isSidebarThreadWorking({ ...monitoring, runtime: { ...busy.runtime!, status: "failed" } }),
+    ).toBe(false);
+    expect(isSidebarThreadWorking(makeTestThread())).toBe(false);
+    expect(
+      isSidebarThreadWorking({
+        ...monitoring,
+        interactionMode: "plan",
+        hasActionableProposedPlan: true,
+        latestRun: {
+          runId: "plan-run" as never,
+          status: "completed",
+          requestedAt: null,
+          startedAt: null,
+          completedAt: "2026-06-20T12:00:00.000Z",
+          assistantMessageId: null,
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("returns attention to the top without moving it again on unrelated updates", () => {
+    const tracker = createInboxReturnTracker();
+    const newer = makeTestThread({
+      id: ThreadId.make("newer"),
+      createdAt: "2026-06-21T00:00:00.000Z",
+    });
+    tracker.observe([busy, newer], Date.parse("2026-06-21T01:00:00.000Z"));
+    const approval = { ...busy, hasPendingApprovals: true };
+    const at = Date.parse("2026-06-21T02:00:00.000Z");
+    tracker.observe([approval, newer], at);
+    expect(sortInboxThreadsByReturn([newer, approval], tracker.returnedAt)).toEqual([
+      approval,
+      newer,
+    ]);
+    tracker.observe([approval, newer], at + 1_000);
+    expect(tracker.returnedAt(approval)).toBe(at);
+    // Turning the beta off clears transient ordering; durable completion time still counts.
+    tracker.observe(null);
+    expect(tracker.returnedAt(approval)).toBeUndefined();
+    expect(sortInboxThreadsByReturn([approval, newer], tracker.returnedAt)).toEqual([
+      newer,
+      approval,
+    ]);
+    const finished = {
+      ...approval,
+      latestRun: {
+        runId: "run-1" as never,
+        status: "completed" as const,
+        requestedAt: null,
+        startedAt: null,
+        completedAt: "2026-06-21T03:00:00.000Z",
+        assistantMessageId: null,
+      },
+    };
+    expect(sortInboxThreadsByReturn([newer, finished], tracker.returnedAt)).toEqual([
+      finished,
+      newer,
+    ]);
+  });
+
+  it("scopes returns by environment and forgets removed threads", () => {
+    const tracker = createInboxReturnTracker();
+    const other = { ...busy, environmentId: EnvironmentId.make("other") };
+    tracker.observe([busy, other], 100);
+    const idle = { ...busy, runtime: null };
+    tracker.observe([idle, other], 200);
+    expect(tracker.returnedAt(idle)).toBe(200);
+    expect(tracker.returnedAt(other)).toBeUndefined();
+    tracker.observe([other], 300);
+    expect(tracker.returnedAt(idle)).toBeUndefined();
+  });
+
+  it("brings delegated ancestors back for child input, without affecting forks or other environments", () => {
+    const tracker = createInboxReturnTracker();
+    const child = makeTestThread({
+      id: ThreadId.make("child"),
+      runtime: busy.runtime,
+      lineage: { rootThreadId: busy.id, parentThreadId: busy.id, relationshipToParent: "subagent" },
+    });
+    const grandchild = makeTestThread({
+      id: ThreadId.make("grandchild"),
+      lineage: {
+        rootThreadId: busy.id,
+        parentThreadId: child.id,
+        relationshipToParent: "subagent",
+      },
+      hasPendingApprovals: true,
+    });
+    const other = { ...busy, environmentId: EnvironmentId.make("other") };
+    tracker.observe([busy, child, other], 100);
+    const working = tracker.observe([busy, child, grandchild, other], 200);
+    expect(working).toEqual(new Set([`other:${busy.id}`]));
+    expect(tracker.returnedAt(busy)).toBe(200);
+    expect(tracker.returnedAt(child)).toBe(200);
+    const fork = {
+      ...grandchild,
+      lineage: { ...grandchild.lineage, relationshipToParent: "fork" as const },
+    };
+    expect(tracker.observe([busy, child, fork], 300)).toEqual(
+      new Set([`${busy.environmentId}:${busy.id}`, `${child.environmentId}:${child.id}`]),
+    );
   });
 });
 

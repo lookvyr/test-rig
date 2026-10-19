@@ -221,6 +221,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "sidebar-v2",
   },
   {
+    id: "sidebar-working-shelf",
+    title: "Working section",
+    to: "/settings/beta",
+  },
+  {
     id: "restore-plan-mode",
     title: "Restore plan mode (legacy)",
     to: "/settings/beta",

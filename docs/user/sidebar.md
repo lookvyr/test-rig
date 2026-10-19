@@ -1,12 +1,26 @@
 # Sidebar
 
-Sidebar V2 is enabled by default in web and desktop builds. It shows a flat thread list,
+The sidebar in web and desktop shows a flat thread list,
 with active work shown as cards and settled threads as compact rows.
 
-To use the original sidebar, turn off **Sidebar V2** in **Settings → Beta**. Test Rig remembers
-your choice across restarts. An existing explicit choice to use the original sidebar is preserved.
-
 Repository grouping keeps each fork separate from its upstream repository and from other forks. Checkouts of the same fork can still group together, using that fork's repository name.
+
+## Working section
+
+Turn on **Working section** in **Settings → Beta** to fold busy threads into a
+collapsed shelf. Expand **Working** to see them all. The thread you have open
+stays visible even when the shelf is collapsed, and sidebar search still finds
+every thread in it.
+
+Threads return to the top of the main list when they finish, fail, or need an
+approval, answer, or plan review, including requests from delegated children.
+Background agents and PR watches stay in
+Working while they need no attention. Pinned threads stay pinned; snoozed and
+settled threads keep their own sections. This changes only sidebar presentation
+and does not stop, snooze, or settle any work.
+
+The toggle is off by default and is saved on this client. Turning it off restores
+the usual sidebar order. It works in both web and desktop.
 
 ## Agent conversations
 

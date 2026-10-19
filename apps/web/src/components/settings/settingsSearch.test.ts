@@ -58,6 +58,7 @@ describe("searchSettings", () => {
     expect(searchSettings("work").map((item) => item.id)).toEqual([
       "automatic-worktree-cleanup",
       "worktree-branch-naming",
+      "sidebar-working-shelf",
     ]);
     expect(searchSettings("worktree branch naming").map((item) => item.id)).toEqual([
       "worktree-branch-naming",

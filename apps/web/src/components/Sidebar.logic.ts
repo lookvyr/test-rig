@@ -464,6 +464,112 @@ export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2S
   return "ready";
 }
 
+type WorkingThreadInput = SidebarV2StatusInput &
+  Pick<SidebarThreadSummary, "interactionMode" | "hasActionableProposedPlan" | "latestRun">;
+
+function needsThreadAttention(thread: WorkingThreadInput): boolean {
+  return (
+    thread.hasPendingApprovals ||
+    thread.hasPendingUserInput ||
+    (thread.interactionMode === "plan" &&
+      thread.hasActionableProposedPlan &&
+      isLatestRunSettled(thread.latestRun, thread.runtime))
+  );
+}
+
+/** Busy threads can fold away only while they need no human attention. */
+export function isSidebarThreadWorking(thread: WorkingThreadInput): boolean {
+  const status = resolveSidebarV2Status(thread);
+  return (status === "working" || status === "monitoring") && !needsThreadAttention(thread);
+}
+
+type InboxThreadInput = Pick<
+  SidebarThreadSummary,
+  "id" | "environmentId" | "createdAt" | "unsettledAt" | "latestRun"
+>;
+
+/** A finished turn or a request for attention brings a thread to the top. */
+export function sortInboxThreadsByReturn<T extends InboxThreadInput>(
+  threads: readonly T[],
+  observedReturnAt: (thread: T) => number | undefined,
+): T[] {
+  const timestamps = new Map(
+    threads.map((thread) => [
+      thread,
+      Math.max(
+        firstValidTimestampMs(thread.createdAt),
+        firstValidTimestampMs(thread.unsettledAt),
+        firstValidTimestampMs(thread.latestRun?.requestedAt),
+        firstValidTimestampMs(thread.latestRun?.completedAt),
+        observedReturnAt(thread) ?? 0,
+      ),
+    ]),
+  );
+  return threads.toSorted(
+    (left, right) =>
+      timestamps.get(right)! - timestamps.get(left)! ||
+      left.id.localeCompare(right.id) ||
+      left.environmentId.localeCompare(right.environmentId),
+  );
+}
+
+/** Observe all shells, before project filtering, so navigation preserves return order. */
+export function createInboxReturnTracker() {
+  const keyOf = (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) =>
+    `${thread.environmentId}:${thread.id}`;
+  let lastWorkingKeys: ReadonlySet<string> = new Set();
+  const returns = new Map<string, number>();
+  return {
+    observe(
+      threads: ReadonlyArray<
+        WorkingThreadInput & InboxThreadInput & Pick<SidebarThreadSummary, "lineage">
+      > | null,
+      at = Date.now(),
+    ) {
+      const working = new Set<string>();
+      const present = new Set<string>();
+      for (const thread of threads ?? []) {
+        const key = keyOf(thread);
+        present.add(key);
+        if (isSidebarThreadWorking(thread)) working.add(key);
+      }
+      // Child requests live on their own shells. Keep every delegated ancestor
+      // reachable while its descendant needs input; historical forks stay independent.
+      const byKey = new Map((threads ?? []).map((thread) => [keyOf(thread), thread]));
+      const attention = new Set<string>();
+      for (const thread of threads ?? []) {
+        if (!needsThreadAttention(thread)) continue;
+        let child = thread;
+        while (
+          child.lineage.relationshipToParent === "subagent" &&
+          child.lineage.parentThreadId !== null
+        ) {
+          const key = keyOf({
+            environmentId: child.environmentId,
+            id: child.lineage.parentThreadId,
+          });
+          if (attention.has(key)) break;
+          attention.add(key);
+          working.delete(key);
+          const parent = byKey.get(key);
+          if (parent === undefined) break;
+          child = parent;
+        }
+      }
+      for (const key of returns.keys()) {
+        if (!present.has(key)) returns.delete(key);
+      }
+      for (const key of lastWorkingKeys) {
+        if (present.has(key) && !working.has(key)) returns.set(key, at);
+      }
+      lastWorkingKeys = working;
+      return working;
+    },
+    returnedAt: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) =>
+      returns.get(keyOf(thread)),
+  };
+}
+
 /** NaN-safe Date.parse for sort comparators: a malformed timestamp must not
     poison the whole ordering, so it sinks to the epoch instead. */
 export function parseTimestampMs(isoDate: string): number {

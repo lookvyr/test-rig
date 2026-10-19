@@ -125,6 +125,8 @@ import { cn } from "~/lib/utils";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   buildBulkTitleRegenerationContextMenuItem,
+  createInboxReturnTracker,
+  sortInboxThreadsByReturn,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
@@ -1381,6 +1383,8 @@ const SidebarV2SearchResultRow = memo(function SidebarV2SearchResultRow(props: {
   );
 });
 
+const inboxReturns = createInboxReturnTracker();
+
 export default function SidebarV2() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
@@ -1389,6 +1393,7 @@ export default function SidebarV2() {
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const autoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays);
+  const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
@@ -1792,90 +1797,108 @@ export default function SidebarV2() {
   // merging, no optimistic holds. Archived threads remain hidden here —
   // archive keeps its original "remove from sidebar" meaning.
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
-  const { pinnedThreads, activeThreads, snoozedThreads, settledThreads, snoozeNow } =
-    useMemo(() => {
-      const now = `${nowMinute}:00.000Z`;
-      // Snooze classification uses a REAL clock, not the quantized minute:
-      // wake times are second-precise and a woken thread must not linger on
-      // the shelf for the rest of the minute. snoozeWakeTick re-runs this
-      // memo exactly at the next wake boundary.
-      void snoozeWakeTick;
-      const preciseNow = new Date().toISOString();
-      const visible = threads.filter(
-        (thread) =>
-          thread.archivedAt === null &&
-          thread.lineage.relationshipToParent !== "subagent" &&
-          !thread.sideOfThreadId &&
-          (scopedProjectKeys === null ||
-            scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
-      );
-      const pinned: EnvironmentThreadShell[] = [];
-      const active: EnvironmentThreadShell[] = [];
-      const snoozed: EnvironmentThreadShell[] = [];
-      const settled: EnvironmentThreadShell[] = [];
-      for (const thread of visible) {
-        // Threads on servers without the settlement capability (old server,
-        // or descriptor not loaded yet) never classify as settled: the user
-        // could neither un-settle nor pin them, so auto-settling them would
-        // strand rows in a tail with no working affordances.
-        const supportsSettlement =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
-          true;
-        const supportsSnooze =
-          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
-        const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-        const changeRequestState = changeRequestStateByKey.get(threadKey) ?? null;
-        // Snooze outranks everything, including a pin: "hide until Tuesday"
-        // temporarily suspends "keep on top". The pin survives underneath —
-        // pinned cards are creation-ordered, so on wake the thread reappears
-        // at its original spot in the pinned block. (For unpinned threads
-        // this is also the snooze-beats-auto-settle rule: the wake time is a
-        // stronger statement about when the thread matters again.)
-        if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
-          snoozed.push(thread);
-          // A pin otherwise overrides the lifecycle: pinned threads never
-          // auto-settle out of sight. (The decider clears settled state on
-          // pin and the pin on settle, so pin-vs-settled conflicts only
-          // arise from stale or raced writes.)
-        } else if (thread.pinnedAt != null) {
-          pinned.push(thread);
-        } else if (supportsSettlement && thread.settledAt !== null) {
-          settled.push(thread);
-        } else {
-          active.push(thread);
-        }
+  const {
+    pinnedThreads,
+    activeThreads,
+    workingThreads,
+    snoozedThreads,
+    settledThreads,
+    snoozeNow,
+  } = useMemo(() => {
+    const workingKeys = inboxReturns.observe(workingShelfEnabled ? threads : null);
+    const now = `${nowMinute}:00.000Z`;
+    // Snooze classification uses a REAL clock, not the quantized minute:
+    // wake times are second-precise and a woken thread must not linger on
+    // the shelf for the rest of the minute. snoozeWakeTick re-runs this
+    // memo exactly at the next wake boundary.
+    void snoozeWakeTick;
+    const preciseNow = new Date().toISOString();
+    const visible = threads.filter(
+      (thread) =>
+        thread.archivedAt === null &&
+        thread.lineage.relationshipToParent !== "subagent" &&
+        !thread.sideOfThreadId &&
+        (scopedProjectKeys === null ||
+          scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+    );
+    const pinned: EnvironmentThreadShell[] = [];
+    const active: EnvironmentThreadShell[] = [];
+    const working: EnvironmentThreadShell[] = [];
+    const snoozed: EnvironmentThreadShell[] = [];
+    const settled: EnvironmentThreadShell[] = [];
+    for (const thread of visible) {
+      // Threads on servers without the settlement capability (old server,
+      // or descriptor not loaded yet) never classify as settled: the user
+      // could neither un-settle nor pin them, so auto-settling them would
+      // strand rows in a tail with no working affordances.
+      const supportsSettlement =
+        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement === true;
+      const supportsSnooze =
+        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
+      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      const changeRequestState = changeRequestStateByKey.get(threadKey) ?? null;
+      // Snooze outranks everything, including a pin: "hide until Tuesday"
+      // temporarily suspends "keep on top". The pin survives underneath —
+      // pinned cards are creation-ordered, so on wake the thread reappears
+      // at its original spot in the pinned block. (For unpinned threads
+      // this is also the snooze-beats-auto-settle rule: the wake time is a
+      // stronger statement about when the thread matters again.)
+      if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
+        snoozed.push(thread);
+        // A pin otherwise overrides the lifecycle: pinned threads never
+        // auto-settle out of sight. (The decider clears settled state on
+        // pin and the pin on settle, so pin-vs-settled conflicts only
+        // arise from stale or raced writes.)
+      } else if (thread.pinnedAt != null) {
+        pinned.push(thread);
+      } else if (supportsSettlement && thread.settledAt !== null) {
+        settled.push(thread);
+      } else if (workingKeys.has(threadKey)) {
+        working.push(thread);
+      } else {
+        active.push(thread);
       }
-      return {
-        // Same static creation order as the inbox: a pin freezes prominence,
-        // it does not introduce a new ordering scheme.
-        pinnedThreads: sortThreadsForSidebarV2(pinned),
-        activeThreads: sortThreadsForSidebarV2(active),
-        // Soonest wake first: "what comes back next" is the shelf's question.
-        snoozedThreads: snoozed.toSorted(
-          (left, right) =>
-            firstValidTimestampMs(left.snoozedUntil ?? null) -
-            firstValidTimestampMs(right.snoozedUntil ?? null),
-        ),
-        settledThreads: sortSettledThreadsForSidebarV2(settled),
-        snoozeNow: preciseNow,
-      };
-    }, [
-      autoSettleAfterDays,
-      changeRequestStateByKey,
-      nowMinute,
-      scopedProjectKeys,
-      serverConfigs,
-      snoozeWakeTick,
-      threads,
-    ]);
+    }
+    return {
+      // Pinned and working cards retain the usual static creation order.
+      pinnedThreads: sortThreadsForSidebarV2(pinned),
+      activeThreads: workingShelfEnabled
+        ? sortInboxThreadsByReturn(active, inboxReturns.returnedAt)
+        : sortThreadsForSidebarV2(active),
+      workingThreads: sortThreadsForSidebarV2(working),
+      // Soonest wake first: "what comes back next" is the shelf's question.
+      snoozedThreads: snoozed.toSorted(
+        (left, right) =>
+          firstValidTimestampMs(left.snoozedUntil ?? null) -
+          firstValidTimestampMs(right.snoozedUntil ?? null),
+      ),
+      settledThreads: sortSettledThreadsForSidebarV2(settled),
+      snoozeNow: preciseNow,
+    };
+  }, [
+    autoSettleAfterDays,
+    changeRequestStateByKey,
+    nowMinute,
+    scopedProjectKeys,
+    serverConfigs,
+    snoozeWakeTick,
+    threads,
+    workingShelfEnabled,
+  ]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   const searchableThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
+    () => [
+      ...pinnedThreads,
+      ...activeThreads,
+      ...workingThreads,
+      ...snoozedThreads,
+      ...settledThreads,
+    ],
+    [activeThreads, pinnedThreads, workingThreads, settledThreads, snoozedThreads],
   );
   const threadSearchResults = useMemo(
     () => searchSidebarThreadsByTitle(searchableThreads, threadSearchQuery),
@@ -1978,9 +2001,32 @@ export default function SidebarV2() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  const [workingShelfExpanded, setWorkingShelfExpanded] = useState(false);
+  const toggleWorkingShelf = useCallback(() => setWorkingShelfExpanded((value) => !value), []);
+  const visibleWorkingThreads = useMemo(() => {
+    if (workingShelfExpanded) return workingThreads;
+    const routeThread = workingThreads.find(
+      (thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+    );
+    return routeThread === undefined ? [] : [routeThread];
+  }, [routeThreadKey, workingShelfExpanded, workingThreads]);
+
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...pinnedThreads,
+      ...activeThreads,
+      ...visibleWorkingThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [
+      pinnedThreads,
+      activeThreads,
+      visibleWorkingThreads,
+      visibleSnoozedThreads,
+      renderedSettledThreads,
+    ],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -2036,6 +2082,18 @@ export default function SidebarV2() {
   );
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
   snoozedThreadKeysRef.current = snoozedThreadKeys;
+
+  const workingThreadKeys = useMemo(
+    () =>
+      new Set(
+        workingThreads.map((thread) =>
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        ),
+      ),
+    [workingThreads],
+  );
+  const workingThreadKeysRef = useRef(workingThreadKeys);
+  workingThreadKeysRef.current = workingThreadKeys;
 
   const jumpLabelByKey = useMemo(() => {
     const mapping = new Map<string, string>();
@@ -2197,7 +2255,11 @@ export default function SidebarV2() {
         currentIndex === -1
           ? null
           : ([...orderedKeys.slice(currentIndex + 1), ...orderedKeys.slice(0, currentIndex)].find(
-              (key) => !settledKeys.has(key) && !snoozedKeys.has(key) && !coParkingKeys?.has(key),
+              (key) =>
+                !settledKeys.has(key) &&
+                !snoozedKeys.has(key) &&
+                !workingThreadKeysRef.current.has(key) &&
+                !coParkingKeys?.has(key),
             ) ?? null);
       const nextThread = nextCardKey ? threadByKeyRef.current.get(nextCardKey) : null;
       return nextThread
@@ -3206,16 +3268,14 @@ export default function SidebarV2() {
                 {(() => {
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,
-                    section: "pinned" | "active" | "snoozed" | "settled",
+                    section: "pinned" | "active" | "working" | "snoozed" | "settled",
                   ) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
-                    // Settled and snoozed are the ONLY things that collapse a
-                    // row: every other thread is a full card. Density comes
-                    // from users (or the auto rules) actually parking work,
-                    // not from the sidebar second-guessing what still matters.
-                    const isCard = section === "active" || section === "pinned";
+                    // Working rows retain their live card when the shelf is open.
+                    const isCard =
+                      section === "active" || section === "pinned" || section === "working";
                     const rowVariant = isCard ? "card" : "slim";
                     return (
                       <SidebarV2Row
@@ -3315,6 +3375,40 @@ export default function SidebarV2() {
                   for (const thread of activeThreads) {
                     items.push(renderThreadRow(thread, "active"));
                   }
+                  if (workingThreads.length > 0) {
+                    items.push(
+                      <li
+                        key="working-shelf-header"
+                        data-thread-selection-safe
+                        className="list-none"
+                      >
+                        <button
+                          type="button"
+                          onClick={toggleWorkingShelf}
+                          aria-expanded={workingShelfExpanded}
+                          data-testid="sidebar-v2-working-shelf-toggle"
+                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                        >
+                          <span className="text-xs font-medium text-sidebar-muted-foreground">
+                            {workingShelfExpanded
+                              ? "Working"
+                              : `Working (${workingThreads.length})`}
+                          </span>
+                          <span className="h-px flex-1 bg-sidebar-border/60" />
+                          <ChevronDownIcon
+                            aria-hidden
+                            className={cn(
+                              "size-3 text-sidebar-muted-foreground transition-transform",
+                              workingShelfExpanded && "rotate-180",
+                            )}
+                          />
+                        </button>
+                      </li>,
+                    );
+                    for (const thread of visibleWorkingThreads) {
+                      items.push(renderThreadRow(thread, "working"));
+                    }
+                  }
                   // Snoozed shelf: between the inbox and Settled — out of the
                   // way, never gone. The header always renders while anything
                   // is snoozed (the count is the whole footprint when
@@ -3408,6 +3502,7 @@ export default function SidebarV2() {
           {!isSearchingThreads &&
           pinnedThreads.length +
             activeThreads.length +
+            workingThreads.length +
             snoozedThreads.length +
             settledThreads.length ===
             0 ? (
