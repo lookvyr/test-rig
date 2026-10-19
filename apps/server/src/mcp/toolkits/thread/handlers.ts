@@ -258,8 +258,13 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
     })),
   t3_thread_organize: (input) =>
     Effect.gen(function* () {
-      const { threads, projection } = yield* readWritableThread(input.threadId);
+      const { threads, projection, caller } = yield* readWritableThread(input.threadId);
       const common = { commandId: yield* newCommandId(), threadId: projection.thread.id };
+      if (input.action === "settle") {
+        return yield* threads
+          .settleThread({ ...common, byOwnAgent: caller.id === projection.thread.id })
+          .pipe(Effect.mapError(unavailable));
+      }
       let command: OrchestrationV2Command;
       switch (input.action) {
         case "snooze":

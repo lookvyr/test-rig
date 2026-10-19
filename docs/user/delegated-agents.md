@@ -127,3 +127,15 @@ Cancelling an already completed task also stops later work in its child
 conversation. Its published result remains available. Provider-native subagents
 follow their provider's interruption behavior and do not have this Lineage
 shortcut.
+
+## Follow-ups
+
+Ask the parent to send a follow-up to an existing delegated child when you want
+to continue with its conversation history. A new follow-up turn gets its own
+tracked task and returns its result to the parent. The original task keeps its
+published result. An update that steers a running task stays with that task.
+For an independent review round, ask for a new delegated agent.
+
+Agents can read effective snooze state and all linked pull requests through
+conversation list and read tools. Snoozed conversations wake when the timer
+expires, new work completes or fails, or a question needs attention.

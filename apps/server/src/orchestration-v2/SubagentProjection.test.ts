@@ -8,6 +8,7 @@ import {
   EventId,
   TurnItemId,
   type OrchestrationV2Run,
+  type OrchestrationV2ThreadProjection,
   type OrchestrationV2AppThread,
   ProjectId,
   ProviderInstanceId,
@@ -19,6 +20,7 @@ import * as DateTime from "effect/DateTime";
 import {
   makeSubagentChildThread,
   delegatedTaskProgress,
+  delegatedTaskProgressForTask,
   subagentResultForRun,
   makeSubagentConversationArtifacts,
 } from "./SubagentProjection.ts";
@@ -186,6 +188,13 @@ it("waits for nested work and retains the report across monitor acknowledgements
     assert.equal(
       delegatedTaskProgress({
         ...projection,
+        subagents: [{ status: "idle", completionDelivery: { state, observedByRunId: null } }],
+      }).state,
+      "result_available",
+    );
+    assert.equal(
+      delegatedTaskProgress({
+        ...projection,
         subagents: [{ status: "completed", completionDelivery: { state, observedByRunId: null } }],
       }).state,
       "waiting_for_children",
@@ -293,4 +302,47 @@ it("exposes the provider failure rather than a progress message from the failed 
   assert.equal(result.text, failure.message);
   assert.equal(result.turnItemId, artifacts.turnItem.id);
   assert.isNull(result.messageId);
+});
+
+it("scopes follow-up descendants while retaining native work across later provider runs", () => {
+  const { projection, run } = taskFixture();
+  const taskId = NodeId.make("followup");
+  const scoped = { ...run, delegatedTaskId: taskId };
+  const later = {
+    ...run,
+    id: RunId.make("unrelated"),
+    ordinal: run.ordinal + 1,
+    status: "running" as const,
+  };
+  const child = {
+    runId: run.id,
+    status: "running",
+  } as OrchestrationV2ThreadProjection["subagents"][number];
+  const provider = {
+    lastRunOrdinal: run.ordinal,
+    pendingBackgroundTasks: [{ kind: "command", taskId: "native" }],
+  } as unknown as OrchestrationV2ThreadProjection["providerThreads"][number];
+  const input = { ...projection, runs: [scoped, later], subagents: [child], providerThreads: [] };
+  assert.equal(delegatedTaskProgressForTask(input, taskId).state, "waiting_for_children");
+  assert.equal(
+    delegatedTaskProgressForTask({ ...input, subagents: [{ ...child, runId: later.id }] }, taskId)
+      .state,
+    "result_available",
+  );
+  assert.equal(
+    delegatedTaskProgressForTask({ ...input, subagents: [], providerThreads: [provider] }, taskId)
+      .state,
+    "waiting_for_children",
+  );
+  assert.equal(
+    delegatedTaskProgressForTask(
+      {
+        ...input,
+        subagents: [],
+        providerThreads: [{ ...provider, lastRunOrdinal: later.ordinal }],
+      },
+      taskId,
+    ).state,
+    "waiting_for_children",
+  );
 });

@@ -238,8 +238,9 @@ export function delegatedTaskProgress(projection: {
         isOrchestrationV2WorkActive(task.status) ||
         // Publishing a child's result precedes scheduling its parent's wake.
         // The parent still owes that follow-up even between those transactions.
-        task.completionDelivery?.state === "pending" ||
-        task.completionDelivery?.state === "claimed",
+        (task.status !== "idle" &&
+          (task.completionDelivery?.state === "pending" ||
+            task.completionDelivery?.state === "claimed")),
     ) ||
     projection.providerThreads.some((thread) => (thread.pendingBackgroundTasks?.length ?? 0) > 0);
   const resultRun = workRuns
@@ -254,4 +255,24 @@ export function delegatedTaskProgress(projection: {
           : ("result_available" as const),
     resultRun,
   };
+}
+
+/** Follow-up work and its descendants settle independently of other requests in the same chat. */
+export function delegatedTaskProgressForTask(
+  projection: Pick<
+    OrchestrationV2ThreadProjection,
+    "runs" | "messages" | "subagents" | "providerThreads"
+  >,
+  taskId: NodeId,
+) {
+  const runs = projection.runs.filter((run) => run.delegatedTaskId === taskId);
+  if (runs.length === 0) return delegatedTaskProgress(projection);
+  const runIds = new Set(runs.map((run) => run.id));
+  return delegatedTaskProgress({
+    ...projection,
+    runs,
+    subagents: projection.subagents.filter((task) => task.runId !== null && runIds.has(task.runId)),
+    // Native rosters have no run provenance and can survive a later provider turn.
+    providerThreads: projection.providerThreads,
+  });
 }

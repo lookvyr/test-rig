@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
-  liveSubagent,
+  currentSubagent,
   resolveThreadLineageWindow,
   ThreadLineageRowList,
 } from "./ThreadRelationshipsControl";
@@ -54,6 +54,32 @@ describe("thread lineage row list", () => {
 });
 
 describe("child follow-up metadata", () => {
+  it.each([
+    ["queued", "pending", null],
+    ["completed", "completed", "2026-10-06T14:00:00.000Z"],
+    ["rolled_back", "interrupted", "2026-10-06T14:00:00.000Z"],
+  ])(
+    "uses newer child %s work instead of the original result",
+    (status, expectedStatus, completedAt) => {
+      const result = currentSubagent(
+        {
+          status: "completed",
+          updatedAt: "2026-10-06T12:00:00Z",
+          completedAt: "2026-10-06T12:00:00Z",
+          result: "Old answer",
+        } as never,
+        {
+          status,
+          activityRunStatus: null,
+          latestRunRequestedAt: DateTime.makeUnsafe("2026-10-06T13:00:00Z"),
+          latestRunStartedAt: DateTime.makeUnsafe("2026-10-06T13:01:00Z"),
+          latestRunCompletedAt: completedAt ? DateTime.makeUnsafe(completedAt) : null,
+        } as never,
+      );
+      expect(result).toMatchObject({ status: expectedStatus, completedAt, result: null });
+    },
+  );
+
   it("uses the live child timer and clears the original task preview", () => {
     const settled = {
       status: "completed",
@@ -63,7 +89,7 @@ describe("child follow-up metadata", () => {
       progress: "Original progress",
       error: null,
     } as never;
-    const live = liveSubagent(settled, {
+    const live = currentSubagent(settled, {
       activityRunStatus: "running",
       activityRunStartedAt: DateTime.makeUnsafe("2026-10-06T13:00:00Z"),
     } as never);
@@ -75,6 +101,6 @@ describe("child follow-up metadata", () => {
       progress: null,
       error: null,
     });
-    expect(liveSubagent(settled, { activityRunStatus: null } as never)).toBe(settled);
+    expect(currentSubagent(settled, { activityRunStatus: null } as never)).toBe(settled);
   });
 });

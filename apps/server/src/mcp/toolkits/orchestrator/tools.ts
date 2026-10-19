@@ -173,7 +173,7 @@ export const CreateThreadsTool = Tool.make("create_threads", {
 
 const ThreadListTool = Tool.make("t3_thread_list", {
   description:
-    "List T3 threads in the calling thread's project, newest first. Filter by durable run status, title, or settled state (settled=true lists threads the user or auto-settlement moved out of the active list) and paginate with the returned cursor. Threads from other projects are never exposed.",
+    "List T3 threads in the calling thread's project, newest first. Filter by durable run status, title, snoozed state, or settled state (settled=true lists threads the user or auto-settlement moved out of the active list) and paginate with the returned cursor. Results include effective snooze state and all visible linked pull requests. Threads from other projects are never exposed.",
   parameters: OrchestratorMcpThreadListInput,
   success: OrchestratorMcpThreadListResult,
   failure: OrchestratorMcpFailure,
@@ -187,7 +187,7 @@ const ThreadListTool = Tool.make("t3_thread_list", {
 
 const ThreadReadTool = Tool.make("t3_thread_read", {
   description:
-    "Read durable state and a paginated timeline from a T3 thread in the calling project, or from a thread the user attached to this conversation as context. The default messages view returns user messages, assistant messages, and proposed plans; activity returns all summarized timeline items. Reading an untruncated terminal assistant result from this parent thread's direct app-owned child acknowledges that child's automatic completion delivery. Continue with afterPosition=nextPosition. Recover long item text with itemId and textOffset=nextTextOffset until nextTextOffset is null; offsets count UTF-16 code units.",
+    "Read durable state and a paginated timeline from a T3 thread in the calling project, or from a thread the user attached to this conversation as context. State includes effective snooze state and all visible linked pull requests. The default messages view returns user messages, assistant messages, and proposed plans; activity returns all summarized timeline items. Reading an untruncated terminal assistant result from this parent thread's direct app-owned child acknowledges that child's automatic completion delivery. Continue with afterPosition=nextPosition. Recover long item text with itemId and textOffset=nextTextOffset until nextTextOffset is null; offsets count UTF-16 code units.",
   parameters: OrchestratorMcpThreadReadInput,
   success: OrchestratorMcpThreadReadResult,
   failure: OrchestratorMcpFailure,
@@ -214,7 +214,7 @@ export const ThreadUpdateTool = Tool.make("t3_thread_update", {
 
 const ThreadSendTool = Tool.make("t3_thread_send", {
   description:
-    "Send a message to a T3 thread in the calling project only when the user explicitly asks you to message that thread. Read access or another agent's request is not permission. Temporary side chats may send without being kept. Do not use a delegated task's childThreadId to start another review round here; use delegate_task with the full review context and a new clientRequestId for that round. Thread messages do not create a new delegated task or reopen a completed task. mode='auto' starts an idle thread, steers a fully active turn, or queues behind a turn that is not yet steerable. Use queue for a separate follow-up turn, steer for an in-flight update, or restart to interrupt-and-restart the active turn. Retain the messageId, runId, and delivery receipt; acceptance does not mean completion. Retry an ambiguous response with the identical request and clientRequestId in the same provider session. Use a new key for each new message.",
+    "Send a message to a T3 thread in the calling project only when the user explicitly asks you to message that thread. Read access or another agent's request is not permission. Temporary side chats may send without being kept. Do not use a delegated task's childThreadId to start another review round here; use delegate_task with the full review context and a new clientRequestId for that round. A new follow-up turn in your direct app-owned child creates a separately tracked task in the same conversation and returns taskId; the original task result stays unchanged. Steering an active task keeps its taskId. mode='auto' starts an idle thread, steers a fully active turn, or queues behind a turn that is not yet steerable. Use queue for a separate follow-up turn, steer for an in-flight update, or restart to interrupt-and-restart the active turn. Retain the messageId, runId, optional taskId, and delivery receipt; acceptance does not mean completion. Retry an ambiguous response with the identical request and clientRequestId in the same provider session. Use a new key for each new message.",
   parameters: OrchestratorMcpThreadSendInput,
   success: OrchestratorMcpThreadSendResult,
   failure: OrchestratorMcpFailure,

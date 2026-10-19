@@ -11,6 +11,7 @@ import {
   MessageId,
   NodeId,
   type OrchestrationV2Command,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
@@ -550,5 +551,90 @@ it.effect.each(["idle", "completed-target", "missing-target", "wrong-project"] a
           },
         });
       }
+    }),
+);
+
+it.effect.each([
+  { status: "completed" as const, settles: true },
+  { status: "failed" as const, settles: false },
+  { status: "interrupted" as const, settles: false },
+])("settleAfterRun settles only when the run $status", ({ status, settles }) =>
+  Effect.gen(function* () {
+    const projectId = ProjectId.make("project:thread-management:settle-after-run");
+    const threadId = ThreadId.make("thread:thread-management:settle-after-run");
+    const runId = RunId.make("run:thread-management:settle-after-run");
+    const dispatched: OrchestrationV2ServerCommand[] = [];
+    const layerTest = ThreadManagementService.layer.pipe(
+      Layer.provide(workspaceTestLayer),
+      Layer.provide(
+        Layer.mock(Orchestrator.OrchestratorV2)({
+          getThreadEventSequence: () => Effect.succeed(0),
+          getThreadRecords: () =>
+            Effect.succeed({
+              thread: { id: threadId, projectId, deletedAt: null },
+              runs: [{ id: runId, status }],
+            } as unknown as OrchestrationV2ThreadProjection),
+          dispatch: (command) =>
+            Effect.sync(() => {
+              dispatched.push(command);
+              return { sequence: 1, storedEvents: [] } as never;
+            }),
+        }),
+      ),
+    );
+    const service = yield* ThreadManagementService.ThreadManagementService.pipe(
+      Effect.provide(layerTest),
+    );
+
+    yield* service.settleAfterRun({ projectId, threadId, runId });
+
+    expect(dispatched).toEqual(
+      settles
+        ? [
+            {
+              type: "thread.settle",
+              commandId: CommandId.make(`server:settle-after-run:${runId}`),
+              threadId,
+              expectedRunId: runId,
+            },
+          ]
+        : [],
+    );
+  }),
+);
+
+it.effect.each([false, true])(
+  "settleThread dispatches immediately outside its own active turn (own agent: %s)",
+  (byOwnAgent) =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread:settle-immediate");
+      const commandId = CommandId.make("settle-immediate");
+      const dispatched: OrchestrationV2ServerCommand[] = [];
+      yield* Effect.gen(function* () {
+        const service = yield* ThreadManagementService.ThreadManagementService;
+        const result = yield* service.settleThread({ threadId, commandId, byOwnAgent });
+        expect(result).toEqual({ sequence: 1 });
+        expect(dispatched).toEqual([{ type: "thread.settle", threadId, commandId }]);
+      }).pipe(
+        Effect.provide(
+          ThreadManagementService.layer.pipe(
+            Layer.provide(workspaceTestLayer),
+            Layer.provide(
+              Layer.mock(Orchestrator.OrchestratorV2)({
+                getThreadShell: () =>
+                  Effect.succeed({
+                    id: threadId,
+                    activeRunId: byOwnAgent ? null : RunId.make("run:other-active"),
+                  } as never),
+                dispatch: (command) =>
+                  Effect.sync(() => {
+                    dispatched.push(command);
+                    return { sequence: 1, storedEvents: [] } as never;
+                  }),
+              }),
+            ),
+          ),
+        ),
+      );
     }),
 );

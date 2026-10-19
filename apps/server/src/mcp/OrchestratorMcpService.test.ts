@@ -1699,6 +1699,12 @@ describe("OrchestratorMcpService provider resolution", () => {
       let requests: OrchestrationV2ThreadProjection["runtimeRequests"] = [];
       const runningChild = {
         ...childProjection,
+        nodes: [
+          {
+            id: parentNodeId,
+            runId: RunId.make("run:timeout-child"),
+          },
+        ] as unknown as OrchestrationV2ThreadProjection["nodes"],
         runs: [
           {
             ...parentProjection([]).runs[0]!,

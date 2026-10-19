@@ -12,6 +12,51 @@ import {
 } from "./threadRelationships.ts";
 
 describe("thread relationships", () => {
+  it.each(["queued", "completed", "failed", "rolled_back"])(
+    "uses current child run outcome %s instead of its original task",
+    (status) => {
+      const parent = ThreadId.make("followup-parent");
+      const child = ThreadId.make("followup-child");
+      const graph = deriveThreadRelationshipGraph({
+        threads: [
+          {
+            id: child,
+            status,
+            latestRunId: "new-run",
+            activityRunStatus: null,
+            lineage: { parentThreadId: parent, relationshipToParent: "subagent" },
+          },
+        ] as never,
+        projection: {
+          thread: { id: parent },
+          subagents: [{ childThreadId: child, status: "completed" }],
+          contextTransfers: [],
+        } as never,
+      });
+      expect(immediateThreadRelationships(graph, parent)[0]?.edge.status).toBe(
+        status === "rolled_back" ? "interrupted" : status,
+      );
+    },
+  );
+
+  it("uses the newest tracked task for a child without an app run", () => {
+    const parent = ThreadId.make("task-parent");
+    const child = ThreadId.make("task-child");
+    const graph = deriveThreadRelationshipGraph({
+      threads: [],
+      projection: {
+        thread: { id: parent },
+        subagents: [
+          { childThreadId: child, status: "completed" },
+          { childThreadId: child, status: "pending" },
+        ],
+        contextTransfers: [],
+      } as never,
+    });
+    expect(immediateThreadRelationships(graph, parent)).toHaveLength(1);
+    expect(immediateThreadRelationships(graph, parent)[0]?.edge.status).toBe("pending");
+  });
+
   it.each([
     ["running", "completed"],
     ["completed", "running"],

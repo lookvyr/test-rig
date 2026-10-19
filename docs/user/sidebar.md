@@ -40,6 +40,11 @@ Use a thread's actions menu from its heading or sidebar row. **Settle thread**
 moves it out of Active; **Un-settle** brings it back. **Auto-settle behavior**
 lets you disable automatic settlement for an individual thread.
 
+If you ask an agent to settle its own thread, settlement waits until its current
+turn completes successfully. A failed or interrupted turn leaves the thread active,
+as does a queued message waiting for a response. The pending request expires after
+24 hours or if the server restarts before the turn ends.
+
 In **Settings → Beta**, automatic settlement defaults to three days of inactivity,
 with settlement after a pull request merges enabled. These server preferences
 apply to both web and desktop clients. Closed pull requests can also settle

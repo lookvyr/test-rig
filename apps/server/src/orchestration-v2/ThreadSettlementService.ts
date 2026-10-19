@@ -143,18 +143,26 @@ export function isAutoSettlementCandidate(
   if (thread.activityRunStatus != null) return false;
   if ((thread.pendingBackgroundTasks?.length ?? 0) > 0) return false;
   if (threadHasQueuedTurnStart(thread, nowMs)) return false;
-  const snoozedUntilMs = toMillis(thread.snoozedUntil);
-  if (snoozedUntilMs === null || snoozedUntilMs <= nowMs) return true;
-  // A snoozed thread that woke early (error or completed work) can settle;
-  // one still parked on its wake time keeps its stronger statement.
-  const snoozedAtMs = toMillis(thread.snoozedAt);
-  const completedAtMs = toMillis(thread.latestRunCompletedAt);
-  const wokeOnError =
-    thread.status === "failed" &&
-    (snoozedAtMs === null || (completedAtMs !== null && completedAtMs > snoozedAtMs));
-  const wokeOnCompletion =
-    snoozedAtMs !== null && completedAtMs !== null && completedAtMs > snoozedAtMs;
-  return wokeOnError || wokeOnCompletion;
+  return !isSnoozed(thread, nowMs);
+}
+
+/** Snooze expires early when completed work or a new request needs attention. */
+export function isSnoozed(
+  thread: Pick<
+    ProjectionStore.ProjectionSettlementCandidate,
+    "snoozedUntil" | "snoozedAt" | "latestRunCompletedAt" | "status" | "pendingRuntimeRequest"
+  >,
+  nowMs: number,
+): boolean {
+  const until = toMillis(thread.snoozedUntil);
+  if (until === null || until <= nowMs || thread.pendingRuntimeRequest !== null) return false;
+  const snoozedAt = toMillis(thread.snoozedAt);
+  const completedAt = toMillis(thread.latestRunCompletedAt);
+  const completedAfterSnooze =
+    snoozedAt !== null && completedAt !== null && completedAt > snoozedAt;
+  const wokeOnError = thread.status === "failed" && (snoozedAt === null || completedAfterSnooze);
+  const wokeOnCompletion = thread.status === "completed" && completedAfterSnooze;
+  return !wokeOnError && !wokeOnCompletion;
 }
 
 export function resolveAutoSettlementAt(input: {

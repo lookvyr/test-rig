@@ -139,6 +139,7 @@ export {
   OrchestratorMcpThreadListResult,
   OrchestratorMcpThreadReadInput,
   OrchestratorMcpThreadDetail,
+  OrchestratorMcpThreadPullRequest,
   OrchestratorMcpThreadRun,
   OrchestratorMcpThreadTimelineItem,
   OrchestratorMcpThreadReadResult,

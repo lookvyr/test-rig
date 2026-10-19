@@ -166,23 +166,35 @@ function relationshipThreadTitle(input: {
 }
 
 /**
- * A delegated task settles with its first run, but the parent can keep sending
- * the child follow-ups. While the child thread has a live run, the row's timer
- * and hover card follow that run instead of the settled task.
+ * The row's timer and hover card follow current child work, including queued
+ * follow-ups whose provider turn has not started yet.
  */
-export function liveSubagent<Agent extends RuntimeSubagent>(
+export function currentSubagent<Agent extends RuntimeSubagent>(
   agent: Agent | undefined,
   childThread: OrchestrationV2ThreadShell | null | undefined,
 ): Agent | undefined {
-  const liveStatus = childThread?.activityRunStatus;
-  if (!agent || !liveStatus) return agent;
-  const startedAt = childThread.activityRunStartedAt;
+  const liveStatus =
+    childThread?.activityRunStatus ?? (childThread?.status === "queued" ? "queued" : null);
+  if (!agent || !childThread) return agent;
+  const newerRun =
+    childThread.latestRunRequestedAt &&
+    DateTime.toEpochMillis(childThread.latestRunRequestedAt) >
+      Date.parse(agent.completedAt ?? agent.startedAt ?? agent.updatedAt);
+  if (!liveStatus && !newerRun) return agent;
+  const status = liveStatus ?? childThread.status;
+  const startedAt = liveStatus ? childThread.activityRunStartedAt : childThread.latestRunStartedAt;
+  const completedAt = liveStatus ? null : childThread.latestRunCompletedAt;
   return {
     ...agent,
-    status: liveStatus === "running" || liveStatus === "waiting" ? liveStatus : "pending",
+    status:
+      status === "preparing" || status === "starting" || status === "queued"
+        ? "pending"
+        : status === "rolled_back"
+          ? "interrupted"
+          : status,
     startedAt: startedAt ? DateTime.formatIso(startedAt) : null,
-    completedAt: null,
-    // The settled task's output belongs to its first run, not this one.
+    completedAt: completedAt ? DateTime.formatIso(completedAt) : null,
+    // The task's output belongs to its recorded run, not newer child work.
     progress: null,
     result: null,
     error: null,
@@ -202,6 +214,7 @@ export function ThreadRelationshipsPanel(props: {
   // Draft ids do not exist on the server yet; a 404 would cache them as deleted.
   const projection = useThreadDetail(props.isDraft ? null : ref)?.projection ?? null;
   const providers = useServerConfigs().get(props.environmentId)?.providers;
+  // Projections retain task creation order; the last task for each child wins.
   const subagentsByThreadId = useMemo(
     () =>
       new Map(
@@ -369,7 +382,7 @@ export function ThreadRelationshipsPanel(props: {
                   ? BotIcon
                   : GitForkIcon;
               const relationship = relationshipLabel(edge, props.threadId);
-              const agent = liveSubagent(
+              const agent = currentSubagent(
                 isSubagent && !isParent ? subagentsByThreadId.get(threadId) : undefined,
                 node?.thread,
               );
