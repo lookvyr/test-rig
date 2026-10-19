@@ -5360,3 +5360,302 @@ it.layer(TestLayer)("snooze queued runs", (it) => {
       }),
   );
 });
+
+it.effect("Stop settles native background subagent cards and their runless child work", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const sink = yield* EventSink.EventSinkV2;
+    const threadId = ThreadId.make("stop:native-background");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("stop:native:create"),
+      threadId,
+      projectId: ProjectId.make("stop:native:project"),
+      title: "Background",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: process.cwd(),
+      createdBy: "user",
+      creationSource: "web",
+    });
+    yield* orchestrator.dispatch({
+      type: "message.dispatch",
+      commandId: CommandId.make("stop:native:message"),
+      threadId,
+      messageId: MessageId.make("stop:native:message"),
+      text: "Launch background agent",
+      attachments: [],
+      modelSelection,
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const before = yield* orchestrator.getThreadProjection(threadId);
+    const run = before.runs[0]!;
+    const attempt = before.attempts[0]!;
+    const root = before.nodes.find((node) => node.id === run.rootNodeId)!;
+    const providerThread = before.providerThreads[0]!;
+    const now = yield* DateTime.now;
+    const providerTurnId = ProviderTurnId.make("stop:native:turn");
+    const subagentId = NodeId.make("stop:native:agent");
+    const childThreadId = ThreadId.make("stop:native:child");
+    const childRootId = NodeId.make("stop:native:child-root");
+    const childToolId = NodeId.make("stop:native:child-tool");
+    const completedToolId = NodeId.make("stop:native:completed-tool");
+    const independentRunId = RunId.make("stop:native:independent-run");
+    const independentRootId = NodeId.make("stop:native:independent-root");
+    const subagent = {
+      id: subagentId,
+      threadId,
+      runId: run.id,
+      parentNodeId: root.id,
+      origin: "provider_native" as const,
+      driver: ProviderDriverKind.make("codex"),
+      providerInstanceId: modelSelection.instanceId,
+      providerThreadId: providerThread.id,
+      childThreadId,
+      nativeTaskRef: null,
+      createdBy: "agent" as const,
+      title: "Background child",
+      prompt: "Wait for a FIFO",
+      model: null,
+      status: "running" as const,
+      result: null,
+      startedAt: now,
+      completedAt: null,
+      updatedAt: now,
+    };
+    const itemBase = {
+      threadId,
+      runId: run.id,
+      nodeId: subagentId,
+      providerThreadId: providerThread.id,
+      providerTurnId,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 2,
+      status: "running" as const,
+      title: "Background child",
+      startedAt: now,
+      completedAt: null,
+      updatedAt: now,
+    };
+    yield* sink.write({
+      events: [
+        {
+          id: EventId.make("stop:native:completed-run"),
+          type: "run.updated",
+          threadId,
+          occurredAt: now,
+          payload: { ...run, status: "completed", startedAt: now, completedAt: now },
+        },
+        {
+          id: EventId.make("stop:native:completed-attempt"),
+          type: "run-attempt.updated",
+          threadId,
+          occurredAt: now,
+          payload: { ...attempt, status: "completed", providerTurnId, completedAt: now },
+        },
+        {
+          id: EventId.make("stop:native:completed-root"),
+          type: "node.updated",
+          threadId,
+          occurredAt: now,
+          payload: { ...root, status: "completed", completedAt: now },
+        },
+        {
+          id: EventId.make("stop:native:provider-thread"),
+          type: "provider-thread.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            ...providerThread,
+            status: "idle",
+            providerSessionId: ProviderSessionId.make("stop:native:gone"),
+          },
+        },
+        {
+          id: EventId.make("stop:native:provider-turn"),
+          type: "provider-turn.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: providerTurnId,
+            providerThreadId: providerThread.id,
+            nodeId: root.id,
+            runAttemptId: attempt.id,
+            nativeTurnRef: null,
+            ordinal: 1,
+            status: "completed",
+            startedAt: now,
+            completedAt: now,
+          },
+        },
+        {
+          id: EventId.make("stop:native:child-thread"),
+          type: "thread.created",
+          threadId: childThreadId,
+          occurredAt: now,
+          payload: {
+            ...before.thread,
+            id: childThreadId,
+            title: "Native child",
+            activeProviderThreadId: null,
+            lineage: {
+              ...before.thread.lineage,
+              parentThreadId: threadId,
+              relationshipToParent: "subagent",
+            },
+            forkedFrom: { type: "node", nodeId: subagentId },
+          },
+        },
+        {
+          id: EventId.make("stop:native:subagent"),
+          type: "subagent.updated",
+          threadId,
+          occurredAt: now,
+          payload: subagent,
+        },
+        {
+          id: EventId.make("stop:native:subagent-node"),
+          type: "node.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            ...root,
+            id: subagentId,
+            parentNodeId: root.id,
+            kind: "subagent",
+            status: "running",
+            countsForRun: false,
+            completedAt: null,
+          },
+        },
+        {
+          id: EventId.make("stop:native:subagent-item"),
+          type: "turn-item.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            ...itemBase,
+            id: TurnItemId.make("stop:native:agent-item"),
+            type: "subagent",
+            subagentId,
+            origin: subagent.origin,
+            driver: subagent.driver,
+            providerInstanceId: subagent.providerInstanceId,
+            childThreadId,
+            prompt: subagent.prompt,
+            result: null,
+          },
+        },
+        ...([childRootId, childToolId, completedToolId] as const).map((id) => ({
+          id: EventId.make(`event:${id}`),
+          type: "node.updated" as const,
+          threadId: childThreadId,
+          occurredAt: now,
+          payload: {
+            ...root,
+            id,
+            threadId: childThreadId,
+            runId: null,
+            parentNodeId: id === childRootId ? null : childRootId,
+            rootNodeId: childRootId,
+            kind: id === childRootId ? ("root_turn" as const) : ("tool_call" as const),
+            status: id === completedToolId ? ("completed" as const) : ("running" as const),
+            countsForRun: false,
+            providerThreadId: null,
+            completedAt: id === completedToolId ? now : null,
+          },
+        })),
+        {
+          id: EventId.make("stop:native:child-tool-item"),
+          type: "turn-item.updated",
+          threadId: childThreadId,
+          occurredAt: now,
+          payload: {
+            ...itemBase,
+            id: TurnItemId.make("stop:native:child-command"),
+            threadId: childThreadId,
+            runId: null,
+            nodeId: childToolId,
+            type: "command_execution",
+            input: "cat fifo",
+          },
+        },
+        {
+          id: EventId.make("stop:native:independent-run"),
+          type: "run.created",
+          threadId: childThreadId,
+          occurredAt: now,
+          payload: {
+            ...run,
+            id: independentRunId,
+            threadId: childThreadId,
+            rootNodeId: independentRootId,
+            activeAttemptId: null,
+            status: "running",
+            startedAt: now,
+          },
+        },
+        {
+          id: EventId.make("stop:native:independent-root"),
+          type: "node.updated",
+          threadId: childThreadId,
+          occurredAt: now,
+          payload: {
+            ...root,
+            id: independentRootId,
+            threadId: childThreadId,
+            runId: independentRunId,
+            rootNodeId: independentRootId,
+            status: "running",
+            completedAt: null,
+          },
+        },
+        {
+          id: EventId.make("stop:native:independent-item"),
+          type: "turn-item.updated",
+          threadId: childThreadId,
+          occurredAt: now,
+          payload: {
+            ...itemBase,
+            id: TurnItemId.make("stop:native:independent-command"),
+            threadId: childThreadId,
+            runId: independentRunId,
+            nodeId: independentRootId,
+            type: "command_execution",
+            input: "independent work",
+          },
+        },
+      ],
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.stop",
+      commandId: CommandId.make("stop:native:stop"),
+      threadId,
+    });
+    const parent = yield* orchestrator.getThreadProjection(threadId);
+    const child = yield* orchestrator.getThreadProjection(childThreadId);
+    assert.equal(parent.runs[0]?.status, "completed");
+    assert.equal(parent.nodes.find((node) => node.id === root.id)?.status, "completed");
+    assert.equal(parent.subagents[0]?.status, "interrupted");
+    assert.equal(parent.nodes.find((node) => node.id === subagentId)?.status, "interrupted");
+    assert.equal(parent.turnItems.find((item) => item.type === "subagent")?.status, "interrupted");
+    assert.equal(child.nodes.find((node) => node.id === childRootId)?.status, "interrupted");
+    assert.equal(child.nodes.find((node) => node.id === childToolId)?.status, "interrupted");
+    assert.equal(child.nodes.find((node) => node.id === completedToolId)?.status, "completed");
+    assert.equal(
+      child.turnItems.find((item) => item.id === "stop:native:child-command")?.status,
+      "interrupted",
+    );
+    assert.equal(child.runs.find((run) => run.id === independentRunId)?.status, "running");
+    assert.equal(child.nodes.find((node) => node.id === independentRootId)?.status, "running");
+    assert.equal(
+      child.turnItems.find((item) => item.id === "stop:native:independent-command")?.status,
+      "running",
+    );
+  }).pipe(Effect.provide(TestLayer)),
+);

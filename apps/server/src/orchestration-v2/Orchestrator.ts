@@ -7932,7 +7932,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
     readonly projection: Pick<
       OrchestrationV2ThreadProjection,
-      "runs" | "turnItems" | "providerThreads"
+      "runs" | "turnItems" | "providerThreads" | "nodes" | "subagents"
     >;
     readonly stoppedProviderThreadId: OrchestrationV2ProviderThread["id"] | null;
     readonly throughRunOrdinal: number;
@@ -7990,6 +7990,50 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: input.now,
           },
         });
+        if (item.type !== "subagent" || item.origin !== "provider_native" || run === undefined)
+          continue;
+        // The adapter has stopped, so it cannot finish the linked agent or
+        // its runless child transcript. Settle the same exact lifecycle rows
+        // as a native terminal event, keeping independently started runs intact.
+        const child =
+          item.childThreadId === null
+            ? undefined
+            : yield* projectionStore
+                .getThreadRecords(item.childThreadId, ["nodes", "turnItems"])
+                .pipe(mapDispatchError(input.command));
+        const cascaded = yield* RunExecutionService.cascadeTerminalizeRunOwnedSubagents({
+          run,
+          status: "interrupted",
+          completedAt: input.now,
+          allocateEventId: () =>
+            idAllocator.allocate.event({
+              threadId: input.command.threadId,
+              commandId: input.command.commandId,
+            }),
+          open: {
+            subagents: new Map(
+              input.projection.subagents
+                .filter((task) => task.id === item.subagentId && task.origin === "provider_native")
+                .map((task) => [task.id, task]),
+            ),
+            nodes: new Map(
+              [
+                ...input.projection.nodes.filter(
+                  (node) => node.id === item.subagentId || node.id === item.nodeId,
+                ),
+                ...(child?.nodes.filter((node) => node.runId === null) ?? []),
+              ].map((node) => [node.id, node]),
+            ),
+            turnItems: new Map(),
+            childTurnItems: new Map(
+              (child?.turnItems.filter((childItem) => childItem.runId === null) ?? []).map(
+                (childItem) => [childItem.id, childItem],
+              ),
+            ),
+            linkedChildThreadIds: new Set(item.childThreadId === null ? [] : [item.childThreadId]),
+          },
+        }).pipe(mapDispatchError(input.command));
+        yield* Ref.update(input.events, (events) => [...events, ...cascaded]);
       }
       for (const providerThread of input.projection.providerThreads) {
         // A live process owns its roster and reports clearing it.
