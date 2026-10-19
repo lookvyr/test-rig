@@ -6,6 +6,7 @@ import v2 from "./Migrations/041_OrchestrationV2.ts";
 import indexes from "./Migrations/042_V2ProjectionIndexes.ts";
 import nightlyDependencies from "./Migrations/043_NightlyV2Dependencies.ts";
 import threadSnapshotIndexes from "./Migrations/044_ThreadSnapshotWindowIndexes.ts";
+import dropUnusedV1Projections from "./Migrations/045_DropUnusedV1Projections.ts";
 // V1 retains its historical ledger. Only the snapshot-backed V2 layer runs these entries.
 export const runV2Migrations = Effect.fn("runV2Migrations")(function* () {
   return yield* Migrator.make({})({
@@ -17,6 +18,7 @@ export const runV2Migrations = Effect.fn("runV2Migrations")(function* () {
         ["42_V2ProjectionIndexes", indexes],
         ["43_NightlyV2Dependencies", nightlyDependencies],
         ["44_ThreadSnapshotWindowIndexes", threadSnapshotIndexes],
+        ["45_DropUnusedV1Projections", dropUnusedV1Projections],
       ]),
     ),
   });

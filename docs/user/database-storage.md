@@ -28,3 +28,22 @@ For recovery, stop the app and preserve the current database and any `-wal` and
 `-shm` siblings together before restoring a backup. Inspect a copy of the backup
 first. Never replace a database while it is open, or combine a backup with the
 failed database's WAL files.
+
+After a V1 upgrade, `state.sqlite` is kept beside `statev2.sqlite` for rollback.
+Doctor reports this copy but `--fix` never deletes it. To permanently remove it,
+stop every Test Rig version and run the inspect command with
+`--remove-legacy-database`. `--dry-run` overrides this flag too. Deletion is
+separate from compaction and does not create another rollback copy.
+
+Removal requires a valid current database, exclusive access to both databases,
+and matching legacy conversation, project, session, pull request, and checkpoint
+source rows in the current database. A newer V1 conversation or an incomplete
+migration blocks deletion. Only the recognized sibling `state.sqlite` and its
+WAL/SHM files are removed; current conversations, lazy transcript sources,
+checkpoint history, and existing backups remain. An older V1 app would then
+start without the deleted copy's conversations or settings.
+
+V2 upgrades discard copied V1 activity, proposed-plan, pending-approval, and
+projector bookkeeping tables that the current app does not read. Legacy
+transcript sources and checkpoint metadata/diffs remain. This frees reusable
+pages; run offline compaction to return them to disk.
