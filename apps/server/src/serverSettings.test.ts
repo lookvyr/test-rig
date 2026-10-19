@@ -619,6 +619,27 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(settingsLayer));
   });
 
+  it.effect("preserves disabled inactivity settlement across concurrent settings edits", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const fs = yield* FileSystem.FileSystem;
+      const config = yield* ServerConfig.ServerConfig;
+      yield* Effect.all(
+        [
+          service.updateSettings({ sidebarAutoSettleAfterDays: null }),
+          service.updateSettings({ sidebarAutoSettleOnMerge: false }),
+        ],
+        { concurrency: "unbounded" },
+      );
+      const saved = yield* decodeSavedServerSettings(yield* fs.readFileString(config.settingsPath));
+      const current = yield* service.getSettings;
+      for (const settings of [saved, current]) {
+        assert.isNull(settings.sidebarAutoSettleAfterDays);
+        assert.isFalse(settings.sidebarAutoSettleOnMerge);
+      }
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("preserves configured preferences when an unrelated decoded patch is saved", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;

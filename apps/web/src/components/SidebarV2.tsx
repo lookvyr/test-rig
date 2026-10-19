@@ -105,7 +105,6 @@ import {
   useUpdateClientSettings,
 } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
-import { useNowMinute } from "../hooks/useNowMinute";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
@@ -446,11 +445,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
-  onChangeRequestState: (threadKey: string, state: "open" | "closed" | "merged" | null) => void;
 }) {
   const {
     isRenaming,
-    onChangeRequestState,
     onCancelRename,
     onCommitRename,
     onContextMenu,
@@ -602,12 +599,6 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state) : undefined;
-  // Report the PR state up: the parent partitions rows with effectiveSettled,
-  // and a merged/closed PR auto-settles a thread — data only rows have.
-  useEffect(() => {
-    onChangeRequestState(threadKey, prState);
-  }, [onChangeRequestState, prState, threadKey]);
-
   const modelInstanceId = thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
   const driverKind = providerEntry?.driverKind ?? null;
@@ -1392,7 +1383,6 @@ export default function SidebarV2() {
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const autoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays);
   const workingShelfEnabled = useClientSettings((s) => s.sidebarWorkingShelfEnabled);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -1577,36 +1567,12 @@ export default function SidebarV2() {
     [projectGroups],
   );
 
-  // now is quantized to the minute so effectiveSettled memoization doesn't
-  // churn on every render; auto-settle thresholds are day-granular anyway.
-  const nowMinute = useNowMinute();
   // Snooze wake times are second-precise, so classifying with the quantized
   // minute would hold a woken thread on the shelf for up to a minute. The
   // tick is a plain counter bumped exactly at the next wake boundary (armed
   // below, after the partition knows the boundary); the partition reads a
   // fresh clock whenever it recomputes.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0);
-
-  // PR states stream in per-row (rows own the VCS subscriptions); a merged or
-  // closed PR auto-settles its thread on the next partition.
-  const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
-    ReadonlyMap<string, "open" | "closed" | "merged">
-  >(() => new Map());
-  const handleChangeRequestState = useCallback(
-    (threadKey: string, state: "open" | "closed" | "merged" | null) => {
-      setChangeRequestStateByKey((current) => {
-        if ((current.get(threadKey) ?? null) === state) return current;
-        const next = new Map(current);
-        if (state === null) {
-          next.delete(threadKey);
-        } else {
-          next.set(threadKey, state);
-        }
-        return next;
-      });
-    },
-    [],
-  );
 
   // Project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
@@ -1806,7 +1772,6 @@ export default function SidebarV2() {
     snoozeNow,
   } = useMemo(() => {
     const workingKeys = inboxReturns.observe(workingShelfEnabled ? threads : null);
-    const now = `${nowMinute}:00.000Z`;
     // Snooze classification uses a REAL clock, not the quantized minute:
     // wake times are second-precise and a woken thread must not linger on
     // the shelf for the rest of the minute. snoozeWakeTick re-runs this
@@ -1836,7 +1801,6 @@ export default function SidebarV2() {
       const supportsSnooze =
         serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
       const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-      const changeRequestState = changeRequestStateByKey.get(threadKey) ?? null;
       // Snooze outranks everything, including a pin: "hide until Tuesday"
       // temporarily suspends "keep on top". The pin survives underneath —
       // pinned cards are creation-ordered, so on wake the thread reappears
@@ -1875,16 +1839,7 @@ export default function SidebarV2() {
       settledThreads: sortSettledThreadsForSidebarV2(settled),
       snoozeNow: preciseNow,
     };
-  }, [
-    autoSettleAfterDays,
-    changeRequestStateByKey,
-    nowMinute,
-    scopedProjectKeys,
-    serverConfigs,
-    snoozeWakeTick,
-    threads,
-    workingShelfEnabled,
-  ]);
+  }, [scopedProjectKeys, serverConfigs, snoozeWakeTick, threads, workingShelfEnabled]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3352,7 +3307,6 @@ export default function SidebarV2() {
                         onUnsnooze={attemptUnsnooze}
                         onUnpin={attemptUnpin}
                         onAcknowledgeWoke={acknowledgeWoke}
-                        onChangeRequestState={handleChangeRequestState}
                       />
                     );
                   };

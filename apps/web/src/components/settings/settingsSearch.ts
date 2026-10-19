@@ -218,7 +218,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/beta",
-    targetId: "sidebar-v2",
+  },
+  {
+    id: "auto-settle-merged-threads",
+    title: "Auto-settle merged pull requests",
+    to: "/settings/beta",
   },
   {
     id: "sidebar-working-shelf",

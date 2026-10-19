@@ -1,6 +1,7 @@
 import {
   CommandId,
   type OrchestrationV2Run,
+  type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
   OrchestrationV2DomainEvent,
   OrchestrationV2StoredEvent,
@@ -112,6 +113,18 @@ export interface EventSinkV2Shape {
     readonly runId: RunId;
     readonly activeAttemptId: RunAttemptId;
     readonly expectedLastRunOrdinal: number;
+    readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
+  }) => Effect.Effect<
+    {
+      readonly committed: boolean;
+      readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>;
+    },
+    EventSinkV2Error
+  >;
+  /** Commit only if the app thread is unchanged and no newer run is active. */
+  readonly writeIfThreadUnchanged: (input: {
+    readonly expected: OrchestrationV2AppThread;
+    readonly runId: RunId;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
   }) => Effect.Effect<
     {
@@ -520,6 +533,36 @@ const baseLayer: Layer.Layer<
       );
     });
 
+    const writeIfThreadUnchangedEffect = Effect.fn(
+      "orchestrationV2.EventSink.writeIfThreadUnchanged",
+    )(function* (input: Parameters<EventSinkV2Shape["writeIfThreadUnchanged"]>[0]) {
+      const expectedJson = yield* ProjectionStore.encodeThreadPayload(input.expected);
+      return yield* commitThenPublish(
+        Effect.gen(function* () {
+          const rows = yield* sql<{ readonly payload_json: string }>`
+              SELECT payload_json FROM orchestration_v2_projection_threads
+              WHERE thread_id = ${input.expected.id} LIMIT 1
+            `;
+          const shell = yield* projectionStore.getThreadShell(input.expected.id);
+          if (
+            rows[0]?.payload_json !== expectedJson ||
+            shell === null ||
+            (shell.activeRunId !== null && shell.activeRunId !== input.runId)
+          ) {
+            return {
+              committed: false as const,
+              storedEvents: [] as ReadonlyArray<OrchestrationV2StoredEvent>,
+            };
+          }
+          const normalized = yield* normalizeEvents(input.events);
+          const storedEvents = yield* eventStore.append({ events: normalized });
+          yield* applyStoredEvents(storedEvents);
+          return { committed: true as const, storedEvents };
+        }),
+        (result) => (result.committed ? publishStoredEvents(result.storedEvents) : Effect.void),
+      );
+    });
+
     const writeIfProviderThreadUnchangedEffect = Effect.fn(
       "orchestrationV2.EventSink.writeIfProviderThreadUnchanged",
     )(function* (input: Parameters<EventSinkV2Shape["writeIfProviderThreadUnchanged"]>[0]) {
@@ -820,6 +863,12 @@ const baseLayer: Layer.Layer<
     };
 
     return EventSinkV2.of({
+      writeIfThreadUnchanged: (input) =>
+        writeIfThreadUnchangedEffect(input).pipe(
+          Effect.mapError(
+            (cause) => new EventSinkWriteError({ eventCount: input.events.length, cause }),
+          ),
+        ),
       writeIfProviderThreadUnchanged: (input) =>
         writeIfProviderThreadUnchangedEffect(input).pipe(
           Effect.mapError(

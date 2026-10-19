@@ -824,6 +824,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
     const onScrollKey = (event: globalThis.KeyboardEvent) => {
       if (
+        !((event.metaKey || event.ctrlKey) && ["ArrowUp", "ArrowDown"].includes(event.key)) &&
         ["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key) &&
         !(
           event.target instanceof Element &&
@@ -1057,7 +1058,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           // DOM geometry includes the header and the virtualizer's layout adjustment.
           offsetWithinRow: element.getBoundingClientRect().top - row.getBoundingClientRect().top,
           scrollOffset: element.scrollTop,
-          atEnd: isAtEnd,
+          atEnd: (liveFollowEnabled && !anchoredEndSpace) || isAtEnd,
           disclosures: {
             runs: paintedExpandedRunIds,
             workGroups: paintedExpandedWorkGroupIds,
@@ -1116,6 +1117,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     workGroupViewState,
     rows,
     listIdentityKey,
+    liveFollowEnabled,
+    anchoredEndSpace,
     restoringThreadPosition,
     listRef,
     minimapItems,
@@ -1128,6 +1131,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const frame = requestAnimationFrame(handleScroll);
     return () => cancelAnimationFrame(frame);
   }, [handleScroll, rows.length]);
+
+  const savedLiveFollowEnabledRef = useRef(liveFollowEnabled);
+  useLayoutEffect(() => {
+    const wasFollowing = savedLiveFollowEnabledRef.current;
+    savedLiveFollowEnabledRef.current = liveFollowEnabled;
+    if (wasFollowing && !liveFollowEnabled) handleScroll();
+  }, [handleScroll, liveFollowEnabled]);
 
   useEffect(() => {
     if (!timelineViewportElement) {

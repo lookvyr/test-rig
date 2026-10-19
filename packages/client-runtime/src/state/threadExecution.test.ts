@@ -7,6 +7,8 @@ import {
   ProviderSessionId,
   ProviderDriverKind,
   RunId,
+  RunAttemptId,
+  ProviderTurnId,
   ThreadId,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2RunStatus,
@@ -189,6 +191,45 @@ describe("thread execution presentation", () => {
     });
     expect(threadRuntimeHasInterruptibleRun(runtime)).toBe(true);
   });
+
+  it.each(["pending", "running", "completed", "failed", "interrupted", "cancelled"] as const)(
+    "recognizes provider turn %s while the run remains open",
+    (status) => {
+      const attemptId = RunAttemptId.make("attempt-open");
+      const openRun = { ...run("run-open", 1, "running"), activeAttemptId: attemptId };
+      const providerTurn = {
+        id: ProviderTurnId.make("provider-turn-open"),
+        providerThreadId: ProviderThreadId.make("provider-thread-open"),
+        nodeId: NodeId.make("node-open"),
+        runAttemptId: attemptId,
+        nativeTurnRef: null,
+        ordinal: 1,
+        status,
+        startedAt: now,
+        completedAt: status === "running" || status === "pending" ? null : now,
+      };
+      const projection = { ...v2Projection, runs: [openRun], providerTurns: [providerTurn] };
+      expect(deriveThreadActivityRun(projection)?.turnEnded).toBe(
+        status === "pending" || status === "running" ? undefined : true,
+      );
+      // A resumed/retried provider turn supersedes the earlier terminal turn,
+      // independent of projection array ordering.
+      const resumed = {
+        ...providerTurn,
+        ordinal: 2,
+        status: "running" as const,
+        completedAt: null,
+      };
+      expect(
+        deriveThreadActivityRun({ ...projection, providerTurns: [resumed, providerTurn] })
+          ?.turnEnded,
+      ).toBeUndefined();
+      expect(
+        deriveThreadActivityRun({ ...projection, runs: [{ ...openRun, activeAttemptId: null }] })
+          ?.turnEnded,
+      ).toBeUndefined();
+    },
+  );
 
   it("presents a held queue as the stopped run instead of queued work", () => {
     const interrupted = { ...run("run-interrupted", 1, "interrupted"), completedAt: now };

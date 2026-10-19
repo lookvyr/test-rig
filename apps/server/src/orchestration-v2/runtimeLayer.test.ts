@@ -736,6 +736,83 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
     }),
   );
 
+  it.effect("rejects branch adoption after concurrent metadata or a newer run", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const sink = yield* EventSink.EventSinkV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("branch-adoption-cas");
+      yield* seedProject({
+        projectId: ProjectId.make("branch-cas-project"),
+        title: "CAS",
+        workspaceRoot: "/tmp/branch-cas",
+        defaultModelSelection: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("branch-cas-create"),
+        threadId,
+        projectId: ProjectId.make("branch-cas-project"),
+        title: "Original",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      const expected = yield* projections.getThread(threadId);
+      const now = yield* DateTime.now;
+      const event = {
+        id: EventId.make("branch-cas-adopt"),
+        type: "thread.metadata-updated" as const,
+        threadId,
+        occurredAt: now,
+        payload: { ...expected, branch: "feature", updatedAt: now },
+      };
+      yield* orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("branch-cas-title"),
+        threadId,
+        title: "Renamed concurrently",
+      });
+      const rejected = yield* sink.writeIfThreadUnchanged({
+        expected,
+        runId: RunId.make("old-run"),
+        events: [event],
+      });
+      assert.equal(rejected.committed, false);
+      assert.equal((yield* projections.getThread(threadId)).title, "Renamed concurrently");
+      const current = yield* projections.getThread(threadId);
+      const accepted = yield* sink.writeIfThreadUnchanged({
+        expected: current,
+        runId: RunId.make("old-run"),
+        events: [{ ...event, payload: { ...current, branch: "feature", updatedAt: now } }],
+      });
+      assert.equal(accepted.committed, true);
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("branch-cas-run"),
+        threadId,
+        messageId: MessageId.make("branch-cas-message"),
+        text: "New run",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+      });
+      const newerRun = yield* sink.writeIfThreadUnchanged({
+        expected: yield* projections.getThread(threadId),
+        runId: RunId.make("old-run"),
+        events: [{ ...event, id: EventId.make("branch-cas-stale-run") }],
+      });
+      assert.equal(newerRun.committed, false);
+      assert.equal((yield* projections.getThread(threadId)).branch, "feature");
+    }),
+  );
+
   /**
    * Seeds already-persisted rollback requests to exercise old outbox records.
    * New rollback commands are rejected before they can create these effects.

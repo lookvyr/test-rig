@@ -200,7 +200,7 @@ export function mergeEnvironmentSettings(
   serverSettings: ServerSettings,
   clientSettings: ClientSettings,
 ): UnifiedSettings {
-  return { ...serverSettings, ...clientSettings };
+  return { ...clientSettings, ...serverSettings };
 }
 
 function useMergedSettings<T>(

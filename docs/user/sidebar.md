@@ -40,6 +40,13 @@ Use a thread's actions menu from its heading or sidebar row. **Settle thread**
 moves it out of Active; **Un-settle** brings it back. **Auto-settle behavior**
 lets you disable automatic settlement for an individual thread.
 
+In **Settings → Beta**, automatic settlement defaults to three days of inactivity,
+with settlement after a pull request merges enabled. These server preferences
+apply to both web and desktop clients. Closed pull requests can also settle
+threads. Disabling auto-settle on a thread prevents automatic settlement.
+Worktree cleanup never settles a thread; it only considers threads already
+settled or archived.
+
 **Snooze** hides a thread until the chosen time. Choose **Custom…** for a date
 and time or a duration. **Wake thread** brings it back early. Snoozing alone
 does not send a message. Custom snooze is also available for selected sidebar

@@ -31,6 +31,8 @@ import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import React, {
   Children,
+  createContext,
+  use,
   type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
   isValidElement,
@@ -785,17 +787,13 @@ function areMarkdownFileLinkPropsEqual(
   );
 }
 
-function ChatMarkdown({
+function useChatMarkdownState({
   text,
   cwd,
   threadRef,
   onTaskListChange,
   isStreaming = false,
   skills = EMPTY_MARKDOWN_SKILLS,
-  className,
-  lineBreaks = false,
-  parseRawHtml = true,
-  extraRemarkPlugins,
   renderContextReference,
   headingLevelOffset = 0,
   onImageExpand,
@@ -878,293 +876,320 @@ function ChatMarkdown({
     },
     [createAssetUrl, openPreview, preparedConnection, threadRef],
   );
-  /* eslint-disable react/no-unstable-nested-components -- ReactMarkdown requires component
-   * renderers that close over this message's metadata. useMemo keeps them stable until that
-   * metadata changes. */
-  const markdownComponents = useMemo<Components>(() => {
-    const fileLinkChip = (
-      fileLinkMeta: MarkdownFileLinkMeta,
-      copyMarkdown: string,
-      className?: string,
-    ) => {
-      return (
-        <MarkdownFileLink
-          href={fileLinkMeta.targetPath}
-          targetPath={fileLinkMeta.targetPath}
-          iconPath={fileLinkMeta.filePath}
-          displayPath={fileLinkMeta.displayPath}
-          workspaceRelativePath={fileLinkMeta.workspaceRelativePath}
-          line={fileLinkMeta.line}
-          label={chatMarkdownFileLinkLabel(fileLinkMeta, fileLinkParentSuffixByPath)}
-          copyMarkdown={copyMarkdown}
-          theme={resolvedTheme}
-          threadRef={threadRef}
-          onOpen={openInPreferredEditor}
-          onOpenInBrowser={
-            threadRef &&
-            isPreviewSupportedInRuntime(threadRef?.environmentId) &&
-            isBrowserPreviewFile(fileLinkMeta.filePath)
-              ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
-              : undefined
-          }
-          className={className}
-        />
-      );
-    };
-
-    return {
-      ...Object.fromEntries(
-        [1, 2, 3, 4, 5, 6].map((level) => [
-          `h${level}`,
-          ({
-            node: _node,
-            ...props
-          }: React.HTMLAttributes<HTMLHeadingElement> & { node?: unknown }) =>
-            React.createElement(`h${level}`, {
-              ...props,
-              "aria-level":
-                headingLevelOffset > 0 ? Math.min(level + headingLevelOffset, 6) : undefined,
-            }),
-        ]),
-      ),
-      img({ node, src, alt = "", title: _title, ...props }) {
-        const source = typeof src === "string" ? src : "";
-        const start = node?.position?.start.offset;
-        const end = node?.position?.end.offset;
-        const copyMarkdown =
-          start !== undefined && end !== undefined ? text.slice(start, end) : undefined;
-        const layout = markdownMediaLayout(node);
-        const standalone = layout?.mediaStandalone === true;
-        const insideLink = layout?.mediaInsideLink === true;
-        const expandImage = insideLink ? undefined : onImageExpand;
-        const context = parseComposerContextHref(source);
-        if (context)
-          return (
-            renderContextReference?.({ ...context, label: alt || context.contextId }) ?? (
-              <span>{alt || context.contextId}</span>
-            )
-          );
-        const fileName = resolveMarkdownBrowserScreenshotFileName(source);
-        const imageEnvironmentId = threadRef?.environmentId ?? environmentId;
-        if (fileName && imageEnvironmentId)
-          return (
-            <ChatMarkdownAssetImage
-              alt={alt}
-              environmentId={imageEnvironmentId}
-              resource={{ _tag: "browser-screenshot", fileName }}
-              imageProps={props}
-              copyMarkdown={copyMarkdown}
-              standalone={standalone}
-              onImageExpand={expandImage}
-            />
-          );
-        const media = resolveMediaSource(source, {
-          threadId: threadRef?.threadId,
-          workspaceRoot: cwd,
-          imageEmbed: true,
-        });
-        if (insideLink && media?.kind === "video") return <span>{alt || "Video"}</span>;
-        if (media?.access === "environment" && threadRef)
-          return (
-            <ChatMarkdownAssetImage
-              environmentId={threadRef.environmentId}
-              resource={media.resource}
-              kind={media.kind}
-              alt={alt}
-              imageProps={props}
-              copyMarkdown={copyMarkdown}
-              standalone={standalone}
-              srcFragment={media.srcFragment}
-              onImageExpand={expandImage}
-            />
-          );
-        if (media?.access === "direct")
-          return (
-            <ChatMarkdownDirectMedia
-              src={media.uri}
-              kind={media.kind}
-              alt={alt}
-              standalone={standalone}
-              copyMarkdown={copyMarkdown}
-              imageProps={props}
-              onImageExpand={expandImage}
-            />
-          );
-        return <span>{alt || "Image unavailable"}</span>;
-      },
-      p({ node: _node, children, ...props }) {
-        return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
-      },
-      li({ node, children, ...props }) {
-        const listItemStart = node?.position?.start.offset;
-        const markerOffset =
-          typeof listItemStart === "number" ? findTaskListMarkerOffset(text, listItemStart) : null;
-        return (
-          <li {...props} data-task-marker-offset={markerOffset ?? undefined}>
-            {renderSkillInlineMarkdownChildren(children, skills)}
-          </li>
-        );
-      },
-      input({ node: _node, type, checked, disabled: _disabled, ...props }) {
-        if (type !== "checkbox" || !onTaskListChange) {
-          return (
-            <input
-              {...props}
-              type={type}
-              checked={checked}
-              disabled={_disabled}
-              readOnly={type === "checkbox"}
-            />
-          );
-        }
-        return (
-          <input
-            {...props}
-            type="checkbox"
-            name="markdown-task"
-            aria-label="Toggle task"
-            checked={checked}
-            onChange={(event) => {
-              const markerOffset = Number(
-                event.currentTarget.closest("li")?.dataset.taskMarkerOffset,
-              );
-              if (!Number.isSafeInteger(markerOffset)) return;
-              onTaskListChange({ markerOffset, checked: event.currentTarget.checked });
-            }}
-          />
-        );
-      },
-      a({ node, href, children, title: _title, ...props }) {
-        const context = href ? parseComposerContextHref(href) : null;
-        if (context) {
-          const label = nodeToPlainText(children) || context.contextId;
-          return renderContextReference?.({ ...context, label }) ?? <span>{label}</span>;
-        }
-        const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
-        const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
-        if (!fileLinkMeta) {
-          const faviconHost = resolveExternalWebLinkHost(href);
-          const isSameDocumentLink = href?.startsWith("#") ?? false;
-          const onClick = props.onClick;
-          const canOpenInPreview =
-            Boolean(threadRef) && isPreviewSupportedInRuntime(threadRef?.environmentId);
-          const link = (
-            <a
-              {...props}
-              href={href}
-              target={isSameDocumentLink ? undefined : "_blank"}
-              rel={isSameDocumentLink ? undefined : "noopener noreferrer"}
-              onClick={(event) => {
-                onClick?.(event);
-                if (isSameDocumentLink && href) {
-                  handleMarkdownFragmentClick(event, href);
-                }
-              }}
-              onContextMenu={(event) => {
-                if (!canOpenInPreview || !href || !faviconHost) return;
-                event.preventDefault();
-                event.stopPropagation();
-                const api = readLocalApi();
-                if (!api) return;
-                void showExternalLinkContextMenu({
-                  href,
-                  position: { x: event.clientX, y: event.clientY },
-                  showContextMenu: (items, position) => api.contextMenu.show(items, position),
-                  openInPreview: async (target) => {
-                    const result = await openExternalLinkInPreview(target);
-                    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-                      reportMarkdownActionFailure(
-                        { operation: "open-link-in-preview", target },
-                        result.cause,
-                      );
-                    }
-                  },
-                  openExternal: (target) => api.shell.openExternal(target),
-                  copyLink: (target) => writeTextToClipboard(target, "link"),
-                  reportFailure: (operation, cause) => {
-                    reportMarkdownActionFailure({ operation, target: href }, cause);
-                  },
-                });
-              }}
-            >
-              {faviconHost ? (
-                <MarkdownExternalLinkContent plainText={plainHastText(node)}>
-                  {children}
-                </MarkdownExternalLinkContent>
-              ) : (
-                children
-              )}
-            </a>
-          );
-          if (!faviconHost || !href) {
-            return link;
-          }
-          return (
-            <Tooltip>
-              <TooltipTrigger render={link} />
-              <TooltipPopup
-                side="top"
-                className="max-w-[min(36rem,calc(100vw-2rem))] whitespace-normal leading-tight wrap-anywhere"
-              >
-                {href}
-              </TooltipPopup>
-            </Tooltip>
-          );
-        }
-
-        return fileLinkChip(
-          fileLinkMeta,
-          `[${fileLinkMeta.basename}](${normalizedHref})`,
-          props.className,
-        );
-      },
-      code({ node, children, className, ...props }) {
-        if (node?.properties?.dataInlineCode != null) {
-          const codeText = nodeToPlainText(children);
-          const fileLinkMeta =
-            inlineCodeFileLinkMetaByText.get(codeText.trim()) ??
-            resolveInlineCodeFileLinkMeta(codeText, cwd);
-          if (fileLinkMeta) {
-            return fileLinkChip(fileLinkMeta, `\`${codeText}\``);
-          }
-        }
-        return (
-          <code {...props} className={className}>
-            {children}
-          </code>
-        );
-      },
-      table({ node: _node, ...props }) {
-        return <MarkdownTable {...props} />;
-      },
-      details({ node: _node, children, open: detailsOpen }) {
-        return <MarkdownDetails open={detailsOpen}>{children}</MarkdownDetails>;
-      },
-      pre(props) {
-        return <MarkdownPre {...props} isStreaming={isStreaming} />;
-      },
-    };
-  }, [
+  return {
+    text,
+    cwd,
+    threadRef,
+    onTaskListChange,
+    isStreaming,
+    skills,
     renderContextReference,
     headingLevelOffset,
     onImageExpand,
-    cwd,
+    resolvedTheme,
     environmentId,
-    fileLinkParentSuffixByPath,
-    inlineCodeFileLinkMetaByText,
-    isStreaming,
     markdownFileLinkMetaByHref,
-    onTaskListChange,
+    inlineCodeFileLinkMetaByText,
+    fileLinkParentSuffixByPath,
+    markdownUrlTransform,
+    handleCopy,
     openInPreferredEditor,
     openExternalLinkInPreview,
     openMarkdownFileInPreview,
-    resolvedTheme,
-    skills,
-    text,
-    threadRef,
-  ]);
-  /* eslint-enable react/no-unstable-nested-components */
+  };
+}
 
+const ChatMarkdownRendererContext = createContext<ReturnType<typeof useChatMarkdownState>>(null!);
+
+function useMarkdownFileLinkChip() {
+  const {
+    fileLinkParentSuffixByPath,
+    resolvedTheme,
+    threadRef,
+    openInPreferredEditor,
+    openMarkdownFileInPreview,
+  } = use(ChatMarkdownRendererContext);
+  return (fileLinkMeta: MarkdownFileLinkMeta, copyMarkdown: string, className?: string) => {
+    return (
+      <MarkdownFileLink
+        href={fileLinkMeta.targetPath}
+        targetPath={fileLinkMeta.targetPath}
+        iconPath={fileLinkMeta.filePath}
+        displayPath={fileLinkMeta.displayPath}
+        workspaceRelativePath={fileLinkMeta.workspaceRelativePath}
+        line={fileLinkMeta.line}
+        label={chatMarkdownFileLinkLabel(fileLinkMeta, fileLinkParentSuffixByPath)}
+        copyMarkdown={copyMarkdown}
+        theme={resolvedTheme}
+        threadRef={threadRef}
+        onOpen={openInPreferredEditor}
+        onOpenInBrowser={
+          threadRef &&
+          isPreviewSupportedInRuntime(threadRef?.environmentId) &&
+          isBrowserPreviewFile(fileLinkMeta.filePath)
+            ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
+            : undefined
+        }
+        className={className}
+      />
+    );
+  };
+}
+
+// Stable renderer types preserve block state through streamed text and completion.
+const CHAT_MARKDOWN_COMPONENTS = {
+  ...Object.fromEntries(
+    [1, 2, 3, 4, 5, 6].map((level) => [
+      `h${level}`,
+      ({
+        node: _node,
+        ...props
+      }: React.HTMLAttributes<HTMLHeadingElement> & { node?: unknown }) => {
+        const { headingLevelOffset } = use(ChatMarkdownRendererContext);
+        return React.createElement(`h${level}`, {
+          ...props,
+          "aria-level":
+            headingLevelOffset > 0 ? Math.min(level + headingLevelOffset, 6) : undefined,
+        });
+      },
+    ]),
+  ),
+  img({ node, src, alt = "", title: _title, ...props }) {
+    const { text, onImageExpand, renderContextReference, threadRef, environmentId, cwd } = use(
+      ChatMarkdownRendererContext,
+    );
+    const source = typeof src === "string" ? src : "";
+    const start = node?.position?.start.offset;
+    const end = node?.position?.end.offset;
+    const copyMarkdown =
+      start !== undefined && end !== undefined ? text.slice(start, end) : undefined;
+    const layout = markdownMediaLayout(node);
+    const standalone = layout?.mediaStandalone === true;
+    const insideLink = layout?.mediaInsideLink === true;
+    const expandImage = insideLink ? undefined : onImageExpand;
+    const context = parseComposerContextHref(source);
+    if (context)
+      return (
+        renderContextReference?.({ ...context, label: alt || context.contextId }) ?? (
+          <span>{alt || context.contextId}</span>
+        )
+      );
+    const fileName = resolveMarkdownBrowserScreenshotFileName(source);
+    const imageEnvironmentId = threadRef?.environmentId ?? environmentId;
+    if (fileName && imageEnvironmentId)
+      return (
+        <ChatMarkdownAssetImage
+          alt={alt}
+          environmentId={imageEnvironmentId}
+          resource={{ _tag: "browser-screenshot", fileName }}
+          imageProps={props}
+          copyMarkdown={copyMarkdown}
+          standalone={standalone}
+          onImageExpand={expandImage}
+        />
+      );
+    const media = resolveMediaSource(source, {
+      threadId: threadRef?.threadId,
+      workspaceRoot: cwd,
+      imageEmbed: true,
+    });
+    if (insideLink && media?.kind === "video") return <span>{alt || "Video"}</span>;
+    if (media?.access === "environment" && threadRef)
+      return (
+        <ChatMarkdownAssetImage
+          environmentId={threadRef.environmentId}
+          resource={media.resource}
+          kind={media.kind}
+          alt={alt}
+          imageProps={props}
+          copyMarkdown={copyMarkdown}
+          standalone={standalone}
+          srcFragment={media.srcFragment}
+          onImageExpand={expandImage}
+        />
+      );
+    if (media?.access === "direct")
+      return (
+        <ChatMarkdownDirectMedia
+          src={media.uri}
+          kind={media.kind}
+          alt={alt}
+          standalone={standalone}
+          copyMarkdown={copyMarkdown}
+          imageProps={props}
+          onImageExpand={expandImage}
+        />
+      );
+    return <span>{alt || "Image unavailable"}</span>;
+  },
+  p({ node: _node, children, ...props }) {
+    const { skills } = use(ChatMarkdownRendererContext);
+    return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
+  },
+  li({ node, children, ...props }) {
+    const { text, skills } = use(ChatMarkdownRendererContext);
+    const listItemStart = node?.position?.start.offset;
+    const markerOffset =
+      typeof listItemStart === "number" ? findTaskListMarkerOffset(text, listItemStart) : null;
+    return (
+      <li {...props} data-task-marker-offset={markerOffset ?? undefined}>
+        {renderSkillInlineMarkdownChildren(children, skills)}
+      </li>
+    );
+  },
+  input({ node: _node, type, checked, disabled: _disabled, ...props }) {
+    const { onTaskListChange } = use(ChatMarkdownRendererContext);
+    if (type !== "checkbox" || !onTaskListChange) {
+      return (
+        <input
+          {...props}
+          type={type}
+          checked={checked}
+          disabled={_disabled}
+          readOnly={type === "checkbox"}
+        />
+      );
+    }
+    return (
+      <input
+        {...props}
+        type="checkbox"
+        name="markdown-task"
+        aria-label="Toggle task"
+        checked={checked}
+        onChange={(event) => {
+          const markerOffset = Number(event.currentTarget.closest("li")?.dataset.taskMarkerOffset);
+          if (!Number.isSafeInteger(markerOffset)) return;
+          onTaskListChange({ markerOffset, checked: event.currentTarget.checked });
+        }}
+      />
+    );
+  },
+  a({ node, href, children, title: _title, ...props }) {
+    const {
+      renderContextReference,
+      markdownFileLinkMetaByHref,
+      threadRef,
+      openExternalLinkInPreview,
+    } = use(ChatMarkdownRendererContext);
+    const fileLinkChip = useMarkdownFileLinkChip();
+    const context = href ? parseComposerContextHref(href) : null;
+    if (context) {
+      const label = nodeToPlainText(children) || context.contextId;
+      return renderContextReference?.({ ...context, label }) ?? <span>{label}</span>;
+    }
+    const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
+    const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
+    if (!fileLinkMeta) {
+      const faviconHost = resolveExternalWebLinkHost(href);
+      const isSameDocumentLink = href?.startsWith("#") ?? false;
+      const onClick = props.onClick;
+      const canOpenInPreview =
+        Boolean(threadRef) && isPreviewSupportedInRuntime(threadRef?.environmentId);
+      const link = (
+        <a
+          {...props}
+          href={href}
+          target={isSameDocumentLink ? undefined : "_blank"}
+          rel={isSameDocumentLink ? undefined : "noopener noreferrer"}
+          onClick={(event) => {
+            onClick?.(event);
+            if (isSameDocumentLink && href) {
+              handleMarkdownFragmentClick(event, href);
+            }
+          }}
+          onContextMenu={(event) => {
+            if (!canOpenInPreview || !href || !faviconHost) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const api = readLocalApi();
+            if (!api) return;
+            void showExternalLinkContextMenu({
+              href,
+              position: { x: event.clientX, y: event.clientY },
+              showContextMenu: (items, position) => api.contextMenu.show(items, position),
+              openInPreview: async (target) => {
+                const result = await openExternalLinkInPreview(target);
+                if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+                  reportMarkdownActionFailure(
+                    { operation: "open-link-in-preview", target },
+                    result.cause,
+                  );
+                }
+              },
+              openExternal: (target) => api.shell.openExternal(target),
+              copyLink: (target) => writeTextToClipboard(target, "link"),
+              reportFailure: (operation, cause) => {
+                reportMarkdownActionFailure({ operation, target: href }, cause);
+              },
+            });
+          }}
+        >
+          {faviconHost ? (
+            <MarkdownExternalLinkContent plainText={plainHastText(node)}>
+              {children}
+            </MarkdownExternalLinkContent>
+          ) : (
+            children
+          )}
+        </a>
+      );
+      if (!faviconHost || !href) {
+        return link;
+      }
+      return (
+        <Tooltip>
+          <TooltipTrigger render={link} />
+          <TooltipPopup
+            side="top"
+            className="max-w-[min(36rem,calc(100vw-2rem))] whitespace-normal leading-tight wrap-anywhere"
+          >
+            {href}
+          </TooltipPopup>
+        </Tooltip>
+      );
+    }
+
+    return fileLinkChip(
+      fileLinkMeta,
+      `[${fileLinkMeta.basename}](${normalizedHref})`,
+      props.className,
+    );
+  },
+  code({ node, children, className, ...props }) {
+    const { inlineCodeFileLinkMetaByText, cwd } = use(ChatMarkdownRendererContext);
+    const fileLinkChip = useMarkdownFileLinkChip();
+    if (node?.properties?.dataInlineCode != null) {
+      const codeText = nodeToPlainText(children);
+      const fileLinkMeta =
+        inlineCodeFileLinkMetaByText.get(codeText.trim()) ??
+        resolveInlineCodeFileLinkMeta(codeText, cwd);
+      if (fileLinkMeta) {
+        return fileLinkChip(fileLinkMeta, `\`${codeText}\``);
+      }
+    }
+    return (
+      <code {...props} className={className}>
+        {children}
+      </code>
+    );
+  },
+  table({ node: _node, ...props }) {
+    return <MarkdownTable {...props} />;
+  },
+  details({ node: _node, children, open }) {
+    return <MarkdownDetails open={open}>{children}</MarkdownDetails>;
+  },
+  pre(props) {
+    const { isStreaming } = use(ChatMarkdownRendererContext);
+    return <MarkdownPre {...props} isStreaming={isStreaming} />;
+  },
+} satisfies Components;
+
+function ChatMarkdown(props: ChatMarkdownProps) {
+  const { text, className, lineBreaks = false, parseRawHtml = true, extraRemarkPlugins } = props;
+  const componentState = useChatMarkdownState(props);
+  const { handleCopy, markdownUrlTransform } = componentState;
   return (
     <div
       className={cn(
@@ -1173,19 +1198,23 @@ function ChatMarkdown({
       )}
       onCopy={handleCopy}
     >
-      <ReactMarkdown
-        remarkPlugins={[
-          ...(lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS),
-          ...(extraRemarkPlugins ?? []),
-        ]}
-        rehypePlugins={
-          parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : CHAT_MARKDOWN_MEDIA_REHYPE_PLUGINS
-        }
-        components={markdownComponents}
-        urlTransform={markdownUrlTransform}
-      >
-        {text}
-      </ReactMarkdown>
+      <ChatMarkdownRendererContext value={componentState}>
+        <ReactMarkdown
+          remarkPlugins={[
+            ...(lineBreaks
+              ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS
+              : CHAT_MARKDOWN_REMARK_PLUGINS),
+            ...(extraRemarkPlugins ?? []),
+          ]}
+          rehypePlugins={
+            parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : CHAT_MARKDOWN_MEDIA_REHYPE_PLUGINS
+          }
+          components={CHAT_MARKDOWN_COMPONENTS}
+          urlTransform={markdownUrlTransform}
+        >
+          {text}
+        </ReactMarkdown>
+      </ChatMarkdownRendererContext>
     </div>
   );
 }

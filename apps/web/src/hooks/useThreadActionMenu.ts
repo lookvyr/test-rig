@@ -67,7 +67,7 @@ export function useThreadActionMenu(input: {
   readonly changeRequestState: ChangeRequestStateLike | null;
   readonly onStartRename: () => void;
 }) {
-  const { threadRef, projectCwd, changeRequestState, onStartRename } = input;
+  const { threadRef, projectCwd, onStartRename } = input;
   const {
     settleThread,
     unsettleThread,
@@ -84,7 +84,6 @@ export function useThreadActionMenu(input: {
   });
   const handleNewThread = useNewThreadHandler();
   const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
-  const autoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -295,9 +294,7 @@ export function useThreadActionMenu(input: {
       })();
     },
     [
-      autoSettleAfterDays,
       archiveThread,
-      changeRequestState,
       confirmThreadDelete,
       confirmThreadArchive,
       copyBranchToClipboard,

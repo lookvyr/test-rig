@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  useUpdateClientSettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
@@ -52,9 +57,13 @@ function AutoSettleDaysInput({
 }
 
 export function BetaSettingsPanel() {
-  const sidebarAutoSettleAfterDays = useClientSettings(
+  const sidebarAutoSettleAfterDays = usePrimarySettings(
     (settings) => settings.sidebarAutoSettleAfterDays,
   );
+  const sidebarAutoSettleOnMerge = usePrimarySettings(
+    (settings) => settings.sidebarAutoSettleOnMerge,
+  );
+  const updatePrimarySettings = useUpdatePrimarySettings();
   const planModeEnabled = useClientSettings((settings) => settings.planModeEnabled);
   const workingShelfEnabled = useClientSettings((settings) => settings.sidebarWorkingShelfEnabled);
   const updateSettings = useUpdateClientSettings();
@@ -77,12 +86,12 @@ export function BetaSettingsPanel() {
         />
         <SettingsRow
           title={searchableSetting("auto-settle-inactive-threads").title}
-          description="Threads with no activity for this long settle automatically. Threads on merged or closed PRs always settle."
+          description="Idle threads with no activity for this long settle automatically."
           control={
             <Switch
               checked={sidebarAutoSettleAfterDays !== null}
               onCheckedChange={(checked) =>
-                updateSettings({
+                updatePrimarySettings({
                   sidebarAutoSettleAfterDays: checked ? AUTO_SETTLE_DEFAULT_DAYS : null,
                 })
               }
@@ -97,11 +106,24 @@ export function BetaSettingsPanel() {
             control={
               <AutoSettleDaysInput
                 value={sidebarAutoSettleAfterDays}
-                onCommit={(days) => updateSettings({ sidebarAutoSettleAfterDays: days })}
+                onCommit={(days) => updatePrimarySettings({ sidebarAutoSettleAfterDays: days })}
               />
             }
           />
         ) : null}
+        <SettingsRow
+          {...searchableSetting("auto-settle-merged-threads")}
+          description="Settle idle threads when their pull request is merged. Closed pull requests also settle when automatic settlement is enabled."
+          control={
+            <Switch
+              checked={sidebarAutoSettleOnMerge}
+              onCheckedChange={(checked) =>
+                updatePrimarySettings({ sidebarAutoSettleOnMerge: Boolean(checked) })
+              }
+              aria-label="Auto-settle merged pull requests"
+            />
+          }
+        />
         <SettingsRow
           {...searchableSetting("restore-plan-mode")}
           description="Legacy feature. Brings back the Build/Plan toggle in the composer along with the /plan and /default commands and the Shift+Tab shortcut. While off, every thread runs in build mode."

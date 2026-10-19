@@ -20,6 +20,14 @@ describe("resolveEnvironmentIdentificationMode", () => {
 });
 
 describe("mergeEnvironmentSettings", () => {
+  it("keeps server authority over obsolete persisted client settings", () => {
+    const settings = mergeEnvironmentSettings(
+      { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
+      Object.assign({}, DEFAULT_CLIENT_SETTINGS, { sidebarAutoSettleAfterDays: 30 }),
+    );
+    expect(settings.sidebarAutoSettleAfterDays).toBeNull();
+  });
+
   it("combines the selected environment's server settings with client preferences", () => {
     const serverSettings = {
       ...DEFAULT_SERVER_SETTINGS,

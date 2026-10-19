@@ -1,3 +1,6 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
 import { getSchema, Node } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
@@ -167,7 +170,7 @@ describe("rich composer Markdown boundary", () => {
     "plain text\n\nnext line",
     "# Heading\n## Smaller heading\nA **bold** and *italic* and ~~removed~~ word.",
     "- First\n- Second\n  - Nested\n- Third",
-    "3. Third\n4. Fourth\n  - Nested bullet\n5. Fifth",
+    "3. Third\n4. Fourth\n   - Nested bullet\n5. Fifth",
     "> Quote\n> More **quoted** text",
     "```ts\n  const value = `$HOME`;\n\n  console.log(value);  \n```",
     "```\n\n```",
@@ -181,6 +184,19 @@ describe("rich composer Markdown boundary", () => {
     "Mention [file_name.ts](src/file_name.ts) and $skill next",
   ])("retains Markdown content: %s", (value) => {
     expect(roundTrip(value)).toBe(value);
+  });
+
+  it.each([1, 9, 10, 20])("keeps ordered-list children nested after sending item %i", (start) => {
+    const document = doc(`${start}. Parent\n  1. Child\n  2. Next child\n${start + 1}. Sibling`);
+    const markdown = serializeEditorDoc(document).value;
+    const indent = " ".repeat(String(start).length + 2);
+    expect(markdown).toBe(
+      `${start}. Parent\n${indent}1. Child\n${indent}2. Next child\n${start + 1}. Sibling`,
+    );
+    expect(doc(markdown).toJSON()).toEqual(document.toJSON());
+    const html = renderToStaticMarkup(createElement(ReactMarkdown, null, markdown));
+    expect(html).toContain("<li>Parent\n<ol>\n<li>Child</li>\n<li>Next child</li>\n</ol>\n</li>");
+    expect(html).toContain("<li>Sibling</li>");
   });
 
   it("uses actual block nodes for supported Markdown", () => {
@@ -246,7 +262,7 @@ describe("rich composer Markdown boundary", () => {
     });
     const markdown = serializeEditorDoc(document).value;
     expect(markdown).toBe(
-      "- Inspect\n  ```sh\n    echo $HOME\n  \n  - literal code\n    echo done  \n  ```\n  Then explain\n  > Quoted note\n  3. Nested\n    ```js\n      const n = 1;\n    ```\n- Next",
+      "- Inspect\n  ```sh\n    echo $HOME\n  \n  - literal code\n    echo done  \n  ```\n  Then explain\n  > Quoted note\n  3. Nested\n     ```js\n       const n = 1;\n     ```\n- Next",
     );
     const restored = doc(markdown);
     expect(restored.toJSON()).toEqual(document.toJSON());

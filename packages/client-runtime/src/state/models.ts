@@ -42,6 +42,8 @@ export interface ThreadRunSummary {
   readonly startedAt: string | null;
   readonly completedAt: string | null;
   readonly assistantMessageId: MessageId | null;
+  /** The provider finished while the app is still settling the run. */
+  readonly turnEnded?: boolean;
   readonly sourcePlanRef?: {
     readonly threadId: ThreadId;
     readonly planId: PlanId;

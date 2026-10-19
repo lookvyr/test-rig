@@ -132,11 +132,10 @@ describe("ClientSettings environment identification", () => {
 });
 
 describe("ClientSettings sidebar v2", () => {
-  it("keeps the raw legacy value unconfigured with a three-day auto-settle threshold", () => {
+  it("keeps the raw legacy value unconfigured", () => {
     const settings = decodeClientSettings({});
     expect(settings.sidebarV2Enabled).toBe(false);
     expect(settings.sidebarV2ConfiguredByUser).toBe(false);
-    expect(settings.sidebarAutoSettleAfterDays).toBe(3);
   });
 
   it("treats settings written before the beta had a per-channel default as unconfigured", () => {
@@ -164,15 +163,22 @@ describe("ClientSettings sidebar v2", () => {
     expect(patch.sidebarV2ConfiguredByUser).toBe(true);
   });
 
+  it("drops obsolete client auto-settle values", () => {
+    expect(decodeClientSettings({ sidebarAutoSettleAfterDays: 30 })).not.toHaveProperty(
+      "sidebarAutoSettleAfterDays",
+    );
+    expect(decodeServerSettings({}).sidebarAutoSettleAfterDays).toBe(3);
+  });
+
   it("allows auto-settle by inactivity to be disabled", () => {
     expect(
-      decodeClientSettings({ sidebarAutoSettleAfterDays: null }).sidebarAutoSettleAfterDays,
+      decodeServerSettings({ sidebarAutoSettleAfterDays: null }).sidebarAutoSettleAfterDays,
     ).toBeNull();
   });
 
   it.each([-1, 0, 91])("rejects an auto-settle threshold outside 1..90: %s", (value) => {
-    expect(() => decodeClientSettings({ sidebarAutoSettleAfterDays: value })).toThrow();
-    expect(() => decodeClientSettingsPatch({ sidebarAutoSettleAfterDays: value })).toThrow();
+    expect(() => decodeServerSettings({ sidebarAutoSettleAfterDays: value })).toThrow();
+    expect(() => decodeServerSettingsPatch({ sidebarAutoSettleAfterDays: value })).toThrow();
   });
 });
 

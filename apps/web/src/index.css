@@ -2244,6 +2244,7 @@ label:has(> select#reasoning-effort) select {
   list-style-type: disc;
 }
 .composer-tiptap ol {
+  padding-left: 3em;
   list-style-type: decimal;
 }
 .composer-tiptap li > p {

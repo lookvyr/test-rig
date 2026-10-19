@@ -234,11 +234,16 @@ export function buildTiptapContent(
             if (!match || match[1]!.length !== indent || /^\d/.test(match[2]!) !== ordered) break;
             const item: JSONContent = { type: "listItem", content: [paragraph(match[3]!)] };
             index++;
-            // Child blocks use the same two-space indent as serialization.
+            // Continuations align with the text after the marker. Keep older
+            // two-space ordered-list drafts readable as well.
             // Parse their stripped lines together so fences own all their code,
             // including lines that happen to look like nested list markers.
             const childLines: string[] = [];
-            const childIndent = " ".repeat(indent + 2);
+            const nextIndent = /^ */.exec(lines[index] ?? "")![0].length;
+            const markerWidth = match[2]!.length + 1;
+            const childIndent = " ".repeat(
+              indent + Math.max(2, Math.min(markerWidth, nextIndent - indent)),
+            );
             while (index < lines.length && lines[index]!.startsWith(childIndent)) {
               childLines.push(lines[index++]!.slice(childIndent.length));
             }
@@ -539,7 +544,7 @@ export function serializeEditorDoc(doc: ProseMirrorNode): RichDocMap {
         item.forEach((child, _childOffset, childIndex) => {
           if (childIndex) pushBreakRun(acc);
           if (childIndex === 0 && child.isTextblock) appendInlineRuns(child, childPos + 1, acc);
-          else walk(child, childPos, prefix + "  ");
+          else walk(child, childPos, prefix + " ".repeat(marker.length));
           childPos += child.nodeSize;
         });
         itemPos += item.nodeSize;

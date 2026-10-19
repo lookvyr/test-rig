@@ -112,6 +112,16 @@ describe("timeline follow intent", () => {
     expect(controller.liveFollowEnabled).toBe(true);
   });
 
+  it("does not treat thread navigation shortcuts as timeline scrolling", () => {
+    render();
+    act(() => controller.onScrollElementChange(node as unknown as HTMLElement));
+    fire("keydown", { key: "ArrowUp", metaKey: true });
+    fire("keydown", { key: "ArrowUp", ctrlKey: true });
+    expect(controller.liveFollowEnabled).toBe(true);
+    fire("keydown", { key: "Home", ctrlKey: true });
+    expect(controller.liveFollowEnabled).toBe(false);
+  });
+
   it("reveals the recovery button during continuous scrolling or streaming", () => {
     render();
     act(() => controller.cancelForUserNavigation());

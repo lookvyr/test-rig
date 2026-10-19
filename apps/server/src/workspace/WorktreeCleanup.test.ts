@@ -101,7 +101,6 @@ const fixture = Effect.gen(function* () {
   let threads = [thread];
   let enabled = true;
   let merged = false;
-  let afterRemote = () => {};
   let terminals: TerminalSummary[] = [];
   let afterStop = () => {};
   let sessions: Effect.Success<ProviderSessionManagerV2["Service"]["residencies"]> = [];
@@ -204,7 +203,6 @@ const fixture = Effect.gen(function* () {
       Layer.mock(GitManager, {
         remoteStatus: () =>
           Effect.sync(() => {
-            afterRemote();
             return {
               hasUpstream: false,
               aheadCount: 0,
@@ -249,9 +247,6 @@ const fixture = Effect.gen(function* () {
     },
     setThreads: (value: typeof threads) => {
       threads = value;
-    },
-    onRemote: (callback: () => void) => {
-      afterRemote = callback;
     },
     merge: () => {
       merged = true;
@@ -389,14 +384,26 @@ describe("settled worktree cleanup", () => {
       expect(NodeFS.existsSync(f.checkout)).toBe(true);
     }),
   );
-  it.effect("settles merged PRs durably before deleting their checkout", () =>
-    Effect.gen(function* () {
-      const f = yield* fixture;
-      f.setThreads([{ ...f.thread, settledOverride: null, settledAt: null }]);
-      f.merge();
-      yield* f.sweep();
-      expect(NodeFS.existsSync(f.checkout)).toBe(false);
-    }),
+  it.effect.each([false, true])(
+    "waits for durable settlement before deleting a merged PR checkout (auto-settle disabled: %s)",
+    (disabled) =>
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        f.setThreads([
+          {
+            ...f.thread,
+            settledOverride: null,
+            settledAt: null,
+            autoSettleDisabledAt: disabled ? f.thread.createdAt : null,
+          },
+        ]);
+        f.merge();
+        yield* f.sweep();
+        expect(NodeFS.existsSync(f.checkout)).toBe(true);
+        f.setThreads([f.thread]);
+        yield* f.sweep();
+        expect(NodeFS.existsSync(f.checkout)).toBe(false);
+      }),
   );
   it.effect("does not settle or remove a checkout for an unlinked or different PR", () =>
     Effect.gen(function* () {
@@ -481,18 +488,6 @@ describe("settled worktree cleanup", () => {
         },
       ]);
       f.merge();
-      yield* f.sweep();
-      expect(NodeFS.existsSync(f.checkout)).toBe(true);
-    }),
-  );
-  it.effect("respects a pin added while PR lookup is running", () =>
-    Effect.gen(function* () {
-      const f = yield* fixture;
-      f.setThreads([{ ...f.thread, settledOverride: null }]);
-      f.merge();
-      f.onRemote(() =>
-        f.setThreads([{ ...f.thread, settledOverride: null, pinnedAt: f.thread.createdAt }]),
-      );
       yield* f.sweep();
       expect(NodeFS.existsSync(f.checkout)).toBe(true);
     }),

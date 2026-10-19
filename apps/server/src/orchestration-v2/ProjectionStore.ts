@@ -1021,7 +1021,7 @@ type ShellRunItemCountRow = {
 
 const encodeIdList = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)));
 
-const encodeThreadPayload = Schema.encodeEffect(
+export const encodeThreadPayload = Schema.encodeEffect(
   Schema.fromJsonString(OrchestrationV2AppThreadJsonSchema),
 );
 const encodeThreadUpdatedAt = Schema.encodeEffect(

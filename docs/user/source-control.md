@@ -102,7 +102,7 @@ Test Rig refreshes remote branch status in the background. The default fetch int
 
 The background-activity policy can pause a scheduled fetch while the machine is locked, on battery, or in another restricted state. The fetch interval controls how often a refresh becomes eligible to run.
 
-After a turn finishes on a feature branch, Test Rig checks again for a newly created pull request. This follows the hosting-integration and background-activity settings and does not trigger an extra Git fetch.
+After a turn finishes on a feature branch, Test Rig checks again for a newly created pull request. If the agent switched branches in the project checkout, the completing thread follows that branch so its pull request indicator can appear. This requires that no other thread is actively using the same checkout. This follows the hosting-integration and background-activity settings and does not trigger an extra Git fetch.
 
 ## Refreshing workspace views
 

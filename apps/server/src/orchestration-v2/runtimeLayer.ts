@@ -141,7 +141,7 @@ const providerSessionManagerProvided = providerSessionManagerLayer.pipe(
 );
 
 const runFinalizationObserverProvided = runFinalizationObserverLive.pipe(
-  Layer.provide(projectionStoreLayer),
+  Layer.provide(Layer.mergeAll(projectionStoreLayer, ProjectStore.layer, eventSinkProvided)),
 );
 
 export const RunExecutionServiceLayerLive = runExecutionServiceLayer.pipe(

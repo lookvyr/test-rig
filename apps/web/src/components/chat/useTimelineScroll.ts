@@ -140,6 +140,7 @@ export function useTimelineScroll({
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
+        !((event.metaKey || event.ctrlKey) && ["ArrowUp", "ArrowDown"].includes(event.key)) &&
         ["PageUp", "Home", "ArrowUp"].includes(event.key) &&
         !(
           event.target instanceof Element &&

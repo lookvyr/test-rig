@@ -202,7 +202,6 @@ import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings";
-import { useNowMinute } from "../hooks/useNowMinute";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
@@ -4069,7 +4068,6 @@ function ChatViewContent(props: ChatViewProps) {
   // partition (same shell, same capability gate, same PR auto-settle input)
   // so the banner and the sidebar row never disagree.
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null);
-  const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays);
   const activeThreadPr = useThreadPullRequest({
     environmentId: environmentId,
     projectCwd: activeProject?.workspaceRoot ?? null,
@@ -4101,7 +4099,6 @@ function ChatViewContent(props: ChatViewProps) {
   const activeThreadPinned = supportsPinning && activeThreadShell?.pinnedAt != null;
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true;
   const supportsSnooze = serverConfig?.environment.capabilities.threadSnooze === true;
-  const nowMinute = useNowMinute();
   const snoozeNow = new Date().toISOString();
   const activeThreadSnoozed =
     activeThreadShell !== null &&
@@ -4161,13 +4158,7 @@ function ChatViewContent(props: ChatViewProps) {
   const activeThreadSettled = useMemo(() => {
     if (activeThreadShell === null || !supportsSettlement) return false;
     return activeThreadShell.settledAt !== null;
-  }, [
-    activeThreadPr?.state,
-    activeThreadShell,
-    autoSettleAfterDays,
-    nowMinute,
-    supportsSettlement,
-  ]);
+  }, [activeThreadShell, supportsSettlement]);
   const unsettleThreadMutation = useAtomCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   });
@@ -6556,7 +6547,7 @@ function ChatViewContent(props: ChatViewProps) {
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
               {(showScrollToBottom || searchHistory !== null) && (
                 <div
-                  className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
+                  className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-1.5"
                   style={{ bottom: composerOverlayHeight + 4 }}
                 >
                   <button

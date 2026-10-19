@@ -51,6 +51,16 @@ function summarizeThreadRun(
   projection: OrchestrationV2ThreadProjection,
   run: OrchestrationV2ThreadProjection["runs"][number],
 ): ThreadRunSummary {
+  let latestProviderTurn: (typeof projection.providerTurns)[number] | undefined;
+  if (ACTIVITY_RUN_STATUSES.has(run.status) && run.activeAttemptId !== null) {
+    for (const turn of projection.providerTurns) {
+      if (turn.runAttemptId !== run.activeAttemptId) continue;
+      if (latestProviderTurn === undefined || turn.ordinal > latestProviderTurn.ordinal) {
+        latestProviderTurn = turn;
+      }
+    }
+  }
+  const turnStatus = latestProviderTurn?.status;
   return {
     runId: run.id,
     status: run.status,
@@ -61,6 +71,9 @@ function summarizeThreadRun(
       projection.messages.findLast(
         (message) => message.runId === run.id && message.role === "assistant",
       )?.id ?? null,
+    ...(turnStatus === undefined || turnStatus === "pending" || turnStatus === "running"
+      ? {}
+      : { turnEnded: true }),
     ...(run.sourcePlanRef === undefined ? {} : { sourcePlanRef: run.sourcePlanRef }),
   };
 }

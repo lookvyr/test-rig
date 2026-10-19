@@ -11,6 +11,8 @@ import * as Layer from "effect/Layer";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
+import * as ProjectStore from "./ProjectStore.ts";
+import * as EventSink from "./EventSink.ts";
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as RunFinalization from "./RunFinalizationService.ts";
@@ -29,6 +31,8 @@ it.effect("tool completion only checks for a changed local branch", () => {
   const layer = RunFinalization.observerLive.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+        Layer.mock(EventSink.EventSinkV2)({}),
         Layer.mock(WorkspaceEntries.WorkspaceEntries)({}),
         Layer.mock(PullRequestService.PullRequestService)({}),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
@@ -59,6 +63,8 @@ it.effect("refreshes workspace after checkpoint capture without reading history"
   const layer = RunFinalization.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+        Layer.mock(EventSink.EventSinkV2)({}),
         Layer.mock(CheckpointCapture.CheckpointCaptureServiceV2)({ execute: capture }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadProjection: () =>
@@ -121,6 +127,8 @@ it.effect.each(
   const layer = RunFinalization.observerLive.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+        Layer.mock(EventSink.EventSinkV2)({}),
         Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
         Layer.mock(PullRequestService.PullRequestService)({
           refreshAfterTurn: () => Effect.void,
@@ -144,10 +152,18 @@ it.effect.each(
             }),
         }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getShellSnapshot: () =>
+            Effect.succeed({
+              threads: [],
+              archivedThreads: [],
+              schemaVersion: 1,
+              snapshotSequence: 0,
+            }),
           getThreadShell: () =>
             Effect.succeed({
               id: threadId,
               branch: scenario.branch,
+              worktreePath: "/other-repo",
               activeRunId: scenario.activeRun === null ? null : RunId.make(scenario.activeRun),
             } as OrchestrationV2ThreadShell),
         }),
@@ -160,3 +176,88 @@ it.effect.each(
     assert.deepEqual(refreshed, [...scenario.expected]);
   }).pipe(Effect.provide(layer));
 });
+
+it.effect.each([
+  { branch: null, otherActive: false, committed: true },
+  { branch: "dev", otherActive: false, committed: true },
+  { branch: "dev", otherActive: true, committed: true },
+  { branch: "dev", otherActive: false, committed: false },
+])(
+  "adopts local branch metadata (%s) before discovering a PR",
+  ({ branch, otherActive, committed }) => {
+    const threadId = ThreadId.make("local-thread");
+    const runId = RunId.make("local-run");
+    const thread = {
+      id: threadId,
+      projectId: "project",
+      branch,
+      worktreePath: null,
+      activeRunId: runId,
+    } as OrchestrationV2ThreadShell;
+    const write = vi.fn<EventSink.EventSinkV2["Service"]["writeIfThreadUnchanged"]>(() =>
+      Effect.succeed({ committed, storedEvents: [] }),
+    );
+    const refreshPullRequestStatus = vi.fn(() => Effect.succeed(null));
+    return Effect.gen(function* () {
+      const observer = yield* RunFinalization.RunFinalizationObserver;
+      yield* observer.refresh({ cwd: "/repo", threadId, runId });
+      if (otherActive) {
+        assert.equal(write.mock.calls.length, 0);
+        assert.equal(refreshPullRequestStatus.mock.calls.length, 0);
+        return;
+      }
+      assert.equal(write.mock.calls.length, 1);
+      const event = write.mock.calls[0]?.[0].events[0];
+      assert.equal(event?.type, "thread.metadata-updated");
+      if (event?.type !== "thread.metadata-updated") throw new Error("Expected metadata event");
+      assert.equal(event.payload.branch, "feature");
+      assert.deepEqual(refreshPullRequestStatus.mock.calls, committed ? [["/repo"]] : []);
+    }).pipe(
+      Effect.provide(
+        RunFinalization.observerLive.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
+              Layer.mock(PullRequestService.PullRequestService)({}),
+              Layer.mock(ProjectStore.ProjectStoreV2)({
+                listShells: () =>
+                  Effect.succeed([{ id: "project", workspaceRoot: "/repo" }] as never),
+              }),
+              Layer.mock(EventSink.EventSinkV2)({ writeIfThreadUnchanged: write }),
+              Layer.mock(ProjectionStore.ProjectionStoreV2)({
+                getThreadShell: () => Effect.succeed(thread),
+                getThread: () => Effect.succeed(thread as never),
+                getShellSnapshot: () =>
+                  Effect.succeed({
+                    threads: [
+                      thread,
+                      {
+                        ...thread,
+                        id: ThreadId.make("sibling"),
+                        activeRunId: otherActive ? RunId.make("other-run") : null,
+                      },
+                    ],
+                    archivedThreads: [],
+                    schemaVersion: 1,
+                    snapshotSequence: 0,
+                  }),
+              }),
+              Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
+                refreshLocalStatus: () =>
+                  Effect.succeed({
+                    isRepo: true,
+                    hasPrimaryRemote: true,
+                    isDefaultRef: false,
+                    refName: "feature",
+                    hasWorkingTreeChanges: false,
+                    workingTree: { files: [], insertions: 0, deletions: 0 },
+                  }),
+                refreshPullRequestStatus,
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+  },
+);

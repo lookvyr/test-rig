@@ -1,4 +1,6 @@
-import { CheckpointScopeId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
+import { CheckpointScopeId, EventId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
+import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -9,6 +11,9 @@ import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import * as ProjectStore from "./ProjectStore.ts";
+import * as EventSink from "./EventSink.ts";
+import { randomUuidV4 } from "./RandomUuid.ts";
 
 export class RunFinalizationError extends Schema.TaggedError<RunFinalizationError>()(
   "RunFinalizationError",
@@ -99,6 +104,8 @@ export const observerLive = Layer.effect(
     const vcsStatus = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const projects = yield* ProjectStore.ProjectStoreV2;
+    const events = yield* EventSink.EventSinkV2;
     return {
       refreshAfterTool: (cwd) =>
         vcsStatus.refreshLocalStatus(cwd, { onlyIfBranchChanged: true }).pipe(
@@ -114,8 +121,45 @@ export const observerLive = Layer.effect(
           );
           if (local.refName === null || local.isDefaultRef) return;
           const thread = yield* projections.getThreadShell(threadId);
-          if (!thread || thread.branch !== local.refName) return;
-          if (thread.activeRunId !== null && thread.activeRunId !== runId) return;
+          if (!thread || (thread.activeRunId !== null && thread.activeRunId !== runId)) return;
+          if (thread.branch !== local.refName) {
+            if (isTemporaryWorktreeBranch(local.refName)) return;
+            const [shell, roots] = yield* Effect.all([
+              projections.getShellSnapshot(),
+              projects.listShells(),
+            ]);
+            const workspaceCwd = (candidate: typeof thread) =>
+              candidate.worktreePath ??
+              roots.find((project) => project.id === candidate.projectId)?.workspaceRoot;
+            if (workspaceCwd(thread) !== cwd) return;
+            if (
+              shell.threads.some(
+                (other) =>
+                  other.id !== threadId &&
+                  workspaceCwd(other) === cwd &&
+                  (thread.worktreePath !== null || other.activeRunId !== null),
+              )
+            )
+              return;
+            const current = yield* projections.getThread(threadId);
+            if (current.branch !== thread.branch || current.worktreePath !== thread.worktreePath)
+              return;
+            const now = yield* DateTime.now;
+            const result = yield* events.writeIfThreadUnchanged({
+              expected: current,
+              runId,
+              events: [
+                {
+                  id: EventId.make(yield* randomUuidV4),
+                  type: "thread.metadata-updated",
+                  threadId,
+                  occurredAt: now,
+                  payload: { ...current, branch: local.refName, updatedAt: now },
+                },
+              ],
+            });
+            if (!result.committed) return;
+          }
           yield* vcsStatus.refreshPullRequestStatus(cwd).pipe(
             Effect.catch((error) =>
               Effect.logWarning("failed to refresh pull request status after run completion", {

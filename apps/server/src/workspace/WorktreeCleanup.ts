@@ -116,12 +116,6 @@ export const make = Effect.gen(function* () {
   });
   const settled = (thread: Thread) =>
     thread.settledOverride === "settled" || thread.archivedAt !== null;
-  const automaticCandidate = (thread: Thread, now: number) =>
-    thread.settledOverride !== "active" &&
-    thread.pullRequestAssociation?.mode !== "unlinked" &&
-    thread.pinnedAt == null &&
-    (thread.snoozedUntil == null || DateTime.toEpochMillis(thread.snoozedUntil) <= now) &&
-    !worktreeHasActiveThread(thread, now);
 
   const clean = Effect.fn("WorktreeCleanup.clean")(function* (checkout: string, initial: Thread[]) {
     const now = DateTime.toEpochMillis(yield* DateTime.now);
@@ -150,44 +144,11 @@ export const make = Effect.gen(function* () {
       ))
         yield* report(thread, { state, reason });
     });
-    // Retain a durable settlement before removing the checkout that supplied the PR association.
+    // Settlement policy belongs to ThreadSettlementService. Cleanup only consumes
+    // durable settlement, so it cannot bypass a thread or project preference.
     if (initial.some((thread) => !settled(thread))) {
-      if (initial.some((thread) => !settled(thread) && !automaticCandidate(thread, now))) {
-        yield* notice("pending", "Worktree cleanup is waiting for other work using this checkout.");
-        return;
-      }
-      const remote = yield* manager.remoteStatus({ cwd: checkout }, { refreshUpstream: false });
-      const matchesCheckoutPr = (thread: Thread) =>
-        thread.pullRequestAssociation?.mode !== "linked" ||
-        thread.pullRequestAssociation.reference === remote?.pr?.url;
-      if (
-        (remote?.pr?.state !== "merged" && remote?.pr?.state !== "closed") ||
-        initial.some((thread) => !settled(thread) && !matchesCheckoutPr(thread))
-      ) {
-        yield* notice("pending", "Worktree cleanup is waiting for other work using this checkout.");
-        return;
-      }
-      if (!(yield* settings.getSettings).autoRemoveSettledWorktrees) return;
-      const refreshed = (yield* readSnapshot).threads.filter((thread) =>
-        initial.some((entry) => entry.id === thread.id),
-      );
-      if (
-        refreshed.length !== initial.length ||
-        refreshed.some(
-          (thread) =>
-            !settled(thread) && (!automaticCandidate(thread, now) || !matchesCheckoutPr(thread)),
-        )
-      )
-        return;
-      for (const thread of refreshed) {
-        if (!settled(thread))
-          yield* engine.dispatch({
-            type: "thread.auto-settle",
-            snapshotAt: thread.updatedAt,
-            threadId: thread.id,
-            commandId: CommandId.make(yield* crypto.randomUUIDv4),
-          });
-      }
+      yield* notice("pending", "Worktree cleanup is waiting for other work using this checkout.");
+      return;
     }
     const currentGroup = Effect.gen(function* () {
       const snapshot = yield* readSnapshot;

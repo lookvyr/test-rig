@@ -615,6 +615,41 @@ describe("resolveAssistantMessageCopyState", () => {
 });
 
 describe("deriveMessagesTimelineRows", () => {
+  it("does not append Thinking after the provider finishes while the run settles", () => {
+    const runId = RunId.make("run-finishing");
+    const createdAt = "2026-01-01T00:00:00Z";
+    const input = {
+      timelineEntries: [
+        {
+          id: "answer-entry",
+          kind: "message" as const,
+          createdAt,
+          message: {
+            id: MessageId.make("answer"),
+            role: "assistant" as const,
+            text: "Finished answer",
+            runId,
+            createdAt,
+            updatedAt: createdAt,
+            streaming: false,
+          },
+        },
+      ],
+      latestRun: { runId, status: "running" as const, startedAt: createdAt, completedAt: null },
+      isWorking: true,
+      activeTurnStartedAt: createdAt,
+      turnDiffSummaries: [],
+    };
+    expect(deriveMessagesTimelineRows(input).at(-1)?.kind).toBe("thinking");
+    const rows = deriveMessagesTimelineRows({
+      ...input,
+      latestRun: { ...input.latestRun, turnEnded: true },
+    });
+    expect(rows.some((row) => row.kind === "thinking")).toBe(false);
+    expect(rows.some((row) => row.kind === "working")).toBe(true);
+    expect(rows.find((row) => row.kind === "message")?.id).toBe("answer-entry");
+  });
+
   it("stops stranded thinking after a steer and follows the next thought or tool", () => {
     const runId = RunId.make("steered-run");
     const at = "2026-10-01T06:19:10Z";
