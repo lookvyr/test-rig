@@ -6,7 +6,8 @@ with active work shown as cards and settled threads as compact rows.
 A branching-arrow icon before the branch name marks active threads attached to
 a worktree, and search results show it too. Compact rows for settled threads
 leave it out; hover over any thread to see its worktree name under the branch.
-Threads using the project's main checkout have no worktree icon.
+Threads using the project's main checkout and threads started with **No project**
+have no worktree icon.
 
 By default, settling a thread removes its worktree. If the worktree can't be
 removed, for example because it has uncommitted changes, the icon turns

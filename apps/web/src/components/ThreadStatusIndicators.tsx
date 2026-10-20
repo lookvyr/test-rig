@@ -133,11 +133,14 @@ export function terminalStatusFromRunningIds(
  * show, and the only one with a tooltip. */
 export function ThreadWorktreeIndicator({
   thread,
+  isScratch,
 }: {
   thread: Pick<SidebarThreadSummary, "id" | "branch" | "worktreePath" | "worktreeCleanup">;
+  isScratch: boolean;
 }) {
   const worktreePath = thread.worktreePath?.trim();
-  if (!worktreePath) {
+  // Scratch threads reuse worktreePath for their private, non-Git folder.
+  if (isScratch || !worktreePath) {
     return null;
   }
 

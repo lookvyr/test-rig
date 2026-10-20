@@ -5,6 +5,7 @@ import { requestCustomSnooze, type SnoozeChoice } from "./CustomSnoozeDialog";
 import { useThreadPullRequest } from "../hooks/useThreadPullRequest";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import {
   canSnooze,
   effectiveSnoozed,
@@ -232,6 +233,7 @@ function terminalProcessLabel(count: number): string {
 
 function SidebarV2ThreadTooltip({
   thread,
+  isScratch,
   projectTitle,
   projectCwd,
   environmentLabel,
@@ -243,6 +245,7 @@ function SidebarV2ThreadTooltip({
   terminalProcessCount,
 }: {
   thread: SidebarThreadSummary;
+  isScratch: boolean;
   projectTitle: string | null;
   projectCwd: string | null;
   environmentLabel: string | null;
@@ -291,7 +294,7 @@ function SidebarV2ThreadTooltip({
               <div className="min-w-0 truncate text-foreground/75">{thread.branch}</div>
             </div>
           ) : null}
-          {thread.worktreePath?.trim() ? (
+          {!isScratch && thread.worktreePath?.trim() ? (
             <div className="flex min-w-0 items-center gap-2">
               <SplitIcon
                 aria-hidden
@@ -415,6 +418,7 @@ function SnoozePopoverButton(props: {
 
 const SidebarV2Row = memo(function SidebarV2Row(props: {
   thread: SidebarThreadSummary;
+  isScratch: boolean;
   variant: "card" | "slim";
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
@@ -631,6 +635,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const detailsTooltip = (
     <SidebarV2ThreadTooltip
       thread={thread}
+      isScratch={props.isScratch}
       projectTitle={props.projectTitle}
       projectCwd={props.projectCwd}
       environmentLabel={props.environmentLabel}
@@ -938,7 +943,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             {/* Settled rows stay quiet about worktrees unless cleanup had to
               keep one: that's the only state that needs the user. */}
             {thread.worktreeCleanup?.state === "retained" ? (
-              <ThreadWorktreeIndicator thread={thread} />
+              <ThreadWorktreeIndicator thread={thread} isScratch={props.isScratch} />
             ) : null}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1203,7 +1208,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               ) : null}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-              <ThreadWorktreeIndicator thread={thread} />
+              <ThreadWorktreeIndicator thread={thread} isScratch={props.isScratch} />
               {/* While working, the current plan step outranks the branch:
                   it's the one line that says what the thread is doing. */}
               {status === "working" && thread.planProgress ? (
@@ -1268,6 +1273,7 @@ function latestRunDiff(
 
 const SidebarV2SearchResultRow = memo(function SidebarV2SearchResultRow(props: {
   thread: SidebarThreadSummary;
+  isScratch: boolean;
   projectCwd: string | null;
   projectTitle: string | null;
   environmentLabel: string | null;
@@ -1349,13 +1355,14 @@ const SidebarV2SearchResultRow = memo(function SidebarV2SearchResultRow(props: {
             threadRef={scopeThreadRef(thread.environmentId, thread.id)}
             isActive={props.isRouteActive}
           />
-          <ThreadWorktreeIndicator thread={thread} />
+          <ThreadWorktreeIndicator thread={thread} isScratch={props.isScratch} />
           <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
             <RelativeTimeLabel timestamp={threadTimeTimestamp(thread)} />
           </span>
         </TooltipTrigger>
         <SidebarV2ThreadTooltip
           thread={thread}
+          isScratch={props.isScratch}
           projectTitle={props.projectTitle}
           projectCwd={props.projectCwd}
           environmentLabel={props.environmentLabel}
@@ -1760,6 +1767,20 @@ export default function SidebarV2() {
   // merging, no optimistic holds. Archived threads remain hidden here —
   // archive keeps its original "remove from sidebar" meaning.
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const scratchProjectKeys = useMemo(
+    () =>
+      new Set(
+        projects
+          .filter((project) =>
+            isScratchProject(
+              project,
+              serverConfigs.get(project.environmentId)?.scratchWorkspaceRoot,
+            ),
+          )
+          .map((project) => `${project.environmentId}:${project.id}`),
+      ),
+    [projects, serverConfigs],
+  );
   const {
     pinnedThreads,
     activeThreads,
@@ -3180,6 +3201,9 @@ export default function SidebarV2() {
                       <SidebarV2SearchResultRow
                         key={threadKey}
                         thread={thread}
+                        isScratch={scratchProjectKeys.has(
+                          `${thread.environmentId}:${thread.projectId}`,
+                        )}
                         projectCwd={
                           projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
                         }
@@ -3239,6 +3263,9 @@ export default function SidebarV2() {
                         // painted over text).
                         key={`${threadKey}:${rowVariant}`}
                         thread={thread}
+                        isScratch={scratchProjectKeys.has(
+                          `${thread.environmentId}:${thread.projectId}`,
+                        )}
                         variant={rowVariant}
                         // Snoozed rows wake; settled rows un-settle (explicit
                         // settles clear the override, auto-settled rows get

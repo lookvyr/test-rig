@@ -8,6 +8,7 @@ describe("ThreadWorktreeIndicator", () => {
   it("renders the worktree folder and branch in an accessible label", () => {
     const markup = renderToStaticMarkup(
       <ThreadWorktreeIndicator
+        isScratch={false}
         thread={{
           id: ThreadId.make("thread-1"),
           branch: "feature/sidebar-indicator",
@@ -26,6 +27,7 @@ describe("ThreadWorktreeIndicator", () => {
   it("leads with the cleanup reason when cleanup kept the worktree", () => {
     const markup = renderToStaticMarkup(
       <ThreadWorktreeIndicator
+        isScratch={false}
         thread={{
           id: ThreadId.make("thread-1"),
           branch: "feature/sidebar-indicator",
@@ -45,6 +47,7 @@ describe("ThreadWorktreeIndicator", () => {
   it("stays neutral while cleanup is only pending", () => {
     const markup = renderToStaticMarkup(
       <ThreadWorktreeIndicator
+        isScratch={false}
         thread={{
           id: ThreadId.make("thread-1"),
           branch: "feature/sidebar-indicator",
@@ -63,9 +66,29 @@ describe("ThreadWorktreeIndicator", () => {
     expect(markup).not.toContain("text-warning");
   });
 
+  it.each([undefined, { state: "retained" as const, reason: "Folder kept." }])(
+    "renders nothing for a No project thread with a private scratch folder",
+    (worktreeCleanup) => {
+      const markup = renderToStaticMarkup(
+        <ThreadWorktreeIndicator
+          isScratch={true}
+          thread={{
+            id: ThreadId.make("scratch-thread"),
+            branch: null,
+            worktreePath: "/tmp/test-rig/scratch/4da1e2d3f4a5b6c7d8e9f012",
+            worktreeCleanup,
+          }}
+        />,
+      );
+
+      expect(markup).toBe("");
+    },
+  );
+
   it.each([null, "", "   "])("renders nothing for an absent worktree path", (worktreePath) => {
     const markup = renderToStaticMarkup(
       <ThreadWorktreeIndicator
+        isScratch={false}
         thread={{
           id: ThreadId.make("thread-1"),
           branch: "main",
