@@ -103,10 +103,11 @@ that turn to it. One run can therefore own several native turns; use
 `latestProviderTurnForAttempt` rather than the attempt's first turn. `/goal`
 commands that start no Codex turn settle on a provider turn without a native ref.
 Claude's SDK mode emits no goal events; its adapter reads goal state from the
-synthetic command output and Stop hook feedback in the transcript. Ported from
-upstream T3 Code #15592; upstream's #16598 (a Claude goal reading as complete
-while a background subagent runs) is not ported because it depends on subagent
-outcome tracking Test Rig does not have.
+synthetic command output and Stop hook feedback in the transcript. A Claude goal is not marked complete while the live process
+still runs background work, including background subagents. Ported from upstream
+T3 Code #15592 and #16598. A `/goal` command never carries inline context: earlier
+handoffs wait for the next ordinary turn unless the provider injects them out of
+band, because the adapter parses the command from the message text.
 
 ## Server-side workers
 

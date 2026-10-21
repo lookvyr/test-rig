@@ -5487,13 +5487,20 @@ export function makeClaudeAdapterV2(
                   nativeThreadId === null ? undefined : goalsByNativeThread.get(nativeThreadId);
                 const goalChecked = goalCheckedTurns.delete(input.context.providerTurnId);
                 const terminalReason = input.result?.terminal_reason;
+                // Background subagents never join the opaque roster, but Claude
+                // defers the goal check while they run.
+                const liveQuery = yield* Ref.get(queryContext);
                 if (
                   nativeThreadId !== null &&
                   goal?.status === "active" &&
                   goalChecked &&
                   input.status === "completed" &&
                   (terminalReason === undefined || terminalReason === "completed") &&
-                  roster.size === 0
+                  roster.size === 0 &&
+                  !(
+                    liveQuery?.nativeThreadId === nativeThreadId &&
+                    (yield* liveProcessRunsBackgroundWork(liveQuery))
+                  )
                 ) {
                   goalsByNativeThread.set(nativeThreadId, {
                     objective: goal.objective,

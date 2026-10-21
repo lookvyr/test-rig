@@ -11,11 +11,14 @@ import { Button } from "../ui/button";
 export const ComposerGoalRow = memo(function ComposerGoalRow({
   presentation,
   working,
+  disabled,
   onResume,
   onClear,
 }: {
   readonly presentation: ProviderGoalPresentation;
   readonly working: boolean;
+  /** The thread cannot take a command right now, such as while a request is pending. */
+  readonly disabled: boolean;
   readonly onResume: () => void;
   readonly onClear: () => void;
 }) {
@@ -40,11 +43,11 @@ export const ComposerGoalRow = memo(function ComposerGoalRow({
       {working ? null : (
         <span className="flex shrink-0 items-center gap-1">
           {presentation.canResume ? (
-            <Button size="xs" variant="ghost" onClick={onResume}>
+            <Button size="xs" variant="ghost" disabled={disabled} onClick={onResume}>
               Resume
             </Button>
           ) : null}
-          <Button size="xs" variant="ghost" onClick={onClear}>
+          <Button size="xs" variant="ghost" disabled={disabled} onClick={onClear}>
             Clear
           </Button>
         </span>

@@ -1128,9 +1128,14 @@ export const layer: Layer.Layer<
                     createdAt: yield* DateTime.now,
                   }),
                 ];
+          // A native /goal command is parsed from the message itself, so prior
+          // context cannot be prepended to it; it waits for the next ordinary turn
+          // unless the provider takes it out of band.
+          const goalCommand =
+            message.attachments.length === 0 && /^\/goal(?:\s|$)/u.test(userText.trim());
           const delivery = yield* deliverContextHandoffs({
             handoffs: [...effectiveHandoffs, ...retryHandoff],
-            deferInline: compact,
+            deferInline: compact || goalCommand,
             providerThread: runningProviderThread,
             budget: Effect.gen(function* () {
               return handoffBudget({
@@ -1178,9 +1183,9 @@ export const layer: Layer.Layer<
           });
           if (!(yield* isCurrentAttemptInStatus("running"))) return;
           const start = compact ? session.compactThread! : session.startTurn;
-          const context = [delivery.context, restartNote]
-            .filter((part) => part !== "")
-            .join("\n\n");
+          const context = goalCommand
+            ? ""
+            : [delivery.context, restartNote].filter((part) => part !== "").join("\n\n");
           // A note continuation has no turn to resume; its text is the prompt.
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;
           yield* start({

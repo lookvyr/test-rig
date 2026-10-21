@@ -4013,8 +4013,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           commandType: input.command.type,
           cause:
             input.text.trim().toLowerCase() === "/compact"
-              ? "Context compaction must run as a separate turn. Queue it or wait for the active turn to finish."
-              : "Signing out must run as a separate turn. Queue it or wait for the active turn to finish.",
+              ? "Context compaction must run as a separate turn. Wait for the active turn to finish, or stop it first."
+              : "Signing out must run as a separate turn. Wait for the active turn to finish, or stop it first.",
         });
       }
       if (isGoalCommand(input)) {
@@ -4022,7 +4022,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           commandId: input.command.commandId,
           commandType: input.command.type,
           cause:
-            "Goal commands must run as a separate turn. Queue it or wait for the active turn to finish.",
+            "Goal commands must run as a separate turn. Wait for the active turn to finish, or stop it first.",
         });
       }
       const targetMessage = input.projection.messages.find(

@@ -5078,20 +5078,20 @@ function ChatViewContent(props: ChatViewProps) {
   const activeGoalPresentation =
     activeGoal === null ? null : presentProviderGoal(activeGoal, isWorking);
 
+  // Controls that send a standalone command stay disabled while it cannot send.
+  const standaloneCommandBlocked =
+    !activeThread ||
+    !isServerThread ||
+    threadDetailLoading ||
+    isWorking ||
+    reviewWorkspacePending ||
+    worktreeSetupBlocksSend ||
+    activeEnvironmentUnavailable ||
+    pendingApprovals.length > 0 ||
+    pendingUserInputs.length > 0;
+
   const sendStandaloneCommand = async (text: string, continuationOfRunId?: RunId) => {
-    if (
-      !activeThread ||
-      !isServerThread ||
-      threadDetailLoading ||
-      isWorking ||
-      reviewWorkspacePending ||
-      worktreeSetupBlocksSend ||
-      activeEnvironmentUnavailable ||
-      sendInFlightRef.current ||
-      pendingApprovals.length > 0 ||
-      pendingUserInputs.length > 0
-    )
-      return;
+    if (!activeThread || standaloneCommandBlocked || sendInFlightRef.current) return;
     const context = composerRef.current?.getSendContext();
     if (!context?.providerAvailable) return;
     const commandThreadId = activeThread.id;
@@ -6671,6 +6671,7 @@ function ChatViewContent(props: ChatViewProps) {
                         <ComposerGoalRow
                           presentation={activeGoalPresentation}
                           working={isWorking}
+                          disabled={standaloneCommandBlocked}
                           onResume={() => void sendStandaloneCommand("/goal resume")}
                           onClear={() => void sendStandaloneCommand("/goal clear")}
                         />
