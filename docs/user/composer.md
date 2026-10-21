@@ -260,8 +260,9 @@ a run in the fork has finished. Test Rig then adds a short summary of the
 fork's turns since it split off (messages, commands run and files changed) to
 your next message in the original conversation, so its agent sees what the fork
 learned. Merging copies no files and changes no Git state: edits the fork made
-stay in its checkout. Merging again from the same fork before you send that
-next message replaces the earlier summary.
+stay in its checkout. Merging again before you send that next message, from
+the same fork or another one, replaces the earlier summary. Messages Test Rig or
+an agent sends to the original conversation leave the summary waiting for yours.
 
 A fork is a durable chat, separate from a temporary `/side` conversation.
 Forking a conversation does not create a Git worktree or isolate file changes.
