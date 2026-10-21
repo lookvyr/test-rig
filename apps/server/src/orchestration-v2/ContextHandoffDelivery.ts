@@ -23,10 +23,9 @@ export const deliverContextHandoffs = Effect.fn("orchestrationV2.deliverContextH
     const nativeThreadId = input.providerThread.nativeThreadRef?.nativeId ?? undefined;
     const pending = input.handoffs.filter(
       (handoff) =>
-        handoff.strategy !== "fork_delta_summary" &&
-        (nativeThreadId === undefined ||
-          handoff.delivery?.nativeThreadId !== nativeThreadId ||
-          handoff.delivery.status === "pending"),
+        nativeThreadId === undefined ||
+        handoff.delivery?.nativeThreadId !== nativeThreadId ||
+        handoff.delivery.status === "pending",
     );
     if (pending.length === 0 || (input.deferInline && input.inject === undefined))
       return { context: "", delivered: Effect.void };
@@ -34,7 +33,7 @@ export const deliverContextHandoffs = Effect.fn("orchestrationV2.deliverContextH
     let coverage = pending
       .map(
         (handoff) =>
-          `Context handoff (${handoff.strategy}):\n${
+          `Context handoff (${handoff.strategy === "fork_delta_summary" ? "merge_back / fork_delta_summary" : handoff.strategy}):\n${
             handoff.history?.coverage ??
             `From thread ${handoff.threadId}, runs ${handoff.coveredRunOrdinals.from}-${handoff.coveredRunOrdinals.to}. Recover history with t3_thread_read, view=activity; paginate with afterPosition, and use itemId/textOffset for long items.`
           }`,

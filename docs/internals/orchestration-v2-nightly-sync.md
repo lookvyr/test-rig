@@ -329,3 +329,18 @@ Fresh integrated observations used the existing disposable copied-data home, tem
 [Recovery instructions](../operations/orchestration-v2-recovery.md) now cover consistent stopped backups, retained original database, independent V2 state, matching client/server protocol, provider/workspace/browser state outside SQLite and opt-in restart continuation. Historical migrations 1–39 remain unchanged. The runtime migration test now compares all imported message fields and the exact original ledger; six integrated migration tests plus the historical side-chat migration test passed. The six disposable proof-harness files are retired, with historical provenance retained.
 
 The final repair diff is local and uncommitted. Web, server, desktop and shared package typechecks passed, as did the final 58-test runtime-composition suite and changed-file formatting/lint checks. No repository-wide checks, release, push or live-database writes were performed. Broader lifecycle/coordination work remains in LOO-24/27/31 and the other existing feature tickets; this acceptance does not close them.
+
+### Merge-back restored (October 21, 2026)
+
+The developer reversed the October 4 exclusion. The merge-back removal parts of
+that slice are restored: the `thread.merge_back` dispatch, fork-delta handoff
+preparation, delivery with the target's next user message, the
+`t3_thread_merge_back` MCP tool, the client command and the Lineage panel's merge
+button. The fork reliability fixes from the same slice stay: route loading,
+"Forked from" timeline labels, and forks clearing temporary side-chat ownership.
+
+`ThreadMergeBack.integration.test.ts` replays upstream T3 Code's recorded Claude
+transcripts (`thread_merge_back_continue`, `thread_merge_back_siblings`). Their
+Codex counterparts were recorded against upstream's app-server handshake, which
+Test Rig's client does not send byte-for-byte, so Codex is covered by the
+provider-neutral orchestration path and the live check rather than a replay.

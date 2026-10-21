@@ -7,6 +7,7 @@ import {
   immediateThreadRelationships,
   orderWebThreadLineageRows,
   relatedThreadIds,
+  resolveMergeBackTargetThreadId,
   walkThreadRelationships,
   threadRelationshipRowStatus,
 } from "./threadRelationships.ts";
@@ -303,6 +304,52 @@ describe("thread relationships", () => {
     ]);
     expect(graph.nodes.has(staleParent)).toBe(false);
   });
+
+  it("resolves merge-back only for forks and prefers the recorded fork source", () => {
+    const source = ThreadId.make("thread-source");
+    const fallbackParent = ThreadId.make("thread-parent");
+    const fork = ThreadId.make("thread-fork");
+
+    expect(
+      resolveMergeBackTargetThreadId({
+        thread: {
+          id: fork,
+          forkedFrom: { type: "run", threadId: source, runId: "run-source" },
+          lineage: {
+            rootThreadId: source,
+            parentThreadId: fallbackParent,
+            relationshipToParent: "fork",
+          },
+        },
+      } as never),
+    ).toBe(source);
+    expect(
+      resolveMergeBackTargetThreadId({
+        thread: {
+          id: fork,
+          forkedFrom: null,
+          lineage: {
+            rootThreadId: source,
+            parentThreadId: fallbackParent,
+            relationshipToParent: "fork",
+          },
+        },
+      } as never),
+    ).toBe(fallbackParent);
+    expect(
+      resolveMergeBackTargetThreadId({
+        thread: {
+          id: fork,
+          forkedFrom: null,
+          lineage: {
+            rootThreadId: source,
+            parentThreadId: fallbackParent,
+            relationshipToParent: "subagent",
+          },
+        },
+      } as never),
+    ).toBeNull();
+  });
 });
 
 const current = ThreadId.make("thread-current");
@@ -335,6 +382,7 @@ function forkShell(input: {
 
 function orderedLineageIds(input: {
   readonly threads: ReadonlyArray<unknown>;
+  readonly mergeTargetThreadId?: ThreadId | null;
   readonly projection?: unknown;
 }): ReadonlyArray<ThreadId> {
   const graph = deriveThreadRelationshipGraph({
@@ -345,6 +393,7 @@ function orderedLineageIds(input: {
     graph,
     rows: immediateThreadRelationships(graph, current),
     currentThreadId: current,
+    mergeTargetThreadId: input.mergeTargetThreadId ?? null,
   }).map(({ threadId }) => threadId);
 }
 
@@ -419,9 +468,13 @@ describe("web thread lineage ordering", () => {
     expect(after).toEqual(before);
   });
 
-  it("pins the parent before newer forks", () => {
+  it("pins the parent first and a distinct merge-back target second", () => {
+    // The panel keeps its two action rows in place regardless of creation time:
+    // parent first, then a merge-back target that is not the parent. The two
+    // diverge while a shell update and its projection disagree about the fork
+    // source, which is exactly when a moving row would misfire a merge.
     const parent = ThreadId.make("thread-parent");
-    const olderFork = ThreadId.make("thread-older-fork");
+    const mergeTarget = ThreadId.make("thread-merge-target");
     const newestFork = ThreadId.make("thread-newest-fork");
 
     expect(
@@ -434,7 +487,7 @@ describe("web thread lineage ordering", () => {
             createdAt: "2026-06-02T00:00:00.000Z",
           }),
           forkShell({
-            id: olderFork,
+            id: mergeTarget,
             parentThreadId: current,
             createdAt: "2026-06-03T00:00:00.000Z",
           }),
@@ -444,8 +497,9 @@ describe("web thread lineage ordering", () => {
             createdAt: "2026-06-09T00:00:00.000Z",
           }),
         ],
+        mergeTargetThreadId: mergeTarget,
       }),
-    ).toEqual([parent, newestFork, olderFork]);
+    ).toEqual([parent, mergeTarget, newestFork]);
   });
 
   it("sinks missing nodes and shells without a decoded createdAt", () => {

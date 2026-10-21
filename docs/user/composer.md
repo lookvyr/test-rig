@@ -236,7 +236,17 @@ Choose **Fork from this response** to start a separate conversation from an
 earlier response. The fork opens with history through that response; later turns
 in the original conversation are excluded. Continue in the fork or use **Open
 parent thread** to return to the original. Both chats remain available after
-reloading. Forks do not merge conversation context back into their parent.
+reloading.
+
+To bring what a fork found back to its original conversation, open the fork's
+**Lineage** panel and choose the merge button on the original conversation's
+row, or ask the fork's agent to merge back. The merge button is available once
+a run in the fork has finished. Test Rig then adds a short summary of the
+fork's turns since it split off (messages, commands run and files changed) to
+your next message in the original conversation, so its agent sees what the fork
+learned. Merging copies no files and changes no Git state: edits the fork made
+stay in its checkout. Merging again from the same fork before you send that
+next message replaces the earlier summary.
 
 A fork is a durable chat, separate from a temporary `/side` conversation.
 Forking a conversation does not create a Git worktree or isolate file changes.

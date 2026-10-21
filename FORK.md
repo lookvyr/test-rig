@@ -117,9 +117,6 @@ The following are outside Test Rig's product boundary:
 - Queuing interactive follow-up messages for later turns. Composer follow-ups
   steer the active turn; Send waits until steering is available. Internal deferred
   work, notifications, and queue persistence remain orchestration concerns.
-- Merging forked conversation context back into a parent. Historical forks remain
-  independent durable chats with parent navigation; old merge-back records stay
-  readable but cannot initiate or deliver a transfer.
 
 Automatic ancillary requests to PostHog, OTLP collectors, upstream desktop
 update feeds, LiteLLM pricing tables, Google favicon services, and npm-registry
