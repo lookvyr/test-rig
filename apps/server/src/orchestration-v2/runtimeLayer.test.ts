@@ -1574,7 +1574,8 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: null,
-        worktreePath: null,
+        // Its own path, so a turn can start without a registered project.
+        worktreePath: "/tmp/t3-runtime-layer-waiting-merge",
       });
       const target = yield* orchestrator.getThreadProjection(targetThreadId);
 
@@ -1713,6 +1714,25 @@ it.layer(TestLayer)("OrchestrationV2LayerLive", (it) => {
       assert.equal(transfer.sourcePoint.providerThreadRef?.nativeId, "native-waiting-merge-source");
       assert.equal(transfer.basePoint?.runId, baseRunId);
       assert.isNull(transfer.error);
+
+      // Only the user's next ordinary message carries the merge-back; a turn the
+      // server starts (a wake or delegated result) leaves it pending.
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "agent",
+        creationSource: "server",
+        commandId: CommandId.make("runtime-layer-waiting-merge-server-turn"),
+        threadId: targetThreadId,
+        messageId: MessageId.make("runtime-layer-waiting-merge-server-message"),
+        text: "Background work finished.",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+      });
+      const afterServerTurn = yield* orchestrator.getThreadProjection(targetThreadId);
+      assert.equal(
+        afterServerTurn.contextTransfers.find((candidate) => candidate.id === transfer.id)?.status,
+        "pending",
+      );
     }),
   );
 });

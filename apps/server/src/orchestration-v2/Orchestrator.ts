@@ -3854,6 +3854,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ),
       );
 
+    if (sourceProjection.thread.deletedAt !== null || targetProjection.thread.deletedAt !== null) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "A deleted conversation cannot merge back or receive a merge-back.",
+      });
+    }
     if (
       sourceProjection.thread.lineage.relationshipToParent !== "fork" ||
       sourceProjection.thread.lineage.parentThreadId !== command.targetThreadId
@@ -3905,11 +3912,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         type: "merge_back",
       }),
     );
+    // The parent's next message carries one merge-back, so a newer merge from
+    // this or a sibling fork replaces any still pending.
     const pendingMergeBackTransfersForPair = targetProjection.contextTransfers.filter(
       (transfer) =>
         transfer.type === "merge_back" &&
         transfer.status === "pending" &&
-        transfer.sourceThreadId === command.sourceThreadId &&
         transfer.targetThreadId === command.targetThreadId,
     );
     const transfer: OrchestrationV2ContextTransfer = {
@@ -5130,20 +5138,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (candidate) => candidate.id === projection.thread.activeProviderThreadId,
       );
       const activeRun = projection.runs.find(isBlockingRun);
-      const pendingMergeBackTransfers = pendingMergeBackTransfersForThread(projection);
+      // A merge-back belongs to the user's next ordinary message. Server and agent
+      // sends (wakes, delegated results, scheduled tasks), and commands such as
+      // /compact or /goal, leave it pending.
+      const pendingMergeBackTransfers =
+        command.createdBy === "user" &&
+        !isNativeMaintenanceCommand(command) &&
+        !isGoalCommand(command)
+          ? pendingMergeBackTransfersForThread(projection)
+          : [];
       const shouldQueue =
         activeRun !== undefined &&
         (dispatchMode.type === "defer_start" ||
           dispatchMode.type === "start_immediately" ||
           dispatchMode.type === "queue_after_active");
       if (shouldQueue) {
-        if (pendingMergeBackTransfers.length > 0) {
-          return yield* new OrchestratorDispatchError({
-            commandId: command.commandId,
-            commandType: command.type,
-            cause: `Thread ${command.threadId} has a pending merge-back transfer; queued merge-back consumption is not implemented yet.`,
-          });
-        }
         const queueProviderThread =
           activeProviderThread ??
           projection.providerThreads.find(
@@ -5412,16 +5421,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         return;
       }
       const pendingForkTransfer = pendingForkTransferForThread(projection);
-      const pendingMergeBackSourceThreadIds = new Set(
-        pendingMergeBackTransfers.map((transfer) => transfer.sourceThreadId),
-      );
-      if (pendingMergeBackSourceThreadIds.size > 1) {
-        return yield* new OrchestratorDispatchError({
-          commandId: command.commandId,
-          commandType: command.type,
-          cause: `Thread ${command.threadId} has pending merge-back transfers from multiple forks.`,
-        });
-      }
+      // Older data can hold pending merge-backs from several forks; the newest wins
+      // and the rest are superseded below.
       const pendingMergeBackTransfer = latestContextTransfer(pendingMergeBackTransfers);
       const supersededMergeBackTransfers = pendingMergeBackTransfers.filter(
         (transfer) => transfer.id !== pendingMergeBackTransfer?.id,
