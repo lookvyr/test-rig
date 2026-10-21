@@ -418,6 +418,8 @@ export const ProjectReadFileResult = Schema.Struct({
   contents: Schema.String,
   byteLength: NonNegativeInt,
   truncated: Schema.Boolean,
+  // Set when the path is a symlink to a file outside the workspace.
+  readOnly: Schema.optional(Schema.Boolean),
 });
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 

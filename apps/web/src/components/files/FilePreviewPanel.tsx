@@ -667,6 +667,7 @@ function RenderedMarkdownSurface({
   relativePath,
   contents,
   threadRef,
+  readOnly,
   onPendingChange,
 }: Omit<
   EditableFileSurfaceProps,
@@ -678,6 +679,7 @@ function RenderedMarkdownSurface({
   | "onPostRender"
 > & {
   threadRef: ScopedThreadRef;
+  readOnly: boolean;
 }) {
   const saveCoordinator = useFileSaveCoordinator({
     environmentId,
@@ -693,15 +695,19 @@ function RenderedMarkdownSurface({
         cwd={cwd}
         threadRef={threadRef}
         className="mx-auto max-w-4xl px-6 py-5"
-        onTaskListChange={({ markerOffset, checked }) => {
-          const currentContents =
-            getOptimisticProjectFileQueryData(environmentId, cwd, relativePath)?.contents ??
-            contents;
-          const nextContents = setMarkdownTaskChecked(currentContents, markerOffset, checked);
-          if (nextContents === currentContents) return;
-          setProjectFileQueryData(environmentId, cwd, relativePath, nextContents);
-          saveCoordinator.change(nextContents);
-        }}
+        onTaskListChange={
+          readOnly
+            ? undefined
+            : ({ markerOffset, checked }) => {
+                const currentContents =
+                  getOptimisticProjectFileQueryData(environmentId, cwd, relativePath)?.contents ??
+                  contents;
+                const nextContents = setMarkdownTaskChecked(currentContents, markerOffset, checked);
+                if (nextContents === currentContents) return;
+                setProjectFileQueryData(environmentId, cwd, relativePath, nextContents);
+                saveCoordinator.change(nextContents);
+              }
+        }
       />
     </ScrollArea>
   );
@@ -993,6 +999,11 @@ export default function FilePreviewPanel({
           Preview limited to the first 1 MB of a {file.data.byteLength.toLocaleString()} byte file.
         </div>
       ) : null}
+      {relativePath && !isMedia && file.data?.readOnly ? (
+        <div className="shrink-0 border-b border-warning/20 bg-warning-surface px-3 py-1.5 text-[11px] text-warning-foreground">
+          Read-only: this is a link to a file outside the workspace.
+        </div>
+      ) : null}
       {file.error && file.data !== null && !isMedia && !isDirectory ? (
         <FileSurfaceNotice>
           <button type="button" onClick={refreshSelectedFile}>
@@ -1030,6 +1041,7 @@ export default function FilePreviewPanel({
                 relativePath={relativePath}
                 threadRef={threadRef}
                 contents={file.data.contents}
+                readOnly={file.data.readOnly === true}
                 onPendingChange={onPendingChange}
               />
             ) : tableDelimiter !== null && renderTable ? (
@@ -1038,7 +1050,7 @@ export default function FilePreviewPanel({
                 text={file.data.contents}
                 delimiter={tableDelimiter}
               />
-            ) : file.data.truncated ? (
+            ) : file.data.truncated || file.data.readOnly ? (
               <Virtualizer
                 key={`${relativePath}:${resolvedTheme}:${file.data.byteLength}`}
                 className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"

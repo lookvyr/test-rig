@@ -234,12 +234,6 @@ function projectFileFailureContext(
         operation: error.operation,
         operationPath: error.operationPath,
       };
-    case "WorkspaceFilePathEscapeError":
-      return {
-        failure: "resolved_path_outside_root",
-        resolvedPath: error.resolvedPath,
-        resolvedWorkspaceRoot: error.resolvedWorkspaceRoot,
-      };
     case "WorkspacePathNotFileError":
       return { failure: "path_not_file", resolvedPath: error.resolvedPath };
     case "WorkspaceBinaryFileError":

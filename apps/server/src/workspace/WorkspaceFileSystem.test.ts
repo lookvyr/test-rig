@@ -88,33 +88,25 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
       }),
     );
 
-    it.effect("rejects symlinks that resolve outside the workspace root", () =>
+    it.effect("reads symlinks that resolve outside the workspace root as read-only", () =>
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const cwd = yield* makeTempDir;
         const outsideDir = yield* makeTempDir;
-        yield* writeTextFile(outsideDir, "secret.txt", "outside\n");
-        yield* fileSystem.symlink(
-          path.join(outsideDir, "secret.txt"),
-          path.join(cwd, "linked-secret.txt"),
-        );
+        yield* writeTextFile(outsideDir, ".env", "SECRET=1\n");
+        yield* fileSystem.symlink(path.join(outsideDir, ".env"), path.join(cwd, ".env"));
 
-        const error = yield* workspaceFileSystem
-          .readFile({ cwd, relativePath: "linked-secret.txt" })
-          .pipe(Effect.flip);
-        const resolvedWorkspaceRoot = yield* fileSystem.realPath(cwd);
-        const resolvedPath = yield* fileSystem.realPath(path.join(outsideDir, "secret.txt"));
+        const result = yield* workspaceFileSystem.readFile({ cwd, relativePath: ".env" });
 
-        expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFilePathEscapeError);
-        expect(error).toMatchObject({
-          workspaceRoot: cwd,
-          relativePath: "linked-secret.txt",
-          resolvedWorkspaceRoot,
-          resolvedPath,
+        expect(result).toEqual({
+          relativePath: ".env",
+          contents: "SECRET=1\n",
+          byteLength: 9,
+          truncated: false,
+          readOnly: true,
         });
-        expect("cause" in error).toBe(false);
       }),
     );
 

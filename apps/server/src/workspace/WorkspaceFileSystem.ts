@@ -52,20 +52,6 @@ export class WorkspaceFileSystemOperationError extends Schema.TaggedError<Worksp
   }
 }
 
-export class WorkspaceFilePathEscapeError extends Schema.TaggedError<WorkspaceFilePathEscapeError>()(
-  "WorkspaceFilePathEscapeError",
-  {
-    workspaceRoot: Schema.String,
-    relativePath: Schema.String,
-    resolvedWorkspaceRoot: Schema.String,
-    resolvedPath: Schema.String,
-  },
-) {
-  override get message(): string {
-    return `Workspace file '${this.relativePath}' resolves outside workspace root '${this.workspaceRoot}': ${this.resolvedPath}`;
-  }
-}
-
 export class WorkspacePathNotFileError extends Schema.TaggedError<WorkspacePathNotFileError>()(
   "WorkspacePathNotFileError",
   {
@@ -94,7 +80,6 @@ export class WorkspaceBinaryFileError extends Schema.TaggedError<WorkspaceBinary
 
 export const WorkspaceFileSystemError = Schema.Union([
   WorkspaceFileSystemOperationError,
-  WorkspaceFilePathEscapeError,
   WorkspacePathNotFileError,
   WorkspaceBinaryFileError,
 ]);
@@ -164,19 +149,13 @@ export const make = Effect.gen(function* () {
           cause,
         }),
     });
+    // A symlink out of the workspace (a worktree's `.env` linked from the main
+    // checkout) is still shown, but read-only: never write through it.
     const relativeRealPath = path.relative(realWorkspaceRoot, realTargetPath);
-    if (
+    const resolvesOutsideRoot =
       relativeRealPath.startsWith(`..${path.sep}`) ||
       relativeRealPath === ".." ||
-      path.isAbsolute(relativeRealPath)
-    ) {
-      return yield* new WorkspaceFilePathEscapeError({
-        workspaceRoot: input.cwd,
-        relativePath: input.relativePath,
-        resolvedWorkspaceRoot: realWorkspaceRoot,
-        resolvedPath: realTargetPath,
-      });
-    }
+      path.isAbsolute(relativeRealPath);
 
     return yield* Effect.acquireUseRelease(
       Effect.tryPromise({
@@ -241,6 +220,7 @@ export const make = Effect.gen(function* () {
             contents: new TextDecoder("utf-8").decode(fileBytes),
             byteLength: stat.size,
             truncated: stat.size > PROJECT_READ_FILE_MAX_BYTES,
+            ...(resolvesOutsideRoot ? { readOnly: true } : {}),
           };
         }),
       (handle) =>

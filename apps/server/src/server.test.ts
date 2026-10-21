@@ -3386,13 +3386,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const workspaceDir = yield* fs.makeTempDirectoryScoped({
         prefix: "t3-ws-workspace-errors-",
       });
-      const outsideDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-workspace-errors-outside-",
-      });
-      const outsideFile = path.join(outsideDir, "outside.txt");
-      yield* fs.writeFileString(outsideFile, "outside\n");
-      yield* fs.symlink(outsideFile, path.join(workspaceDir, "linked-outside.txt"));
-      const resolvedOutsideFile = yield* fs.realPath(outsideFile);
+      const missingFile = path.join(workspaceDir, "missing.txt");
 
       yield* buildAppUnderTest();
 
@@ -3413,7 +3407,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             ),
             read: client[WS_METHODS.projectsReadFile]({
               cwd: workspaceDir,
-              relativePath: "linked-outside.txt",
+              relativePath: "missing.txt",
             }).pipe(Effect.result),
             browse: client[WS_METHODS.filesystemBrowse]({
               cwd: workspaceDir,
@@ -3463,12 +3457,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const readError = results.read.failure;
       assert.equal(
         readError.message,
-        `Failed to read workspace file 'linked-outside.txt' in '${workspaceDir}'.`,
+        `Failed to read workspace file 'missing.txt' in '${workspaceDir}'.`,
       );
       assert.equal(readError.cwd, workspaceDir);
-      assert.equal(readError.relativePath, "linked-outside.txt");
-      assert.equal(readError.failure, "resolved_path_outside_root");
-      assert.equal(readError.resolvedPath, resolvedOutsideFile);
+      assert.equal(readError.relativePath, "missing.txt");
+      assert.equal(readError.failure, "operation_failed");
+      assert.equal(readError.operation, "realpath-target");
+      assert.equal(readError.resolvedPath, missingFile);
       assert.isDefined(readError.cause);
 
       if (
