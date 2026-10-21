@@ -93,6 +93,21 @@ cascades to temporary children. The deletion reactor expires remaining temporary
 once at backend startup, before other reactors and client commands start. Hidden children
 remain in backing state for ownership checks but are excluded from navigation and search.
 
+## Native goals
+
+Native `/goal` state belongs to the provider and is mirrored on the provider thread
+(`OrchestrationV2ProviderThread.goal`); the thread shell exposes the active
+provider thread's goal. Codex starts the next goal turn on its own milliseconds
+after the last one completes, so the Codex V2 adapter keeps the run open and adds
+that turn to it. One run can therefore own several native turns; use
+`latestProviderTurnForAttempt` rather than the attempt's first turn. `/goal`
+commands that start no Codex turn settle on a provider turn without a native ref.
+Claude's SDK mode emits no goal events; its adapter reads goal state from the
+synthetic command output and Stop hook feedback in the transcript. Ported from
+upstream T3 Code #15592; upstream's #16598 (a Claude goal reading as complete
+while a background subagent runs) is not ported because it depends on subagent
+outcome tracking Test Rig does not have.
+
 ## Server-side workers
 
 Provider work flows through three queue-backed workers. All three are built with

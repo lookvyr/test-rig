@@ -355,6 +355,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
           );
           assert.deepStrictEqual(status.slashCommands, [
             { name: "compact", description: "Compact conversation context" },
+            {
+              name: "goal",
+              description: "Set a goal Codex keeps working toward until it is done",
+              input: { hint: "Objective, or pause, resume, clear" },
+            },
           ]);
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.installed, true);

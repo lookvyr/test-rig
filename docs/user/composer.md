@@ -113,6 +113,21 @@ is waiting on a question, approval, background work or a pending merge-back,
 and when the cache has already expired, for example after the computer slept.
 Waiting compactions do not survive a restart.
 
+## Goals
+
+With Codex and Claude, send `/goal` followed by what "done" means, for example
+`/goal all tests in packages/api pass`. The agent keeps working across turns
+until it judges the goal met. The sidebar shows **Goal** while it works, and a
+row above the composer shows the goal and its progress.
+
+- `/goal` alone shows the current goal. `/goal clear` removes it.
+- Codex also supports `/goal pause` and `/goal resume`. Stopping a Codex goal
+  pauses it; the row then offers **Resume** and **Clear**.
+- Stopping Claude ends the current turn, but the goal stays set. Claude checks it
+  again at the end of your next message.
+- A goal command runs as its own turn. Wait for the active turn to finish
+  before sending one.
+
 ## Agent-prepared attachments
 
 An upload prepared by an agent belongs to the conversation that prepared it.

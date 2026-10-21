@@ -285,6 +285,8 @@ import {
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ComposerTasksBadge, composerTasksProgress } from "./chat/ComposerTasksBadge";
+import { ComposerGoalRow } from "./chat/ComposerGoalRow";
+import { presentProviderGoal } from "@t3tools/client-runtime/state/thread-execution";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -5070,6 +5072,12 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
+  // A native /goal keeps the agent working across turns. Stop pauses a Codex
+  // goal; once the thread is idle the row offers the native follow-ups.
+  const activeGoal = activeThreadShell?.goal ?? null;
+  const activeGoalPresentation =
+    activeGoal === null ? null : presentProviderGoal(activeGoal, isWorking);
+
   const sendStandaloneCommand = async (text: string, continuationOfRunId?: RunId) => {
     if (
       !activeThread ||
@@ -6659,6 +6667,14 @@ function ChatViewContent(props: ChatViewProps) {
                       ) : (
                         <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                       )}
+                      {activeGoalPresentation !== null && !isDraftHeroState ? (
+                        <ComposerGoalRow
+                          presentation={activeGoalPresentation}
+                          working={isWorking}
+                          onResume={() => void sendStandaloneCommand("/goal resume")}
+                          onClear={() => void sendStandaloneCommand("/goal clear")}
+                        />
+                      ) : null}
                       {composerTasks !== null && !isDraftHeroState ? (
                         <ComposerTasksBadge
                           expanded={composerTasksExpanded}
