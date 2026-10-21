@@ -2220,8 +2220,17 @@ function ChatViewContent(props: ChatViewProps) {
     const progress = composerTasksProgress(composerTasksPlan.steps, live);
     return progress === null ? null : { progress, steps: composerTasksPlan.steps };
   }, [activeLatestRun?.runId, composerTasksPlan, latestRunSettled]);
-  const [composerTasksExpanded, setComposerTasksExpanded] = useState(false);
-  const toggleComposerTasks = useCallback(() => setComposerTasksExpanded((value) => !value), []);
+  // The view is reused across threads, so the open list belongs to one thread.
+  const [expandedTasksThreadKey, setExpandedTasksThreadKey] = useState<string | null>(null);
+  const composerTasksExpanded =
+    activeThreadKey !== null && expandedTasksThreadKey === activeThreadKey;
+  const toggleComposerTasks = useCallback(
+    () =>
+      setExpandedTasksThreadKey((current) =>
+        current !== null && current === activeThreadKey ? null : activeThreadKey,
+      ),
+    [activeThreadKey],
+  );
   const composerHasAttachments = useComposerDraftStore(
     (store) => (store.getComposerDraft(composerDraftTarget)?.images.length ?? 0) > 0,
   );

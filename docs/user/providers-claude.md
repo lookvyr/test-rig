@@ -36,8 +36,8 @@ When Claude tracks its work as a task list, the list appears above the
 composer: the current task and how many are done. Click it to see every task
 with its status and how long finished tasks took. A list with unfinished tasks
 stays between turns while the thread keeps the same Claude session, and hides
-once every task is done. The sidebar shows the current task for working
-threads.
+once every task is done. While Claude updates the list during a turn, the
+sidebar also shows the current task.
 
 Test Rig turns on Claude's task tools for its sessions. To turn them off, add
 `CLAUDE_CODE_ENABLE_TODO_TOOLS=0` to the Claude provider's Environment variables

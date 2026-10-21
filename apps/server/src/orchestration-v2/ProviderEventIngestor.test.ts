@@ -436,6 +436,70 @@ layer("ProviderEventIngestorV2", (it) => {
     }),
   );
 
+  it.effect("supersedes an earlier active task list and carries its timings forward", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-09-07T00:00:00.000Z"));
+      const now = yield* DateTime.now;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const threadEvent = yield* threadCreatedEvent(now);
+      const providerSessionId = yield* idAllocator.allocate.providerSession({
+        providerInstanceId: modelSelection.instanceId,
+        threadId: threadEvent.threadId,
+      });
+      type TodoListPlan = Extract<OrchestrationV2PlanArtifact, { readonly kind: "todo_list" }>;
+      const ingest = (id: string, steps: TodoListPlan["steps"]) =>
+        ingestor.ingestNormalized({
+          providerSessionId,
+          providerInstanceId: modelSelection.instanceId,
+          threadId: threadEvent.threadId,
+          event: {
+            type: "plan.updated",
+            driver: CODEX_DRIVER,
+            plan: {
+              id: PlanId.make(id),
+              threadId: threadEvent.threadId,
+              runId: null,
+              nodeId: NodeId.make(`node:${id}`),
+              kind: "todo_list",
+              status: "active",
+              steps,
+            },
+          },
+        });
+
+      yield* eventSink.write({ events: [threadEvent] });
+      yield* ingest("plan:turn-1", [
+        { id: "task-1", text: "Inspect", status: "running" },
+        { id: "task-2", text: "Fix", status: "pending" },
+      ]);
+      yield* TestClock.adjust("6 seconds");
+      // The next turn's first list, as after the provider session was released.
+      yield* ingest("plan:turn-2", [
+        { id: "task-1", text: "Inspect", status: "completed" },
+        { id: "task-2", text: "Fix", status: "pending" },
+      ]);
+
+      const projection = yield* projectionStore.getThreadProjection(threadEvent.threadId);
+      const todoLists = projection.plans.filter(
+        (candidate): candidate is TodoListPlan => candidate.kind === "todo_list",
+      );
+      assert.deepEqual(
+        todoLists.map((plan) => [String(plan.id), plan.status]),
+        [
+          ["plan:turn-1", "superseded"],
+          ["plan:turn-2", "active"],
+        ],
+      );
+      assert.equal(
+        todoLists.find((plan) => plan.id === PlanId.make("plan:turn-2"))?.steps[0]?.durationMs,
+        6_000,
+      );
+    }),
+  );
+
   it.effect(
     "treats successful provider terminal markers as non-persisted orchestration control signals",
     () =>

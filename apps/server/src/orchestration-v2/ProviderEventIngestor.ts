@@ -490,15 +490,39 @@ export const layer: Layer.Layer<
               plan.kind === "todo_list"
                 ? yield* projections.getPlan(plan.threadId, plan.id)
                 : undefined;
+            // A thread has one live task list. When a new one first appears, earlier
+            // lists still marked active (for example after the provider session was
+            // released, which loses its own bookkeeping) are superseded, and the
+            // newest of them carries its step timings into the new list.
+            const replaced =
+              plan.kind === "todo_list" && previous === undefined
+                ? (yield* projections.getThreadRecords(plan.threadId, ["plans"])).plans.filter(
+                    (candidate): candidate is TodoListPlan =>
+                      candidate.kind === "todo_list" &&
+                      candidate.status === "active" &&
+                      candidate.id !== plan.id,
+                  )
+                : [];
             const payload =
               plan.kind === "todo_list"
                 ? withPlanStepDurations(
                     plan,
-                    previous?.kind === "todo_list" ? previous : undefined,
+                    previous?.kind === "todo_list" ? previous : replaced.at(-1),
                     occurredAt,
                   )
                 : plan;
+            const superseded = yield* Effect.forEach(replaced, (stale) =>
+              makeDomainEvent(input, {
+                type: "plan.updated",
+                threadId: stale.threadId,
+                payload: { ...stale, status: "superseded" },
+                runId: stale.runId,
+                nodeId: stale.nodeId,
+                occurredAt,
+              }),
+            );
             return [
+              ...superseded,
               yield* makeDomainEvent(input, {
                 type: "plan.updated",
                 threadId: plan.threadId,

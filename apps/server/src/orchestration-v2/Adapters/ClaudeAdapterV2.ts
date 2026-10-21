@@ -3082,7 +3082,13 @@ export function applyClaudeTaskTool(
   ) {
     return undefined;
   }
-  const id = claudeTaskString(input, "taskId") ?? claudeTaskString(result, "taskId");
+  // Claude accepts id and task_id as aliases, and a subagent's result is only text.
+  const id =
+    claudeTaskString(input, "taskId") ??
+    claudeTaskString(input, "task_id") ??
+    claudeTaskString(input, "id") ??
+    claudeTaskString(result, "taskId") ??
+    (typeof result === "string" ? /^Updated task #(\S+)/.exec(result)?.[1] : undefined);
   const task = id === undefined ? undefined : tasks.get(id);
   if (id === undefined || task === undefined) return undefined;
   const nativeStatus = claudeTaskField(input, "status");

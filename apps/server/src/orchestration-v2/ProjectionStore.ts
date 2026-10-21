@@ -3062,7 +3062,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             WHERE thread_id = ${threadId}
               AND (status IN ('queued','preparing','starting','running','waiting')
                 OR run_id IN (SELECT value FROM json_each(${cohortRunIds}))
-                OR run_id = ${window.requiredRunId ?? null})
+                OR run_id = ${window.requiredRunId ?? null}
+                -- An unfinished task list outlives its turn; the composer needs its run.
+                OR run_id IN (
+                  SELECT run_id FROM orchestration_v2_projection_plans
+                  WHERE thread_id = ${threadId} AND kind = 'todo_list' AND status = 'active'
+                ))
             ORDER BY ordinal ASC
           `,
           fields !== undefined && !fields.includes("attempts")

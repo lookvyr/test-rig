@@ -10212,6 +10212,21 @@ describe("ClaudeAdapterV2 task lists", () => {
     assert.deepEqual([...deleted.keys()], ["1"]);
   });
 
+  it("reads TaskUpdate id aliases and text-only subagent results", () => {
+    const tasks = new Map([["7", { text: "A", status: "pending" as const }]]);
+    assert.equal(
+      apply(tasks, "TaskUpdate", { task_id: "7", status: "in_progress" }, { success: true })?.get(
+        "7",
+      )?.status,
+      "running",
+    );
+    assert.equal(
+      apply(tasks, "TaskUpdate", { status: "completed" }, "Updated task #7 status")?.get("7")
+        ?.status,
+      "completed",
+    );
+  });
+
   it("ignores failed, unknown and no-op updates", () => {
     const tasks = new Map([["1", { text: "A", status: "pending" as const }]]);
     assert.isUndefined(

@@ -10,6 +10,7 @@ import {
   type ModelSelection,
   type OrchestrationV2ThreadShellSnapshot,
   NodeId,
+  PlanId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -5315,3 +5316,101 @@ it.effect("memory history pages bound agent-only turns and retain their first pr
     assert.equal(older.items.length + bounded.projection.visibleTurnItems.length, 91);
   }).pipe(Effect.provide(ProjectionStore.layerMemory)),
 );
+
+it.layer(TestLayer)("ProjectionStoreV2 task lists", (it) => {
+  it.effect("keeps the run that owns an unfinished task list in bounded snapshots", () =>
+    Effect.gen(function* () {
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:bounded-task-list");
+      yield* projectionStore.apply({
+        id: EventId.make("event:bounded-task-list:thread"),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: threadId,
+          projectId: ProjectId.make("project:bounded-task-list"),
+          title: "Bounded task list",
+          providerInstanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+      const completedRun = (ordinal: number) => {
+        const runId = RunId.make(`run:bounded-task-list:${ordinal}`);
+        const nodeId = NodeId.make(`node:bounded-task-list:${ordinal}`);
+        return projectionStore.apply({
+          id: EventId.make(`event:bounded-task-list:run-${ordinal}`),
+          type: "run.created",
+          threadId,
+          runId,
+          nodeId,
+          driver,
+          providerInstanceId,
+          occurredAt: now,
+          payload: {
+            id: runId,
+            threadId,
+            ordinal,
+            providerInstanceId,
+            modelSelection,
+            providerThreadId: null,
+            userMessageId: MessageId.make(`message:bounded-task-list:${ordinal}`),
+            rootNodeId: nodeId,
+            activeAttemptId: null,
+            status: "completed",
+            requestedAt: now,
+            startedAt: now,
+            completedAt: now,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        });
+      };
+      yield* completedRun(1);
+      yield* completedRun(2);
+      yield* projectionStore.apply({
+        id: EventId.make("event:bounded-task-list:plan"),
+        type: "plan.updated",
+        threadId,
+        runId: RunId.make("run:bounded-task-list:1"),
+        nodeId: NodeId.make("node:bounded-task-list:plan"),
+        occurredAt: now,
+        payload: {
+          id: PlanId.make("plan:bounded-task-list"),
+          threadId,
+          runId: RunId.make("run:bounded-task-list:1"),
+          nodeId: NodeId.make("node:bounded-task-list:plan"),
+          kind: "todo_list",
+          status: "active",
+          steps: [{ id: "task-1", text: "Finish later", status: "pending" }],
+        },
+      });
+
+      const snapshot = yield* projectionStore.getThreadSnapshotWindow(threadId, {
+        rowLimit: 10,
+        userTurnLimit: 1,
+      });
+      assert.deepEqual(
+        snapshot.projection.runs.map((run) => String(run.id)),
+        ["run:bounded-task-list:1"],
+      );
+    }),
+  );
+});
