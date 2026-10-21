@@ -1,8 +1,15 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
 import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "./T3OrchestrationInstructions.ts";
+import { T3_CODE_ORCHESTRATION_SECTIONS } from "./T3OrchestrationInstructions.ts";
 import { SIDE_CHAT_INSTRUCTIONS } from "./SideChatInstructions.ts";
+
+/**
+ * Codex cuts the middle out of any `additionalContext` value over 1,000 tokens,
+ * which it counts as UTF-8 bytes divided by four. It does this silently, so
+ * every value built here has to fit.
+ */
+export const CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES = 4_000;
 
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
@@ -181,7 +188,14 @@ export function buildCodexAdditionalContext(
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> {
   const browser = typeof toolsAvailable === "boolean" ? toolsAvailable : toolsAvailable.browser;
   return {
-    test_rig_orchestration: { kind: "application", value: T3_CODE_ORCHESTRATION_INSTRUCTIONS },
+    // Separate keys keep each value under Codex's per-entry cap. Codex emits
+    // entries in key order, so the numbering preserves the authored order.
+    ...Object.fromEntries(
+      T3_CODE_ORCHESTRATION_SECTIONS.map((section, index) => [
+        `test_rig_orchestration_${String(index + 1).padStart(2, "0")}`,
+        { kind: "application" as const, value: section },
+      ]),
+    ),
     test_rig_runtime: {
       kind: "application",
       value: buildRuntimeInstructions({ harness: "Codex", ...runtime }),

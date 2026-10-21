@@ -485,11 +485,11 @@ describe("CodexAdapterV2 runtime policy", () => {
 
       assert.equal(params.collaborationMode?.mode, "default");
       assert.include(
-        params.additionalContext?.test_rig_orchestration?.value ?? "",
+        params.additionalContext?.test_rig_orchestration_01?.value ?? "",
         "Use `delegate_task`",
       );
       assert.include(
-        params.additionalContext?.test_rig_orchestration?.value ?? "",
+        params.additionalContext?.test_rig_orchestration_01?.value ?? "",
         "structured object, never as JSON text",
       );
     }),
@@ -3434,7 +3434,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           hasT3Mcp: true,
         });
         assert.include(
-          params.additionalContext?.test_rig_orchestration?.value ?? "",
+          params.additionalContext?.test_rig_orchestration_01?.value ?? "",
           "delegate_task",
         );
         const entries = codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "work" });
@@ -3611,7 +3611,9 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           hasT3Mcp: true,
         });
         assert.deepEqual(Object.keys(params.additionalContext ?? {}).sort(), [
-          "test_rig_orchestration",
+          "test_rig_orchestration_01",
+          "test_rig_orchestration_02",
+          "test_rig_orchestration_03",
           "test_rig_runtime",
           "test_rig_tools",
         ]);
