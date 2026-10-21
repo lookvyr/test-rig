@@ -1,8 +1,9 @@
 import {
   CommandId,
+  isProviderDriverKind,
   MessageId,
+  ProviderDriverKind,
   type ProviderInstanceId,
-  type RunId,
   resolveProviderInstanceEnabled,
   type ServerSettings as ServerSettingsValue,
   type ThreadId,
@@ -24,14 +25,19 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 // the compaction fire after the cache has already expired.
 const MAX_WAIT_STEP_MS = 60_000;
 
+// A built-in instance without its own entry follows the older per-provider toggle.
 function providerInstanceEnabled(
-  settings: Pick<ServerSettingsValue, "providerInstances">,
+  settings: Pick<ServerSettingsValue, "providerInstances" | "providers">,
   instanceId: ProviderInstanceId,
 ): boolean {
-  const config = Object.hasOwn(settings.providerInstances, instanceId)
-    ? settings.providerInstances[instanceId]
-    : undefined;
-  return config === undefined || resolveProviderInstanceEnabled(config);
+  if (Object.hasOwn(settings.providerInstances, instanceId)) {
+    return resolveProviderInstanceEnabled(settings.providerInstances[instanceId]!);
+  }
+  if (!isProviderDriverKind(instanceId)) return true;
+  return resolveProviderInstanceEnabled({
+    driver: ProviderDriverKind.make(instanceId),
+    config: (settings.providers as Record<string, unknown>)[instanceId],
+  });
 }
 
 const sleepUntil = Effect.fnUntraced(function* (targetMs: number) {
@@ -52,12 +58,21 @@ export const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const settings = yield* ServerSettings.ServerSettingsService;
 
+  // Waits for whichever run is latest when it looks, so an update to an older run
+  // re-arms the wait for the latest one instead of cancelling it.
   const compactWhenDue = Effect.fn("IdleCompactionService.compactWhenDue")(
-    function* (threadId: ThreadId, runId: RunId) {
+    function* (threadId: ThreadId) {
       // Loops once after the wait: the thread may have moved on.
       while (true) {
         const current = yield* settings.getSettings;
         if (!current.compactIdleThreads) return;
+        const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
+        const latestRun = runs.reduce<(typeof runs)[number] | null>(
+          (latest, run) => (latest === null || run.ordinal > latest.ordinal ? run : latest),
+          null,
+        );
+        if (latestRun === null) return;
+        const runId = latestRun.id;
         const records = yield* projections.getThreadRecords(
           threadId,
           [
@@ -106,7 +121,7 @@ export const make = Effect.gen(function* () {
     yield* forkParked(
       Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
         event.type === "run.updated" && event.payload.status === "completed"
-          ? FiberMap.run(timers, event.threadId, compactWhenDue(event.threadId, event.payload.id))
+          ? FiberMap.run(timers, event.threadId, compactWhenDue(event.threadId))
           : Effect.void,
       ),
     );

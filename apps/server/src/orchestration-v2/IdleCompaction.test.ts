@@ -247,7 +247,10 @@ const runService = Effect.fn("runIdleCompactionService")(function* (
     readonly commands: Queue.Queue<OrchestrationV2ServerCommand>;
     /** Moves the service's wall clock without running its timers, as a sleeping machine does. */
     readonly sleepMachine: (ms: number) => void;
+    /** Sends the completion of an older run again, as delegated-result updates do. */
+    readonly resendOlderCompletion: Effect.Effect<void>;
   }) => Effect.Effect<void>,
+  settingsOverride: Partial<typeof DEFAULT_SERVER_SETTINGS> = {},
 ) {
   yield* TestClock.setTime(NOW_MS);
   const value = records({ cacheExpiresInMs });
@@ -263,7 +266,11 @@ const runService = Effect.fn("runIdleCompactionService")(function* (
         store.getThreadRecords(...args).pipe(Effect.tap(() => Queue.offer(reads, undefined))),
     }),
     Layer.mock(ServerSettings.ServerSettingsService)({
-      getSettings: Effect.succeed({ ...DEFAULT_SERVER_SETTINGS, compactIdleThreads: true }),
+      getSettings: Effect.succeed({
+        ...DEFAULT_SERVER_SETTINGS,
+        compactIdleThreads: true,
+        ...settingsOverride,
+      }),
     }),
     Layer.mock(Orchestrator.OrchestratorV2)({
       streamDomainEvents: Stream.fromQueue(events),
@@ -287,7 +294,7 @@ const runService = Effect.fn("runIdleCompactionService")(function* (
     };
     const service = yield* IdleCompactionService.make;
     yield* service.start().pipe(Effect.provideService(Clock.Clock, machineClock));
-    yield* Queue.offer(events, {
+    const completion = Queue.offer(events, {
       id: EventId.make("completed"),
       type: "run.updated",
       threadId,
@@ -297,9 +304,30 @@ const runService = Effect.fn("runIdleCompactionService")(function* (
       providerInstanceId: instanceId,
       occurredAt: at(),
       payload: value.runs[0]!,
-    });
-    yield* Queue.take(reads);
+    }).pipe(Effect.asVoid);
+    yield* completion;
+    // One read for the latest run, one for its records. A disabled service reads nothing.
+    if (settingsOverride.compactIdleThreads !== false) {
+      yield* Queue.take(reads);
+      yield* Queue.take(reads);
+    }
     yield* drive({
+      resendOlderCompletion: Effect.gen(function* () {
+        const olderRunId = RunId.make("run-0");
+        yield* Queue.offer(events, {
+          id: EventId.make("older-completed"),
+          type: "run.updated",
+          threadId,
+          runId: olderRunId,
+          nodeId,
+          driver,
+          providerInstanceId: instanceId,
+          occurredAt: at(),
+          payload: { ...value.runs[0]!, id: olderRunId, ordinal: 0 },
+        });
+        yield* Queue.take(reads);
+        yield* Queue.take(reads);
+      }),
       commands,
       sleepMachine: (ms) => {
         skewMs += ms;
@@ -369,6 +397,52 @@ it.effect("skips the compaction after sleeping past the cache expiry", () =>
         yield* TestClock.adjust("1 hour");
         expect(yield* Queue.size(commands)).toBe(0);
       }),
+    ),
+  ),
+);
+
+it.effect("keeps waiting when an older run's completion is sent again", () =>
+  withStore(
+    runService(5 * MINUTE_MS, ({ commands, resendOlderCompletion }) =>
+      Effect.gen(function* () {
+        yield* TestClock.adjust("1 minute");
+        yield* resendOlderCompletion;
+        yield* TestClock.adjust("2 minutes");
+        expect(yield* Queue.take(commands)).toMatchObject({ text: "/compact" });
+      }),
+    ),
+  ),
+);
+
+it.effect("does nothing while the setting is off", () =>
+  withStore(
+    runService(
+      5 * MINUTE_MS,
+      ({ commands }) =>
+        Effect.gen(function* () {
+          yield* TestClock.adjust("10 minutes");
+          expect(yield* Queue.size(commands)).toBe(0);
+        }),
+      { compactIdleThreads: false },
+    ),
+  ),
+);
+
+it.effect("does nothing when the older Claude provider toggle is off", () =>
+  withStore(
+    runService(
+      5 * MINUTE_MS,
+      ({ commands }) =>
+        Effect.gen(function* () {
+          yield* TestClock.adjust("10 minutes");
+          expect(yield* Queue.size(commands)).toBe(0);
+        }),
+      {
+        providers: {
+          ...DEFAULT_SERVER_SETTINGS.providers,
+          claudeAgent: { ...DEFAULT_SERVER_SETTINGS.providers.claudeAgent, enabled: false },
+        },
+      },
     ),
   ),
 );

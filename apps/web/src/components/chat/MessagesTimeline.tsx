@@ -2165,6 +2165,14 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             "Sent by automation"
           )}
         </p>
+      ) : row.message.createdBy === "agent" && row.message.creationSource === "server" ? (
+        // Test Rig itself sent it, such as an idle compaction.
+        <p
+          className="me-1 text-2xs text-muted-foreground/70"
+          data-user-message-attribution="test-rig"
+        >
+          Sent by Test Rig
+        </p>
       ) : row.message.createdBy === "agent" ? (
         <p className="me-1 text-2xs text-muted-foreground/70" data-user-message-attribution="agent">
           {senderThreadId ? (

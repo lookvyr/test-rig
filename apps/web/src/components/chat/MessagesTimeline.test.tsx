@@ -1407,6 +1407,23 @@ describe("MessagesTimeline", () => {
     expect(userMarkup).not.toContain("Sent by another agent");
   });
 
+  it("attributes server-sent messages such as idle compactions to Test Rig", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const entry = buildUserTimelineEntry("/compact");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          { ...entry, message: { ...entry.message, createdBy: "agent", creationSource: "server" } },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('data-user-message-attribution="test-rig"');
+    expect(markup).toContain("Sent by Test Rig");
+    expect(markup).not.toContain("Sent by another agent");
+  });
+
   it("keeps a subagent parent-thread link at the top of an empty timeline", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
