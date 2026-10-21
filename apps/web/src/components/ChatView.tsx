@@ -106,6 +106,7 @@ import {
   selectThreadMessages,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  selectComposerTasksPlan,
   findLatestProposedPlan,
   hasActionableProposedPlan,
   hasCompletedSideChatContext,
@@ -283,6 +284,7 @@ import {
 } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { ComposerTasksBadge, composerTasksProgress } from "./chat/ComposerTasksBadge";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -2202,6 +2204,24 @@ function ChatViewContent(props: ChatViewProps) {
     () => deriveActivePlanState(threadProjection, activeLatestRun?.runId ?? undefined),
     [activeLatestRun?.runId, threadProjection],
   );
+  const composerTasksPlan = useMemo(
+    () =>
+      selectComposerTasksPlan(
+        threadProjection,
+        activePlan,
+        activeLatestRun?.runId ?? null,
+        latestRunSettled,
+      ),
+    [activeLatestRun?.runId, activePlan, latestRunSettled, threadProjection],
+  );
+  const composerTasks = useMemo(() => {
+    if (composerTasksPlan === null) return null;
+    const live = !latestRunSettled && composerTasksPlan.runId === activeLatestRun?.runId;
+    const progress = composerTasksProgress(composerTasksPlan.steps, live);
+    return progress === null ? null : { progress, steps: composerTasksPlan.steps };
+  }, [activeLatestRun?.runId, composerTasksPlan, latestRunSettled]);
+  const [composerTasksExpanded, setComposerTasksExpanded] = useState(false);
+  const toggleComposerTasks = useCallback(() => setComposerTasksExpanded((value) => !value), []);
   const composerHasAttachments = useComposerDraftStore(
     (store) => (store.getComposerDraft(composerDraftTarget)?.images.length ?? 0) > 0,
   );
@@ -6630,6 +6650,14 @@ function ChatViewContent(props: ChatViewProps) {
                       ) : (
                         <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                       )}
+                      {composerTasks !== null && !isDraftHeroState ? (
+                        <ComposerTasksBadge
+                          expanded={composerTasksExpanded}
+                          onToggle={toggleComposerTasks}
+                          progress={composerTasks.progress}
+                          steps={composerTasks.steps}
+                        />
+                      ) : null}
                       {nonBlockingUserInputs.length > 0 && (
                         <AsyncUserInputPanel
                           key={activeThreadKey}

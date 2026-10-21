@@ -963,9 +963,28 @@ describe("ClaudeAdapterV2 context usage", () => {
     assert.isUndefined(ttl(env, null));
     assert.isUndefined(ttl(env, "fork"));
     assert.equal(ttl({ ...env, CLAUDE_CODE_PROMPT_CACHE_TTL: "1h" }, "subagent"), "1h");
-    assert.strictEqual(
-      ClaudeAdapterV2.claudeQueryEnvironment(env, lineage("subagent"), undefined),
-      env,
+    assert.deepEqual(ClaudeAdapterV2.claudeQueryEnvironment(env, lineage("subagent"), undefined), {
+      ...env,
+      CLAUDE_CODE_ENABLE_TODO_TOOLS: "1",
+    });
+  });
+
+  it("enables Claude's task tools unless the instance sets them", () => {
+    const root = {
+      lineage: {
+        parentThreadId: null,
+        relationshipToParent: null,
+        rootThreadId: ThreadId.make("thread-root"),
+      },
+    };
+    assert.equal(
+      ClaudeAdapterV2.claudeQueryEnvironment({}, root, undefined).CLAUDE_CODE_ENABLE_TODO_TOOLS,
+      "1",
+    );
+    assert.equal(
+      ClaudeAdapterV2.claudeQueryEnvironment({ CLAUDE_CODE_ENABLE_TODO_TOOLS: "0" }, root, "1h")
+        .CLAUDE_CODE_ENABLE_TODO_TOOLS,
+      "0",
     );
   });
 });
@@ -3970,6 +3989,110 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
         const proposedPlan = [...plans.values()].find((plan) => plan.kind === "proposed_plan");
         assert.equal(proposedPlan?.status, "active");
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
+  it.effect("projects Claude 5 task tools as the turn's task list", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
+        const assistantTool = (uuid: string, tool: Record<string, unknown>) =>
+          claudeSdkFrame({
+            type: "assistant",
+            message: {
+              model: "claude-opus-5-5",
+              id: `msg_${uuid}`,
+              type: "message",
+              role: "assistant",
+              content: [{ type: "tool_use", ...tool }],
+              stop_reason: "tool_use",
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+            parent_tool_use_id: null,
+            uuid,
+            session_id: WAKE_NATIVE_SESSION,
+          });
+        const toolResult = (uuid: string, toolUseId: string, content: string, result: unknown) =>
+          claudeSdkFrame({
+            type: "user",
+            message: {
+              role: "user",
+              content: [{ type: "tool_result", tool_use_id: toolUseId, content }],
+            },
+            parent_tool_use_id: null,
+            uuid,
+            session_id: WAKE_NATIVE_SESSION,
+            tool_use_result: result,
+          });
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-task-tools"),
+            text: "Track the work.",
+            attachments: [],
+          }),
+        );
+        const frames = [
+          assistantTool("00000000-0000-4000-8000-000000000601", {
+            id: "tool-task-create-1",
+            name: "TaskCreate",
+            input: { subject: "Inspect", description: "Read the code" },
+          }),
+          toolResult(
+            "00000000-0000-4000-8000-000000000602",
+            "tool-task-create-1",
+            "Task #1 created successfully: Inspect",
+            { task: { id: "1", subject: "Inspect" } },
+          ),
+          assistantTool("00000000-0000-4000-8000-000000000603", {
+            id: "tool-task-create-2",
+            name: "TaskCreate",
+            input: { subject: "Fix", description: "Make the change" },
+          }),
+          toolResult(
+            "00000000-0000-4000-8000-000000000604",
+            "tool-task-create-2",
+            "Task #2 created successfully: Fix",
+            { task: { id: "2", subject: "Fix" } },
+          ),
+          assistantTool("00000000-0000-4000-8000-000000000605", {
+            id: "tool-task-update-1",
+            name: "TaskUpdate",
+            input: { taskId: "1", status: "completed" },
+          }),
+          toolResult(
+            "00000000-0000-4000-8000-000000000606",
+            "tool-task-update-1",
+            "Updated task #1 status",
+            { success: true, taskId: "1", updatedFields: ["status"] },
+          ),
+          makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000607", result: "Tracked." }),
+        ];
+        for (const frame of frames) yield* Queue.offer(harness.sdkMessages, frame);
+        yield* Queue.take(harness.terminalReceipts);
+
+        const plans = harness.events.flatMap((event) =>
+          event.type === "plan.updated" && event.plan.kind === "todo_list" ? [event.plan] : [],
+        );
+        const latest = plans.at(-1);
+        assert.isDefined(latest);
+        assert.equal(new Set(plans.map((plan) => plan.id)).size, 1);
+        assert.deepEqual(
+          latest?.kind === "todo_list"
+            ? latest.steps.map(({ text, status }) => ({ text, status }))
+            : [],
+          [
+            { text: "Inspect", status: "completed" },
+            { text: "Fix", status: "pending" },
+          ],
+        );
+        assert.equal(latest?.status, "active");
       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     ),
   );
@@ -10048,5 +10171,127 @@ describe("ClaudeAdapterV2 query message stream", () => {
       yield* Scope.close(scope, Exit.void);
       assert.isTrue(closed);
     }),
+  );
+});
+
+describe("ClaudeAdapterV2 task lists", () => {
+  const apply = ClaudeAdapterV2.applyClaudeTaskTool;
+
+  it("builds a list from TaskCreate and applies TaskUpdate status and deletion", () => {
+    const created = apply(
+      new Map(),
+      "TaskCreate",
+      { subject: "Write tests" },
+      { task: { id: "1", subject: "Write tests" } },
+    )!;
+    const second = apply(created, "TaskCreate", {}, "Task #2 created successfully: Ship it")!;
+    assert.deepEqual(
+      [...second],
+      [
+        ["1", { text: "Write tests", status: "pending" }],
+        ["2", { text: "Ship it", status: "pending" }],
+      ],
+    );
+    const running = apply(
+      second,
+      "TaskUpdate",
+      { taskId: "1", status: "in_progress" },
+      {
+        success: true,
+      },
+    )!;
+    assert.equal(running.get("1")?.status, "running");
+    const deleted = apply(
+      running,
+      "TaskUpdate",
+      { taskId: "2", status: "deleted" },
+      {
+        success: true,
+      },
+    )!;
+    assert.deepEqual([...deleted.keys()], ["1"]);
+  });
+
+  it("ignores failed, unknown and no-op updates", () => {
+    const tasks = new Map([["1", { text: "A", status: "pending" as const }]]);
+    assert.isUndefined(
+      apply(
+        tasks,
+        "TaskUpdate",
+        { taskId: "1", status: "completed" },
+        {
+          success: false,
+        },
+      ),
+    );
+    assert.isUndefined(apply(tasks, "TaskUpdate", { taskId: "9", status: "completed" }, {}));
+    assert.isUndefined(apply(tasks, "TaskUpdate", { taskId: "1", status: "pending" }, {}));
+    assert.isUndefined(
+      apply(tasks, "TaskUpdate", { taskId: "1", status: "completed" }, "Task not found"),
+    );
+    assert.isUndefined(apply(tasks, "Read", {}, {}));
+  });
+
+  it("replaces the list from a structured TaskList snapshot", () => {
+    const tasks = new Map([["1", { text: "Old", status: "pending" as const }]]);
+    const listed = apply(
+      tasks,
+      "TaskList",
+      {},
+      {
+        tasks: [
+          { id: "3", subject: "New", status: "completed" },
+          { id: "4", subject: "Next", status: "in_progress" },
+          { id: "5", status: "pending" },
+        ],
+      },
+    )!;
+    assert.deepEqual(
+      [...listed],
+      [
+        ["3", { text: "New", status: "completed" }],
+        ["4", { text: "Next", status: "running" }],
+      ],
+    );
+  });
+
+  it.effect("reads Claude's persisted list in task order, skipping internal tasks", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const configDir = yield* fileSystem.makeTempDirectoryScoped();
+      const directory = path.join(configDir, "tasks", "native-thread");
+      yield* fileSystem.makeDirectory(directory, { recursive: true });
+      const write = (name: string, value: unknown) =>
+        fileSystem.writeFileString(path.join(directory, name), JSON.stringify(value));
+      yield* write("10.json", { id: "10", subject: "Later", status: "pending" });
+      yield* write("2.json", { id: "2", subject: "Earlier", status: "in_progress" });
+      yield* write("3.json", {
+        id: "3",
+        subject: "Hidden",
+        status: "pending",
+        metadata: { _internal: true },
+      });
+      yield* fileSystem.writeFileString(path.join(directory, "4.json"), "not json");
+
+      const tasks = yield* ClaudeAdapterV2.readClaudeTaskList({
+        environment: { CLAUDE_CONFIG_DIR: configDir },
+        cwd: null,
+        nativeThreadId: "native-thread",
+      });
+      assert.deepEqual(
+        [...(tasks ?? [])],
+        [
+          ["2", { text: "Earlier", status: "running" }],
+          ["10", { text: "Later", status: "pending" }],
+        ],
+      );
+      const missing = yield* ClaudeAdapterV2.readClaudeTaskList({
+        environment: { CLAUDE_CONFIG_DIR: configDir },
+        cwd: null,
+        nativeThreadId: "missing",
+      });
+      assert.isUndefined(missing);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

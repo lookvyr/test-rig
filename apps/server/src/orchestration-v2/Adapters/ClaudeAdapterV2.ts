@@ -1,6 +1,7 @@
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
 import { SIDE_CHAT_INSTRUCTIONS } from "../../provider/SideChatInstructions.ts";
 import * as NodeCrypto from "node:crypto";
+import * as NodeOS from "node:os";
 
 import { makeProviderTextDeltaCoalescer } from "./ProviderTextDeltaCoalescer.ts";
 import {
@@ -73,6 +74,7 @@ import {
   type ProviderThreadId,
   type ThreadId,
   type ToolActivitySource,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 
 import * as Cause from "effect/Cause";
@@ -848,22 +850,34 @@ export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
   }),
 );
 
-// A delegated child is its own SDK session, so Claude Code gives it the main-conversation cache
-// TTL. When the user sets Claude's subagentPromptCacheTtl, the child follows it like a native
-// subagent would. An explicit CLAUDE_CODE_PROMPT_CACHE_TTL on the instance still wins.
+/**
+ * The environment one Claude query runs with.
+ *
+ * SDK sessions get no task-list tool unless CLAUDE_CODE_ENABLE_TODO_TOOLS is set, so the
+ * composer's task list would never appear; it defaults on, and an explicit value on the
+ * instance (such as 0) still wins.
+ *
+ * A delegated child is its own SDK session, so Claude Code gives it the main-conversation cache
+ * TTL. When the user sets Claude's subagentPromptCacheTtl, the child follows it like a native
+ * subagent would. An explicit CLAUDE_CODE_PROMPT_CACHE_TTL on the instance still wins.
+ */
 export function claudeQueryEnvironment(
   environment: NodeJS.ProcessEnv,
   appThread: Pick<OrchestrationV2AppThread, "lineage">,
   subagentPromptCacheTtl: "5m" | "1h" | undefined,
 ): NodeJS.ProcessEnv {
+  const withTasks =
+    environment.CLAUDE_CODE_ENABLE_TODO_TOOLS === undefined
+      ? { ...environment, CLAUDE_CODE_ENABLE_TODO_TOOLS: "1" }
+      : environment;
   if (
     appThread.lineage.relationshipToParent !== "subagent" ||
     subagentPromptCacheTtl === undefined ||
-    environment.CLAUDE_CODE_PROMPT_CACHE_TTL !== undefined
+    withTasks.CLAUDE_CODE_PROMPT_CACHE_TTL !== undefined
   ) {
-    return environment;
+    return withTasks;
   }
-  return { ...environment, CLAUDE_CODE_PROMPT_CACHE_TTL: subagentPromptCacheTtl };
+  return { ...withTasks, CLAUDE_CODE_PROMPT_CACHE_TTL: subagentPromptCacheTtl };
 }
 
 const ClaudePromptCacheTtl = Schema.Literals(["5m", "1h"]);
@@ -2988,6 +3002,155 @@ export function claudeSdkUserInputAnswers(
   );
 }
 
+/** One native thread's Claude task list, keyed by Claude's task id, in creation order. */
+type ClaudeTaskList = ReadonlyMap<string, Omit<OrchestrationV2PlanStep, "id">>;
+
+function claudeTaskField(value: unknown, key: string): unknown {
+  return typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined;
+}
+
+function claudeTaskString(value: unknown, key: string): string | undefined {
+  const field = claudeTaskField(value, key);
+  return typeof field === "string" && field.trim().length > 0 ? field.trim() : undefined;
+}
+
+function claudeTaskStatus(value: unknown): OrchestrationV2PlanStep["status"] | undefined {
+  switch (value) {
+    case "pending":
+      return "pending";
+    case "in_progress":
+      return "running";
+    case "completed":
+      return "completed";
+    default:
+      return undefined;
+  }
+}
+
+// Subagent results carry no structured `tool_use_result`, only the text
+// "Task #3 created successfully: <subject>".
+function claudeCreatedTaskFromText(
+  result: unknown,
+): { readonly id: string; readonly subject: string } | undefined {
+  const match =
+    typeof result === "string" ? /^Task #(\S+) created successfully: (.+)$/s.exec(result) : null;
+  return match === null ? undefined : { id: match[1]!, subject: match[2]!.trim() };
+}
+
+/**
+ * Applies a finished TaskCreate, TaskUpdate or TaskList call to a task list.
+ * Claude 5 tracks todos with these tools instead of TodoWrite. Ids come from
+ * Claude (TaskCreate reports them in its result), a `deleted` status removes
+ * the task, and TaskList replaces the whole list. Returns undefined when the
+ * call is not a task tool or leaves the list unchanged.
+ */
+export function applyClaudeTaskTool(
+  tasks: ClaudeTaskList,
+  toolName: string,
+  input: unknown,
+  result: unknown,
+): ClaudeTaskList | undefined {
+  if (toolName === "TaskList") {
+    const listed = claudeTaskField(result, "tasks");
+    if (!Array.isArray(listed)) return undefined;
+    const next = new Map<string, Omit<OrchestrationV2PlanStep, "id">>();
+    for (const task of listed) {
+      const id = claudeTaskString(task, "id");
+      const text = claudeTaskString(task, "subject");
+      const status = claudeTaskStatus(claudeTaskField(task, "status"));
+      if (id !== undefined && text !== undefined && status !== undefined) {
+        next.set(id, { text, status });
+      }
+    }
+    return next.size === 0 && tasks.size === 0 ? undefined : next;
+  }
+  if (toolName === "TaskCreate") {
+    const created = claudeTaskField(result, "task");
+    const fromText = claudeCreatedTaskFromText(result);
+    const id = claudeTaskString(created, "id") ?? fromText?.id;
+    const text =
+      claudeTaskString(created, "subject") ??
+      fromText?.subject ??
+      claudeTaskString(input, "subject");
+    if (id === undefined || text === undefined) return undefined;
+    return new Map(tasks).set(id, { text, status: "pending" });
+  }
+  if (
+    toolName !== "TaskUpdate" ||
+    claudeTaskField(result, "success") === false ||
+    (typeof result === "string" && !result.startsWith("Updated task #"))
+  ) {
+    return undefined;
+  }
+  const id = claudeTaskString(input, "taskId") ?? claudeTaskString(result, "taskId");
+  const task = id === undefined ? undefined : tasks.get(id);
+  if (id === undefined || task === undefined) return undefined;
+  const nativeStatus = claudeTaskField(input, "status");
+  if (nativeStatus === "deleted") {
+    const next = new Map(tasks);
+    next.delete(id);
+    return next;
+  }
+  const text = claudeTaskString(input, "subject") ?? task.text;
+  const status = claudeTaskStatus(nativeStatus) ?? task.status;
+  if (text === task.text && status === task.status) return undefined;
+  return new Map(tasks).set(id, { text, status });
+}
+
+function claudeTaskSteps(tasks: ClaudeTaskList): ReadonlyArray<OrchestrationV2PlanStep> {
+  return [...tasks].map(([id, task]) => ({ id: `task-${id}`, ...task }));
+}
+
+const CLAUDE_TASK_TOOL_NAMES = new Set(["TaskCreate", "TaskUpdate", "TaskList"]);
+const decodeClaudeTaskFile = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      id: TrimmedNonEmptyString,
+      subject: TrimmedNonEmptyString,
+      status: Schema.Literals(["pending", "in_progress", "completed"]),
+      metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+    }),
+  ),
+);
+
+/**
+ * Claude's persisted task list for a session, so a list started before a
+ * server restart keeps its earlier tasks. Undefined when the store is unreadable.
+ */
+export const readClaudeTaskList = Effect.fnUntraced(
+  function* (input: {
+    readonly environment: NodeJS.ProcessEnv;
+    readonly cwd: string | null | undefined;
+    readonly nativeThreadId: string;
+  }) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const configDirOverride = input.environment.CLAUDE_CONFIG_DIR?.trim();
+    const configDir = configDirOverride
+      ? path.resolve(input.cwd ?? ".", configDirOverride)
+      : path.join(input.environment.HOME?.trim() || NodeOS.homedir(), ".claude");
+    const listId = input.environment.CLAUDE_CODE_TASK_LIST_ID?.trim() || input.nativeThreadId;
+    const directory = path.join(configDir, "tasks", listId.replace(/[^a-zA-Z0-9_-]/g, "-"));
+    const tasks = new Map<string, Omit<OrchestrationV2PlanStep, "id">>();
+    const names = (yield* fileSystem.readDirectory(directory))
+      .filter((name) => /^\d+\.json$/.test(name))
+      .toSorted((left, right) => Number.parseInt(left, 10) - Number.parseInt(right, 10));
+    for (const name of names) {
+      const contents = yield* fileSystem
+        .readFileString(path.join(directory, name))
+        .pipe(Effect.orElseSucceed(() => ""));
+      const task = Option.getOrUndefined(decodeClaudeTaskFile(contents));
+      if (task === undefined || task.metadata?._internal) continue;
+      tasks.set(task.id, {
+        text: task.subject,
+        status: task.status === "in_progress" ? "running" : task.status,
+      });
+    }
+    return tasks as ClaudeTaskList;
+  },
+  Effect.orElseSucceed((): ClaudeTaskList | undefined => undefined),
+);
+
 export function claudeTodoSteps(input: unknown): ReadonlyArray<OrchestrationV2PlanStep> {
   const value =
     typeof input === "object" && input !== null && Reflect.get(input, "type") === "record"
@@ -3155,6 +3318,11 @@ export function makeClaudeAdapterV2(
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
         const openedNativeThreads = yield* Ref.make(new Set<string>());
         const latestPlanByKind = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact>());
+        // Claude 5 task tools edit one list per native session, across turns.
+        // Undefined records a store that could not be read, so it is read once.
+        const taskListsByNativeThread = yield* Ref.make(
+          new Map<string, ClaudeTaskList | undefined>(),
+        );
         const planIdsByNativeItem = yield* Ref.make(
           new Map<string, OrchestrationV2PlanArtifact["id"]>(),
         );
@@ -6499,6 +6667,56 @@ export function makeClaudeAdapterV2(
             yield* stopTaskOutputTail(toolCall.nativeItemId);
             yield* emitToolCallArtifacts(artifacts);
             toolCallsFor(context, toolCall).delete(toolCall.nativeItemId);
+            // Subagents write to the session's shared task store, so their
+            // task tools update the parent turn's list. Failed or never-run
+            // calls changed nothing.
+            if (
+              toolNonExecutionKind === undefined &&
+              !isClaudeToolResultError(toolResult) &&
+              CLAUDE_TASK_TOOL_NAMES.has(toolCall.toolName)
+            ) {
+              const taskLists = yield* Ref.get(taskListsByNativeThread);
+              const knownTaskList = taskLists.get(context.nativeThreadId);
+              const outputValue = claudeNativeToolOutputValue(output);
+              // A structured TaskList already supplies a snapshot. Anything else, including
+              // a subagent's text-only TaskList, needs Claude's persisted list once;
+              // afterward the cache also records an unavailable store.
+              const storedTaskList =
+                !taskLists.has(context.nativeThreadId) &&
+                !(
+                  toolCall.toolName === "TaskList" &&
+                  Array.isArray(claudeTaskField(outputValue, "tasks"))
+                )
+                  ? yield* readClaudeTaskList({
+                      environment: adapterOptions.environment,
+                      cwd: context.input.runtimePolicy.cwd,
+                      nativeThreadId: context.nativeThreadId,
+                    }).pipe(
+                      Effect.provideService(FileSystem.FileSystem, fileSystem),
+                      Effect.provideService(Path.Path, path),
+                    )
+                  : undefined;
+              const taskList =
+                applyClaudeTaskTool(
+                  knownTaskList ?? storedTaskList ?? new Map(),
+                  toolCall.toolName,
+                  claudeNativeToolInputValue(toolCall.input),
+                  outputValue,
+                ) ?? storedTaskList;
+              yield* Ref.set(
+                taskListsByNativeThread,
+                new Map(taskLists).set(context.nativeThreadId, taskList ?? knownTaskList),
+              );
+              if (taskList !== undefined) {
+                // One list per turn, updated in place; a later turn supersedes it.
+                yield* emitClaudePlanProjection({
+                  context,
+                  nativeItemId: `claude-tasks:${context.providerTurnId}`,
+                  kind: "todo_list",
+                  steps: claudeTaskSteps(taskList),
+                }).pipe(Effect.orDie);
+              }
+            }
           }
 
           const assistantParentToolUseId = parentToolUseIdFromSdkMessage(message);
