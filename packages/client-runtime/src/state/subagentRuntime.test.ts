@@ -41,6 +41,55 @@ function agent(overrides: Partial<OrchestrationV2Subagent> = {}): OrchestrationV
 }
 
 describe("projectedSubagentsToRuntime", () => {
+  it("expands a workflow run into its coordinator and agent rows", () => {
+    const rows = projectedSubagentsToRuntime([
+      agent({
+        id: NodeId.make("workflow"),
+        title: "Review workflow",
+        status: "cancelled",
+        workflow: {
+          name: "review",
+          runHandles: { scriptPath: "/home/me/.claude/projects/p/workflows/review.js" },
+          phases: [
+            { index: 0, title: "Review" },
+            { index: 1, title: "Verify" },
+          ],
+          agents: [
+            { index: 0, label: "reviewer", state: "completed", phaseIndex: 0, totalTokens: 900 },
+            { index: 1, label: "verifier", state: "running", phaseIndex: 1 },
+          ],
+        },
+      }),
+    ]);
+    expect(
+      rows.map(({ id, kind, status, parentAgentId }) => ({ id, kind, status, parentAgentId })),
+    ).toEqual([
+      { id: "workflow", kind: "workflow", status: "cancelled", parentAgentId: null },
+      {
+        id: "workflow:agent:0",
+        kind: "workflow_agent",
+        status: "completed",
+        parentAgentId: "workflow",
+      },
+      // A stopped workflow takes its unfinished agents with it.
+      {
+        id: "workflow:agent:1",
+        kind: "workflow_agent",
+        status: "cancelled",
+        parentAgentId: "workflow",
+      },
+    ]);
+    expect(rows[0]).toMatchObject({
+      workflowName: "review",
+      phases: [
+        { index: 0, title: "Review" },
+        { index: 1, title: "Verify" },
+      ],
+      runHandles: { scriptPath: "/home/me/.claude/projects/p/workflows/review.js" },
+    });
+    expect(rows[1]).toMatchObject({ phaseIndex: 0, usage: { totalTokens: 900 } });
+  });
+
   it("preserves durable identity, lifecycle and model attribution", () => {
     const [value] = projectedSubagentsToRuntime([
       agent({ status: "completed", result: "Done", completedAt: now }),

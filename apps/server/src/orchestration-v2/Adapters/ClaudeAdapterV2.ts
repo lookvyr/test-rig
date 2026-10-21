@@ -1,4 +1,10 @@
 import { claudeTaskOutputRoot, tailClaudeTaskOutput } from "./ClaudeTaskOutputTail.ts";
+import {
+  CLAUDE_WORKFLOW_TASK_TYPE,
+  hasClaudeWorkflowSnapshot,
+  mergeClaudeWorkflowProgress,
+  parseClaudeWorkflowRunHandles,
+} from "./claudeWorkflowProgress.ts";
 import { SIDE_CHAT_INSTRUCTIONS } from "../../provider/SideChatInstructions.ts";
 import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
@@ -61,6 +67,7 @@ import {
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2AppThread,
+  type OrchestrationV2WorkflowRunHandles,
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2UserInputQuestion,
@@ -4425,6 +4432,10 @@ export function makeClaudeAdapterV2(
           readonly owner?: ActiveClaudeSubagent;
           readonly progress?: string;
           readonly result?: string;
+          // A Claude workflow run's task frame, name and filesystem handles.
+          readonly workflowFrame?: unknown;
+          readonly workflowName?: string;
+          readonly workflowRunHandles?: OrchestrationV2WorkflowRunHandles;
           readonly status: Extract<
             OrchestrationV2ExecutionNode["status"],
             "running" | "completed" | "failed" | "cancelled"
@@ -4520,6 +4531,14 @@ export function makeClaudeAdapterV2(
                     existingSubagent.task,
                   )
                 : existingSubagent.task;
+          const workflow = mergeClaudeWorkflowProgress({
+            previous: priorTask?.workflow,
+            ...(input.workflowName === undefined ? {} : { name: input.workflowName }),
+            ...(input.workflowRunHandles === undefined
+              ? {}
+              : { runHandles: input.workflowRunHandles }),
+            message: input.workflowFrame,
+          });
           const task = {
             ...(priorTask ?? {
               id: nodeId,
@@ -4560,6 +4579,7 @@ export function makeClaudeAdapterV2(
             ...(input.title === undefined ? {} : { title: input.title }),
             ...(input.model === undefined ? {} : { model: input.model }),
             ...(input.progress === undefined ? {} : { progress: input.progress }),
+            ...(workflow === undefined ? {} : { workflow }),
             ...(input.result === undefined ? {} : { result: input.result }),
             ...(isReopen ? { startedAt: now } : {}),
             completedAt: input.status === "running" ? null : (priorTask?.completedAt ?? now),
@@ -6590,6 +6610,8 @@ export function makeClaudeAdapterV2(
                 toolUseId: message.tool_use_id,
                 title: message.description,
               });
+              const isWorkflow = message.task_type === CLAUDE_WORKFLOW_TASK_TYPE;
+              const workflowName = isWorkflow ? Reflect.get(message, "workflow_name") : undefined;
               yield* updateClaudeSubagentNode({
                 context,
                 taskId: message.task_id,
@@ -6597,6 +6619,14 @@ export function makeClaudeAdapterV2(
                 ...(message.prompt === undefined ? {} : { prompt: message.prompt }),
                 ...(model === undefined ? {} : { model }),
                 ...(owner === undefined ? {} : { owner }),
+                ...(isWorkflow
+                  ? {
+                      workflowFrame: message,
+                      ...(typeof workflowName === "string" && workflowName.trim().length > 0
+                        ? { workflowName: workflowName.trim() }
+                        : {}),
+                    }
+                  : {}),
                 title: message.description,
                 status: "running",
                 reopen: true,
@@ -6610,8 +6640,11 @@ export function makeClaudeAdapterV2(
               liveQuery.nativeThreadId,
               message.task_id,
             );
+            // A workflow reports its phases and agents in progress frames,
+            // sometimes with no description of its own.
+            const carriesWorkflowTelemetry = hasClaudeWorkflowSnapshot(message);
             if (
-              progress.length > 0 &&
+              (progress.length > 0 || carriesWorkflowTelemetry) &&
               !context.ignoredTaskIds.has(message.task_id) &&
               !isBackgroundTask
             ) {
@@ -6619,7 +6652,8 @@ export function makeClaudeAdapterV2(
                 context,
                 taskId: message.task_id,
                 ...(message.tool_use_id === undefined ? {} : { toolUseId: message.tool_use_id }),
-                progress,
+                ...(progress.length === 0 ? {} : { progress }),
+                workflowFrame: message,
                 status: "running",
               });
             }
@@ -6673,6 +6707,7 @@ export function makeClaudeAdapterV2(
                 context,
                 taskId: message.task_id,
                 ...(message.tool_use_id === undefined ? {} : { toolUseId: message.tool_use_id }),
+                workflowFrame: message,
                 result: message.summary,
                 status:
                   message.status === "completed"
@@ -6738,6 +6773,20 @@ export function makeClaudeAdapterV2(
             // that settled last, which never saw a subagent an earlier turn
             // launched (a nested one whose Agent call returns now).
             const subagent = yield* resolveSubagentByToolUseId(context, toolResult.tool_use_id);
+            // A workflow's launch acknowledgement is the only frame that names
+            // its run's script and transcripts.
+            const workflowRunHandles = parseClaudeWorkflowRunHandles(
+              claudeNativeToolOutputValue(output),
+            );
+            if (subagent !== undefined && workflowRunHandles !== undefined) {
+              yield* updateClaudeSubagentNode({
+                context,
+                taskId: subagent.task.nativeTaskRef?.nativeId ?? String(subagent.task.id),
+                toolUseId: toolResult.tool_use_id,
+                workflowRunHandles,
+                status: "running",
+              });
+            }
             // A resume task_started reuses the resuming tool call's
             // tool_use_id (e.g. SendMessage), whose tool_result only
             // acknowledges delivery. Only the Agent launch's tool_result may

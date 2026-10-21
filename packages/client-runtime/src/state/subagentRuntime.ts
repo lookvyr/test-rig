@@ -5,7 +5,9 @@
 import * as DateTime from "effect/DateTime";
 import type {
   OrchestrationV2Subagent,
+  OrchestrationV2SubagentWorkflow,
   OrchestrationV2TurnItem,
+  OrchestrationV2WorkflowAgent,
   OrchestrationV2SubagentPresentation,
   RuntimeTaskUsage,
 } from "@t3tools/contracts";
@@ -96,46 +98,122 @@ export function projectedSubagentsToRuntime(
   subagents: ReadonlyArray<OrchestrationV2Subagent>,
 ): ReadonlyArray<RuntimeSubagent> {
   const agentIds = new Set(subagents.map((agent) => agent.id));
-  return subagents.map((subagent) => {
-    const info = subagent.presentation;
-    const parentAgentId = agentIds.has(subagent.parentNodeId) ? subagent.parentNodeId : null;
-    const updatedAt = DateTime.formatIso(subagent.updatedAt);
-    const startedAt = subagent.startedAt === null ? null : DateTime.formatIso(subagent.startedAt);
+  return subagents.flatMap((subagent) => {
+    const runtime = projectedSubagentToRuntime(subagent, agentIds);
+    return subagent.workflow === undefined
+      ? [runtime]
+      : [runtime, ...workflowAgentsToRuntime(runtime, subagent.workflow)];
+  });
+}
+
+const WORKFLOW_AGENT_STATUSES: Record<
+  OrchestrationV2WorkflowAgent["state"],
+  RuntimeSubagentStatus
+> = {
+  queued: "pending",
+  running: "running",
+  completed: "completed",
+  failed: "failed",
+};
+
+const epochIso = (milliseconds: number | undefined) =>
+  milliseconds === undefined ? null : DateTime.formatIso(DateTime.makeUnsafe(milliseconds));
+
+/**
+ * A provider-native workflow run reports its agents on the coordinator; they
+ * become rows under it. A coordinator that ended takes its unfinished agents with it.
+ */
+function workflowAgentsToRuntime(
+  coordinator: RuntimeSubagent,
+  workflow: OrchestrationV2SubagentWorkflow,
+): ReadonlyArray<RuntimeSubagent> {
+  const coordinatorEnded = isTerminalSubagentStatus(coordinator.status);
+  return workflow.agents.map((agent) => {
+    const reported = WORKFLOW_AGENT_STATUSES[agent.state];
+    const status =
+      coordinatorEnded && !isTerminalSubagentStatus(reported) ? coordinator.status : reported;
+    const startedAt = epochIso(agent.startedAt);
     return {
-      id: subagent.id,
-      kind:
-        info?.taskType === "local_workflow"
-          ? "workflow"
-          : parentAgentId !== null
-            ? "workflow_agent"
-            : "subagent",
-      title:
-        subagent.title ??
-        (subagent.prompt.length > 80 ? `${subagent.prompt.slice(0, 77)}...` : subagent.prompt),
-      role: info?.role ?? null,
-      model: subagent.model,
-      effort: info?.effort ?? null,
-      status: subagent.status,
-      activationCount: info?.activationCount ?? 1,
-      usage: info?.usage ?? null,
-      progress: subagent.progress ?? null,
-      lastToolName: info?.lastToolName ?? null,
-      result: subagent.result,
-      error: info?.error ?? (subagent.status === "failed" ? subagent.result : null),
-      outputFile: info?.outputFile ?? null,
-      parentAgentId,
-      agentIndex: info?.agentIndex ?? null,
-      phaseIndex: info?.phaseIndex ?? null,
-      phaseTitle: info?.phaseTitle ?? null,
-      attempt: info?.attempt ?? null,
-      workflowName: info?.workflowName ?? null,
-      phases: info?.phases ?? [],
-      runHandles: info?.runHandles ?? null,
-      recentActivity: info?.recentActivity ?? [],
-      firstSeenAt: info?.firstSeenAt ?? startedAt ?? updatedAt,
+      id: `${coordinator.id}:agent:${agent.index}`,
+      kind: "workflow_agent",
+      title: agent.label,
+      role: null,
+      model: agent.model ?? null,
+      effort: null,
+      status,
+      activationCount: agent.attempt ?? 1,
+      usage:
+        agent.totalTokens === undefined
+          ? null
+          : {
+              totalTokens: agent.totalTokens,
+              ...(agent.toolCalls === undefined ? {} : { toolUses: agent.toolCalls }),
+              ...(agent.durationMs === undefined ? {} : { durationMs: agent.durationMs }),
+            },
+      progress: null,
+      lastToolName: null,
+      result: agent.result ?? null,
+      error: agent.state === "failed" ? (agent.result ?? null) : null,
+      outputFile: null,
+      parentAgentId: coordinator.id,
+      agentIndex: agent.index,
+      phaseIndex: agent.phaseIndex ?? null,
+      phaseTitle: agent.phaseTitle ?? null,
+      attempt: agent.attempt ?? null,
+      workflowName: null,
+      phases: [],
+      runHandles: null,
+      recentActivity: [],
+      firstSeenAt: epochIso(agent.queuedAt) ?? startedAt ?? coordinator.firstSeenAt,
       startedAt,
-      completedAt: subagent.completedAt === null ? null : DateTime.formatIso(subagent.completedAt),
-      updatedAt,
+      completedAt: epochIso(agent.completedAt),
+      updatedAt: coordinator.updatedAt,
     } satisfies RuntimeSubagent;
   });
+}
+
+function projectedSubagentToRuntime(
+  subagent: OrchestrationV2Subagent,
+  agentIds: ReadonlySet<string>,
+): RuntimeSubagent {
+  const info = subagent.presentation;
+  const parentAgentId = agentIds.has(subagent.parentNodeId) ? subagent.parentNodeId : null;
+  const updatedAt = DateTime.formatIso(subagent.updatedAt);
+  const startedAt = subagent.startedAt === null ? null : DateTime.formatIso(subagent.startedAt);
+  return {
+    id: subagent.id,
+    kind:
+      info?.taskType === "local_workflow" || subagent.workflow !== undefined
+        ? "workflow"
+        : parentAgentId !== null
+          ? "workflow_agent"
+          : "subagent",
+    title:
+      subagent.title ??
+      (subagent.prompt.length > 80 ? `${subagent.prompt.slice(0, 77)}...` : subagent.prompt),
+    role: info?.role ?? null,
+    model: subagent.model,
+    effort: info?.effort ?? null,
+    status: subagent.status,
+    activationCount: info?.activationCount ?? 1,
+    usage: info?.usage ?? null,
+    progress: subagent.progress ?? null,
+    lastToolName: info?.lastToolName ?? null,
+    result: subagent.result,
+    error: info?.error ?? (subagent.status === "failed" ? subagent.result : null),
+    outputFile: info?.outputFile ?? null,
+    parentAgentId,
+    agentIndex: info?.agentIndex ?? null,
+    phaseIndex: info?.phaseIndex ?? null,
+    phaseTitle: info?.phaseTitle ?? null,
+    attempt: info?.attempt ?? null,
+    workflowName: subagent.workflow?.name ?? info?.workflowName ?? null,
+    phases: subagent.workflow?.phases ?? info?.phases ?? [],
+    runHandles: subagent.workflow?.runHandles ?? info?.runHandles ?? null,
+    recentActivity: info?.recentActivity ?? [],
+    firstSeenAt: info?.firstSeenAt ?? startedAt ?? updatedAt,
+    startedAt,
+    completedAt: subagent.completedAt === null ? null : DateTime.formatIso(subagent.completedAt),
+    updatedAt,
+  } satisfies RuntimeSubagent;
 }

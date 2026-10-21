@@ -59,6 +59,8 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
+import { deriveAgentPanelModel } from "../agentPanelModel";
+import { ThreadLineageWorkflowRow } from "./ThreadLineageWorkflowRow";
 import {
   THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
@@ -239,6 +241,16 @@ export function ThreadRelationshipsPanel(props: {
               origin: subagent.origin,
             },
           ]),
+      ),
+    [projection?.subagents],
+  );
+  // Provider-native workflow runs, with their phases and agents, by coordinator id.
+  const workflowGroupsById = useMemo(
+    () =>
+      new Map(
+        deriveAgentPanelModel(
+          projectedSubagentsToRuntime(projection?.subagents ?? []),
+        ).workflows.map((group) => [group.workflow.id, group] as const),
       ),
     [projection?.subagents],
   );
@@ -516,6 +528,39 @@ export function ThreadRelationshipsPanel(props: {
                   )}
                 </>
               );
+              const workflowGroup =
+                agent === undefined ? undefined : workflowGroupsById.get(agent.id);
+              if (workflowGroup !== undefined) {
+                return (
+                  <ThreadLineageWorkflowRow
+                    key={threadId}
+                    environmentId={props.environmentId}
+                    threadId={props.threadId}
+                    group={workflowGroup}
+                    provider={provider}
+                    driver={providerDriver}
+                    header={
+                      <Tooltip>
+                        <TooltipTrigger
+                          delay={200}
+                          render={
+                            <ThreadDetailsControl
+                              size="sm"
+                              variant="ghost"
+                              part="primary"
+                              disabled={node?.missing === true}
+                              onClick={() => openThread(threadId)}
+                            />
+                          }
+                        >
+                          {relationshipContent}
+                        </TooltipTrigger>
+                        <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
+                      </Tooltip>
+                    }
+                  />
+                );
+              }
               if (isMergeTarget) {
                 return (
                   <li key={threadId} className="group relative flex h-9 items-center rounded-lg">

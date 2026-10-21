@@ -689,6 +689,61 @@ export const OrchestrationV2SubagentPresentation = Schema.Struct({
 });
 export type OrchestrationV2SubagentPresentation = typeof OrchestrationV2SubagentPresentation.Type;
 
+/**
+ * The plan grows while the run executes: a phase a script only reaches at runtime joins the list
+ * when it starts, so a client must treat the list as append-only rather than as a fixed arc
+ * declared up front.
+ */
+export const OrchestrationV2WorkflowPhase = Schema.Struct({
+  index: NonNegativeInt,
+  title: TrimmedNonEmptyString,
+});
+export type OrchestrationV2WorkflowPhase = typeof OrchestrationV2WorkflowPhase.Type;
+
+/**
+ * Timestamps are epoch milliseconds rather than `DateTimeUtc` because only the top-level entity
+ * fields are remapped for the JSON wire shape (see `OrchestrationV2SubagentJson`), so a nested
+ * `DateTimeUtc` would never be encoded.
+ */
+export const OrchestrationV2WorkflowAgent = Schema.Struct({
+  index: NonNegativeInt,
+  label: TrimmedNonEmptyString,
+  agentId: Schema.optional(TrimmedNonEmptyString),
+  childThreadId: Schema.optional(ThreadId),
+  state: Schema.Literals(["queued", "running", "completed", "failed"]),
+  phaseIndex: Schema.optional(NonNegativeInt),
+  phaseTitle: Schema.optional(TrimmedNonEmptyString),
+  model: Schema.optional(TrimmedNonEmptyString),
+  attempt: Schema.optional(NonNegativeInt),
+  totalTokens: Schema.optional(NonNegativeInt),
+  toolCalls: Schema.optional(NonNegativeInt),
+  durationMs: Schema.optional(NonNegativeInt),
+  queuedAt: Schema.optional(NonNegativeInt),
+  startedAt: Schema.optional(NonNegativeInt),
+  completedAt: Schema.optional(NonNegativeInt),
+  prompt: Schema.optional(Schema.NonEmptyString),
+  result: Schema.optional(Schema.NonEmptyString),
+});
+export type OrchestrationV2WorkflowAgent = typeof OrchestrationV2WorkflowAgent.Type;
+
+export const OrchestrationV2WorkflowRunHandles = Schema.Struct({
+  runId: Schema.optional(TrimmedNonEmptyString),
+  transcriptDir: Schema.optional(TrimmedNonEmptyString),
+  scriptPath: Schema.optional(TrimmedNonEmptyString),
+});
+export type OrchestrationV2WorkflowRunHandles = typeof OrchestrationV2WorkflowRunHandles.Type;
+
+export const OrchestrationV2SubagentWorkflow = Schema.Struct({
+  name: Schema.optional(TrimmedNonEmptyString),
+  runHandles: Schema.optional(OrchestrationV2WorkflowRunHandles),
+  phases: Schema.Array(OrchestrationV2WorkflowPhase),
+  agents: Schema.Array(OrchestrationV2WorkflowAgent),
+  totalTokens: Schema.optional(NonNegativeInt),
+  toolCalls: Schema.optional(NonNegativeInt),
+  durationMs: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationV2SubagentWorkflow = typeof OrchestrationV2SubagentWorkflow.Type;
+
 export const OrchestrationV2Subagent = Schema.Struct({
   presentation: Schema.optional(OrchestrationV2SubagentPresentation),
   id: NodeId,
@@ -723,6 +778,8 @@ export const OrchestrationV2Subagent = Schema.Struct({
     "interrupted",
   ]),
   progress: Schema.optional(Schema.String),
+  /** A provider-native workflow run (Claude's Workflow tool): its phases and agents. */
+  workflow: Schema.optional(OrchestrationV2SubagentWorkflow),
   result: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.DateTimeUtc),
   completedAt: Schema.NullOr(Schema.DateTimeUtc),

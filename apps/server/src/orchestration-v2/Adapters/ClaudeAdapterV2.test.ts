@@ -4097,6 +4097,103 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("projects a Claude workflow's name, phases and agents onto its subagent", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const now = yield* DateTime.now;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-workflow"),
+            text: "Review the repo with a workflow.",
+            attachments: [],
+          }),
+        );
+        const taskId = "task-workflow";
+        const toolUseId = "toolu-workflow";
+        const progressAgent = (index: number, state: string, phaseIndex: number) => ({
+          type: "workflow_agent",
+          index,
+          label: `reviewer-${index}`,
+          state,
+          phaseIndex,
+          phaseTitle: phaseIndex === 0 ? "Review" : "Verify",
+          tokens: 1_000 * (index + 1),
+        });
+        const frames = [
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: taskId,
+            tool_use_id: toolUseId,
+            description: "Review workflow",
+            task_type: "local_workflow",
+            workflow_name: "review",
+            prompt: "export const meta = { name: 'review' }",
+            is_backgrounded: false,
+            uuid: "00000000-0000-4000-8000-000000000701",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_progress",
+            task_id: taskId,
+            tool_use_id: toolUseId,
+            description: "",
+            usage: { total_tokens: 3_000, tool_uses: 4, duration_ms: 12_000 },
+            workflow_progress: [
+              { type: "workflow_phase", index: 0, title: "Review" },
+              { type: "workflow_phase", index: 1, title: "Verify" },
+              progressAgent(0, "done", 0),
+              progressAgent(1, "start", 1),
+            ],
+            uuid: "00000000-0000-4000-8000-000000000702",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_notification",
+            task_id: taskId,
+            tool_use_id: toolUseId,
+            status: "completed",
+            output_file: "/tmp/task-workflow.output",
+            summary: "Workflow finished.",
+            workflow_progress: [progressAgent(1, "done", 1)],
+            uuid: "00000000-0000-4000-8000-000000000703",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000704", result: "Reviewed." }),
+        ];
+        for (const frame of frames) yield* Queue.offer(harness.sdkMessages, frame);
+        yield* Queue.take(harness.terminalReceipts);
+
+        const workflow = harness.events
+          .flatMap((event) =>
+            event.type === "subagent.updated" && event.subagent.nativeTaskRef?.nativeId === taskId
+              ? [event.subagent]
+              : [],
+          )
+          .at(-1)?.workflow;
+        assert.equal(workflow?.name, "review");
+        assert.deepEqual(
+          workflow?.phases.map((phase) => phase.title),
+          ["Review", "Verify"],
+        );
+        assert.deepEqual(
+          workflow?.agents.map(({ label, state, phaseTitle }) => ({ label, state, phaseTitle })),
+          [
+            { label: "reviewer-0", state: "completed", phaseTitle: "Review" },
+            { label: "reviewer-1", state: "completed", phaseTitle: "Verify" },
+          ],
+        );
+        assert.equal(workflow?.totalTokens, 3_000);
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
   it.effect("resolves API retries on resumed assistant activity", () =>
     Effect.scoped(
       Effect.gen(function* () {

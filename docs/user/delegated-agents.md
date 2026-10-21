@@ -139,3 +139,12 @@ For an independent review round, ask for a new delegated agent.
 Agents can read effective snooze state and all linked pull requests through
 conversation list and read tools. Snoozed conversations wake when the timer
 expires, new work completes or fails, or a question needs attention.
+
+## Claude workflows
+
+When Claude runs a workflow with its Workflow tool, the workflow appears as one
+subagent in **Subagents** and **Lineage**, named after the workflow. Expand it to
+see each phase with its agents: their status, tokens used and how long they took.
+Phases appear as the workflow reaches them. **Script** shows the workflow script
+Claude ran. Stop the workflow by stopping the conversation's turn; the agents
+inside a workflow do not get chats of their own.
