@@ -979,6 +979,10 @@ export const OrchestrationV2ProviderTurnTokenUsage = Schema.Struct({
   cachedInputTokens: Schema.optional(NonNegativeInt),
   outputTokens: Schema.optional(NonNegativeInt),
   reasoningOutputTokens: Schema.optional(NonNegativeInt),
+  /** Lifetime of the prompt cache the provider's last request wrote, when it reported one. */
+  promptCacheTtlMs: Schema.optional(PositiveInt),
+  /** ISO time that cache expires, measured from when the request started. */
+  promptCacheExpiresAt: Schema.optional(Schema.String),
   /** ISO timestamp of the provider's report; string so wire encoding is stable. */
   updatedAt: Schema.String,
 });

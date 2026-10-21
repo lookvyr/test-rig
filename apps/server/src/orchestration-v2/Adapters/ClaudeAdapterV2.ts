@@ -17,6 +17,7 @@ import {
   type ForkSessionResult,
   getSubagentMessages,
   query,
+  resolveSettings as resolveClaudeSettings,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
   type PermissionResult,
@@ -57,6 +58,7 @@ import {
   type OrchestrationV2ProviderRetry,
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2AppThread,
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2UserInputQuestion,
@@ -153,21 +155,44 @@ function claudeContextWindow(modelSelection: ModelSelection): number | null {
   );
 }
 
+interface ClaudeCacheCreation {
+  readonly ephemeral_1h_input_tokens: number;
+  readonly ephemeral_5m_input_tokens: number;
+}
+
+// The TTL Claude actually used for the request, whichever setting chose it.
+function claudePromptCacheTtlMs(
+  cacheCreation: ClaudeCacheCreation | null | undefined,
+): number | undefined {
+  if (!cacheCreation) return undefined;
+  if (cacheCreation.ephemeral_1h_input_tokens > 0) return 60 * 60_000;
+  if (cacheCreation.ephemeral_5m_input_tokens > 0) return 5 * 60_000;
+  return undefined;
+}
+
 export function claudeProviderTurnTokenUsage(
   usage: {
     readonly input_tokens: number;
     readonly cache_creation_input_tokens?: number | null;
     readonly cache_read_input_tokens?: number | null;
+    readonly cache_creation?: ClaudeCacheCreation | null;
     readonly output_tokens: number;
   },
   modelSelection: ModelSelection,
   updatedAt: string,
+  requestedAt?: DateTime.Utc,
 ) {
   const inputTokens =
     usage.input_tokens +
     (usage.cache_creation_input_tokens ?? 0) +
     (usage.cache_read_input_tokens ?? 0);
   const outputTokens = usage.output_tokens;
+  const promptCacheTtlMs = claudePromptCacheTtlMs(usage.cache_creation);
+  // The cache lifetime starts with the request, not when its response ends.
+  const promptCacheExpiresAt =
+    promptCacheTtlMs === undefined || requestedAt === undefined
+      ? undefined
+      : DateTime.formatIso(DateTime.add(requestedAt, { milliseconds: promptCacheTtlMs }));
   return {
     usedTokens: inputTokens + outputTokens,
     maxTokens: claudeContextWindow(modelSelection),
@@ -175,6 +200,8 @@ export function claudeProviderTurnTokenUsage(
     cachedInputTokens: usage.cache_read_input_tokens ?? 0,
     outputTokens,
     reasoningOutputTokens: 0,
+    ...(promptCacheTtlMs === undefined ? {} : { promptCacheTtlMs }),
+    ...(promptCacheExpiresAt === undefined ? {} : { promptCacheExpiresAt }),
     updatedAt,
   };
 }
@@ -819,6 +846,30 @@ export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
       assertComplete: Effect.void,
     });
   }),
+);
+
+// A delegated child is its own SDK session, so Claude Code gives it the main-conversation cache
+// TTL. When the user sets Claude's subagentPromptCacheTtl, the child follows it like a native
+// subagent would. An explicit CLAUDE_CODE_PROMPT_CACHE_TTL on the instance still wins.
+export function claudeQueryEnvironment(
+  environment: NodeJS.ProcessEnv,
+  appThread: Pick<OrchestrationV2AppThread, "lineage">,
+  subagentPromptCacheTtl: "5m" | "1h" | undefined,
+): NodeJS.ProcessEnv {
+  if (
+    appThread.lineage.relationshipToParent !== "subagent" ||
+    subagentPromptCacheTtl === undefined ||
+    environment.CLAUDE_CODE_PROMPT_CACHE_TTL !== undefined
+  ) {
+    return environment;
+  }
+  return { ...environment, CLAUDE_CODE_PROMPT_CACHE_TTL: subagentPromptCacheTtl };
+}
+
+const ClaudePromptCacheTtl = Schema.Literals(["5m", "1h"]);
+const decodeClaudePromptCacheTtl = Schema.decodeUnknownOption(ClaudePromptCacheTtl);
+const decodeClaudeSubagentCacheSettings = Schema.decodeUnknownOption(
+  Schema.Struct({ subagentPromptCacheTtl: Schema.optionalKey(ClaudePromptCacheTtl) }),
 );
 
 export function makeClaudeQueryOptions(input: {
@@ -2699,6 +2750,9 @@ interface ActiveClaudeTurnContext {
   // here: a subagent resumed from another turn keeps its ordinal on the
   // session subagent registry.
   readonly itemOrdinals: Map<string, number>;
+  // When the root conversation's latest request started, from its stream's
+  // message_start; its prompt cache lifetime is measured from then.
+  requestStart: { readonly messageId: string; readonly at: DateTime.Utc } | null;
   readonly assistant: {
     fallbackText: string;
     fallbackNativeItemId: string;
@@ -3000,6 +3054,38 @@ export function makeClaudeAdapterV2(
   const continuationRequests = adapterOptions.continuationRequests ?? {
     offer: () => Effect.void,
   };
+
+  // Claude Code's own subagent TTL setting, in its precedence order. Unset or unreadable means
+  // Anthropic's default applies.
+  const resolveSubagentPromptCacheTtl = Effect.fn("ClaudeAdapterV2.resolveSubagentPromptCacheTtl")(
+    function* (cwd: string | null) {
+      const fromEnvironment = decodeClaudePromptCacheTtl(
+        adapterOptions.environment.CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL,
+      );
+      if (Option.isSome(fromEnvironment)) return fromEnvironment.value;
+      // A configured CLAUDE_CONFIG_DIR replaces the user source the SDK would read.
+      const configDir = adapterOptions.environment.CLAUDE_CONFIG_DIR;
+      const resolved = yield* Effect.tryPromise(() =>
+        resolveClaudeSettings({
+          ...(cwd === null ? {} : { cwd }),
+          settingSources: configDir ? ["project", "local"] : ["user", "project", "local"],
+        }),
+      ).pipe(Effect.orElseSucceed(() => undefined));
+      const fromProject = resolved?.effective.subagentPromptCacheTtl;
+      if (fromProject !== undefined || !configDir) return fromProject;
+      const home = yield* fileSystem.readFileString(path.join(configDir, "settings.json")).pipe(
+        Effect.map((text) => {
+          try {
+            return decodeClaudeSubagentCacheSettings(JSON.parse(text));
+          } catch {
+            return Option.none();
+          }
+        }),
+        Effect.orElseSucceed(() => Option.none()),
+      );
+      return Option.isSome(home) ? home.value.subagentPromptCacheTtl : undefined;
+    },
+  );
 
   // Re-scan on every send: skills are added and switched off mid-session, and
   // the scan is a few directory reads. A skill switched off via skillOverrides,
@@ -5792,6 +5878,7 @@ export function makeClaudeAdapterV2(
             if (event.type === "message_start") {
               reasoning.messageId = event.message.id;
               reasoning.streamBlocks.clear();
+              context.requestStart = { messageId: event.message.id, at: yield* DateTime.now };
             } else if (
               event.type === "content_block_start" &&
               event.content_block.type === "thinking" &&
@@ -6046,6 +6133,11 @@ export function makeClaudeAdapterV2(
                     message.message.usage,
                     context.input.modelSelection,
                     DateTime.formatIso(now),
+                    // An assistant snapshot arrives after generation, so only its
+                    // stream's message_start gives the request's start time.
+                    context.requestStart?.messageId === message.message.id
+                      ? context.requestStart.at
+                      : undefined,
                   ),
                 },
               });
@@ -7293,7 +7385,16 @@ export function makeClaudeAdapterV2(
                 cwd: turnInput.runtimePolicy.cwd,
                 attachmentsDir,
                 settings: adapterOptions.settings,
-                environment: { ...adapterOptions.environment, ...mcpOverrides.mcpEnvironment },
+                environment: {
+                  ...claudeQueryEnvironment(
+                    adapterOptions.environment,
+                    turnInput.appThread,
+                    turnInput.appThread.lineage.relationshipToParent === "subagent"
+                      ? yield* resolveSubagentPromptCacheTtl(turnInput.runtimePolicy.cwd)
+                      : undefined,
+                  ),
+                  ...mcpOverrides.mcpEnvironment,
+                },
                 tools: queryPolicy.tools ?? CLAUDE_CODE_PRESET_TOOLS,
                 ...(mcpOverrides.allowedTools === undefined
                   ? {}
@@ -7497,6 +7598,7 @@ export function makeClaudeAdapterV2(
               providerTurnOrdinal,
               startedAt,
               itemOrdinals: new Map(),
+              requestStart: null,
               assistant: {
                 fallbackText: "",
                 fallbackNativeItemId: `assistant:${turnInput.runId}`,

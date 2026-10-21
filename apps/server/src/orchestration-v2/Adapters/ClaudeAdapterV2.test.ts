@@ -907,6 +907,67 @@ describe("ClaudeAdapterV2 context usage", () => {
       updatedAt: "2026-08-29T00:00:00.000Z",
     });
   });
+
+  it("dates cache expiry from the request start, not the response end", () => {
+    const usage = ClaudeAdapterV2.claudeProviderTurnTokenUsage(
+      {
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 300 },
+      },
+      CLAUDE_TEST_MODEL_SELECTION,
+      "2026-08-29T00:03:00.000Z",
+      DateTime.makeUnsafe("2026-08-29T00:00:00.000Z"),
+    );
+    assert.strictEqual(usage.promptCacheTtlMs, 5 * 60_000);
+    assert.strictEqual(usage.promptCacheExpiresAt, "2026-08-29T00:05:00.000Z");
+  });
+
+  it("follows the 1h cache when Claude wrote one, and leaves expiry unknown without a start", () => {
+    const oneHour = ClaudeAdapterV2.claudeProviderTurnTokenUsage(
+      {
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_creation: { ephemeral_1h_input_tokens: 300, ephemeral_5m_input_tokens: 0 },
+      },
+      CLAUDE_TEST_MODEL_SELECTION,
+      "2026-08-29T00:03:00.000Z",
+      DateTime.makeUnsafe("2026-08-29T00:00:00.000Z"),
+    );
+    assert.strictEqual(oneHour.promptCacheExpiresAt, "2026-08-29T01:00:00.000Z");
+    const noStart = ClaudeAdapterV2.claudeProviderTurnTokenUsage(
+      {
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_creation: { ephemeral_1h_input_tokens: 300, ephemeral_5m_input_tokens: 0 },
+      },
+      CLAUDE_TEST_MODEL_SELECTION,
+      "2026-08-29T00:03:00.000Z",
+    );
+    assert.isUndefined(noStart.promptCacheExpiresAt);
+  });
+
+  it("gives delegated children Claude's subagent prompt cache TTL", () => {
+    const lineage = (relationshipToParent: "fork" | "subagent" | null) => ({
+      lineage: {
+        parentThreadId: null,
+        relationshipToParent,
+        rootThreadId: ThreadId.make("thread-root"),
+      },
+    });
+    const env = { PATH: "/bin" };
+    const ttl = (environment: NodeJS.ProcessEnv, ...args: Parameters<typeof lineage>) =>
+      ClaudeAdapterV2.claudeQueryEnvironment(environment, lineage(...args), "5m")
+        .CLAUDE_CODE_PROMPT_CACHE_TTL;
+    assert.equal(ttl(env, "subagent"), "5m");
+    assert.isUndefined(ttl(env, null));
+    assert.isUndefined(ttl(env, "fork"));
+    assert.equal(ttl({ ...env, CLAUDE_CODE_PROMPT_CACHE_TTL: "1h" }, "subagent"), "1h");
+    assert.strictEqual(
+      ClaudeAdapterV2.claudeQueryEnvironment(env, lineage("subagent"), undefined),
+      env,
+    );
+  });
 });
 
 describe("ClaudeAdapterV2 session permissions", () => {

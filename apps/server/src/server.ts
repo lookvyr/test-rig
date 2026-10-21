@@ -101,6 +101,7 @@ import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReact
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
 import * as ThreadPullRequestService from "./orchestration-v2/ThreadPullRequestService.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
+import * as IdleCompactionService from "./orchestration-v2/IdleCompactionService.ts";
 import * as ProjectEnrichmentService from "./project/ProjectEnrichmentService.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import {
@@ -338,6 +339,9 @@ const OrchestrationWorkersLive = Layer.mergeAll(
   ).pipe(Layer.provide(DelegatedTaskQuestionReactor.layer)),
   Layer.effectDiscard(
     ThreadSettlementService.make.pipe(Effect.flatMap((service) => service.start())),
+  ),
+  Layer.effectDiscard(
+    IdleCompactionService.make.pipe(Effect.flatMap((service) => service.start())),
   ),
   Layer.effectDiscard(
     ThreadPullRequestService.make.pipe(Effect.flatMap((service) => service.start())),

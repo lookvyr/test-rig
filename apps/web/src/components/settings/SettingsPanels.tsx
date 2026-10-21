@@ -284,6 +284,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
         ? ["Snooze limited threads"]
         : []),
+      ...(settings.compactIdleThreads !== DEFAULT_UNIFIED_SETTINGS.compactIdleThreads
+        ? ["Compact idle Claude threads"]
+        : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
         : []),
@@ -309,6 +312,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.autoRemoveSettledWorktrees,
       settings.autoResumeLimitedThreads,
       settings.snoozeLimitedThreads,
+      settings.compactIdleThreads,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
       settings.environmentIdentificationMode,
@@ -409,6 +413,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       autoRemoveSettledWorktrees: DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
+      compactIdleThreads: DEFAULT_UNIFIED_SETTINGS.compactIdleThreads,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
@@ -1615,6 +1620,28 @@ export function GeneralSettingsPanel() {
                 updateSettings({ snoozeLimitedThreads: Boolean(checked) })
               }
               aria-label="Snooze limited threads"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("compact-idle-threads")}
+          description="Compact long idle Claude threads just before their prompt cache expires, so coming back costs less. Off by default; the compaction shows in the thread as a /compact turn."
+          resetAction={
+            settings.compactIdleThreads ? (
+              <SettingResetButton
+                label="Compact idle Claude threads"
+                onClick={() => updateSettings({ compactIdleThreads: false })}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.compactIdleThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ compactIdleThreads: Boolean(checked) })
+              }
+              aria-label="Compact idle Claude threads (beta)"
             />
           }
         />
