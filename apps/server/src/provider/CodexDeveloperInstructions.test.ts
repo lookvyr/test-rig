@@ -4,6 +4,7 @@ import { describe, it } from "vite-plus/test";
 
 import {
   buildCodexAdditionalContext,
+  codexContextEntries,
   CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES,
 } from "./CodexDeveloperInstructions.ts";
 import {
@@ -57,5 +58,56 @@ describe("buildCodexAdditionalContext", () => {
       sections.map((entry) => entry.value).join("\n\n"),
       T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim(),
     );
+  });
+});
+
+describe("codexContextEntries", () => {
+  it("splits a large catalogue at line boundaries into entries under the cap, in order", () => {
+    const lines = Array.from(
+      { length: 40 },
+      (_, index) => `- "$test-rig:skill-${index}": ${"description ".repeat(20)}`,
+    );
+    const text = ["## Test Rig skill library", ...lines].join("\n");
+    const entries = codexContextEntries("test_rig_skill_library", text);
+    const keys = Object.keys(entries);
+
+    NodeAssert.ok(keys.length > 1);
+    NodeAssert.deepEqual(keys, keys.toSorted());
+    for (const entry of Object.values(entries)) {
+      NodeAssert.ok(
+        Buffer.byteLength(entry.value, "utf8") <= CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES,
+      );
+    }
+    NodeAssert.equal(
+      Object.values(entries)
+        .map((entry) => entry.value)
+        .join("\n"),
+      text,
+    );
+  });
+
+  it("cuts a single over-long line on a code point boundary without losing text", () => {
+    const line = "🦊".repeat(1_500);
+    const entries = Object.values(codexContextEntries("skills", `head\n${line}`));
+
+    for (const entry of entries) {
+      NodeAssert.ok(
+        Buffer.byteLength(entry.value, "utf8") <= CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES,
+      );
+      NodeAssert.ok(!entry.value.includes("�"));
+    }
+    NodeAssert.equal(
+      entries
+        .map((entry) => entry.value)
+        .join("")
+        .replace("head", "head\n"),
+      `head\n${line}`,
+    );
+  });
+
+  it("keeps a small catalogue as one entry", () => {
+    NodeAssert.deepEqual(codexContextEntries("skills", "one\ntwo"), {
+      skills_01: { kind: "application", value: "one\ntwo" },
+    });
   });
 });

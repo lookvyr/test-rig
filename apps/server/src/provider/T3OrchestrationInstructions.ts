@@ -44,6 +44,7 @@ When a chart, table, diagram, image collage, or mockup would say more than prose
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
 
 ${T3_CODE_ORCHESTRATION_SECTIONS.join("\n\n")}
+
 `;
 
 export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `

@@ -86,6 +86,7 @@ import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
   buildCodexAdditionalContext,
+  codexContextEntries,
   buildCodexDeveloperInstructions,
 } from "../../provider/CodexDeveloperInstructions.ts";
 import {
@@ -761,7 +762,7 @@ export function buildCodexTurnStartParams(input: {
         ? builtInContext
         : {
             ...builtInContext,
-            test_rig_skill_library: { kind: "application" as const, value: input.skillCatalogue },
+            ...codexContextEntries("test_rig_skill_library", input.skillCatalogue),
           };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =
       input.runtimePolicy.interactionMode !== "plan" && developerInstructions === undefined

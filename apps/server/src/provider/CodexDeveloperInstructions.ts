@@ -11,6 +11,55 @@ import { SIDE_CHAT_INSTRUCTIONS } from "./SideChatInstructions.ts";
  */
 export const CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES = 4_000;
 
+/**
+ * Splits generated context into numbered entries that each fit Codex's cap, so
+ * text of unbounded size (such as the skill library catalogue) arrives whole.
+ * Breaks at line boundaries, and inside a line only when one line alone is too long.
+ */
+export function codexContextEntries(
+  keyPrefix: string,
+  text: string,
+): Record<string, V2TurnStartParams__AdditionalContextEntry> {
+  const limit = CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES;
+  const chunks: Array<string> = [];
+  let current = "";
+  const push = (piece: string) => {
+    const next = current.length === 0 ? piece : `${current}\n${piece}`;
+    if (Buffer.byteLength(next, "utf8") <= limit) {
+      current = next;
+      return;
+    }
+    if (current.length > 0) chunks.push(current);
+    current = piece;
+  };
+  for (const line of text.split("\n")) {
+    let rest = line;
+    while (Buffer.byteLength(rest, "utf8") > limit) {
+      // Cut on a code point boundary at or below the byte limit.
+      let end = 0;
+      let bytes = 0;
+      for (const char of rest) {
+        const size = Buffer.byteLength(char, "utf8");
+        if (bytes + size > limit) break;
+        bytes += size;
+        end += char.length;
+      }
+      if (current.length > 0) chunks.push(current);
+      current = "";
+      chunks.push(rest.slice(0, end));
+      rest = rest.slice(end);
+    }
+    push(rest);
+  }
+  if (current.length > 0) chunks.push(current);
+  return Object.fromEntries(
+    chunks.map((value, index) => [
+      `${keyPrefix}_${String(index + 1).padStart(2, "0")}`,
+      { kind: "application" as const, value },
+    ]),
+  );
+}
+
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
 ## Test Rig collaborative browser

@@ -132,8 +132,8 @@ describe("app-owned provider MCP configuration", () => {
         modelSelection,
         skillCatalogue: catalogue,
       });
-      assert.equal(result.additionalContext?.test_rig_skill_library?.value, catalogue);
-      assert.equal(result.additionalContext?.test_rig_skill_library?.kind, "application");
+      assert.equal(result.additionalContext?.test_rig_skill_library_01?.value, catalogue);
+      assert.equal(result.additionalContext?.test_rig_skill_library_01?.kind, "application");
       const options = makeClaudeQueryOptions({
         modelSelection,
         nativeThreadId: "native",
