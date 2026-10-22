@@ -613,6 +613,44 @@ export const make = Effect.gen(function* () {
           });
         }
       }
+      // A Claude workflow's agents are runless subagents in the workflow's
+      // thread. Only the dead provider process could settle them.
+      for (const subagent of projection.subagents ?? []) {
+        if (
+          subagent.runId !== null ||
+          subagent.origin !== "provider_native" ||
+          !isNonterminalNodeStatus(subagent.status)
+        ) {
+          continue;
+        }
+        events.push({
+          id: yield* allocateEventId(),
+          type: "subagent.updated",
+          threadId: projection.thread.id,
+          nodeId: subagent.id,
+          driver: subagent.driver,
+          providerInstanceId: subagent.providerInstanceId,
+          occurredAt: now,
+          payload: { ...subagent, status: "cancelled", completedAt: now, updatedAt: now },
+        });
+        const node = (projection.nodes ?? []).find(
+          (candidate) =>
+            candidate.id === subagent.id &&
+            candidate.runId === null &&
+            isNonterminalNodeStatus(candidate.status),
+        );
+        if (node === undefined || cancelledStaleNodeIds.has(node.id)) continue;
+        cancelledStaleNodeIds.add(node.id);
+        events.push({
+          id: yield* allocateEventId(),
+          type: "node.updated",
+          threadId: projection.thread.id,
+          nodeId: node.id,
+          providerInstanceId: subagent.providerInstanceId,
+          occurredAt: now,
+          payload: { ...node, status: "cancelled", completedAt: now },
+        });
+      }
       // A provider-native subagent thread has no runs: its work is a runless
       // root turn, plus items under it (Claude's live progress item), that
       // only the dead provider process could settle. Left running, the child

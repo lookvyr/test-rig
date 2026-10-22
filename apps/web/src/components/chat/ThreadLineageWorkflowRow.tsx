@@ -79,6 +79,7 @@ function WorkflowMemberRow({
 }: { readonly member: RuntimeSubagent } & WorkflowProviderProps) {
   const threadId = (member.childThreadId ?? null) as ThreadId | null;
   const canOpen = threadId !== null && isThreadAvailable(threadId);
+  const statusLabel = threadRelationshipStatusLabel(member.status);
   return (
     <li data-workflow-member={member.agentIndex ?? undefined}>
       <Tooltip>
@@ -89,9 +90,14 @@ function WorkflowMemberRow({
               size="sm"
               variant="ghost"
               part="row"
-              className="h-8"
-              aria-label={`Open ${member.title} chat`}
-              disabled={!canOpen}
+              // Not disabled: a row without a chat (an older workflow) keeps its hover card.
+              className="h-8 aria-disabled:opacity-100"
+              aria-label={
+                canOpen
+                  ? `Open ${member.title} chat, ${statusLabel}`
+                  : `${member.title}, ${statusLabel}`
+              }
+              aria-disabled={!canOpen}
               onClick={() => {
                 if (canOpen) onOpenThread(threadId);
               }}
@@ -102,7 +108,6 @@ function WorkflowMemberRow({
           <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">
             {member.title}
           </span>
-          <span className="sr-only">{threadRelationshipStatusLabel(member.status)}</span>
           {member.startedAt ? (
             <span className="shrink-0 text-2xs font-normal tabular-nums text-muted-foreground">
               <AgentElapsed agent={member} />

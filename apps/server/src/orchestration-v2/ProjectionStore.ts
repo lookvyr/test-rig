@@ -3771,6 +3771,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                       AND node.status IN ('pending', 'running', 'waiting')
                   )
                 UNION
+                -- A Claude workflow's agents: runless subagents in its thread.
+                SELECT thread_id FROM orchestration_v2_projection_subagents
+                WHERE run_id IS NULL
+                  AND origin = 'provider_native'
+                  AND status IN ('pending', 'running', 'waiting')
+                UNION
                 SELECT item.thread_id FROM orchestration_v2_projection_turn_items AS item
                 WHERE NOT EXISTS (
                     SELECT 1 FROM orchestration_v2_projection_runs AS run

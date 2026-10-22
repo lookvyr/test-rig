@@ -287,7 +287,7 @@ export function ThreadRelationshipsPanel(props: {
   const stopWorkflowCommand = useAtomCommand(orchestrationEnvironment.stopWorkflow, {
     reportFailure: false,
   });
-  const [stoppingWorkflowId, setStoppingWorkflowId] = useState<string | null>(null);
+  const [stopRequestedWorkflowId, setStopRequestedWorkflowId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<"merge" | "detach" | null>(null);
   const latestMergeBackRun = projection == null ? null : resolveLatestMergeBackRun(projection);
   const mergeTargetThreadId = compact ? null : resolveMergeBackTargetThreadId(projection ?? null);
@@ -361,15 +361,22 @@ export function ThreadRelationshipsPanel(props: {
     }
   };
 
+  // A stop is in flight until the provider settles the workflow, not just
+  // until the request returns.
+  const stoppingWorkflowId =
+    stopRequestedWorkflowId !== null &&
+    workflowGroupsById.get(stopRequestedWorkflowId)?.workflow.status === "running"
+      ? stopRequestedWorkflowId
+      : null;
   const stopWorkflow = async (subagentId: string) => {
     if (stoppingWorkflowId !== null) return;
-    setStoppingWorkflowId(subagentId);
+    setStopRequestedWorkflowId(subagentId);
     const result = await stopWorkflowCommand({
       environmentId: props.environmentId,
       input: { threadId: props.threadId, subagentId: NodeId.make(subagentId) },
     });
-    setStoppingWorkflowId(null);
     if (result._tag === "Failure") {
+      setStopRequestedWorkflowId(null);
       toastManager.add({ type: "error", title: "Could not stop workflow" });
     }
   };
