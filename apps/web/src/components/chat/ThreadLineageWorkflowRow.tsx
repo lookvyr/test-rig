@@ -2,21 +2,24 @@ import type { RuntimeSubagent } from "@t3tools/client-runtime/state/subagentRunt
 import type {
   EnvironmentId,
   ProviderDriverKind,
+  ProviderInstanceId,
   ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
-import { ChevronDownIcon, FileCodeIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useEnvironmentQuery } from "../../state/query";
 import type { AgentPanelWorkflowGroup } from "../agentPanelModel";
-import { formatSubagentTokenCount } from "../agentPanelModel";
+import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { CollapsibleSectionHeader, SectionHeaderStatus } from "../ui/collapsible-section-header";
+import { Tooltip, TooltipTrigger } from "../ui/tooltip";
 import { AgentElapsed } from "./AgentElapsed";
+import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
-import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadRelationshipIcon";
+import { ThreadRelationshipIcon } from "./ThreadRelationshipIcon";
 import {
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
@@ -51,37 +54,55 @@ function phaseStatusLabel(phase: WorkflowPhase) {
   return phase.state === "done" ? "done" : "not started";
 }
 
+type WorkflowProviderProps = {
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly provider: ServerProvider | undefined;
+  readonly providers: ReadonlyArray<ServerProvider> | undefined;
+  readonly driver: ProviderDriverKind | undefined;
+};
+
+/** One workflow agent: its name and time, with model, status and result on hover. */
 function WorkflowMemberRow({
   member,
+  providerInstanceId,
   provider,
+  providers,
   driver,
-}: {
-  readonly member: RuntimeSubagent;
-  readonly provider: ServerProvider | undefined;
-  readonly driver: ProviderDriverKind | undefined;
-}) {
-  const detail = member.result ?? member.error;
+}: { readonly member: RuntimeSubagent } & WorkflowProviderProps) {
   return (
-    <li
-      className="flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-sm"
-      title={detail ?? undefined}
-      data-workflow-member={member.agentIndex ?? undefined}
-    >
-      <ThreadRelationshipIcon driver={driver} provider={provider} status={member.status} />
-      <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">{member.title}</span>
-      {member.usage !== null ? (
-        <span className="shrink-0 text-2xs font-normal tabular-nums text-muted-foreground">
-          {formatSubagentTokenCount(member.usage.totalTokens)}
-        </span>
-      ) : null}
-      {member.startedAt ? (
-        <span className="shrink-0 text-2xs font-normal tabular-nums text-muted-foreground">
-          <AgentElapsed agent={member} />
-        </span>
-      ) : null}
-      <span className="shrink-0 text-2xs text-muted-foreground">
-        {threadRelationshipStatusLabel(member.status)}
-      </span>
+    <li data-workflow-member={member.agentIndex ?? undefined}>
+      <Tooltip>
+        <TooltipTrigger
+          delay={200}
+          render={<div className="flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-sm" />}
+        >
+          <ThreadRelationshipIcon driver={driver} provider={provider} status={member.status} />
+          <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">
+            {member.title}
+          </span>
+          <span className="sr-only">{member.status}</span>
+          {member.startedAt ? (
+            <span className="shrink-0 text-2xs font-normal tabular-nums text-muted-foreground">
+              <AgentElapsed agent={member} />
+            </span>
+          ) : null}
+        </TooltipTrigger>
+        <ThreadHoverCardPopup side="left">
+          <SubagentTooltipContent
+            title={member.title}
+            model={member.model}
+            providerInstanceId={providerInstanceId}
+            origin="provider_native"
+            provider={provider}
+            providers={providers}
+            driver={driver}
+            elapsed={<AgentElapsed agent={member} />}
+            status={member.status}
+            result={member.result ?? member.error}
+            progress={member.progress}
+          />
+        </ThreadHoverCardPopup>
+      </Tooltip>
     </li>
   );
 }
@@ -105,7 +126,7 @@ function WorkflowScript({
     return <p className="px-2.5 py-1.5 text-2xs text-muted-foreground">Loading script…</p>;
   }
   return (
-    <pre className="mx-2.5 my-1 max-h-72 overflow-auto rounded-md border border-border/60 bg-muted/40 p-2 font-mono text-2xs leading-4 text-foreground/80">
+    <pre className="mx-2.5 my-1 max-h-48 overflow-auto rounded-md border border-border/60 bg-muted/40 p-2 font-mono text-2xs leading-4 text-foreground/80">
       {data.contents}
       {data.truncated ? "\n…" : ""}
     </pre>
@@ -115,24 +136,22 @@ function WorkflowScript({
 /**
  * A provider-native workflow run (Claude's Workflow tool) in the Lineage
  * panel: its coordinator row, and when expanded, its phases and agents and
- * the script it ran.
+ * the script it ran. Finished phases start collapsed so a settled workflow
+ * reads as one line per phase.
  */
 export function ThreadLineageWorkflowRow({
   environmentId,
   threadId,
   group,
   header,
-  provider,
-  driver,
+  ...providerProps
 }: {
   readonly environmentId: EnvironmentId;
   /** The thread that launched the workflow. */
   readonly threadId: ThreadId;
   readonly group: AgentPanelWorkflowGroup;
   readonly header: ReactNode;
-  readonly provider: ServerProvider | undefined;
-  readonly driver: ProviderDriverKind | undefined;
-}) {
+} & WorkflowProviderProps) {
   const [expanded, setExpanded] = useState(false);
   const [phaseOpen, setPhaseOpen] = useState<ReadonlyMap<number, boolean>>(() => new Map());
   const [scriptOpen, setScriptOpen] = useState(false);
@@ -168,7 +187,7 @@ export function ThreadLineageWorkflowRow({
       {expanded ? (
         <ul className="m-0 list-none p-0 ps-6.5">
           {phases.map((phase) => {
-            const open = phaseOpen.get(phase.index) ?? true;
+            const open = phaseOpen.get(phase.index) ?? phase.state === "running";
             const status = phaseStatusLabel(phase);
             return (
               <li key={phase.index}>
@@ -199,12 +218,7 @@ export function ThreadLineageWorkflowRow({
                 {open ? (
                   <ul className="m-0 list-none p-0">
                     {phase.members.map((member) => (
-                      <WorkflowMemberRow
-                        key={member.id}
-                        member={member}
-                        provider={provider}
-                        driver={driver}
-                      />
+                      <WorkflowMemberRow key={member.id} member={member} {...providerProps} />
                     ))}
                   </ul>
                 ) : null}
@@ -212,12 +226,7 @@ export function ThreadLineageWorkflowRow({
             );
           })}
           {group.unphasedMembers.map((member) => (
-            <WorkflowMemberRow
-              key={member.id}
-              member={member}
-              provider={provider}
-              driver={driver}
-            />
+            <WorkflowMemberRow key={member.id} member={member} {...providerProps} />
           ))}
           {phases.length === 0 && group.unphasedMembers.length === 0 ? (
             <li className="px-2.5 py-1.5 text-2xs text-muted-foreground/70">No agents yet</li>
@@ -229,7 +238,6 @@ export function ThreadLineageWorkflowRow({
                 expanded={scriptOpen}
                 aria-label={`${scriptOpen ? "Hide" : "Show"} the workflow script`}
                 onClick={() => setScriptOpen((value) => !value)}
-                accessory={<FileCodeIcon aria-hidden className="size-3.5 shrink-0" />}
               >
                 Script
               </CollapsibleSectionHeader>

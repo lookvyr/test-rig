@@ -144,7 +144,8 @@ expires, new work completes or fails, or a question needs attention.
 
 When Claude runs a workflow with its Workflow tool, the workflow appears as one
 subagent in **Subagents** and **Lineage**, named after the workflow. Expand it to
-see each phase with its agents: their status, tokens used and how long they took.
-Phases appear as the workflow reaches them. **Script** shows the workflow script
+see each phase with its agents and how long they took; hover an agent for its
+model, status and result. Phases appear as the workflow reaches them, and a
+finished phase stays collapsed to one line until you open it. **Script** shows the workflow script
 Claude ran. Stop the workflow by stopping the conversation's turn; the agents
 inside a workflow do not get chats of their own.

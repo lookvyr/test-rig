@@ -96,11 +96,13 @@ export function ThreadLineageRowList(props: {
         component: this sits inside an already scrolling panel, where a
         max-height-only virtual viewport measures badly. Every row is a focusable
         button, so keyboard users reach and scroll the region through the rows
-        themselves and the container needs no extra tab stop of its own.
+        themselves and the container needs no extra tab stop of its own. An
+        expanded workflow lists its phases and agents, so the bound loosens
+        while one is open.
       */}
       <ul
         aria-label={props.label ?? "Related threads"}
-        className="m-0 max-h-[13.5rem] list-none overflow-y-auto overscroll-contain p-0"
+        className="m-0 max-h-[13.5rem] list-none overflow-y-auto overscroll-contain p-0 has-data-workflow-expanded:max-h-[min(28rem,55dvh)]"
       >
         {props.children}
       </ul>
@@ -530,14 +532,16 @@ export function ThreadRelationshipsPanel(props: {
               );
               const workflowGroup =
                 agent === undefined ? undefined : workflowGroupsById.get(agent.id);
-              if (workflowGroup !== undefined) {
+              if (agent !== undefined && workflowGroup !== undefined) {
                 return (
                   <ThreadLineageWorkflowRow
                     key={threadId}
                     environmentId={props.environmentId}
                     threadId={props.threadId}
                     group={workflowGroup}
+                    providerInstanceId={agent.providerInstanceId}
                     provider={provider}
+                    providers={providers}
                     driver={providerDriver}
                     header={
                       <Tooltip>
