@@ -77,24 +77,16 @@ export function deriveAgentPanelModel(source: ReadonlyArray<RuntimeSubagent>): A
 
   const workflowGroups: AgentPanelWorkflowGroup[] = workflows.map((workflow) => {
     const workflowMembers = members.get(workflow.id) ?? [];
-    const knownPhases =
-      workflow.phases.length > 0
-        ? workflow.phases
-        : (() => {
-            const derived = new Map<number, string>();
-            for (const member of workflowMembers) {
-              if (member.phaseIndex !== null && !derived.has(member.phaseIndex)) {
-                derived.set(
-                  member.phaseIndex,
-                  member.phaseTitle ?? `Phase ${member.phaseIndex + 1}`,
-                );
-              }
-            }
-            return Array.from(derived.entries())
-              .map(([index, title]) => ({ index, title }))
-              .slice()
-              .sort((a, b) => a.index - b.index);
-          })();
+    // The declared plan lags its members, so a member's own phase counts too.
+    const phaseTitles = new Map(workflow.phases.map((phase) => [phase.index, phase.title]));
+    for (const member of workflowMembers) {
+      if (member.phaseIndex !== null && !phaseTitles.has(member.phaseIndex)) {
+        phaseTitles.set(member.phaseIndex, member.phaseTitle ?? `Phase ${member.phaseIndex + 1}`);
+      }
+    }
+    const knownPhases = Array.from(phaseTitles, ([index, title]) => ({ index, title })).sort(
+      (a, b) => a.index - b.index,
+    );
 
     const knownPhaseIndices = new Set(knownPhases.map((phase) => phase.index));
     const phases = knownPhases.map((phase) => {

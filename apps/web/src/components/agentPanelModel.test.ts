@@ -39,7 +39,7 @@ const agent = (id: string, patch: Partial<RuntimeSubagent> = {}): RuntimeSubagen
 });
 
 describe("native Agents panel", () => {
-  it("retains orphaned and unknown-phase members and does not double-count coordinator usage", () => {
+  it("groups members under phases the plan has not declared yet, keeps orphans, and does not double-count coordinator usage", () => {
     const model = deriveAgentPanelModel([
       agent("workflow", {
         kind: "workflow",
@@ -55,23 +55,29 @@ describe("native Agents panel", () => {
         status: "idle",
         usage: { totalTokens: 100 },
       }),
-      agent("unknown", {
+      agent("undeclared", {
         parentAgentId: "workflow",
         phaseIndex: 9,
+        phaseTitle: "Verify",
         status: "failed",
         usage: { totalTokens: 200 },
       }),
+      agent("unphased", { parentAgentId: "workflow", status: "completed" }),
       agent("orphan", { parentAgentId: "missing", status: "waiting", usage: { totalTokens: 50 } }),
     ]);
-    expect(model.workflows[0]?.phases.map((phase) => phase.state)).toEqual(["running", "pending"]);
-    expect(model.workflows[0]?.unphasedMembers.map((member) => member.id)).toEqual(["unknown"]);
+    expect(model.workflows[0]?.phases.map(({ title, state }) => ({ title, state }))).toEqual([
+      { title: "Build", state: "running" },
+      { title: "Review", state: "pending" },
+      { title: "Verify", state: "done" },
+    ]);
+    expect(model.workflows[0]?.unphasedMembers.map((member) => member.id)).toEqual(["unphased"]);
     expect(model.directAgents.map((member) => member.id)).toEqual(["orphan"]);
     expect(model).toMatchObject({
       totalTokens: 350,
       runningCount: 1,
       waitingCount: 1,
       idleCount: 1,
-      settledCount: 1,
+      settledCount: 2,
       liveCount: 2,
     });
   });
