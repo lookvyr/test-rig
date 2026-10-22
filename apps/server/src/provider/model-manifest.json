@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-10-15T00:08:08Z",
+  "updatedAt": "2026-10-22T22:12:20Z",
   "compatibility": [
     {
       "driver": "codex",
@@ -138,21 +138,15 @@
                     "id": "ultracode",
                     "label": "Ultracode",
                     "description": "xhigh effort plus multi-agent workflow orchestration"
-                  },
-                  {
-                    "id": "ultrathink",
-                    "label": "Ultrathink"
                   }
-                ],
-                "promptInjectedValues": ["ultrathink"]
+                ]
               }
             ]
           },
           "adapter": {
             "claudeCode": {
               "effortMap": {
-                "ultracode": "xhigh",
-                "ultrathink": null
+                "ultracode": "xhigh"
               },
               "fixedContextWindowTokens": 1000000
             }
@@ -175,17 +169,15 @@
                     "id": "ultracode",
                     "label": "Ultracode",
                     "description": "xhigh effort plus multi-agent workflow orchestration"
-                  },
-                  { "id": "ultrathink", "label": "Ultrathink" }
-                ],
-                "promptInjectedValues": ["ultrathink"]
+                  }
+                ]
               },
               { "id": "fastMode", "label": "Fast Mode", "type": "boolean" }
             ]
           },
           "adapter": {
             "claudeCode": {
-              "effortMap": { "ultracode": "xhigh", "ultrathink": null },
+              "effortMap": { "ultracode": "xhigh" },
               "fixedContextWindowTokens": 1000000
             }
           }
@@ -223,13 +215,8 @@
                     "id": "ultracode",
                     "label": "Ultracode",
                     "description": "xhigh effort plus multi-agent workflow orchestration"
-                  },
-                  {
-                    "id": "ultrathink",
-                    "label": "Ultrathink"
                   }
-                ],
-                "promptInjectedValues": ["ultrathink"]
+                ]
               },
               {
                 "id": "fastMode",
@@ -241,8 +228,7 @@
           "adapter": {
             "claudeCode": {
               "effortMap": {
-                "ultracode": "xhigh",
-                "ultrathink": null
+                "ultracode": "xhigh"
               },
               "fixedContextWindowTokens": 1000000
             }
@@ -281,13 +267,8 @@
                     "id": "ultracode",
                     "label": "Ultracode",
                     "description": "xhigh effort plus multi-agent workflow orchestration"
-                  },
-                  {
-                    "id": "ultrathink",
-                    "label": "Ultrathink"
                   }
-                ],
-                "promptInjectedValues": ["ultrathink"]
+                ]
               },
               {
                 "id": "fastMode",
@@ -299,8 +280,7 @@
           "adapter": {
             "claudeCode": {
               "effortMap": {
-                "ultracode": "xhigh",
-                "ultrathink": null
+                "ultracode": "xhigh"
               },
               "fixedContextWindowTokens": 1000000
             }
@@ -334,13 +314,8 @@
                   {
                     "id": "max",
                     "label": "Max"
-                  },
-                  {
-                    "id": "ultrathink",
-                    "label": "Ultrathink"
                   }
-                ],
-                "promptInjectedValues": ["ultrathink"]
+                ]
               },
               {
                 "id": "fastMode",
@@ -352,8 +327,7 @@
           "adapter": {
             "claudeCode": {
               "effortMap": {
-                "xhigh": "max",
-                "ultrathink": null
+                "xhigh": "max"
               },
               "fixedContextWindowTokens": 1000000
             }
@@ -383,13 +357,8 @@
                   {
                     "id": "max",
                     "label": "Max"
-                  },
-                  {
-                    "id": "ultrathink",
-                    "label": "Ultrathink"
                   }
-                ],
-                "promptInjectedValues": ["ultrathink"]
+                ]
               },
               {
                 "id": "fastMode",
@@ -416,9 +385,6 @@
           },
           "adapter": {
             "claudeCode": {
-              "effortMap": {
-                "ultrathink": null
-              },
               "modelSuffixes": {
                 "contextWindow": {
                   "1m": "[1m]"
@@ -497,21 +463,13 @@
                   {
                     "id": "max",
                     "label": "Max"
-                  },
-                  {
-                    "id": "ultrathink",
-                    "label": "Ultrathink"
                   }
-                ],
-                "promptInjectedValues": ["ultrathink"]
+                ]
               }
             ]
           },
           "adapter": {
             "claudeCode": {
-              "effortMap": {
-                "ultrathink": null
-              },
               "fixedContextWindowTokens": 1000000
             }
           }
@@ -540,13 +498,8 @@
                   {
                     "id": "max",
                     "label": "Max"
-                  },
-                  {
-                    "id": "ultrathink",
-                    "label": "Ultrathink"
                   }
-                ],
-                "promptInjectedValues": ["ultrathink"]
+                ]
               },
               {
                 "id": "contextWindow",
@@ -569,8 +522,7 @@
           "adapter": {
             "claudeCode": {
               "effortMap": {
-                "max": "high",
-                "ultrathink": null
+                "max": "high"
               },
               "modelSuffixes": {
                 "contextWindow": {
@@ -596,16 +548,13 @@
                   { "id": "medium", "label": "Medium", "isDefault": true },
                   { "id": "high", "label": "High" },
                   { "id": "xhigh", "label": "Extra High" },
-                  { "id": "max", "label": "Max" },
-                  { "id": "ultrathink", "label": "Ultrathink" }
-                ],
-                "promptInjectedValues": ["ultrathink"]
+                  { "id": "max", "label": "Max" }
+                ]
               }
             ]
           },
           "adapter": {
             "claudeCode": {
-              "effortMap": { "ultrathink": null },
               "fixedContextWindowTokens": 1000000
             }
           }

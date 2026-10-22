@@ -56,12 +56,12 @@ describe("compileClaudeModelSelection", () => {
     ).toEqual({ fastMode: false });
   });
 
-  it("uses the model default SDK effort alongside prompt-injected effort", () => {
+  it("falls back to model default effort for a saved Ultrathink selection without injecting a prefix", () => {
     expect(
       compileClaudeModelSelection(
         selection("claude-sonnet-4-6", [{ id: "effort", value: "ultrathink" }]),
       ),
-    ).toMatchObject({ effort: "high", promptEffort: "ultrathink" });
+    ).toMatchObject({ effort: "high", promptEffort: undefined });
   });
 
   it("compiles the thinking toggle for models that expose it", () => {

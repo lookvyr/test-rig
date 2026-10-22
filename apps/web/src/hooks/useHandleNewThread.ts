@@ -26,7 +26,6 @@ import { readProject, readThreadShell, useProjects, useThread } from "../state/e
 import {
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
-  resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
 import { resolveDraftProjectDefaults } from "../lib/draftProjectDefaults";
 import { resolveThreadRouteTarget } from "../threadRoutes";
@@ -69,12 +68,10 @@ export function useNewThreadHandler() {
         applyStickyState,
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
-        setModelSelection,
       } = useComposerDraftStore.getState();
       const currentRouteTarget = getCurrentRouteTarget();
-      // Model and interaction choices can carry from the viewed thread.
-      // The destination project's model and permissions take precedence;
-      // workspace choices use its defaults unless explicitly supplied.
+      // Interaction mode can carry from the viewed thread. Model and effort
+      // come from the last launched thread; workspace choices use project defaults.
       const carrySourceShell =
         currentRouteTarget?.kind === "server"
           ? readThreadShell(currentRouteTarget.threadRef)
@@ -90,12 +87,6 @@ export function useNewThreadHandler() {
               : currentRouteTarget.draftId,
           )
         : null;
-      const composerActiveProvider = carrySourceComposer?.activeProvider ?? null;
-      const composerModelSelection = composerActiveProvider
-        ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
-        : null;
-      const carryModelSelection =
-        composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
       const carryInteractionMode =
         carrySourceComposer?.interactionMode ??
         carrySourceShell?.interactionMode ??
@@ -189,25 +180,15 @@ export function useNewThreadHandler() {
               runtimeMode: projectDefaults.defaultRuntimeMode,
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
-            const modelSelectionOverride = resolveNewThreadModelSelectionOverride({
-              projectDefaultSelection: projectDefaults.defaultModelSelection ?? null,
-              carrySelection: carryModelSelection,
-              carrySourceDraftId:
-                currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
-              destinationDraftId: reusableStoredDraftThread.draftId,
-            });
             if (
-              modelSelectionOverride &&
               !hasExplicitComposerModelSelection(
                 getComposerDraft(reusableStoredDraftThread.draftId),
               )
             ) {
-              // The carried selection is a complete snapshot of the viewed
-              // thread's model state: absent options mean "no options", not
-              // "keep the stale draft's options".
-              setModelSelection(reusableStoredDraftThread.draftId, modelSelectionOverride, {
-                replaceOptions: true,
-              });
+              applyStickyState(
+                reusableStoredDraftThread.draftId,
+                projectDefaults.defaultModelSelection,
+              );
             }
           }
           // The workspace context must also ride along here: when projectRef
@@ -291,22 +272,7 @@ export function useNewThreadHandler() {
           runtimeMode: projectDefaults.defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
         });
-        applyStickyState(draftId);
-        const modelSelectionOverride = resolveNewThreadModelSelectionOverride({
-          projectDefaultSelection: projectDefaults.defaultModelSelection ?? null,
-          carrySelection: carryModelSelection,
-          carrySourceDraftId:
-            currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
-          destinationDraftId: draftId,
-        });
-        if (modelSelectionOverride) {
-          // After sticky state so the viewed thread's exact selection
-          // (model + options like effort and context window) wins over the
-          // globally sticky one. replaceOptions: the carried selection is a
-          // complete snapshot — absent options mean "no options", not "keep
-          // whatever sticky state just wrote".
-          setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
-        }
+        applyStickyState(draftId, projectDefaults.defaultModelSelection);
 
         await router.navigate({
           to: "/draft/$draftId",

@@ -2987,7 +2987,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             .setProviderModelOptions(composerDraftTarget, selectedProvider, change.modelOptions, {
               instanceId: selectedInstanceId,
               model: selectedModel,
-              persistSticky: true,
+              explicit: true,
             });
         }
         if (change.prompt !== promptRef.current) {

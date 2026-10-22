@@ -101,7 +101,7 @@ describe("Scratch draft reuse", () => {
   });
 });
 
-it("creates a fresh project draft with target defaults ahead of sticky model and workspace choices", async () => {
+it("creates a fresh project draft using the last launch model and the target workspace defaults", async () => {
   const store = useComposerDraftStore.getState();
   store.clearDraftThread(DraftId.make("existing"));
   mocks.readProject.mockReturnValue({
@@ -137,8 +137,8 @@ it("creates a fresh project draft with target defaults ahead of sticky model and
     worktreePath: null,
   });
   expect(store.getComposerDraft(draft.draftId)).toMatchObject({
-    activeProvider: "claude-code",
-    modelSelectionByProvider: { "claude-code": selection },
+    activeProvider: "codex",
+    modelSelectionByProvider: { codex: { model: "sticky-model" } },
   });
 });
 
@@ -233,3 +233,67 @@ it("refreshes defaults when the open logical draft moves to a different physical
     modelSelectionByProvider: { "claude-code": model },
   });
 });
+
+it("ignores the viewed thread's model when opening a new thread", async () => {
+  const store = useComposerDraftStore.getState();
+  store.clearDraftThread(DraftId.make("existing"));
+  mocks.matches = [{ params: { environmentId: "local", threadId: "viewed" } }];
+  mocks.readThreadShell.mockReturnValue({
+    id: "viewed",
+    modelSelection: { instanceId: "claudeAgent", model: "claude-fable-5" },
+  });
+  store.setStickyModelSelection({
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "gpt-6-sol",
+    options: [
+      { id: "reasoningEffort", value: "high" },
+      { id: "serviceTier", value: "fast" },
+    ],
+  });
+  await useNewThreadHandler()(projectRef);
+  const draft = store.getDraftSessionByLogicalProjectKey("scratch-key")!;
+  expect(store.getComposerDraft(draft.draftId)).toMatchObject({
+    activeProvider: "codex",
+    modelSelectionByProvider: {
+      codex: {
+        model: "gpt-6-sol",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      },
+    },
+  });
+});
+
+it.each([false, true])(
+  "refreshes a reused draft unless its model was explicitly chosen (%s)",
+  async (explicit) => {
+    const store = useComposerDraftStore.getState();
+    const draftId = DraftId.make("existing");
+    const chosen = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-opus-5-5",
+      options: [
+        { id: "effort", value: "max" },
+        { id: "fastMode", value: true },
+      ],
+    };
+    store.setModelSelection(draftId, chosen, { explicit });
+    store.setStickyModelSelection({
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-6-sol",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    });
+    store.setPrompt(draftId, "Keep this text");
+    await useNewThreadHandler()(projectRef);
+    const draft = store.getComposerDraft(draftId)!;
+    expect(draft.prompt).toBe("Keep this text");
+    expect(draft.activeProvider).toBe(explicit ? "claudeAgent" : "codex");
+    if (explicit)
+      expect(draft.modelSelectionByProvider[ProviderInstanceId.make("claudeAgent")]).toEqual(
+        chosen,
+      );
+    else
+      expect(draft.modelSelectionByProvider[ProviderInstanceId.make("codex")]?.options).toEqual([
+        { id: "reasoningEffort", value: "high" },
+      ]);
+  },
+);

@@ -68,6 +68,10 @@ export const DraftId = Schema.String.pipe(Schema.brand("DraftId"));
 export type DraftId = typeof DraftId.Type;
 
 const COMPOSER_PERSIST_DEBOUNCE_MS = 300;
+const NORMAL_SPEED_OPTIONS: ReadonlyArray<ProviderOptionSelection> = [
+  { id: "fastMode", value: false },
+  { id: "serviceTier", value: "default" },
+];
 
 const composerDebouncedStorage = createDebouncedStorage(
   typeof localStorage !== "undefined" ? localStorage : createMemoryStorage(),
@@ -412,6 +416,7 @@ interface ComposerDraftStoreState {
   /** Removes draft-session metadata after promotion is complete. */
   finalizePromotedDraftThread: (threadRef: ComposerThreadTarget) => void;
   clearDraftThread: (threadRef: ComposerThreadTarget) => void;
+  /** Remember the selection after a new thread's first turn is accepted. */
   setStickyModelSelection: (modelSelection: ModelSelection | null | undefined) => void;
   setPrompt: (threadRef: ComposerThreadTarget, prompt: string) => void;
   setTerminalContexts: (threadRef: ComposerThreadTarget, contexts: TerminalContextDraft[]) => void;
@@ -437,7 +442,11 @@ interface ComposerDraftStoreState {
       | null
       | undefined,
   ) => void;
-  applyStickyState: (threadRef: ComposerThreadTarget) => void;
+  /** Seed an untouched draft from the last launched thread, always at normal speed. */
+  applyStickyState: (
+    threadRef: ComposerThreadTarget,
+    fallbackSelection?: ModelSelection | null,
+  ) => void;
   setProviderModelOptions: (
     threadRef: ComposerThreadTarget,
     provider: ProviderDriverKind,
@@ -445,7 +454,7 @@ interface ComposerDraftStoreState {
     options?: {
       instanceId?: ProviderInstanceId | null | undefined;
       model?: string | null | undefined;
-      persistSticky?: boolean;
+      explicit?: boolean;
     },
   ) => void;
   setRuntimeMode: (
@@ -984,6 +993,7 @@ export function deriveEffectiveComposerModelState(input: {
     | Pick<ComposerThreadDraftState, "modelSelectionByProvider" | "activeProvider">
     | null
     | undefined;
+  isNewThread?: boolean;
   providers: ReadonlyArray<ServerProvider>;
   selectedProvider: ProviderDriverKind;
   /**
@@ -1044,11 +1054,28 @@ export function deriveEffectiveComposerModelState(input: {
         activeSelection.model,
       ))
     : baseModel;
-  const modelOptions =
+  let modelOptions =
     modelSelectionByProviderToOptions(input.draft?.modelSelectionByProvider) ??
     providerSelectionsFromModelSelection(input.threadModelSelection) ??
     providerSelectionsFromModelSelection(input.projectModelSelection) ??
     null;
+
+  if (input.isNewThread) {
+    const instanceId =
+      input.selectedInstanceId ?? defaultInstanceIdForDriver(input.selectedProvider);
+    const options = modelOptions?.[instanceId] ?? [];
+    // An unconfigured draft (or a newly selected provider) must not opt into
+    // a faster catalog default. Only a choice stored on this draft can do so.
+    modelOptions = {
+      ...modelOptions,
+      [instanceId]: [
+        ...options.filter((option) => !NORMAL_SPEED_OPTIONS.some(({ id }) => id === option.id)),
+        ...NORMAL_SPEED_OPTIONS.map(
+          (normal) => activeSelection?.options?.find(({ id }) => id === normal.id) ?? normal,
+        ),
+      ],
+    };
+  }
 
   return {
     selectedModel,
@@ -2593,52 +2620,35 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             };
           });
         },
-        applyStickyState: (threadRef) => {
-          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
-          if (threadKey.length === 0) {
-            return;
-          }
-          set((state) => {
-            const stickyMap = state.stickyModelSelectionByProvider;
-            const stickyActiveProvider = state.stickyActiveProvider;
-            if (Object.keys(stickyMap).length === 0 && stickyActiveProvider === null) {
-              return state;
-            }
-            const existing = state.draftsByThreadKey[threadKey];
-            const base = existing ?? createEmptyThreadDraft();
-            const nextMap = { ...base.modelSelectionByProvider };
-            for (const [provider, selection] of Object.entries(stickyMap)) {
-              if (selection) {
-                // Iteration key comes from the instance-keyed sticky map,
-                // so coerce the string back to `ProviderInstanceId` for
-                // the typed lookup.
-                const instanceKey = provider as ProviderInstanceId;
-                const current = nextMap[instanceKey];
-                nextMap[instanceKey] = {
-                  ...selection,
-                  model: current?.model ?? selection.model,
-                };
-              }
-            }
-            if (
-              Equal.equals(base.modelSelectionByProvider, nextMap) &&
-              base.activeProvider === stickyActiveProvider
-            ) {
-              return state;
-            }
-            const nextDraft: ComposerThreadDraftState = {
-              ...base,
-              modelSelectionByProvider: nextMap,
-              activeProvider: stickyActiveProvider,
-            };
-            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
-            if (shouldRemoveDraft(nextDraft)) {
-              delete nextDraftsByThreadKey[threadKey];
-            } else {
-              nextDraftsByThreadKey[threadKey] = nextDraft;
-            }
-            return { draftsByThreadKey: nextDraftsByThreadKey };
-          });
+        applyStickyState: (threadRef, fallbackSelection) => {
+          const state = get();
+          const selection =
+            (state.stickyActiveProvider
+              ? state.stickyModelSelectionByProvider[state.stickyActiveProvider]
+              : null) ?? fallbackSelection;
+          if (!selection) return;
+          // Remember model options without speed; new drafts derive Normal
+          // until the user explicitly chooses a faster speed.
+          const threadKey = resolveComposerDraftKey(state, threadRef);
+          if (!threadKey) return;
+          const seededSelection = createModelSelection(
+            selection.instanceId,
+            selection.model,
+            selection.options?.filter(
+              (option) => option.id !== "fastMode" && option.id !== "serviceTier",
+            ),
+          );
+          set((current) => ({
+            draftsByThreadKey: {
+              ...current.draftsByThreadKey,
+              [threadKey]: {
+                ...(current.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft()),
+                activeProvider: selection.instanceId,
+                modelSelectionByProvider: { [selection.instanceId]: seededSelection },
+                modelSelectionExplicit: false,
+              },
+            },
+          }));
         },
         setPrompt: (threadRef, prompt) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
@@ -2818,35 +2828,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextMap[instanceKey] = rest as ModelSelection;
             }
 
-            // Handle sticky persistence
-            let nextStickyMap = state.stickyModelSelectionByProvider;
-            let nextStickyActiveProvider = state.stickyActiveProvider;
-            if (options?.persistSticky === true) {
-              nextStickyMap = { ...state.stickyModelSelectionByProvider };
-              const stickyBase =
-                nextStickyMap[instanceKey] ??
-                base.modelSelectionByProvider[instanceKey] ??
-                createModelSelection(instanceKey, fallbackModel);
-              if (providerOpts) {
-                nextStickyMap[instanceKey] = createModelSelection(
-                  instanceKey,
-                  stickyBase.model,
-                  providerOpts,
-                );
-              } else if ((stickyBase.options?.length ?? 0) > 0) {
-                const { options: _, ...rest } = stickyBase;
-                nextStickyMap[instanceKey] = rest as ModelSelection;
-              }
-              nextStickyActiveProvider = options.instanceId
-                ? instanceKey
-                : (base.activeProvider ?? instanceKey);
-            }
-
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
-              Equal.equals(state.stickyModelSelectionByProvider, nextStickyMap) &&
-              state.stickyActiveProvider === nextStickyActiveProvider &&
-              (!options?.persistSticky || base.modelSelectionExplicit === true)
+              (options?.instanceId == null || base.activeProvider === instanceKey) &&
+              (!options?.explicit || base.modelSelectionExplicit === true)
             ) {
               return state;
             }
@@ -2855,7 +2840,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...base,
               ...(options?.instanceId ? { activeProvider: instanceKey } : {}),
               modelSelectionByProvider: nextMap,
-              ...(options?.persistSticky ? { modelSelectionExplicit: true } : {}),
+              ...(options?.explicit ? { modelSelectionExplicit: true } : {}),
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {
@@ -2864,15 +2849,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftsByThreadKey[threadKey] = nextDraft;
             }
 
-            return {
-              draftsByThreadKey: nextDraftsByThreadKey,
-              ...(options?.persistSticky === true
-                ? {
-                    stickyModelSelectionByProvider: nextStickyMap,
-                    stickyActiveProvider: nextStickyActiveProvider,
-                  }
-                : {}),
-            };
+            return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
         setRuntimeMode: (threadRef, runtimeMode) => {
@@ -3633,12 +3610,15 @@ export function useEffectiveComposerModelState(input: {
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
 }): EffectiveComposerModelState {
-  const draft = useComposerDraftModelState(input.threadRef ?? input.draftId ?? DraftId.make(""));
+  const target = input.threadRef ?? input.draftId ?? DraftId.make("");
+  const draft = useComposerDraftModelState(target);
+  const isNewThread = typeof target === "string";
 
   return useMemo(
     () =>
       deriveEffectiveComposerModelState({
         draft,
+        isNewThread,
         providers: input.providers,
         selectedProvider: input.selectedProvider,
         selectedInstanceId: input.selectedInstanceId,
@@ -3648,6 +3628,7 @@ export function useEffectiveComposerModelState(input: {
       }),
     [
       draft,
+      isNewThread,
       input.providers,
       input.settings,
       input.projectModelSelection,

@@ -340,7 +340,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       setProviderModelOptions(threadTarget, provider, nextOptions, {
         ...(instanceId ? { instanceId } : {}),
         model,
-        persistSticky: true,
+        explicit: true,
       });
     },
     [instanceId, model, persistence, provider, setProviderModelOptions],

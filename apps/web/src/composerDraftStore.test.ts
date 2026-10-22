@@ -17,6 +17,7 @@ import {
   type ModelSelection,
   type ProviderOptionSelection,
 } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 
 // The composer draft's `modelSelectionByProvider` and
@@ -62,6 +63,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
   clearComposerDraftsEnvironment,
+  deriveEffectiveComposerModelState,
   composerDraftHasUserContent,
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThread,
@@ -1340,7 +1342,7 @@ describe("composerDraftStore modelSelection", () => {
       CLAUDE_AGENT_DRIVER,
       toSelections({ thinking: false }),
       {
-        persistSticky: true,
+        explicit: true,
       },
     );
 
@@ -1355,9 +1357,11 @@ describe("composerDraftStore modelSelection", () => {
       useComposerDraftStore.getState().stickyModelSelectionByProvider[CLAUDE_AGENT_INSTANCE],
     ).toEqual(
       modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", {
-        thinking: false,
+        effort: "max",
+        fastMode: true,
       }),
     );
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBe(true);
   });
 
   it("keeps explicit default-state overrides on the selection", () => {
@@ -1437,7 +1441,7 @@ describe("composerDraftStore modelSelection", () => {
 
     store.setProviderModelOptions(threadRef, CURSOR_DRIVER, toSelections({ reasoning: "high" }), {
       model: "gpt-5.4",
-      persistSticky: true,
+      explicit: true,
     });
 
     expect(
@@ -1449,14 +1453,10 @@ describe("composerDraftStore modelSelection", () => {
     );
     expect(
       useComposerDraftStore.getState().stickyModelSelectionByProvider[CURSOR_INSTANCE],
-    ).toEqual(
-      modelSelection(CURSOR_DRIVER, "gpt-5.4", {
-        reasoning: "high",
-      }),
-    );
+    ).toBeUndefined();
   });
 
-  it("updates only the draft when sticky persistence is omitted", () => {
+  it("updates the draft without marking an implicit option change as explicit", () => {
     const store = useComposerDraftStore.getState();
 
     store.setStickyModelSelection(
@@ -1537,20 +1537,18 @@ describe("composerDraftStore modelSelection", () => {
     expect(draft?.activeProvider).toBe("claudeAgent");
   });
 
-  it("creates the first sticky snapshot from provider option changes", () => {
+  it("does not remember an unsent model or speed selection", () => {
     const store = useComposerDraftStore.getState();
 
     store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.4"));
 
     store.setProviderModelOptions(threadRef, CODEX_DRIVER, toSelections({ fastMode: true }), {
-      persistSticky: true,
+      explicit: true,
     });
 
-    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_INSTANCE]).toEqual(
-      modelSelection(CODEX_DRIVER, "gpt-5.4", {
-        fastMode: true,
-      }),
-    );
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toEqual({});
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBeNull();
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionExplicit).toBe(true);
   });
 
   it("stores provider option changes on a selected custom instance", () => {
@@ -1563,7 +1561,7 @@ describe("composerDraftStore modelSelection", () => {
       {
         instanceId: CODEX_SECONDARY_INSTANCE,
         model: "gpt-5-codex",
-        persistSticky: true,
+        explicit: true,
       },
     );
 
@@ -1576,21 +1574,16 @@ describe("composerDraftStore modelSelection", () => {
       }),
     );
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.activeProvider).toBe(CODEX_SECONDARY_INSTANCE);
-    expect(useComposerDraftStore.getState().stickyActiveProvider).toBe(CODEX_SECONDARY_INSTANCE);
+    expect(useComposerDraftStore.getState().stickyActiveProvider).toBeNull();
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_INSTANCE]).toBe(
       undefined,
     );
     expect(
       useComposerDraftStore.getState().stickyModelSelectionByProvider[CODEX_SECONDARY_INSTANCE],
-    ).toEqual(
-      expect.objectContaining({
-        instanceId: CODEX_SECONDARY_INSTANCE,
-        options: [{ id: "reasoningEffort", value: "low" }],
-      }),
-    );
+    ).toBeUndefined();
   });
 
-  it("updates only the draft when sticky persistence is disabled", () => {
+  it("keeps remembered launch settings when an option change is implicit", () => {
     const store = useComposerDraftStore.getState();
 
     store.setStickyModelSelection(
@@ -1606,7 +1599,7 @@ describe("composerDraftStore modelSelection", () => {
       CLAUDE_AGENT_DRIVER,
       toSelections({ thinking: false }),
       {
-        persistSticky: false,
+        explicit: false,
       },
     );
 
@@ -1642,6 +1635,55 @@ describe("composerDraftStore setModelSelection", () => {
   });
 });
 
+describe("new thread speed defaults", () => {
+  it.each([false, true])(
+    "uses normal speed before a first launch, preserving an opt-in (%s)",
+    (optIn) => {
+      const state = deriveEffectiveComposerModelState({
+        isNewThread: true,
+        draft: optIn
+          ? {
+              activeProvider: CODEX_INSTANCE,
+              modelSelectionByProvider: {
+                [CODEX_INSTANCE]: createModelSelection(CODEX_INSTANCE, "gpt-6-sol", [
+                  { id: "reasoningEffort", value: "high" },
+                  { id: "serviceTier", value: "fast" },
+                ]),
+              },
+            }
+          : null,
+        providers: [],
+        selectedProvider: CODEX_DRIVER,
+        selectedInstanceId: CODEX_INSTANCE,
+        threadModelSelection: null,
+        projectModelSelection: createModelSelection(CODEX_INSTANCE, "gpt-6-sol", [
+          { id: "reasoningEffort", value: "high" },
+          { id: "serviceTier", value: "fast" },
+        ]),
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      });
+      expect(state.modelOptions?.[CODEX_INSTANCE]).toEqual([
+        { id: "reasoningEffort", value: "high" },
+        { id: "fastMode", value: false },
+        { id: "serviceTier", value: optIn ? "fast" : "default" },
+      ]);
+    },
+  );
+
+  it("leaves speed selections on existing chats alone", () => {
+    const options = [{ id: "serviceTier", value: "fast" }];
+    const state = deriveEffectiveComposerModelState({
+      draft: null,
+      providers: [],
+      selectedProvider: CODEX_DRIVER,
+      threadModelSelection: createModelSelection(CODEX_INSTANCE, "gpt-6-sol", options),
+      projectModelSelection: null,
+      settings: DEFAULT_UNIFIED_SETTINGS,
+    });
+    expect(state.modelOptions?.[CODEX_INSTANCE]).toEqual(options);
+  });
+});
+
 describe("composerDraftStore sticky composer settings", () => {
   beforeEach(() => {
     resetComposerDraftStore();
@@ -1664,6 +1706,95 @@ describe("composerDraftStore sticky composer settings", () => {
       }),
     );
     expect(useComposerDraftStore.getState().stickyActiveProvider).toBe("codex");
+  });
+
+  it.each([
+    [CODEX_INSTANCE, "gpt-6-sol", "reasoningEffort", "high", "serviceTier", "fast"],
+    [CLAUDE_AGENT_INSTANCE, "claude-opus-5-5", "effort", "max", "fastMode", true],
+    [ProviderInstanceId.make("opencode"), "openai/gpt-5", "variant", "high", "fastMode", true],
+    [CODEX_SECONDARY_INSTANCE, "gpt-6-sol", "reasoningEffort", "low", "serviceTier", "priority"],
+  ] as const)(
+    "reuses %s model and effort at normal speed without changing the launched thread",
+    (instanceId, model, effortId, effort, speedId, speed) => {
+      const store = useComposerDraftStore.getState();
+      const launched = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("launched"));
+      const next = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("next"));
+      const selection = createModelSelection(instanceId, model, [
+        { id: effortId, value: effort },
+        { id: speedId, value: speed },
+      ]);
+      store.setModelSelection(launched, selection, { explicit: true });
+      store.setStickyModelSelection(selection);
+      store.applyStickyState(next);
+      expect(store.getComposerDraft(next)?.modelSelectionByProvider[instanceId]).toEqual(
+        createModelSelection(instanceId, model, [{ id: effortId, value: effort }]),
+      );
+      expect(store.getComposerDraft(launched)?.modelSelectionByProvider[instanceId]).toEqual(
+        selection,
+      );
+    },
+  );
+
+  it("remembers a new launch rather than model and effort edits on another thread", () => {
+    const store = useComposerDraftStore.getState();
+    const viewed = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("viewed"));
+    const next = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("next"));
+    store.setStickyModelSelection(
+      modelSelection(CODEX_DRIVER, "gpt-6-sol", {
+        reasoningEffort: "high",
+        serviceTier: "fast",
+      }),
+    );
+    store.setModelSelection(viewed, modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-5-5"), {
+      explicit: true,
+    });
+    store.setProviderModelOptions(viewed, CLAUDE_AGENT_DRIVER, toSelections({ effort: "low" }), {
+      explicit: true,
+    });
+    store.applyStickyState(next);
+    expect(store.getComposerDraft(next)?.activeProvider).toBe(CODEX_INSTANCE);
+    expect(store.getComposerDraft(next)?.modelSelectionByProvider[CODEX_INSTANCE]).toEqual(
+      modelSelection(CODEX_DRIVER, "gpt-6-sol", {
+        reasoningEffort: "high",
+      }),
+    );
+    store.setStickyModelSelection(
+      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-5-5", {
+        effort: "low",
+        fastMode: true,
+      }),
+    );
+    store.applyStickyState(next);
+    expect(store.getComposerDraft(next)?.activeProvider).toBe(CLAUDE_AGENT_INSTANCE);
+    expect(store.getComposerDraft(next)?.modelSelectionByProvider[CLAUDE_AGENT_INSTANCE]).toEqual(
+      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-5-5", {
+        effort: "low",
+      }),
+    );
+  });
+
+  it("drops older inherited provider buckets when refreshing an untouched draft", () => {
+    const store = useComposerDraftStore.getState();
+    const draft = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("old-draft"));
+    store.setModelSelection(
+      draft,
+      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-5-5", {
+        effort: "max",
+        fastMode: true,
+      }),
+    );
+    store.setStickyModelSelection(
+      modelSelection(CODEX_DRIVER, "gpt-6-sol", {
+        reasoningEffort: "high",
+      }),
+    );
+    store.applyStickyState(draft);
+    store.setModelSelection(draft, modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-5-5"), {
+      explicit: true,
+    });
+    expect(
+      store.getComposerDraft(draft)?.modelSelectionByProvider[CLAUDE_AGENT_INSTANCE]?.options,
+    ).toBeUndefined();
   });
 
   it("normalizes empty sticky model options by dropping selection options", () => {

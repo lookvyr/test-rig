@@ -43,11 +43,6 @@ export function retargetDraftProject(input: {
     runtimeMode: input.defaults.defaultRuntimeMode,
   });
   if (!hasExplicitComposerModelSelection(currentDraft)) {
-    store.applyStickyState(input.draftId);
-    const sticky = store.stickyActiveProvider
-      ? store.stickyModelSelectionByProvider[store.stickyActiveProvider]
-      : null;
-    const selection = input.defaults.defaultModelSelection ?? sticky;
-    if (selection) store.setModelSelection(input.draftId, selection, { replaceOptions: true });
+    store.applyStickyState(input.draftId, input.defaults.defaultModelSelection);
   }
 }

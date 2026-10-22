@@ -1,5 +1,11 @@
 # Composer controls
 
+New chats start with the provider, model, and reasoning effort from the last chat you started in this browser or desktop profile, including when you switch projects. The remembered choice updates after the first message is accepted; browsing older chats, changing an unsent draft, and sending follow-ups do not change it.
+
+Speed starts at **Normal** (or **Standard**) for each new chat. Choose a faster speed in that chat when you want it. Existing chats and choices you explicitly made in an unfinished draft are preserved.
+
+Claude’s reasoning menu offers explicit effort levels and the Ultracode preset. To request deeper reasoning for one message, you can type `ultrathink` in the prompt; it does not change the selected effort level.
+
 During a turn, the send arrow becomes **Steer message**. A follow-up changes the active turn. If the provider is still starting or cannot accept steering yet, the button explains that it is waiting. **Stop generation** remains available while you prepare a follow-up.
 
 After stopping a turn, an empty composer offers **Resume thread**. Resume continues the stopped work. Typing a new message instead uses the ordinary send action. Resume is unavailable while a pending request still needs to be resolved.

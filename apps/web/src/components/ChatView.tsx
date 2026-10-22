@@ -1950,6 +1950,7 @@ function ChatViewContent(props: ChatViewProps) {
         interactionMode: DEFAULT_INTERACTION_MODE,
         ...input,
       });
+      useComposerDraftStore.getState().applyStickyState(nextDraftId);
       await navigate({
         to: "/draft/$draftId",
         params: buildDraftThreadRouteParams(nextDraftId),
@@ -5615,6 +5616,7 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (isFirstMessage) setStickyComposerModelSelection(ctxSelectedModelSelection);
         acknowledgeActiveThreadWoke();
       }
     }
@@ -6121,14 +6123,12 @@ function ChatViewContent(props: ChatViewProps) {
         nextModelSelection,
         { explicit: true },
       );
-      setStickyComposerModelSelection(nextModelSelection);
       scheduleComposerFocus();
     },
     [
       activeThread,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
-      setStickyComposerModelSelection,
       providerStatuses,
       settings,
     ],

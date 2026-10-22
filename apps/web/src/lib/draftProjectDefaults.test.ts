@@ -77,7 +77,7 @@ describe("destination draft defaults", () => {
     expect((await resolveDraftProjectDefaults(ref)).defaultThreadEnvMode).toBe("worktree");
     expect(mocks.file).toHaveBeenCalledWith("destination", "/b");
   });
-  it("applies target defaults over sticky state and keeps composer content", () => {
+  it("keeps the last launch model when changing projects and preserves composer content", () => {
     const store = useComposerDraftStore.getState();
     store.setLogicalProjectDraftThreadId(
       "a",
@@ -114,8 +114,8 @@ describe("destination draft defaults", () => {
     expect(store.getComposerDraft(draftId)).toMatchObject({
       prompt: "Keep this rich prompt",
       threadContexts: [context],
-      activeProvider: "claude-code",
-      modelSelectionByProvider: { "claude-code": model },
+      activeProvider: "codex",
+      modelSelectionByProvider: { codex: { model: "sticky" } },
     });
   });
   it("preserves deliberately selected model and permission overrides through retargeting", () => {
