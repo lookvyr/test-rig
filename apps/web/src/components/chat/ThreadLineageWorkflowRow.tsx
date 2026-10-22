@@ -163,7 +163,7 @@ export function ThreadLineageWorkflowRow({
     group.unphasedMembers.length;
   return (
     <li className="group" data-workflow-expanded={expanded ? "" : undefined}>
-      <div className={cn("relative flex h-9 items-center", THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS)}>
+      <div className={cn("relative", THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS)}>
         {header}
         <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
         <ThreadDetailsControl

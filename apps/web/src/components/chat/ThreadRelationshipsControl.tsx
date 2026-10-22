@@ -552,6 +552,7 @@ export function ThreadRelationshipsPanel(props: {
                               size="sm"
                               variant="ghost"
                               part="primary"
+                              className={compact ? "h-auto min-h-12 py-2" : undefined}
                               disabled={node?.missing === true}
                               onClick={() => openThread(threadId)}
                             />
