@@ -4,6 +4,7 @@ import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as NativeAppIconResolver from "./assets/NativeAppIconResolver.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as OrchestratorV2 from "./orchestration-v2/Orchestrator.ts";
+import * as ProviderSessionManagerV2 from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ProviderAdapterRegistryV2 from "./orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ScheduledTaskService from "./scheduledTasks/ScheduledTaskService.ts";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
@@ -756,7 +757,12 @@ const buildAppUnderTest = (options?: {
           resolve: () => Effect.succeed(null),
         }),
       ),
-      Layer.provide(Layer.mock(OrchestratorV2.OrchestratorV2)({})),
+      Layer.provide(
+        Layer.merge(
+          Layer.mock(OrchestratorV2.OrchestratorV2)({}),
+          Layer.mock(ProviderSessionManagerV2.ProviderSessionManagerV2)({}),
+        ),
+      ),
       Layer.provide(Layer.mock(EventSink.EventSinkV2)({})),
       Layer.provide(Layer.mock(ProviderAdapterRegistryV2.ProviderAdapterRegistryV2)({})),
       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),

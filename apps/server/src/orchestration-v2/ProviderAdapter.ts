@@ -569,6 +569,11 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly steerTurn: (
     input: ProviderAdapterV2SteerInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;
+  /** Stops one provider-native task, such as a Claude workflow, without ending the turn. */
+  readonly stopTask?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+    readonly taskId: string;
+  }) => Effect.Effect<void, ProviderAdapterV2Error>;
   readonly interruptTurn: (
     input: ProviderAdapterV2InterruptInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;

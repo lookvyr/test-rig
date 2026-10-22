@@ -6,7 +6,7 @@ import type {
   ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, LoaderCircleIcon, SquareIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
@@ -15,7 +15,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import type { AgentPanelWorkflowGroup } from "../agentPanelModel";
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { CollapsibleSectionHeader, SectionHeaderStatus } from "../ui/collapsible-section-header";
-import { Tooltip, TooltipTrigger } from "../ui/tooltip";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentElapsed } from "./AgentElapsed";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
@@ -144,6 +144,9 @@ export function ThreadLineageWorkflowRow({
   threadId,
   group,
   header,
+  onStop,
+  stopping,
+  stopDisabled,
   ...providerProps
 }: {
   readonly environmentId: EnvironmentId;
@@ -151,6 +154,10 @@ export function ThreadLineageWorkflowRow({
   readonly threadId: ThreadId;
   readonly group: AgentPanelWorkflowGroup;
   readonly header: ReactNode;
+  /** Present while the workflow runs and its provider can stop it. */
+  readonly onStop: (() => void) | undefined;
+  readonly stopping: boolean;
+  readonly stopDisabled: boolean;
 } & WorkflowProviderProps) {
   const [expanded, setExpanded] = useState(false);
   const [phaseOpen, setPhaseOpen] = useState<ReadonlyMap<number, boolean>>(() => new Map());
@@ -165,6 +172,32 @@ export function ThreadLineageWorkflowRow({
     <li className="group" data-workflow-expanded={expanded ? "" : undefined}>
       <div className={cn("relative", THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS)}>
         {header}
+        {onStop ? (
+          <div className="flex w-7 shrink-0 items-center justify-center">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <ThreadDetailsControl
+                    size="icon-xs"
+                    variant="ghost"
+                    part="icon"
+                    tone="destructive"
+                    aria-label={`Stop workflow ${label}`}
+                    disabled={stopDisabled}
+                    onClick={onStop}
+                  />
+                }
+              >
+                {stopping ? (
+                  <LoaderCircleIcon aria-hidden className="size-3 animate-spin" />
+                ) : (
+                  <SquareIcon aria-hidden className="size-3 fill-current" />
+                )}
+              </TooltipTrigger>
+              <TooltipPopup side="left">Stop workflow</TooltipPopup>
+            </Tooltip>
+          </div>
+        ) : null}
         <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
         <ThreadDetailsControl
           size="sm"

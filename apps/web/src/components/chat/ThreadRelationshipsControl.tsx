@@ -25,7 +25,12 @@ import {
   canDetachThreadProviderSession,
   resolveLatestMergeBackRun,
 } from "@t3tools/client-runtime/state/thread-workflows";
-import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
+import {
+  NodeId,
+  type EnvironmentId,
+  type OrchestrationV2ThreadShell,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { groupBy } from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import { useNavigate } from "@tanstack/react-router";
@@ -50,6 +55,7 @@ import {
   useThreadDetail,
   useThreadRelationshipShells,
 } from "../../state/entities";
+import { orchestrationEnvironment } from "../../state/orchestration";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AgentElapsed } from "./AgentElapsed";
@@ -278,6 +284,10 @@ export function ThreadRelationshipsPanel(props: {
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack);
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn, { reportFailure: false });
   const [stoppingThreadId, setStoppingThreadId] = useState<ThreadId | null>(null);
+  const stopWorkflowCommand = useAtomCommand(orchestrationEnvironment.stopWorkflow, {
+    reportFailure: false,
+  });
+  const [stoppingWorkflowId, setStoppingWorkflowId] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<"merge" | "detach" | null>(null);
   const latestMergeBackRun = projection == null ? null : resolveLatestMergeBackRun(projection);
   const mergeTargetThreadId = compact ? null : resolveMergeBackTargetThreadId(projection ?? null);
@@ -348,6 +358,19 @@ export function ThreadRelationshipsPanel(props: {
     setStoppingThreadId(null);
     if (result._tag === "Failure") {
       toastManager.add({ type: "error", title: "Could not stop subagent" });
+    }
+  };
+
+  const stopWorkflow = async (subagentId: string) => {
+    if (stoppingWorkflowId !== null) return;
+    setStoppingWorkflowId(subagentId);
+    const result = await stopWorkflowCommand({
+      environmentId: props.environmentId,
+      input: { threadId: props.threadId, subagentId: NodeId.make(subagentId) },
+    });
+    setStoppingWorkflowId(null);
+    if (result._tag === "Failure") {
+      toastManager.add({ type: "error", title: "Could not stop workflow" });
     }
   };
 
@@ -543,6 +566,15 @@ export function ThreadRelationshipsPanel(props: {
                     provider={provider}
                     providers={providers}
                     driver={providerDriver}
+                    onStop={
+                      agent.status === "running" &&
+                      agent.origin === "provider_native" &&
+                      providerDriver === "claudeAgent"
+                        ? () => void stopWorkflow(agent.id)
+                        : undefined
+                    }
+                    stopping={stoppingWorkflowId === agent.id}
+                    stopDisabled={stoppingWorkflowId !== null}
                     header={
                       <Tooltip>
                         <TooltipTrigger

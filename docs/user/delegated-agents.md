@@ -147,5 +147,8 @@ subagent in **Subagents** and **Lineage**, named after the workflow. Expand it t
 see each phase with its agents and how long they took; hover an agent for its
 model, status and result. Phases appear as the workflow reaches them, and a
 finished phase stays collapsed to one line until you open it. **Script** shows the workflow script
-Claude ran. Stop the workflow by stopping the conversation's turn; the agents
-inside a workflow do not get chats of their own.
+Claude ran; the agents inside a workflow do not get chats of their own.
+
+While a workflow runs, the square button on its row stops it, even after the
+turn that launched it has ended; the conversation's turn keeps going. Stopping
+the turn, or a turn that fails, also stops the workflows it launched.

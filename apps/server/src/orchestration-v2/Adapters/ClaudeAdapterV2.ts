@@ -371,6 +371,8 @@ export interface ClaudeAgentSdkQuerySession {
   readonly messages: Stream.Stream<SDKMessage, ClaudeAgentSdkQueryRunnerError>;
   readonly offer: (message: SDKUserMessage) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   readonly setModel: (model: string) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
+  /** Asks the CLI to stop one running task, such as a workflow. Optional for test doubles. */
+  readonly stopTask?: (taskId: string) => Effect.Effect<void, ClaudeAgentSdkQueryRunnerError>;
   /** Moves a foreground tool task to the background; false when none matched. */
   readonly backgroundTasks: (
     toolUseId: string,
@@ -527,6 +529,14 @@ export type ClaudeAgentSdkProtocolLogEvent =
       readonly payload: {
         readonly type: "query.background_tasks";
         readonly toolUseId: string;
+      };
+    }
+  | {
+      readonly direction: "outgoing";
+      readonly stage: "decoded";
+      readonly payload: {
+        readonly type: "query.stop_task";
+        readonly taskId: string;
       };
     }
   | {
@@ -742,6 +752,19 @@ export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
               try: () => queryRuntime.reconnectMcpServer(name),
               catch: (cause) => queryRunnerError(cause, "reconnectMcpServer"),
             }),
+          stopTask: (taskId) =>
+            Effect.tryPromise({
+              try: () => queryRuntime.stopTask(taskId),
+              catch: (cause) => queryRunnerError(cause, "stopTask"),
+            }).pipe(
+              Effect.tap(() =>
+                logProtocolEvent({
+                  direction: "outgoing",
+                  stage: "decoded",
+                  payload: { type: "query.stop_task", taskId },
+                }),
+              ),
+            ),
           backgroundTasks: (toolUseId) =>
             Effect.tryPromise({
               try: () => queryRuntime.backgroundTasks(toolUseId),
@@ -5316,6 +5339,34 @@ export function makeClaudeAdapterV2(
           readonly result?: SDKResultMessage;
         }) {
           yield* reasoningDeltas.flushTurn(input.context.nativeTurnId);
+          // Interrupting the CLI leaves its tasks running, so a stopped turn
+          // stops the workflows it launched; the app has already settled them.
+          if (input.status !== "completed") {
+            const liveQuery = yield* Ref.get(queryContext);
+            for (const [taskId, subagent] of yield* Ref.get(sessionSubagentsByTaskId)) {
+              if (
+                subagent.task.workflow === undefined ||
+                subagent.task.status !== "running" ||
+                subagent.task.runId !== input.context.input.runId
+              )
+                continue;
+              const stopTask = liveQuery?.query.stopTask;
+              if (liveQuery !== null && !liveQuery.stopping && stopTask !== undefined) {
+                // Best effort and off the terminal path: an unanswered stop must
+                // not keep the turn from ending.
+                yield* stopTask(taskId).pipe(
+                  Effect.timeout("15 seconds"),
+                  Effect.ignore,
+                  Effect.forkIn(sessionScope),
+                );
+              }
+              yield* updateClaudeSubagentNode({
+                context: input.context,
+                taskId,
+                status: input.status === "failed" ? "failed" : "cancelled",
+              });
+            }
+          }
           // A subagent still running in the background keeps its open calls:
           // their results arrive after this turn. One left by an earlier CLI
           // process is gone and never reports them.
@@ -8528,6 +8579,38 @@ export function makeClaudeAdapterV2(
               message: { ...turnInput.message, text: "/compact" },
             }),
           steerTurn,
+          stopTask: Effect.fn("ClaudeAdapterV2.stopTask")(function* ({ providerThread, taskId }) {
+            const liveQuery = yield* Ref.get(queryContext);
+            const task = (yield* Ref.get(sessionSubagentsByTaskId)).get(taskId);
+            const stopTask = liveQuery?.query.stopTask;
+            if (
+              liveQuery === null ||
+              stopTask === undefined ||
+              liveQuery.stopping ||
+              liveQuery.nativeThreadId !== providerThread.nativeThreadRef?.nativeId ||
+              task === undefined ||
+              task.task.threadId !== providerThread.appThreadId ||
+              task.task.workflow === undefined ||
+              task.task.status !== "running" ||
+              liveQuery.subagentsFromEarlierProcesses.has(task)
+            ) {
+              return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+                driver: CLAUDE_PROVIDER,
+                detail: "No running workflow task belongs to this provider thread",
+              });
+            }
+            // The CLI answers with a task_notification, which settles the workflow.
+            yield* stopTask(taskId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ProviderAdapter.ProviderAdapterProtocolError({
+                    driver: CLAUDE_PROVIDER,
+                    detail: "Workflow stop request failed",
+                    cause,
+                  }),
+              ),
+            );
+          }),
           interruptTurn,
           respondToRuntimeRequest: Effect.fn("ClaudeAdapterV2.respondToRuntimeRequest")(
             function* (requestInput) {

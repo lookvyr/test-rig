@@ -25,6 +25,9 @@ import * as ThreadManagement from "./ThreadManagementService.ts";
 import * as ThreadLaunch from "./ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
 import * as ThreadSearch from "./ThreadSearch.ts";
+import * as Orchestrator from "./Orchestrator.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import { stopWorkflow } from "./WorkflowStop.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ApplicationEvents from "./Services/OrchestrationEventStore.ts";
 import {
@@ -72,6 +75,9 @@ export const makeHandlers = Effect.fn("orchestrationV2.makeRpcHandlers")(functio
   const diffs = yield* CheckpointDiffQuery.CheckpointDiffQuery;
   const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
   const archive = yield* makeArchivedShellStreams;
+  const workflowStopContext = yield* Effect.context<
+    Orchestrator.OrchestratorV2 | ProviderSessionManager.ProviderSessionManagerV2
+  >();
   return OrchestrationV2RpcGroup.of({
     [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: (input) =>
       observe.streamEffect(
@@ -106,6 +112,11 @@ export const makeHandlers = Effect.fn("orchestrationV2.makeRpcHandlers")(functio
       ),
     [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: (input) =>
       observe.effect(ORCHESTRATION_V2_WS_METHODS.getWorkflowScript, readWorkflowScript(input)),
+    [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: (input) =>
+      observe.effect(
+        ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
+        stopWorkflow(input).pipe(Effect.provide(workflowStopContext)),
+      ),
     [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: (input) =>
       observe.effect(
         ORCHESTRATION_V2_WS_METHODS.getTurnItem,

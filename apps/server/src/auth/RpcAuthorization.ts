@@ -36,6 +36,7 @@ export const RPC_REQUIRED_SCOPES = {
   [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.subscribeThread]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: AuthOrchestrationReadScope,
+  [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksList]: AuthOrchestrationReadScope,
   [WS_METHODS.toolsProjectScopesList]: AuthOrchestrationReadScope,
   [WS_METHODS.skillLibraryList]: AuthOrchestrationReadScope,

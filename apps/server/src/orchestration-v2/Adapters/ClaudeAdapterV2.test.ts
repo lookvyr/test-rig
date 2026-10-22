@@ -2234,6 +2234,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly backgroundTasks?: (
       toolUseId: string,
     ) => Effect.Effect<boolean, ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError>;
+    readonly stopTask?: (taskId: string) => Effect.Effect<void>;
     readonly environment?: NodeJS.ProcessEnv;
     readonly onCommandOutput?: ProviderAdapterV2OpenSessionInput["onCommandOutput"];
     // A CLI process opened after the first streams from its own queue, so the
@@ -2302,6 +2303,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                     }),
                   setModel: () => Effect.void,
                   backgroundTasks: options?.backgroundTasks ?? (() => Effect.succeed(false)),
+                  stopTask: options?.stopTask ?? (() => Effect.void),
                   setPermissionMode: () => Effect.void,
                   interrupt: Effect.void,
                   close: Queue.shutdown(processMessages),
@@ -2332,6 +2334,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   }),
                 setModel: () => Effect.void,
                 backgroundTasks: options?.backgroundTasks ?? (() => Effect.succeed(false)),
+                stopTask: options?.stopTask ?? (() => Effect.void),
                 interrupt: options?.interrupt ?? Effect.void,
                 close: options?.close?.(sdkMessages) ?? Effect.void,
               };
@@ -4190,6 +4193,160 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           ],
         );
         assert.equal(workflow?.totalTokens, 3_000);
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
+  const STOP_WORKFLOW_TASK_ID = "task-workflow-stop";
+  const STOP_WORKFLOW_TOOL_USE_ID = "toolu-workflow-stop";
+  const launchStoppableWorkflow = Effect.fnUntraced(function* (
+    harness: Effect.Success<typeof makeWakeHarness>,
+    attemptId: RunAttemptId,
+  ) {
+    yield* harness.runtime.startTurn(
+      makeClaudeTestTurnInput({
+        threadId: harness.threadId,
+        providerThread: harness.providerThread,
+        now: yield* DateTime.now,
+        attemptId,
+        text: "Run the workflow.",
+        attachments: [],
+      }),
+    );
+    yield* harness.offerAndWait(
+      claudeSdkFrame({
+        type: "system",
+        subtype: "task_started",
+        task_id: STOP_WORKFLOW_TASK_ID,
+        tool_use_id: STOP_WORKFLOW_TOOL_USE_ID,
+        description: "Run the alpha workflow",
+        task_type: "local_workflow",
+        workflow_name: "alpha",
+        uuid: "00000000-0000-4000-8000-000000000801",
+        session_id: WAKE_NATIVE_SESSION,
+      }),
+    );
+    yield* harness.offerAndWait(
+      claudeSdkFrame({
+        type: "system",
+        subtype: "task_progress",
+        task_id: STOP_WORKFLOW_TASK_ID,
+        tool_use_id: STOP_WORKFLOW_TOOL_USE_ID,
+        description: "",
+        workflow_progress: [
+          { type: "workflow_phase", index: 0, title: "Alpha" },
+          { type: "workflow_agent", index: 0, label: "one", state: "start", phaseIndex: 0 },
+        ],
+        uuid: "00000000-0000-4000-8000-000000000802",
+        session_id: WAKE_NATIVE_SESSION,
+      }),
+    );
+  });
+  const stopWorkflowCoordinator = (events: ReadonlyArray<ProviderAdapterV2Event>) =>
+    events
+      .flatMap((event) =>
+        event.type === "subagent.updated" &&
+        event.subagent.nativeTaskRef?.nativeId === STOP_WORKFLOW_TASK_ID
+          ? [event.subagent]
+          : [],
+      )
+      .at(-1);
+
+  it.effect("stops only a live workflow task without ending the turn", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const stoppedTasks: Array<string> = [];
+        let interrupted = false;
+        const harness = yield* makeWakeHarnessWithOptions({
+          stopTask: (taskId) => Effect.sync(() => void stoppedTasks.push(taskId)),
+          interrupt: Effect.sync(() => {
+            interrupted = true;
+          }),
+        });
+        yield* launchStoppableWorkflow(harness, RunAttemptId.make("attempt-workflow-stop"));
+        const stopTask = harness.runtime.stopTask!;
+        const wrongThread = {
+          ...harness.providerThread,
+          nativeThreadRef: {
+            driver: harness.providerThread.driver,
+            nativeId: "wrong-session",
+            strength: "strong" as const,
+          },
+        };
+        for (const attempt of [
+          { providerThread: harness.providerThread, taskId: "missing-task" },
+          { providerThread: wrongThread, taskId: STOP_WORKFLOW_TASK_ID },
+        ]) {
+          assert.isTrue(Exit.isFailure(yield* stopTask(attempt).pipe(Effect.exit)));
+        }
+        assert.deepEqual(stoppedTasks, []);
+
+        yield* stopTask({ providerThread: harness.providerThread, taskId: STOP_WORKFLOW_TASK_ID });
+        assert.deepEqual(stoppedTasks, [STOP_WORKFLOW_TASK_ID]);
+        assert.isFalse(interrupted);
+        // The CLI's own notification settles it.
+        yield* awaitUntil(
+          () => stopWorkflowCoordinator(harness.events)?.status === "running",
+          "running workflow",
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_notification",
+            task_id: STOP_WORKFLOW_TASK_ID,
+            tool_use_id: STOP_WORKFLOW_TOOL_USE_ID,
+            status: "stopped",
+            output_file: "/tmp/workflow.output",
+            summary: "Workflow stopped.",
+            uuid: "00000000-0000-4000-8000-000000000803",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        yield* awaitUntil(
+          () => stopWorkflowCoordinator(harness.events)?.status === "cancelled",
+          "stopped workflow",
+        );
+        assert.isTrue(
+          Exit.isFailure(
+            yield* stopTask({
+              providerThread: harness.providerThread,
+              taskId: STOP_WORKFLOW_TASK_ID,
+            }).pipe(Effect.exit),
+          ),
+        );
+        assert.deepEqual(stoppedTasks, [STOP_WORKFLOW_TASK_ID]);
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
+  // An interrupt closes the whole CLI process, which ends its workflows too. A
+  // turn that fails leaves the process, and so its workflows, running.
+  it.effect("a failed turn stops the workflows it launched", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const stoppedTasks: Array<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          stopTask: (taskId) => Effect.sync(() => void stoppedTasks.push(taskId)),
+        });
+        yield* launchStoppableWorkflow(harness, RunAttemptId.make("attempt-workflow-fail"));
+        yield* Queue.offer(
+          harness.sdkMessages,
+          makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000804",
+            result: "boom",
+            subtype: "error_during_execution",
+            isError: true,
+            errors: ["boom"],
+            terminalReason: "model_error",
+          }),
+        );
+        yield* awaitUntil(() => harness.terminalEvents().length === 1, "failed turn terminal");
+        yield* awaitUntil(() => stoppedTasks.length === 1, "workflow stop request");
+        assert.deepEqual(stoppedTasks, [STOP_WORKFLOW_TASK_ID]);
+        yield* awaitUntil(
+          () => stopWorkflowCoordinator(harness.events)?.status === "failed",
+          "failed workflow",
+        );
       }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
     ),
   );

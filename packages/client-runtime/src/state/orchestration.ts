@@ -4,6 +4,7 @@ import { applyCommandOutputFrame, EMPTY_COMMAND_OUTPUT } from "./commandOutput.t
 import { Atom } from "effect/unstable/reactivity";
 
 import {
+  createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "./runtime.ts";
@@ -36,6 +37,10 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       // Scripts are immutable per run: cache generously.
       staleTimeMs: 300_000,
       idleTtlMs: 300_000,
+    }),
+    stopWorkflow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:orchestration:stop-workflow",
+      tag: ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
     }),
     // One fetch while running, then a fresh cache key when the item finishes.
     turnItem: createEnvironmentRpcQueryAtomFamily(runtime, {
