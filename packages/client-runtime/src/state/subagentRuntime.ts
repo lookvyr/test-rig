@@ -61,6 +61,8 @@ export interface RuntimeSubagent {
   readonly phases: ReadonlyArray<SubagentWorkflowPhase>;
   readonly runHandles: SubagentRunHandles | null;
   readonly recentActivity: ReadonlyArray<SubagentActivityEntry>;
+  /** A workflow agent's own thread; other subagents are linked by their projection. */
+  readonly childThreadId?: string | null;
   /** First retained observation, used as the roster's stable display order. */
   readonly firstSeenAt: string;
   readonly startedAt: string | null;
@@ -133,6 +135,13 @@ function workflowAgentsToRuntime(
     const status =
       coordinatorEnded && !isTerminalSubagentStatus(reported) ? coordinator.status : reported;
     const startedAt = epochIso(agent.startedAt);
+    // An agent its workflow cut short reports no end of its own.
+    const completedAt = isTerminalSubagentStatus(status)
+      ? (epochIso(agent.completedAt) ??
+        (agent.startedAt !== undefined && agent.durationMs !== undefined
+          ? epochIso(agent.startedAt + agent.durationMs)
+          : coordinator.completedAt))
+      : null;
     return {
       id: `${coordinator.id}:agent:${agent.index}`,
       kind: "workflow_agent",
@@ -150,7 +159,7 @@ function workflowAgentsToRuntime(
               ...(agent.toolCalls === undefined ? {} : { toolUses: agent.toolCalls }),
               ...(agent.durationMs === undefined ? {} : { durationMs: agent.durationMs }),
             },
-      progress: null,
+      progress: agent.prompt ?? null,
       lastToolName: null,
       result: agent.result ?? null,
       error: agent.state === "failed" ? (agent.result ?? null) : null,
@@ -164,9 +173,10 @@ function workflowAgentsToRuntime(
       phases: [],
       runHandles: null,
       recentActivity: [],
+      childThreadId: agent.childThreadId ?? null,
       firstSeenAt: epochIso(agent.queuedAt) ?? startedAt ?? coordinator.firstSeenAt,
       startedAt,
-      completedAt: epochIso(agent.completedAt),
+      completedAt,
       updatedAt: coordinator.updatedAt,
     } satisfies RuntimeSubagent;
   });

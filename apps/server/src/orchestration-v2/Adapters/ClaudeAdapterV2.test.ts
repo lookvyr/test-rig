@@ -4351,6 +4351,200 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("gives each workflow agent a thread with its prompt, tool calls and reply", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const configDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-wf-" });
+        const transcriptDir = `${configDir}/projects/workflow`;
+        yield* fileSystem.makeDirectory(transcriptDir, { recursive: true });
+        const harness = yield* makeWakeHarnessWithOptions({
+          environment: { CLAUDE_CONFIG_DIR: configDir },
+        });
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-workflow-members"),
+            text: "Run the workflow.",
+            attachments: [],
+          }),
+        );
+        const taskId = "task-workflow-members";
+        const toolUseId = "toolu-workflow-members";
+        const snapshot = (uuid: string, state: "start" | "done") =>
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_progress",
+            task_id: taskId,
+            tool_use_id: toolUseId,
+            description: "",
+            workflow_progress: [
+              { type: "workflow_phase", index: 0, title: "Alpha" },
+              {
+                type: "workflow_agent",
+                index: 0,
+                label: "alpha:one",
+                agentId: "a1",
+                state,
+                phaseIndex: 0,
+                promptPreview: "Reply with exactly: A1",
+                ...(state === "done" ? { resultPreview: "A1 excerpt" } : {}),
+              },
+            ],
+            uuid,
+            session_id: WAKE_NATIVE_SESSION,
+          });
+        for (const frame of [
+          claudeSdkFrame({
+            type: "assistant",
+            message: {
+              model: "claude-sonnet-4-6",
+              content: [{ type: "tool_use", id: toolUseId, name: "Workflow", input: {} }],
+            },
+            parent_tool_use_id: null,
+            uuid: "00000000-0000-4000-8000-000000000901",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: taskId,
+            tool_use_id: toolUseId,
+            description: "Run the alpha workflow",
+            task_type: "local_workflow",
+            workflow_name: "alpha",
+            uuid: "00000000-0000-4000-8000-000000000902",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+          claudeSdkFrame({
+            type: "user",
+            message: {
+              role: "user",
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: toolUseId,
+                  content: [{ type: "text", text: "Workflow launched." }],
+                },
+              ],
+            },
+            parent_tool_use_id: null,
+            uuid: "00000000-0000-4000-8000-000000000903",
+            session_id: WAKE_NATIVE_SESSION,
+            tool_use_result: { taskType: "local_workflow", runId: "wf_alpha", transcriptDir },
+          }),
+          snapshot("00000000-0000-4000-8000-000000000904", "start"),
+        ]) {
+          yield* harness.offerAndWait(frame);
+        }
+        const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+        yield* fileSystem.writeFileString(
+          `${transcriptDir}/agent-a1.jsonl`,
+          line({
+            type: "assistant",
+            uuid: "wf-a1-1",
+            message: {
+              role: "assistant",
+              id: "msg_a1_1",
+              stop_reason: "tool_use",
+              content: [
+                { type: "thinking", thinking: "Check the file first." },
+                {
+                  type: "tool_use",
+                  id: "toolu-a1-read",
+                  name: "Read",
+                  input: { file_path: "a.ts" },
+                },
+              ],
+            },
+          }) +
+            line({
+              type: "user",
+              uuid: "wf-a1-2",
+              message: {
+                role: "user",
+                content: [{ type: "tool_result", tool_use_id: "toolu-a1-read", content: "ok" }],
+              },
+            }) +
+            line({
+              type: "assistant",
+              uuid: "wf-a1-3",
+              message: {
+                role: "assistant",
+                id: "msg_a1_2",
+                stop_reason: "end_turn",
+                content: [{ type: "text", text: "A1" }],
+              },
+            }),
+        );
+        yield* harness.offerAndWait(snapshot("00000000-0000-4000-8000-000000000905", "done"));
+
+        const coordinator = () =>
+          harness.events
+            .flatMap((event) =>
+              event.type === "subagent.updated" && event.subagent.nativeTaskRef?.nativeId === taskId
+                ? [event.subagent]
+                : [],
+            )
+            .at(-1);
+        const member = () =>
+          harness.events
+            .flatMap((event) =>
+              event.type === "subagent.updated" &&
+              event.subagent.nativeTaskRef?.nativeId?.endsWith(":agent:0") === true
+                ? [event.subagent]
+                : [],
+            )
+            .at(-1);
+        yield* awaitUntil(() => member()?.status === "completed", "completed member");
+        const memberThreadId = member()?.childThreadId;
+        assert.equal(member()?.threadId, coordinator()?.childThreadId);
+        assert.isNull(member()?.runId);
+        assert.equal(coordinator()?.workflow?.agents[0]?.childThreadId, memberThreadId);
+        const memberThread = harness.events.find(
+          (event) => event.type === "app_thread.created" && event.appThread.id === memberThreadId,
+        );
+        assert.equal(
+          memberThread?.type === "app_thread.created" ? memberThread.appThread.title : null,
+          "alpha:one",
+        );
+        assert.equal(
+          memberThread?.type === "app_thread.created"
+            ? memberThread.appThread.lineage.parentThreadId
+            : null,
+          coordinator()?.childThreadId,
+        );
+        const memberItems = () =>
+          harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" && event.turnItem.threadId === memberThreadId
+              ? [event.turnItem]
+              : [],
+          );
+        yield* awaitUntil(
+          () => memberItems().some((item) => item.type === "assistant_message"),
+          "member reply",
+        );
+        const messages = harness.events.flatMap((event) =>
+          event.type === "message.updated" && event.message.threadId === memberThreadId
+            ? [event.message.text]
+            : [],
+        );
+        assert.deepEqual(messages, ["Reply with exactly: A1", "A1"]);
+        assert.isTrue(
+          memberItems().some(
+            (item) => item.type === "reasoning" && item.text === "Check the file first.",
+          ),
+        );
+        const readCall = memberItems().findLast(
+          (item) => item.nativeItemRef?.nativeId === "toolu-a1-read",
+        );
+        assert.equal(readCall?.status, "completed");
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
+  );
+
   it.effect("resolves API retries on resumed assistant activity", () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -328,6 +328,10 @@ export function selectThreadRelationshipShells(
     if (parentThreadId !== null) named.add(parentThreadId);
     for (const subagent of projection.subagents) {
       if (subagent.childThreadId !== null) named.add(subagent.childThreadId);
+      // A workflow's agents open from its row, though they sit under its thread.
+      for (const agent of subagent.workflow?.agents ?? []) {
+        if (agent.childThreadId !== undefined) named.add(agent.childThreadId);
+      }
     }
     for (const transfer of projection.contextTransfers) {
       named.add(transfer.sourceThreadId);

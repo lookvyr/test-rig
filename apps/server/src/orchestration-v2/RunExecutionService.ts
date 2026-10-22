@@ -59,8 +59,12 @@ import * as RunFinalizationService from "./RunFinalizationService.ts";
 export interface ProviderEventRoutingState {
   readonly ownedThreadIds: ReadonlySet<ThreadId>;
   // Set once this run's root turn ended. A child thread created after that
-  // belongs to the run that is live then, so this one no longer adopts it.
+  // belongs to the run that is live then, so this one no longer adopts it,
+  // except a workflow member enrolled below: its workflow keeps this run
+  // open, so the member is this run's to follow.
   readonly rootTurnEnded: boolean;
+  /** Member thread id to the workflow child thread that spawned it. */
+  readonly workflowMemberParents: ReadonlyMap<ThreadId, ThreadId>;
   readonly ownedProviderThreadIds: ReadonlySet<ProviderThreadId>;
   readonly ownedProviderTurnIds: ReadonlySet<ProviderTurnId>;
   readonly inheritedBackgroundTurnItems: ReadonlyMap<TurnItemId, OrchestrationV2Run["id"]>;
@@ -337,6 +341,7 @@ export function makeProviderEventRoutingState(input: {
   return {
     ownedThreadIds: new Set([input.identity.threadId, ...(input.relatedThreadIds ?? [])]),
     rootTurnEnded: false,
+    workflowMemberParents: new Map(),
     ownedProviderThreadIds: new Set([
       input.identity.providerThreadId,
       ...(input.relatedProviderThreadIds ?? []),
@@ -382,10 +387,12 @@ export function routeProviderEvent(
         return [true, state];
       }
       const isOwnedSubagent =
-        !state.rootTurnEnded &&
         event.appThread.lineage.relationshipToParent === "subagent" &&
         event.appThread.lineage.parentThreadId !== null &&
-        ownsThread(event.appThread.lineage.parentThreadId);
+        ownsThread(event.appThread.lineage.parentThreadId) &&
+        (!state.rootTurnEnded ||
+          state.workflowMemberParents.get(event.appThread.id) ===
+            event.appThread.lineage.parentThreadId);
       if (!isOwnedSubagent) {
         return [false, state];
       }
@@ -433,7 +440,21 @@ export function routeProviderEvent(
         !ownsThread(subagent.childThreadId)
           ? { ...state, ownedThreadIds: new Set([...state.ownedThreadIds, subagent.childThreadId]) }
           : state;
-      return [belongs, adopted];
+      // A workflow names its members' threads before they exist.
+      if (
+        !ownsRun(subagent.runId) ||
+        subagent.workflow === undefined ||
+        subagent.childThreadId === null
+      ) {
+        return [belongs, adopted];
+      }
+      const workflowMemberParents = new Map(adopted.workflowMemberParents);
+      for (const member of subagent.workflow.agents) {
+        if (member.childThreadId !== undefined) {
+          workflowMemberParents.set(member.childThreadId, subagent.childThreadId);
+        }
+      }
+      return [true, { ...adopted, workflowMemberParents }];
     }
     case "message.updated":
       return [ownsRun(event.message.runId) || ownsChildThread(event.message.threadId), state];

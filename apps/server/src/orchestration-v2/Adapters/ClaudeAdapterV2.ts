@@ -5,6 +5,12 @@ import {
   mergeClaudeWorkflowProgress,
   parseClaudeWorkflowRunHandles,
 } from "./claudeWorkflowProgress.ts";
+import { field, text } from "../unknownField.ts";
+import {
+  initialWorkflowAgentTranscriptCursor,
+  readWorkflowAgentTranscript,
+  type WorkflowAgentTranscriptCursor,
+} from "../workflowAgentTranscript.ts";
 import { SIDE_CHAT_INSTRUCTIONS } from "../../provider/SideChatInstructions.ts";
 import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
@@ -67,6 +73,7 @@ import {
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2AppThread,
+  type OrchestrationV2SubagentWorkflow,
   type OrchestrationV2WorkflowRunHandles,
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2RuntimeRequest,
@@ -95,6 +102,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Equal from "effect/Equal";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
@@ -2957,6 +2965,67 @@ interface ActiveClaudeToolCall {
   readonly presentation?: ClaudeToolPresentation;
 }
 
+// Claude Code flushes transcript writes every 100 ms, so a workflow member's
+// reply can land after the progress frame that settles it. Its transcript
+// stays the source of its answer this long after it settles.
+const WORKFLOW_MEMBER_TRANSCRIPT_FLUSH_MS = 500;
+
+/** Where a workflow member's conversation lands: its child thread and root node. */
+interface ClaudeWorkflowMemberTarget {
+  readonly childThreadId: ThreadId;
+  readonly childRootNodeId: OrchestrationV2ExecutionNode["id"];
+  readonly nextOrdinal: () => number;
+  readonly toolCalls: Map<string, ActiveClaudeToolCall>;
+}
+
+/** What was last projected for one workflow member, so each change is emitted once. */
+interface ClaudeWorkflowMemberState {
+  readonly status: OrchestrationV2Subagent["status"];
+  readonly attempt: number;
+  readonly agentId: string | undefined;
+  readonly transcriptReadAttempts: number;
+  readonly finalTranscriptRead: boolean;
+  // Where the next read of the member's transcript starts; every line before
+  // it is already projected into the member's thread.
+  readonly transcriptCursor: WorkflowAgentTranscriptCursor;
+  readonly nextItemOrdinal: number;
+  readonly toolCalls: Map<string, ActiveClaudeToolCall>;
+  readonly textShown: boolean;
+  // The transcript reached the end of the member's last turn.
+  readonly turnEnded: boolean;
+  readonly resultShown: boolean;
+  readonly result: string | undefined;
+  readonly label: string;
+  readonly prompt: string;
+  readonly model: string;
+  readonly createdAt: DateTime.Utc;
+  readonly startedAt: DateTime.Utc | null;
+  readonly completedAt: DateTime.Utc | null;
+}
+
+/**
+ * Whether a transcript line ends the assistant's turn. Claude Code writes each
+ * block of a message as its own line, `stop_reason: null` on all but the last,
+ * and text before a tool call (`tool_use`) is not the reply.
+ */
+function isClaudeTranscriptTurnEnd(entry: unknown): boolean {
+  if (field(entry, "type") !== "assistant") return false;
+  const stopReason = field(field(entry, "message"), "stop_reason");
+  return typeof stopReason === "string" && stopReason !== "tool_use";
+}
+
+function isClaudeTranscriptConversationLine(
+  entry: unknown,
+): entry is SDKAssistantMessage | SDKUserMessage {
+  const type = field(entry, "type");
+  const content = field(field(entry, "message"), "content");
+  return (
+    typeof field(entry, "uuid") === "string" &&
+    ((type === "assistant" && Array.isArray(content)) ||
+      (type === "user" && (Array.isArray(content) || typeof content === "string")))
+  );
+}
+
 // What is known about a subagent before its task_started registers it,
 // keyed by the tool_use_id that launches it.
 interface PendingClaudeSubagentLaunch {
@@ -3474,6 +3543,9 @@ export function makeClaudeAdapterV2(
         // ended, and its task_notification must both count as wake evidence
         // and hydrate the original subagent node instead of being dropped.
         const sessionSubagentsByTaskId = yield* Ref.make(new Map<string, ActiveClaudeSubagent>());
+        // Survives turn settle: workflow members mostly finish after the
+        // launching turn has ended, and each transition is emitted once.
+        const workflowMemberStates = yield* Ref.make(new Map<string, ClaudeWorkflowMemberState>());
         // Subagent frames carry only parent_tool_use_id. Frames that outlive
         // the turn that launched the subagent (wake drain, later turns) resolve
         // their subagent through this index into sessionSubagentsByTaskId.
@@ -4443,6 +4515,544 @@ export function makeClaudeAdapterV2(
           );
         });
 
+        // Each workflow member gets its own child thread under the workflow's.
+        const withWorkflowMemberThreadIds = (
+          workflow: OrchestrationV2SubagentWorkflow,
+          coordinatorChildThreadId: ThreadId,
+        ): OrchestrationV2SubagentWorkflow => ({
+          ...workflow,
+          agents: workflow.agents.map((member) => ({
+            ...member,
+            childThreadId: idAllocator.derive.threadFromProviderThread({
+              driver: CLAUDE_PROVIDER,
+              nativeThreadId: `${coordinatorChildThreadId}:agent:${member.index}`,
+            }),
+          })),
+        });
+
+        const emitWorkflowMemberMessage = Effect.fnUntraced(function* (input: {
+          readonly nativeItemId: string;
+          readonly target: Pick<ClaudeWorkflowMemberTarget, "childThreadId" | "childRootNodeId">;
+          readonly role: "user" | "assistant";
+          readonly text: string;
+          readonly ordinal: number;
+          readonly now: DateTime.Utc;
+        }) {
+          const artifacts = makeSubagentConversationArtifacts({
+            messageId: idAllocator.derive.messageFromProviderItem({
+              driver: CLAUDE_PROVIDER,
+              nativeItemId: input.nativeItemId,
+            }),
+            turnItemId: idAllocator.derive.turnItemFromProviderItem({
+              driver: CLAUDE_PROVIDER,
+              nativeItemId: input.nativeItemId,
+            }),
+            threadId: input.target.childThreadId,
+            rootNodeId: input.target.childRootNodeId,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: {
+              driver: CLAUDE_PROVIDER,
+              nativeId: input.nativeItemId,
+              strength: "strong",
+            },
+            role: input.role,
+            text: input.text,
+            ordinal: input.ordinal,
+            now: input.now,
+          });
+          yield* emitProviderEvent({
+            type: "message.updated",
+            driver: CLAUDE_PROVIDER,
+            message: artifacts.message,
+          });
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver: CLAUDE_PROVIDER,
+            turnItem: artifacts.turnItem,
+          });
+        });
+
+        /**
+         * Projects one line of a workflow member's transcript into its thread:
+         * tool calls, thinking and replies. True when it showed reply text.
+         */
+        const projectWorkflowMemberTranscriptLine = Effect.fnUntraced(function* (
+          context: ActiveClaudeTurnContext,
+          target: ClaudeWorkflowMemberTarget,
+          line: unknown,
+        ) {
+          if (!isClaudeTranscriptConversationLine(line)) return false;
+          const at =
+            Option.getOrUndefined(DateTime.make(text(field(line, "timestamp")) ?? "")) ??
+            (yield* DateTime.now);
+          const emitCall = (
+            toolCall: ActiveClaudeToolCall,
+            update: {
+              readonly output: ClaudeNativeToolOutput;
+              readonly status: "running" | "completed" | "failed";
+              readonly updatedAt: DateTime.Utc;
+            },
+          ) =>
+            emitToolCallArtifacts(
+              buildToolCallArtifacts({
+                context,
+                nativeItemId: toolCall.nativeItemId,
+                toolName: toolCall.toolName,
+                classification: toolCall.classification,
+                toolInput: toolCall.input,
+                threadId: toolCall.threadId,
+                runId: null,
+                rootNodeId: toolCall.rootNodeId,
+                parentNodeId: toolCall.parentNodeId,
+                ordinal: toolCall.ordinal,
+                output: update.output,
+                status: update.status,
+                startedAt: toolCall.startedAt,
+                updatedAt: update.updatedAt,
+                presentation: toolCall.presentation,
+              }),
+            );
+          const startCall = Effect.fnUntraced(function* (call: {
+            readonly nativeItemId: string;
+            readonly toolName: string;
+            readonly toolInput: ClaudeNativeToolInput;
+            readonly presentation: ClaudeToolPresentation | undefined;
+          }) {
+            const toolCall: ActiveClaudeToolCall = {
+              nativeItemId: call.nativeItemId,
+              toolName: call.toolName,
+              classification: classifyClaudeNativeTool(call.toolName),
+              input: call.toolInput,
+              threadId: target.childThreadId,
+              runId: null,
+              rootNodeId: target.childRootNodeId,
+              parentNodeId: target.childRootNodeId,
+              ordinal: target.nextOrdinal(),
+              startedAt: at,
+              ...(call.presentation === undefined ? {} : { presentation: call.presentation }),
+            };
+            target.toolCalls.set(call.nativeItemId, toolCall);
+            yield* emitCall(toolCall, {
+              output: NO_CLAUDE_NATIVE_TOOL_OUTPUT,
+              status: "running",
+              updatedAt: at,
+            });
+            return toolCall;
+          });
+          const presentations = claudeToolPresentationsFromAssistantMessage(line);
+          for (const toolUse of claudeToolUseBlocksFromAssistantMessage(line)) {
+            if (target.toolCalls.has(toolUse.id)) continue;
+            yield* startCall({
+              nativeItemId: toolUse.id,
+              toolName: toolUse.name,
+              toolInput: claudeNativeToolInputFromUnknown(toolUse.input),
+              presentation: presentations.get(toolUse.id),
+            });
+          }
+          for (const { toolResult, output } of claudeToolResultEntriesFromMessage(line)) {
+            const toolCall =
+              target.toolCalls.get(toolResult.tool_use_id) ??
+              (yield* startCall({
+                nativeItemId: toolResult.tool_use_id,
+                toolName: toolNameFromClaudeToolResult(toolResult),
+                toolInput: EMPTY_CLAUDE_NATIVE_TOOL_INPUT,
+                presentation: undefined,
+              }));
+            yield* emitCall(toolCall, {
+              output,
+              status: isClaudeToolResultError(toolResult) ? "failed" : "completed",
+              updatedAt: at,
+            });
+            target.toolCalls.delete(toolResult.tool_use_id);
+          }
+          if (line.type !== "assistant") return false;
+          for (const [index, block] of line.message.content.entries()) {
+            if (block.type !== "thinking" || block.thinking.trim().length === 0) continue;
+            const nativeItemId = `${line.uuid}:thinking:${index}`;
+            yield* emitProviderEvent({
+              type: "turn_item.updated",
+              driver: CLAUDE_PROVIDER,
+              turnItem: {
+                id: idAllocator.derive.turnItemFromProviderItem({
+                  driver: CLAUDE_PROVIDER,
+                  nativeItemId,
+                }),
+                threadId: target.childThreadId,
+                runId: null,
+                nodeId: target.childRootNodeId,
+                providerThreadId: null,
+                providerTurnId: null,
+                nativeItemRef: {
+                  driver: CLAUDE_PROVIDER,
+                  nativeId: nativeItemId,
+                  strength: "strong",
+                },
+                parentItemId: null,
+                ordinal: target.nextOrdinal(),
+                type: "reasoning",
+                title: "Thinking",
+                text: block.thinking,
+                streaming: false,
+                status: "completed",
+                startedAt: at,
+                completedAt: at,
+                updatedAt: at,
+              },
+            });
+          }
+          const assistantText = textFromClaudeContent(line.message.content);
+          if (assistantText.length === 0) return false;
+          yield* emitWorkflowMemberMessage({
+            nativeItemId: line.uuid,
+            target,
+            role: "assistant",
+            text: assistantText,
+            ordinal: target.nextOrdinal(),
+            now: at,
+          });
+          return true;
+        });
+
+        /**
+         * A workflow member never becomes a provider task: the CLI reports it
+         * only inside its workflow's progress frames and forwards nothing it
+         * says. Each member gets a child thread under the workflow's, a
+         * subagent record there, and the conversation its transcript records.
+         */
+        const projectClaudeWorkflowMembers = Effect.fnUntraced(function* (input: {
+          readonly context: ActiveClaudeTurnContext;
+          readonly coordinator: ActiveClaudeSubagent;
+          readonly workflow: OrchestrationV2SubagentWorkflow;
+        }) {
+          const taskId = input.coordinator.task.nativeTaskRef?.nativeId;
+          if (taskId === undefined || taskId === null) return;
+          const coordinatorStatus = input.coordinator.task.status;
+          const coordinatorCurrent = Effect.map(
+            Ref.get(sessionSubagentsByTaskId),
+            (current) => current.get(taskId) === input.coordinator,
+          );
+          // Members sit under the workflow's child thread, in the same project.
+          const parentThread = {
+            ...input.context.input.appThread,
+            id: input.coordinator.childThreadId,
+          };
+          const providerInstanceId = input.context.input.modelSelection.instanceId;
+          const transcriptDir = input.workflow.runHandles?.transcriptDir;
+          const configDir = adapterOptions.environment.CLAUDE_CONFIG_DIR?.trim() || undefined;
+          const now = yield* DateTime.now;
+          const seen = yield* Ref.get(workflowMemberStates);
+
+          for (const member of input.workflow.agents) {
+            if (!(yield* coordinatorCurrent)) return;
+            const childThreadId = member.childThreadId;
+            if (childThreadId === undefined) continue;
+            const memberKey = `${input.coordinator.childThreadId}:agent:${member.index}`;
+            const previous = seen.get(memberKey);
+            // A member still queued or running ends with its workflow.
+            const status: OrchestrationV2Subagent["status"] =
+              (member.state === "queued" || member.state === "running") &&
+              coordinatorStatus !== "running"
+                ? coordinatorStatus
+                : member.state === "queued"
+                  ? "pending"
+                  : member.state;
+            const settled = status !== "pending" && status !== "running";
+            const prompt = member.prompt ?? member.label;
+            const model = member.model ?? input.context.input.modelSelection.model;
+            const attempt = member.attempt ?? previous?.attempt ?? 1;
+            const restarted = previous !== undefined && attempt > previous.attempt;
+            const createdAt = previous?.createdAt ?? now;
+            const startedAt =
+              status === "pending"
+                ? null
+                : member.startedAt !== undefined
+                  ? DateTime.makeUnsafe(member.startedAt)
+                  : ((restarted ? null : previous?.startedAt) ??
+                    (status === "running" ? now : null));
+            const completedAt = settled
+              ? member.completedAt !== undefined
+                ? DateTime.makeUnsafe(member.completedAt)
+                : ((restarted ? null : previous?.completedAt) ?? now)
+              : null;
+            const changed =
+              restarted ||
+              previous?.status !== status ||
+              !Equal.equals(previous?.startedAt, startedAt) ||
+              !Equal.equals(previous?.completedAt, completedAt) ||
+              previous?.result !== member.result ||
+              previous?.label !== member.label ||
+              previous?.prompt !== prompt ||
+              previous?.model !== model;
+            const agentId = member.agentId;
+            // A settled member's transcript is read a few times while the
+            // workflow runs, and once more after it ends.
+            const readTranscript =
+              settled &&
+              transcriptDir !== undefined &&
+              agentId !== undefined &&
+              (coordinatorStatus === "running"
+                ? (restarted ? 0 : (previous?.transcriptReadAttempts ?? 0)) < 3
+                : restarted || previous?.finalTranscriptRead !== true);
+            // The CLI forwards nothing a member says, so every frame while it
+            // runs reads what its transcript gained since the last one.
+            const readLiveTranscript =
+              status === "running" && transcriptDir !== undefined && agentId !== undefined;
+            if (!changed && !readTranscript && !readLiveTranscript) continue;
+
+            const nodeId = idAllocator.derive.nodeFromProviderItem({
+              driver: CLAUDE_PROVIDER,
+              nativeItemId: memberKey,
+            });
+            const childRootNodeId = idAllocator.derive.nodeFromProviderItem({
+              driver: CLAUDE_PROVIDER,
+              nativeItemId: `${memberKey}:thread-root`,
+            });
+            if (previous === undefined) {
+              yield* emitProviderEvent({
+                type: "app_thread.created",
+                driver: CLAUDE_PROVIDER,
+                appThread: makeSubagentChildThread({
+                  parentThread,
+                  childThreadId,
+                  parentNodeId: nodeId,
+                  activeProviderThreadId: null,
+                  providerInstanceId,
+                  modelSelection: { instanceId: providerInstanceId, model },
+                  title: member.label,
+                  now: createdAt,
+                  createdBy: "agent",
+                  creationSource: "provider",
+                }),
+              });
+            }
+            let nextItemOrdinal = previous?.nextItemOrdinal ?? 100;
+            const target: ClaudeWorkflowMemberTarget = {
+              childThreadId,
+              childRootNodeId,
+              nextOrdinal: () => ++nextItemOrdinal,
+              toolCalls: previous?.toolCalls ?? new Map<string, ActiveClaudeToolCall>(),
+            };
+            if (previous === undefined || previous.prompt !== prompt) {
+              yield* emitWorkflowMemberMessage({
+                nativeItemId: `${memberKey}:prompt`,
+                target,
+                role: "user",
+                text: prompt,
+                ordinal: 100,
+                now,
+              });
+            }
+
+            const nativeTaskRef = {
+              driver: CLAUDE_PROVIDER,
+              nativeId: memberKey,
+              strength: "strong" as const,
+            };
+            if (changed) {
+              const nodeBase = {
+                runId: null,
+                status,
+                countsForRun: false,
+                providerThreadId: null,
+                providerTurnId: null,
+                nativeItemRef: nativeTaskRef,
+                runtimeRequestId: null,
+                checkpointScopeId: null,
+                startedAt,
+                completedAt,
+              };
+              for (const node of [
+                {
+                  ...nodeBase,
+                  id: nodeId,
+                  threadId: parentThread.id,
+                  parentNodeId: input.coordinator.childRootNodeId,
+                  rootNodeId: input.coordinator.childRootNodeId,
+                  kind: "subagent" as const,
+                },
+                {
+                  ...nodeBase,
+                  id: childRootNodeId,
+                  threadId: childThreadId,
+                  parentNodeId: null,
+                  rootNodeId: childRootNodeId,
+                  kind: "root_turn" as const,
+                },
+              ]) {
+                yield* emitProviderEvent({ type: "node.updated", driver: CLAUDE_PROVIDER, node });
+              }
+              yield* emitProviderEvent({
+                type: "subagent.updated",
+                driver: CLAUDE_PROVIDER,
+                subagent: {
+                  id: nodeId,
+                  threadId: parentThread.id,
+                  runId: null,
+                  parentNodeId: input.coordinator.childRootNodeId,
+                  origin: "provider_native",
+                  createdBy: "agent",
+                  driver: CLAUDE_PROVIDER,
+                  providerInstanceId,
+                  providerThreadId: null,
+                  childThreadId,
+                  nativeTaskRef,
+                  prompt,
+                  title: member.label,
+                  model,
+                  status,
+                  result: member.result ?? null,
+                  startedAt,
+                  completedAt,
+                  updatedAt: now,
+                } satisfies OrchestrationV2Subagent,
+              });
+            }
+
+            const endOpenToolCalls = Effect.fnUntraced(function* () {
+              if (target.toolCalls.size === 0) return;
+              yield* endToolCalls({
+                context: input.context,
+                toolCalls: [...target.toolCalls.values()],
+                status: "interrupted",
+                completedAt: now,
+              });
+              target.toolCalls.clear();
+            });
+            if (restarted) yield* endOpenToolCalls();
+            // A retry may rewrite the transcript in place, past the old cursor;
+            // re-reading from 0 re-emits only items already shown.
+            let transcriptCursor =
+              previous === undefined || restarted || previous.agentId !== agentId
+                ? initialWorkflowAgentTranscriptCursor
+                : previous.transcriptCursor;
+            let textShown = !restarted && previous?.textShown === true;
+            let resultShown = !restarted && previous?.resultShown === true;
+            let turnEnded = !restarted && previous?.turnEnded === true;
+            let transcriptRead = false;
+            let lastReadAt = now;
+            // Milliseconds until a read started at `at` sees every line the
+            // member wrote before it settled.
+            const flushWindowLeft = (at: DateTime.Utc) =>
+              completedAt === null
+                ? 0
+                : WORKFLOW_MEMBER_TRANSCRIPT_FLUSH_MS -
+                  (DateTime.toEpochMillis(at) - DateTime.toEpochMillis(completedAt));
+            let transcriptDrained = true;
+            if (
+              (readTranscript || readLiveTranscript) &&
+              transcriptDir !== undefined &&
+              agentId !== undefined
+            ) {
+              // Each read is capped, so keep reading until no complete lines
+              // are left. False once a newer update replaced the workflow.
+              const drain = Effect.fnUntraced(function* () {
+                lastReadAt = yield* DateTime.now;
+                transcriptDrained = false;
+                while (!transcriptDrained) {
+                  const read = yield* readWorkflowAgentTranscript({
+                    transcriptDir,
+                    agentId,
+                    cursor: transcriptCursor,
+                    ...(configDir === undefined
+                      ? {}
+                      : {
+                          configDir: path.resolve(
+                            input.context.input.runtimePolicy.cwd ?? ".",
+                            configDir,
+                          ),
+                        }),
+                  }).pipe(Effect.option);
+                  if (!(yield* coordinatorCurrent)) return false;
+                  if (Option.isNone(read)) break;
+                  transcriptRead = true;
+                  const advanced = read.value.cursor.offset !== transcriptCursor.offset;
+                  transcriptCursor = read.value.cursor;
+                  for (const line of read.value.lines) {
+                    if (yield* projectWorkflowMemberTranscriptLine(input.context, target, line)) {
+                      textShown = true;
+                    }
+                    // A later line (a retry, or a resumed member) reopens the turn.
+                    turnEnded = isClaudeTranscriptTurnEnd(line);
+                  }
+                  // A line longer than the cap can't advance; stop rather than spin.
+                  transcriptDrained = !read.value.truncated || !advanced;
+                }
+                return true;
+              });
+              if (!(yield* drain())) return;
+              // The workflow sends nothing after its last frame, so wait out
+              // the flush window here rather than settle on the excerpt.
+              const waitLeft = flushWindowLeft(lastReadAt);
+              if (
+                coordinatorStatus !== "running" &&
+                settled &&
+                transcriptRead &&
+                !turnEnded &&
+                !resultShown &&
+                member.result !== undefined &&
+                waitLeft > 0
+              ) {
+                yield* Effect.sleep(waitLeft);
+                if (!(yield* drain())) return;
+              }
+            }
+            if (settled) {
+              // A call still open once the member settles never gets its result.
+              yield* endOpenToolCalls();
+              // Only the progress excerpt is left when the transcript says
+              // nothing, read after its last writes had time to land.
+              if (
+                !textShown &&
+                !resultShown &&
+                member.result !== undefined &&
+                (!transcriptRead || flushWindowLeft(lastReadAt) <= 0)
+              ) {
+                yield* emitWorkflowMemberMessage({
+                  nativeItemId: `${memberKey}:result:${attempt}`,
+                  target,
+                  role: "assistant",
+                  text: `Partial answer from workflow progress:\n\n${member.result}`,
+                  ordinal: target.nextOrdinal(),
+                  now,
+                });
+                resultShown = true;
+              }
+            }
+
+            yield* Ref.update(workflowMemberStates, (current) =>
+              new Map(current).set(memberKey, {
+                status,
+                attempt,
+                agentId,
+                transcriptReadAttempts:
+                  (restarted ? 0 : (previous?.transcriptReadAttempts ?? 0)) +
+                  (readTranscript ? 1 : 0),
+                finalTranscriptRead:
+                  (!restarted && previous?.finalTranscriptRead === true) ||
+                  (readTranscript &&
+                    transcriptRead &&
+                    transcriptDrained &&
+                    textShown &&
+                    coordinatorStatus !== "running"),
+                transcriptCursor,
+                nextItemOrdinal,
+                toolCalls: target.toolCalls,
+                textShown,
+                turnEnded,
+                resultShown,
+                result: member.result,
+                label: member.label,
+                prompt,
+                model,
+                createdAt,
+                startedAt,
+                completedAt,
+              }),
+            );
+          }
+        });
+
         const updateClaudeSubagentNode = Effect.fnUntraced(function* (input: {
           readonly context: ActiveClaudeTurnContext;
           readonly taskId: string;
@@ -4562,6 +5172,10 @@ export function makeClaudeAdapterV2(
               : { runHandles: input.workflowRunHandles }),
             message: input.workflowFrame,
           });
+          const workflowWithThreads =
+            workflow === undefined
+              ? undefined
+              : withWorkflowMemberThreadIds(workflow, childThreadId);
           const task = {
             ...(priorTask ?? {
               id: nodeId,
@@ -4602,7 +5216,7 @@ export function makeClaudeAdapterV2(
             ...(input.title === undefined ? {} : { title: input.title }),
             ...(input.model === undefined ? {} : { model: input.model }),
             ...(input.progress === undefined ? {} : { progress: input.progress }),
-            ...(workflow === undefined ? {} : { workflow }),
+            ...(workflowWithThreads === undefined ? {} : { workflow: workflowWithThreads }),
             ...(input.result === undefined ? {} : { result: input.result }),
             ...(isReopen ? { startedAt: now } : {}),
             completedAt: input.status === "running" ? null : (priorTask?.completedAt ?? now),
@@ -4790,6 +5404,13 @@ export function makeClaudeAdapterV2(
               type: "turn_item.updated",
               driver: CLAUDE_PROVIDER,
               turnItem: promptArtifacts.turnItem,
+            });
+          }
+          if (workflowWithThreads !== undefined) {
+            yield* projectClaudeWorkflowMembers({
+              context: input.context,
+              coordinator: subagent,
+              workflow: workflowWithThreads,
             });
           }
           yield* emitProviderEvent({

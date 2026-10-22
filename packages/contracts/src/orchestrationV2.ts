@@ -3539,6 +3539,40 @@ export class OrchestrationV2ThreadLaunchError extends Schema.TaggedError<Orchest
   },
 ) {}
 
+const WORKFLOW_FILE_ERROR_MESSAGES = {
+  "invalid-path": "Workflow files must be absolute paths with the expected extension.",
+  "root-unavailable": "Workflow file root unavailable.",
+  "not-found": "Workflow file not found.",
+  "outside-root": "Path is outside the workflow files root.",
+  "wrong-extension": "Resolved file has the wrong extension.",
+  "not-regular-file": "Workflow file is not a regular file.",
+  "changed-during-read": "Workflow file changed between resolution and open.",
+  "read-failed": "Workflow file read failed.",
+} as const;
+
+/** A contained read of a file a Claude workflow wrote, such as a member's transcript. */
+export class OrchestrationWorkflowFileError extends Schema.TaggedError<OrchestrationWorkflowFileError>()(
+  "OrchestrationWorkflowFileError",
+  {
+    reason: Schema.Literals([
+      "invalid-path",
+      "root-unavailable",
+      "not-found",
+      "outside-root",
+      "wrong-extension",
+      "not-regular-file",
+      "changed-during-read",
+      "read-failed",
+    ]),
+    path: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return WORKFLOW_FILE_ERROR_MESSAGES[this.reason];
+  }
+}
+
 export const OrchestrationV2StopWorkflowInput = Schema.Struct({
   threadId: ThreadId,
   /** The workflow's subagent node. */

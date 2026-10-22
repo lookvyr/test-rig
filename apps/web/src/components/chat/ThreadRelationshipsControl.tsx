@@ -575,6 +575,10 @@ export function ThreadRelationshipsPanel(props: {
                     }
                     stopping={stoppingWorkflowId === agent.id}
                     stopDisabled={stoppingWorkflowId !== null}
+                    onOpenThread={openThread}
+                    isThreadAvailable={(memberThreadId) =>
+                      graph.nodes.get(memberThreadId)?.missing === false
+                    }
                     header={
                       <Tooltip>
                         <TooltipTrigger

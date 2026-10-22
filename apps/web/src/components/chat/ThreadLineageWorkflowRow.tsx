@@ -19,7 +19,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AgentElapsed } from "./AgentElapsed";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
-import { ThreadRelationshipIcon } from "./ThreadRelationshipIcon";
+import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadRelationshipIcon";
 import {
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
@@ -59,28 +59,50 @@ type WorkflowProviderProps = {
   readonly provider: ServerProvider | undefined;
   readonly providers: ReadonlyArray<ServerProvider> | undefined;
   readonly driver: ProviderDriverKind | undefined;
+  /** Opens a workflow agent's chat. */
+  readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly isThreadAvailable: (threadId: ThreadId) => boolean;
 };
 
-/** One workflow agent: its name and time, with model, status and result on hover. */
+/**
+ * One workflow agent: its name and time, with model, status and result on
+ * hover. It opens the agent's chat once that thread exists.
+ */
 function WorkflowMemberRow({
   member,
   providerInstanceId,
   provider,
   providers,
   driver,
+  onOpenThread,
+  isThreadAvailable,
 }: { readonly member: RuntimeSubagent } & WorkflowProviderProps) {
+  const threadId = (member.childThreadId ?? null) as ThreadId | null;
+  const canOpen = threadId !== null && isThreadAvailable(threadId);
   return (
     <li data-workflow-member={member.agentIndex ?? undefined}>
       <Tooltip>
         <TooltipTrigger
           delay={200}
-          render={<div className="flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-sm" />}
+          render={
+            <ThreadDetailsControl
+              size="sm"
+              variant="ghost"
+              part="row"
+              className="h-8"
+              aria-label={`Open ${member.title} chat`}
+              disabled={!canOpen}
+              onClick={() => {
+                if (canOpen) onOpenThread(threadId);
+              }}
+            />
+          }
         >
           <ThreadRelationshipIcon driver={driver} provider={provider} status={member.status} />
           <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">
             {member.title}
           </span>
-          <span className="sr-only">{member.status}</span>
+          <span className="sr-only">{threadRelationshipStatusLabel(member.status)}</span>
           {member.startedAt ? (
             <span className="shrink-0 text-2xs font-normal tabular-nums text-muted-foreground">
               <AgentElapsed agent={member} />

@@ -47,6 +47,32 @@ describe("selectThreadRelationshipShells", () => {
     ).toEqual(["current", "parent", "child", "subagent-child", "transfer-source"]);
   });
 
+  it("keeps a workflow's agent threads, which sit under the workflow's thread", () => {
+    const threads = [
+      shell("current"),
+      shell("workflow", "current"),
+      shell("agent-0", "workflow"),
+      shell("unrelated", "workflow"),
+    ];
+    const projection = {
+      thread: threads[0],
+      subagents: [
+        {
+          childThreadId: "workflow",
+          workflow: { agents: [{ childThreadId: "agent-0" }, {}] },
+        },
+      ],
+      contextTransfers: [],
+    } as unknown as Pick<
+      OrchestrationV2ThreadProjection,
+      "thread" | "subagents" | "contextTransfers"
+    >;
+
+    expect(
+      selectThreadRelationshipShells(threadId, projection, threads).map((thread) => thread.id),
+    ).toEqual(["current", "workflow", "agent-0"]);
+  });
+
   it("finds the parent from the shell before the projection loads", () => {
     const threads = [shell("current", "parent"), shell("parent"), shell("unrelated")];
     expect(
