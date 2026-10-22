@@ -49,6 +49,41 @@ export const ListMcpRuntimeStatusesResult = Schema.Struct({
   statuses: Schema.Array(McpRuntimeStatus),
 });
 export type ListMcpRuntimeStatusesResult = typeof ListMcpRuntimeStatusesResult.Type;
+
+/** Authentication belongs to the saved HTTP server, independently of provider sessions. */
+export const McpOAuthServerInput = Schema.Struct({
+  serverName: Schema.String,
+  projectId: Schema.optionalKey(ProjectId),
+});
+export type McpOAuthServerInput = typeof McpOAuthServerInput.Type;
+export const McpOAuthBeginInput = Schema.Struct({
+  ...McpOAuthServerInput.fields,
+  callbackUrl: Schema.String,
+});
+export type McpOAuthBeginInput = typeof McpOAuthBeginInput.Type;
+export const McpOAuthState = Schema.Literals(["signed-out", "signed-in", "expired"]);
+export type McpOAuthState = typeof McpOAuthState.Type;
+export const McpOAuthStatus = Schema.Struct({
+  serverName: Schema.String,
+  projectId: Schema.NullOr(ProjectId),
+  state: McpOAuthState,
+  error: Schema.NullOr(Schema.String),
+});
+export type McpOAuthStatus = typeof McpOAuthStatus.Type;
+export const ListMcpOAuthStatusesResult = Schema.Struct({
+  statuses: Schema.Array(McpOAuthStatus),
+});
+export type ListMcpOAuthStatusesResult = typeof ListMcpOAuthStatusesResult.Type;
+export const McpOAuthBeginResult = Schema.Struct({
+  flowId: Schema.NullOr(Schema.String),
+  authorizationUrl: Schema.NullOr(Schema.String),
+});
+export type McpOAuthBeginResult = typeof McpOAuthBeginResult.Type;
+export const McpOAuthCompleteInput = Schema.Struct({
+  flowId: Schema.String,
+  callbackUrl: Schema.String,
+});
+export type McpOAuthCompleteInput = typeof McpOAuthCompleteInput.Type;
 export class McpRuntimeError extends Schema.TaggedError<McpRuntimeError>()("McpRuntimeError", {
   operation: Schema.String,
   message: Schema.String,

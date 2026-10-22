@@ -140,11 +140,12 @@ import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanc
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import { appMcpRuntimeName, claudeAppMcpConfig } from "../../mcp/AppMcpConfig.ts";
+import { appMcpProviderServers, appMcpRuntimeName, claudeAppMcpConfig } from "../../mcp/AppMcpConfig.ts";
 import {
   registerProviderMcpRuntime,
   normalizeMcpRuntimeState,
   providerMcpRequestError,
+  providerMcpReconnectError,
 } from "../../mcp/ProviderMcpRuntime.ts";
 import * as IdAllocator from "../IdAllocator.ts";
 import { makeProviderFailure, makeProviderRetryTurnItem } from "../ProviderFailure.ts";
@@ -1107,7 +1108,7 @@ export function claudeMcpQueryOverrides(input: {
   if (session === undefined) {
     return input.allowedTools === undefined ? {} : { allowedTools: input.allowedTools };
   }
-  const appConfig = claudeAppMcpConfig(session.appMcpServers ?? []);
+  const appConfig = claudeAppMcpConfig(appMcpProviderServers(session));
   const mcpAllowedTools = input.readOnlySandbox
     ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
     : [CLAUDE_T3_MCP_TOOL_WILDCARD];
@@ -8578,7 +8579,7 @@ export function makeClaudeAdapterV2(
               : {
                   reconnect: (name: string) =>
                     querySession.reconnectMcpServer!(name).pipe(
-                      Effect.mapError(providerMcpRequestError),
+                      Effect.mapError((error) => providerMcpReconnectError(error.cause)),
                     ),
                 }),
           });

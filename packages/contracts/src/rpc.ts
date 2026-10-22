@@ -10,6 +10,11 @@ import {
   McpRuntimeAuthenticateResult,
   McpRuntimeError,
   McpRuntimeOperationInput,
+  McpOAuthServerInput,
+  McpOAuthBeginInput,
+  ListMcpOAuthStatusesResult,
+  McpOAuthBeginResult,
+  McpOAuthCompleteInput,
 } from "./mcpRuntime.ts";
 import {
   SkillLibraryDetail,
@@ -323,6 +328,10 @@ export const WS_METHODS = {
   mcpRuntimeList: "mcpRuntime.list",
   mcpRuntimeReconnect: "mcpRuntime.reconnect",
   mcpRuntimeAuthenticate: "mcpRuntime.authenticate",
+  mcpOAuthList: "mcpOAuth.list",
+  mcpOAuthBegin: "mcpOAuth.begin",
+  mcpOAuthComplete: "mcpOAuth.complete",
+  mcpOAuthSignOut: "mcpOAuth.signOut",
   scheduledTasksList: "scheduledTasks.list",
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1080,6 +1089,28 @@ const WsMcpRuntimeAuthenticateRpc = Rpc.make(WS_METHODS.mcpRuntimeAuthenticate, 
   error: Schema.Union([McpRuntimeError, EnvironmentAuthorizationError]),
 });
 
+const WsMcpOAuthListRpc = Rpc.make(WS_METHODS.mcpOAuthList, {
+  payload: ListMcpRuntimeStatusesInput,
+  success: ListMcpOAuthStatusesResult,
+  error: Schema.Union([McpRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsMcpOAuthBeginRpc = Rpc.make(WS_METHODS.mcpOAuthBegin, {
+  payload: McpOAuthBeginInput,
+  success: McpOAuthBeginResult,
+  error: Schema.Union([McpRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsMcpOAuthCompleteRpc = Rpc.make(WS_METHODS.mcpOAuthComplete, {
+  payload: McpOAuthCompleteInput,
+  error: Schema.Union([McpRuntimeError, EnvironmentAuthorizationError]),
+});
+
+const WsMcpOAuthSignOutRpc = Rpc.make(WS_METHODS.mcpOAuthSignOut, {
+  payload: McpOAuthServerInput,
+  error: Schema.Union([McpRuntimeError, EnvironmentAuthorizationError]),
+});
+
 const WsSkillLibraryReadRpc = Rpc.make(WS_METHODS.skillLibraryRead, {
   payload: SkillLibraryReadInput,
   success: SkillLibraryDetail,
@@ -1146,6 +1177,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsMcpRuntimeListRpc,
   WsMcpRuntimeReconnectRpc,
   WsMcpRuntimeAuthenticateRpc,
+  WsMcpOAuthListRpc,
+  WsMcpOAuthBeginRpc,
+  WsMcpOAuthCompleteRpc,
+  WsMcpOAuthSignOutRpc,
   WsToolsProjectScopesListRpc,
   WsSkillLibraryListRpc,
   WsSkillLibraryReadRpc,

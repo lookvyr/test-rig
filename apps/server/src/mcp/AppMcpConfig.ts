@@ -1,5 +1,26 @@
 import * as NodeCrypto from "node:crypto";
 import { mcpServerVariableRecord, type ResolvedMcpServer } from "@t3tools/contracts";
+import type { McpProviderSessionConfig } from "./McpProviderSession.ts";
+
+/** Providers receive only a scoped local credential; upstream HTTP secrets stay in Test Rig. */
+export function appMcpProviderServers(
+  session: McpProviderSessionConfig,
+): ReadonlyArray<ResolvedMcpServer> {
+  return (session.appMcpServers ?? []).map((server) =>
+    server.transport.type === "stdio"
+      ? server
+      : {
+          ...server,
+          transport: {
+            type: "http" as const,
+            url: `${session.endpoint.replace(/\/$/, "")}/app/${encodeURIComponent(server.name)}`,
+            headers: [
+              { name: "Authorization", value: session.authorizationHeader, sensitive: true },
+            ],
+          },
+        },
+  );
+}
 
 export const appMcpRuntimeName = (name: string, threadId?: string) =>
   threadId === undefined

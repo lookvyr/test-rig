@@ -7,7 +7,11 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
+import * as Option from "effect/Option";
 import { McpRuntimeError } from "@t3tools/contracts";
+import { AppMcpOAuth } from "./AppMcpOAuth.ts";
+import { readMcpProviderSession } from "./McpProviderSession.ts";
 
 export { McpRuntimeError as ProviderMcpRuntimeError } from "@t3tools/contracts";
 export interface ProviderMcpConnection {
@@ -32,7 +36,50 @@ export interface ProviderMcpRuntime {
 }
 export const providerMcpRequestError = () =>
   new McpRuntimeError({ operation: "provider", message: "The provider MCP request failed." });
+/** Preserve provider diagnostics for an explicit reconnect request. */
+export const providerMcpReconnectError = (error: unknown) =>
+  new McpRuntimeError({
+    operation: "provider",
+    message:
+      Predicate.hasProperty(error, "message") && typeof error.message === "string"
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "The provider could not reconnect this MCP server.",
+  });
 const runtimes = new Map<ThreadId, ProviderMcpRuntime>();
+const sharedHttpTransport = (threadId: ThreadId, serverName: string) => {
+  const transport = readMcpProviderSession(threadId)?.appMcpServers?.find(
+    (server) => server.name === serverName,
+  )?.transport;
+  return transport?.type === "http" ? transport : undefined;
+};
+const withSharedAuth = Effect.fn("ProviderMcpRuntime.withSharedAuth")(function* (
+  threadId: ThreadId,
+  serverName: string,
+  connection: ProviderMcpConnection,
+) {
+  const transport = sharedHttpTransport(threadId, serverName);
+  if (!transport) return connection;
+  const oauth = yield* Effect.serviceOption(AppMcpOAuth);
+  if (
+    Option.isNone(oauth) ||
+    transport.headers.some((header) => header.name.toLowerCase() === "authorization")
+  )
+    return { ...connection, authenticateSupported: false };
+  const auth = yield* oauth.value.status(transport.url);
+  const needsAuth = auth.authenticationRequired && auth.state !== "signed-in";
+  return {
+    ...connection,
+    state: needsAuth
+      ? ("needs-auth" as const)
+      : connection.state === "needs-auth"
+        ? ("disconnected" as const)
+        : connection.state,
+    authStatus: auth.state,
+    authenticateSupported: false,
+  };
+});
 /** The disposer only removes its own registration, so closing an old query preserves its replacement. */
 export function registerProviderMcpRuntime(runtime: ProviderMcpRuntime): () => void {
   runtimes.set(runtime.identity.threadId, runtime);
@@ -95,6 +142,9 @@ export const listMcpRuntimeStatuses = Effect.fn("ProviderMcpRuntime.list")(funct
                     )
                   : Effect.fail(providerMcpRequestError());
             return status.pipe(
+              Effect.flatMap((connection) =>
+                withSharedAuth(runtime.identity.threadId, server.name, connection),
+              ),
               Effect.timeout("10 seconds"),
               Effect.map(
                 (connection) =>
@@ -106,7 +156,9 @@ export const listMcpRuntimeStatuses = Effect.fn("ProviderMcpRuntime.list")(funct
                     toolCount: connection.toolCount ?? null,
                     authStatus: connection.authStatus ?? null,
                     reconnectSupported:
-                      runtime.reconnect !== undefined && connection.reconnectSupported !== false,
+                      connection.state !== "needs-auth" &&
+                      runtime.reconnect !== undefined &&
+                      connection.reconnectSupported !== false,
                     authenticateSupported:
                       runtime.authenticate !== undefined &&
                       connection.authenticateSupported === true,
@@ -156,26 +208,32 @@ export const reconnectMcpServer = Effect.fn("ProviderMcpRuntime.reconnect")(func
     });
   const connection = yield* entry.runtime
     .status(entry.server.runtimeName)
+    .pipe(
+      Effect.flatMap((connection) => withSharedAuth(input.threadId, input.serverName, connection)),
+    )
     .pipe(Effect.timeout("10 seconds"), Effect.mapError(providerMcpRequestError));
+  if (connection.state === "needs-auth")
+    return yield* new McpRuntimeError({
+      operation: "runtime",
+      message: "This MCP server requires sign-in before it can reconnect.",
+    });
   if (connection.reconnectSupported === false)
     return yield* new McpRuntimeError({
       operation: "runtime",
       message: "This MCP server was not registered with the provider.",
     });
-  yield* entry.runtime.reconnect(entry.server.runtimeName).pipe(
-    Effect.timeout("15 seconds"),
-    Effect.mapError(
-      () =>
-        new McpRuntimeError({
-          operation: "runtime",
-          message: "The provider could not reconnect this MCP server.",
-        }),
-    ),
-  );
+  yield* entry.runtime
+    .reconnect(entry.server.runtimeName)
+    .pipe(Effect.timeout("15 seconds"), Effect.mapError(providerMcpReconnectError));
 });
 export const authenticateMcpServer = Effect.fn("ProviderMcpRuntime.authenticate")(function* (
   input: McpRuntimeOperationInput,
 ) {
+  if (sharedHttpTransport(input.threadId, input.serverName))
+    return yield* new McpRuntimeError({
+      operation: "runtime",
+      message: "Use shared sign-in in this MCP server's Connections tab.",
+    });
   const entry = yield* resolveOperation(input);
   if (!entry?.runtime.authenticate)
     return yield* new McpRuntimeError({

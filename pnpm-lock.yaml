@@ -141,6 +141,9 @@ importers:
       '@ff-labs/fff-node':
         specifier: 0.9.4
         version: 0.9.4(patch_hash=2b16019ce7ab61aec6478dd02f79ef468cc1d5c51e9d00764f7d2ab8167210c8)
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@4.4.3)
       '@opencode/client':
         specifier: 2.0.18
         version: 2.0.18(effect@4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40))

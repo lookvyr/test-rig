@@ -76,12 +76,13 @@ import {
   type OpenCodeRuntimeError,
 } from "../../provider/opencodeRuntime.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import { appMcpRuntimeName } from "../../mcp/AppMcpConfig.ts";
+import { appMcpProviderServers, appMcpRuntimeName } from "../../mcp/AppMcpConfig.ts";
 import { mcpServerVariableRecord } from "@t3tools/contracts";
 import {
   registerProviderMcpRuntime,
   normalizeMcpRuntimeState,
   providerMcpRequestError,
+  providerMcpReconnectError,
 } from "../../mcp/ProviderMcpRuntime.ts";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
 import { t3OrchestrationSystemPrompt } from "../../provider/T3OrchestrationInstructions.ts";
@@ -3315,7 +3316,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       }
       if (state.appMcp === undefined && mcpSession !== undefined && !connection.external) {
         const registrations: Array<{ name: string; directory: string }> = [];
-        for (const server of mcpSession.appMcpServers ?? []) {
+        for (const server of appMcpProviderServers(mcpSession)) {
           const runtimeName = appMcpRuntimeName(server.name, turnInput.threadId);
           const transport = server.transport;
           const config =
@@ -3329,6 +3330,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
                   type: "remote",
                   url: transport.url,
                   headers: mcpServerVariableRecord(transport.headers),
+                  oauth: false,
                 });
           const added = yield* client.mcp
             .add({ server: runtimeName, location: { directory }, config })
@@ -3387,7 +3389,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           reconnect: (runtimeName) =>
             client.mcp
               .connect({ server: runtimeName, location: { directory } })
-              .pipe(Effect.asVoid, Effect.mapError(providerMcpRequestError)),
+              .pipe(Effect.asVoid, Effect.mapError(providerMcpReconnectError)),
         });
       }
       if (state.appMcp === undefined && mcpSession !== undefined && connection.external) {

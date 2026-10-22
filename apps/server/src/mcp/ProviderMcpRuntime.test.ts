@@ -5,6 +5,7 @@ import {
   ProviderSessionId,
   ThreadId,
   McpRuntimeError,
+  EnvironmentId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
@@ -18,6 +19,8 @@ import {
   normalizeMcpRuntimeState,
   type ProviderMcpRuntime,
 } from "./ProviderMcpRuntime.ts";
+import { AppMcpOAuth, type AppMcpOAuthStatus } from "./AppMcpOAuth.ts";
+import * as McpProviderSession from "./McpProviderSession.ts";
 
 const runtime = (name: string, project = "project-a"): ProviderMcpRuntime => ({
   identity: {
@@ -190,4 +193,185 @@ it.effect("skips inventories when no app-owned server matches the refresh", () =
       disposeFiltered();
     }
   }),
+);
+
+it.effect("requires sign-in instead of reconnecting an unauthenticated server", () =>
+  Effect.gen(function* () {
+    let reconnects = 0;
+    const current = {
+      ...runtime("signed-out"),
+      status: () => Effect.succeed({ state: "needs-auth" as const }),
+      reconnect: () =>
+        Effect.sync(() => {
+          reconnects++;
+        }),
+    };
+    const dispose = registerProviderMcpRuntime(current);
+    try {
+      const statuses = yield* listMcpRuntimeStatuses({});
+      assert.isFalse(statuses[0]?.reconnectSupported);
+      const result = yield* reconnectMcpServer({
+        threadId: current.identity.threadId,
+        serverName: "github",
+      }).pipe(Effect.result);
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") assert.include(result.failure.message, "requires sign-in");
+      assert.equal(reconnects, 0);
+    } finally {
+      dispose();
+    }
+  }),
+);
+
+it.effect("returns the provider's reconnect diagnostic", () =>
+  Effect.gen(function* () {
+    const current = {
+      ...runtime("reconnect-error"),
+      reconnect: () =>
+        Effect.fail(
+          new McpRuntimeError({
+            operation: "provider",
+            message: "MCP connection rejected: authorization expired",
+          }),
+        ),
+    };
+    const dispose = registerProviderMcpRuntime(current);
+    try {
+      const result = yield* reconnectMcpServer({
+        threadId: current.identity.threadId,
+        serverName: "github",
+      }).pipe(Effect.result);
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure")
+        assert.equal(result.failure.message, "MCP connection rejected: authorization expired");
+    } finally {
+      dispose();
+    }
+  }),
+);
+
+const sharedRuntimeHarness = Effect.fn("sharedRuntimeHarness")(function* (input: {
+  readonly auth: AppMcpOAuthStatus;
+  readonly authorization?: string;
+  readonly state?: "needs-auth" | "failed";
+}) {
+  let reconnects = 0;
+  let authenticates = 0;
+  let statusRequests = 0;
+  const current: ProviderMcpRuntime = {
+    ...runtime("shared-oauth"),
+    status: () => Effect.succeed({ state: input.state ?? "failed", authenticateSupported: true }),
+    reconnect: () =>
+      Effect.sync(() => {
+        reconnects++;
+      }),
+    authenticate: () =>
+      Effect.sync(() => {
+        authenticates++;
+        return { authorizationUrl: null };
+      }),
+  };
+  const dispose = registerProviderMcpRuntime(current);
+  McpProviderSession.setMcpProviderSession({
+    environmentId: EnvironmentId.make("shared-oauth-env"),
+    threadId: current.identity.threadId,
+    providerSessionId: "shared-oauth-credential",
+    providerInstanceId: current.identity.providerInstanceId,
+    endpoint: "http://localhost/mcp",
+    authorizationHeader: "Bearer local-only",
+    browserToolsAvailable: false,
+    appMcpServers: [
+      {
+        name: "github",
+        transport: {
+          type: "http",
+          url: "https://mcp.example.test",
+          headers:
+            input.authorization === undefined
+              ? []
+              : [{ name: "aUtHoRiZaTiOn", value: input.authorization, sensitive: true }],
+        },
+      },
+    ],
+  });
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      dispose();
+      McpProviderSession.clearMcpProviderSession(current.identity.threadId);
+    }),
+  );
+  const oauth = AppMcpOAuth.of({
+    status: () =>
+      Effect.sync(() => {
+        statusRequests++;
+        return input.auth;
+      }),
+    authenticate: () => Effect.die("shared authentication is outside the runtime"),
+    complete: () => Effect.void,
+    accessToken: () => Effect.die("status must not materialize tokens"),
+    markExpired: () => Effect.void,
+    signOut: () => Effect.void,
+  });
+  const operation = { threadId: current.identity.threadId, serverName: "github" };
+  const statuses = yield* listMcpRuntimeStatuses({}).pipe(
+    Effect.provideService(AppMcpOAuth, oauth),
+  );
+  const reconnect = yield* reconnectMcpServer(operation).pipe(
+    Effect.provideService(AppMcpOAuth, oauth),
+    Effect.result,
+  );
+  const authenticate = yield* authenticateMcpServer(operation).pipe(Effect.result);
+  return { statuses, reconnect, authenticate, reconnects, authenticates, statusRequests };
+});
+
+it.effect(
+  "uses shared HTTP authentication requirements across runtime statuses and operations",
+  () =>
+    Effect.gen(function* () {
+      for (const state of ["expired", "signed-out"] as const) {
+        const result = yield* sharedRuntimeHarness({
+          auth: { state, expiresAt: null, authenticationRequired: true },
+        });
+        assert.equal(result.statuses[0]?.state, "needs-auth");
+        assert.isFalse(result.statuses[0]?.reconnectSupported);
+        assert.isFalse(result.statuses[0]?.authenticateSupported);
+        assert.equal(result.reconnect._tag, "Failure");
+        assert.equal(result.authenticate._tag, "Failure");
+        assert.equal(result.reconnects, 0);
+        assert.equal(result.authenticates, 0);
+      }
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "allows reconnect after shared sign-in while rejecting provider-native HTTP authentication",
+  () =>
+    Effect.gen(function* () {
+      const result = yield* sharedRuntimeHarness({
+        state: "needs-auth",
+        auth: { state: "signed-in", expiresAt: null, authenticationRequired: true },
+      });
+      assert.equal(result.statuses[0]?.state, "disconnected");
+      assert.isTrue(result.statuses[0]?.reconnectSupported);
+      assert.isFalse(result.statuses[0]?.authenticateSupported);
+      assert.equal(result.reconnect._tag, "Success");
+      assert.equal(result.reconnects, 1);
+      assert.equal(result.authenticate._tag, "Failure");
+      assert.equal(result.authenticates, 0);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("keeps explicitly configured HTTP credentials independent of shared OAuth status", () =>
+  Effect.gen(function* () {
+    const result = yield* sharedRuntimeHarness({
+      authorization: "Bearer configured-account",
+      auth: { state: "expired", expiresAt: null, authenticationRequired: true },
+    });
+    assert.equal(result.statuses[0]?.state, "failed");
+    assert.isTrue(result.statuses[0]?.reconnectSupported);
+    assert.isFalse(result.statuses[0]?.authenticateSupported);
+    assert.equal(result.statusRequests, 0);
+    assert.equal(result.reconnects, 1);
+    assert.equal(result.authenticates, 0);
+  }).pipe(Effect.scoped),
 );

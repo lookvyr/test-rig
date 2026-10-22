@@ -7,7 +7,12 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { describe } from "vite-plus/test";
-import { appMcpRuntimeName, claudeAppMcpConfig, codexAppMcpConfig } from "./AppMcpConfig.ts";
+import {
+  appMcpProviderServers,
+  appMcpRuntimeName,
+  claudeAppMcpConfig,
+  codexAppMcpConfig,
+} from "./AppMcpConfig.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
 import {
   buildCodexTurnStartParams,
@@ -102,16 +107,23 @@ describe("app-owned provider MCP configuration", () => {
     try {
       const codex = codexThreadRuntimeParams({ threadId });
       assert.deepEqual(codex.config.mcp_servers, {
-        ...codexAppMcpConfig(servers),
+        ...codexAppMcpConfig(
+          appMcpProviderServers(McpProviderSession.readMcpProviderSession(threadId)!),
+        ),
         test_rig: {
           url: "http://localhost/mcp",
           tool_timeout_sec: 65 * 60,
           http_headers: { Authorization: "Bearer builtin" },
         },
       });
+      assert.notInclude(JSON.stringify(codex.config), "header-secret");
+      assert.include(JSON.stringify(codex.config), "http://localhost/mcp/app/github");
       const claude = claudeMcpQueryOverrides({ threadId, readOnlySandbox: true });
       assert.isDefined(claude.mcpServers?.["tru-github"]);
       assert.isDefined(claude.mcpServers?.["tru-local"]);
+      assert.notInclude(JSON.stringify(claude.mcpEnvironment), "header-secret");
+      assert.include(JSON.stringify(claude.mcpServers), "http://localhost/mcp/app/github");
+      assert.equal(McpProviderSession.readMcpProviderSession(threadId)?.appMcpServers, servers);
       assert.notInclude(claude.allowedTools ?? [], "mcp__tru-local__*");
     } finally {
       McpProviderSession.clearMcpProviderSession(threadId);

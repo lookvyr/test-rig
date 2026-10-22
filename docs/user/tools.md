@@ -30,8 +30,31 @@ inherited connection's transport requires reentering its secrets.
 Configuration changes apply to new or restarted agent sessions. **Configured**
 means the server is saved but no active session has reported a connection. Open a
 server's **Connections** tab to inspect each active session. Its action menu
-offers reconnect and sign-in when the provider supports them. Codex's reload action
-reloads its provider MCP configuration, rather than just one server.
+offers reconnect when the provider supports it. Codex's reload action
+reloads its provider MCP configuration, rather than just one server. Reconnect is
+not offered for a connection that needs sign-in. Reconnect failures show the
+provider's error message.
+
+For HTTP servers that require OAuth, open **Connections → Shared sign-in** and
+choose **Sign in**. Complete authorization in your browser, return to Tools, and
+choose **Refresh** to see **Signed in**. This sign-in is shared by Codex, Claude,
+and OpenCode in the same environment and does not require an active conversation.
+Servers without authentication work while signed out.
+
+OAuth servers must support discovery and dynamic client registration, as
+Atlassian's remote MCP server does. Servers that require you to supply a
+pre-registered OAuth client ID are not supported by shared sign-in yet.
+
+Sign-in also works in desktop and remote browser connections. If the browser
+cannot reach the callback page after authorization, copy its full address from
+the address bar and paste it into **Sign-in callback URL**, then choose
+**Complete sign-in**. Tokens stay with the environment that owns the server.
+Expired credentials show **Sign-in expired**; choose **Sign in** to authorize
+again. **Sign out** removes the saved sign-in for that server.
+Configurations using the same server URL share this account, including across
+projects and worktrees. A configured Authorization header takes precedence over
+shared sign-in. After signing in, reconnect a failed active session or start a
+new conversation to load its tools.
 
 This list manages servers added through Test Rig. Servers configured directly in
 a provider continue to work through that provider; Test Rig does not list or edit

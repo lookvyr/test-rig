@@ -15,6 +15,9 @@ import {
   type McpServerConfig,
   type McpServerVariable,
   type McpRuntimeStatus,
+  type McpOAuthStatus,
+  type McpOAuthBeginResult,
+  type McpOAuthCompleteInput,
 } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -34,6 +37,7 @@ import { Textarea } from "../ui/textarea";
 import { ProviderAvailability, ToolsSelect, type ToolsProject } from "./ToolsAvailability";
 import { MCP_STATUS_LABELS, parseMcpServerJson } from "./toolsSettings.logic";
 import { useThreadShell } from "../../state/entities";
+import { McpOAuthConnection } from "./McpOAuthConnection";
 
 function McpChatTitle({
   environmentId,
@@ -55,12 +59,14 @@ function ConnectionRow({
   status,
   showTitle,
   disabled,
+  sharedAuthentication,
   onAction,
 }: {
   environmentId: EnvironmentId;
   status: McpRuntimeStatus;
   showTitle: boolean;
   disabled: boolean;
+  sharedAuthentication: boolean;
   onAction: (action: "reconnect" | "authenticate") => void;
 }) {
   return (
@@ -88,7 +94,7 @@ function ConnectionRow({
           </p>
         ) : null}
       </div>
-      {status.reconnectSupported || status.authenticateSupported ? (
+      {status.reconnectSupported || (status.authenticateSupported && !sharedAuthentication) ? (
         <Menu>
           <MenuTrigger
             disabled={disabled}
@@ -117,7 +123,7 @@ function ConnectionRow({
                 </MenuItem>
               )
             ) : null}
-            {status.authenticateSupported ? (
+            {status.authenticateSupported && !sharedAuthentication ? (
               <MenuItem disabled={disabled} onClick={() => onAction("authenticate")}>
                 Sign in
               </MenuItem>
@@ -144,6 +150,13 @@ export function McpServerDialog({
   statusError,
   statusPending,
   onStatusRefresh,
+  oauthStatus,
+  oauthError,
+  oauthPending,
+  onOAuthRefresh,
+  onOAuthBegin,
+  onOAuthComplete,
+  onOAuthSignOut,
   onClose,
 }: {
   environmentId: EnvironmentId;
@@ -160,6 +173,13 @@ export function McpServerDialog({
   statusError: string | null;
   statusPending: boolean;
   onStatusRefresh: () => void;
+  oauthStatus: McpOAuthStatus | null;
+  oauthError: string | null;
+  oauthPending: boolean;
+  onOAuthRefresh: () => void;
+  onOAuthBegin: () => Promise<McpOAuthBeginResult>;
+  onOAuthComplete: (input: McpOAuthCompleteInput) => Promise<void>;
+  onOAuthSignOut: () => Promise<void>;
   onClose: () => void;
 }) {
   const [name, setName] = useState(initialName);
@@ -316,6 +336,18 @@ export function McpServerDialog({
           ) : null}
           {tab === "connections" ? (
             <div className="space-y-3">
+              {initialConfig.transport.type === "http" ? (
+                <McpOAuthConnection
+                  status={oauthStatus}
+                  error={oauthError}
+                  pending={oauthPending}
+                  disabled={busy || readOnly}
+                  onBegin={onOAuthBegin}
+                  onComplete={onOAuthComplete}
+                  onSignOut={onOAuthSignOut}
+                  onRefresh={onOAuthRefresh}
+                />
+              ) : null}
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-medium">Active sessions</p>
                 <Button size="xs" variant="ghost" disabled={busy} onClick={onStatusRefresh}>
@@ -351,6 +383,7 @@ export function McpServerDialog({
                       status={status}
                       showTitle={(sessionCounts.get(status.provider) ?? 0) > 1}
                       disabled={busy || readOnly}
+                      sharedAuthentication={initialConfig.transport.type === "http"}
                       onAction={(action) => void run(() => onAction(status, action))}
                     />
                   ))}

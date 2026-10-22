@@ -1,4 +1,4 @@
-import { useContext, useState, type ReactNode } from "react";
+import { useContext, useEffect, useState, type ReactNode } from "react";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { PlusIcon } from "lucide-react";
@@ -19,7 +19,12 @@ import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import { AtomRegistry } from "effect/unstable/reactivity";
-import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import {
+  useEnvironment,
+  useEnvironmentHttpBaseUrl,
+  useEnvironments,
+  usePrimaryEnvironmentId,
+} from "../../state/environments";
 import { useEnvironmentQuery, useLeasedEnvironmentQuery } from "../../state/query";
 import { useProjects } from "../../state/entities";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
@@ -241,6 +246,7 @@ function EnvironmentTools({
       (project) => project.id === projectId && project.environmentId === environmentId,
     )?.workspaceRoot ?? selectedProject?.workspaceRoot;
   const unavailableScope = Boolean(search.project && !selectedProject);
+  const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const primaryId = usePrimaryEnvironmentId();
   const primarySession = usePrimarySessionState();
   const session = useEnvironmentSessionState(environmentId);
@@ -271,6 +277,25 @@ function EnvironmentTools({
         })
       : null,
   );
+  const oauthQuery = useEnvironmentQuery(
+    connected && !unavailableScope
+      ? serverEnvironment.listMcpOAuthStatuses({
+          environmentId,
+          input: projectId ? { projectId } : {},
+        })
+      : null,
+  );
+  const refreshOAuth = oauthQuery.refresh;
+  const refreshRuntimeStatuses = statusQuery.refresh;
+  useEffect(() => {
+    if (!connected) return;
+    const refresh = () => {
+      refreshOAuth();
+      refreshRuntimeStatuses();
+    };
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [connected, refreshOAuth, refreshRuntimeStatuses]);
   const skillId =
     search.skill && search.skill !== "new" && isSkillLibraryId(search.skill) ? search.skill : null;
   const skill = useLeasedEnvironmentQuery(
@@ -291,6 +316,11 @@ function EnvironmentTools({
   const authenticate = useAtomCommand(serverEnvironment.authenticateMcpServer, {
     reportFailure: false,
   });
+  const beginOAuth = useAtomCommand(serverEnvironment.beginMcpOAuth, { reportFailure: false });
+  const completeOAuth = useAtomCommand(serverEnvironment.completeMcpOAuth, {
+    reportFailure: false,
+  });
+  const signOutOAuth = useAtomCommand(serverEnvironment.signOutMcpOAuth, { reportFailure: false });
   const [mcpEditor, setMcpEditor] = useState<{
     name: string;
     config: McpServerConfig;
@@ -407,6 +437,7 @@ function EnvironmentTools({
     const result = await updateSettings({ environmentId, input: { patch } });
     if (result._tag !== "Success") throw squashAtomCommandFailure(result);
     statusQuery.refresh();
+    oauthQuery.refresh();
   };
   const toggleMcp = (name: string, config: McpServerConfig, enabled: boolean) =>
     void run(name, async () => {
@@ -460,6 +491,9 @@ function EnvironmentTools({
   const mcpStatus = (name: string, config: McpServerConfig) => {
     if (!config.enabled) return "Off";
     if (!connected) return "Status unavailable";
+    const auth = oauthQuery.data?.statuses.find((entry) => entry.serverName === name);
+    if (config.transport.type === "http" && auth?.state === "expired") return "Sign-in expired";
+    if (config.transport.type === "http" && auth?.state === "signed-in") return "Signed in";
     if (statusQuery.error) return "Status unavailable";
     if (!statusQuery.data && statusQuery.isPending) return "Checking status…";
     const entries =
@@ -645,6 +679,7 @@ function EnvironmentTools({
                   disabled={!canEdit || pending !== null}
                   onOpen={() => {
                     statusQuery.refresh();
+                    oauthQuery.refresh();
                     setMcpEditor({ name, config, project: scopeId ?? "all" });
                   }}
                   onToggle={(enabled) => toggleMcp(name, config, enabled)}
@@ -773,6 +808,45 @@ function EnvironmentTools({
           }
           statusPending={statusQuery.isPending && statusQuery.data === null}
           onStatusRefresh={statusQuery.refresh}
+          oauthStatus={
+            oauthQuery.data?.statuses.find((entry) => entry.serverName === mcpEditor.name) ?? null
+          }
+          oauthError={
+            !connected ? "Connect to this environment to manage sign-in." : oauthQuery.error
+          }
+          oauthPending={oauthQuery.isPending && oauthQuery.data === null}
+          onOAuthRefresh={() => {
+            oauthQuery.refresh();
+            statusQuery.refresh();
+          }}
+          onOAuthBegin={async () => {
+            if (!httpBaseUrl) throw new Error("The environment connection is unavailable.");
+            const result = await beginOAuth({
+              environmentId,
+              input: {
+                serverName: mcpEditor.name,
+                ...(projectId ? { projectId } : {}),
+                callbackUrl: new URL("/oauth/mcp/callback", httpBaseUrl).href,
+              },
+            });
+            if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+            return result.value;
+          }}
+          onOAuthComplete={async (input) => {
+            const result = await completeOAuth({ environmentId, input });
+            if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+            oauthQuery.refresh();
+            statusQuery.refresh();
+          }}
+          onOAuthSignOut={async () => {
+            const result = await signOutOAuth({
+              environmentId,
+              input: { serverName: mcpEditor.name, ...(projectId ? { projectId } : {}) },
+            });
+            if (result._tag !== "Success") throw squashAtomCommandFailure(result);
+            oauthQuery.refresh();
+            statusQuery.refresh();
+          }}
           onReset={
             mcpEditor.project !== "all" &&
             settings?.mcpServers[mcpEditor.name] &&

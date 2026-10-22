@@ -6,6 +6,8 @@ import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SkillLibrary from "./skills/SkillLibrary.ts";
 import * as ToolsProjectScopes from "./skills/ToolsProjectScopes.ts";
 import * as ProviderMcpRuntime from "./mcp/ProviderMcpRuntime.ts";
+import * as AppMcpAuth from "./mcp/AppMcpAuth.ts";
+import { AppMcpOAuth } from "./mcp/AppMcpOAuth.ts";
 import { SkillLibraryError, type SkillLibrarySourceReadInput } from "@t3tools/contracts";
 import { persistChatAttachments } from "./orchestration-v2/AttachmentUpload.ts";
 import { makeThreadFind } from "./orchestration-v2/ThreadFind.ts";
@@ -339,6 +341,7 @@ const makeWsRpcLayer = (
       const skillLibrary = yield* SkillLibrary.SkillLibraryService;
       const toolsProjectScopes = yield* ToolsProjectScopes.ToolsProjectScopesService;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const appMcpOAuth = yield* AppMcpOAuth;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
@@ -674,17 +677,68 @@ const makeWsRpcLayer = (
               Effect.flatMap((source) => skillLibrary.importSkill(input, source)),
             ),
           ),
+        [WS_METHODS.mcpOAuthList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.mcpOAuthList,
+            AppMcpAuth.list(input).pipe(
+              Effect.provideService(AppMcpOAuth, appMcpOAuth),
+              Effect.provideService(ServerSettings.ServerSettingsService, serverSettings),
+              Effect.provideService(
+                ToolsProjectScopes.ToolsProjectScopesService,
+                toolsProjectScopes,
+              ),
+            ),
+          ),
+        [WS_METHODS.mcpOAuthBegin]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.mcpOAuthBegin,
+            AppMcpAuth.begin(input).pipe(
+              Effect.provideService(AppMcpOAuth, appMcpOAuth),
+              Effect.provideService(ServerSettings.ServerSettingsService, serverSettings),
+              Effect.provideService(
+                ToolsProjectScopes.ToolsProjectScopesService,
+                toolsProjectScopes,
+              ),
+            ),
+          ),
+        [WS_METHODS.mcpOAuthComplete]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.mcpOAuthComplete,
+            AppMcpAuth.complete(input).pipe(
+              Effect.provideService(AppMcpOAuth, appMcpOAuth),
+              Effect.provideService(ServerSettings.ServerSettingsService, serverSettings),
+              Effect.provideService(
+                ToolsProjectScopes.ToolsProjectScopesService,
+                toolsProjectScopes,
+              ),
+            ),
+          ),
+        [WS_METHODS.mcpOAuthSignOut]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.mcpOAuthSignOut,
+            AppMcpAuth.signOut(input).pipe(
+              Effect.provideService(AppMcpOAuth, appMcpOAuth),
+              Effect.provideService(ServerSettings.ServerSettingsService, serverSettings),
+              Effect.provideService(
+                ToolsProjectScopes.ToolsProjectScopesService,
+                toolsProjectScopes,
+              ),
+            ),
+          ),
         [WS_METHODS.mcpRuntimeList]: (input) =>
           observeRpcEffect(
             WS_METHODS.mcpRuntimeList,
             ProviderMcpRuntime.listMcpRuntimeStatuses(input).pipe(
+              Effect.provideService(AppMcpOAuth, appMcpOAuth),
               Effect.map((statuses) => ({ statuses })),
             ),
           ),
         [WS_METHODS.mcpRuntimeReconnect]: (input) =>
           observeRpcEffect(
             WS_METHODS.mcpRuntimeReconnect,
-            ProviderMcpRuntime.reconnectMcpServer(input),
+            ProviderMcpRuntime.reconnectMcpServer(input).pipe(
+              Effect.provideService(AppMcpOAuth, appMcpOAuth),
+            ),
           ),
         [WS_METHODS.mcpRuntimeAuthenticate]: (input) =>
           observeRpcEffect(
@@ -1510,6 +1564,7 @@ export const WS_RPC_SERVER_OPTIONS = {
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    const appMcpOAuth = yield* AppMcpOAuth;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -1581,6 +1636,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           () => sessions.markDisconnected(session.sessionId),
         );
       }).pipe(
+        Effect.provideService(AppMcpOAuth, appMcpOAuth),
         Effect.catchTags({
           EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
           EnvironmentInternalError: HttpServerRespondable.toResponse,

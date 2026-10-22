@@ -110,11 +110,12 @@ import {
 } from "../../provider/Layers/codexLaunchArgs.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import { appMcpRuntimeName, codexAppMcpConfig } from "../../mcp/AppMcpConfig.ts";
+import { appMcpProviderServers, appMcpRuntimeName, codexAppMcpConfig } from "../../mcp/AppMcpConfig.ts";
 import {
   registerProviderMcpRuntime,
   normalizeMcpRuntimeState,
   providerMcpRequestError,
+  providerMcpReconnectError,
 } from "../../mcp/ProviderMcpRuntime.ts";
 import {
   ProviderAdapterDriverCreateError,
@@ -1338,7 +1339,7 @@ export function codexThreadRuntimeParams(input: {
         ? {}
         : {
             mcp_servers: {
-              ...codexAppMcpConfig(mcpSession.appMcpServers ?? []),
+              ...codexAppMcpConfig(appMcpProviderServers(mcpSession)),
               test_rig: {
                 url: mcpSession.endpoint,
                 // Internal wait tools can block for an hour; let their own deadline end the call.
@@ -6133,7 +6134,7 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                 reconnect: () =>
                   client
                     .request("config/mcpServer/reload", undefined)
-                    .pipe(Effect.asVoid, Effect.mapError(providerMcpRequestError)),
+                    .pipe(Effect.asVoid, Effect.mapError(providerMcpReconnectError)),
                 authenticate: (runtimeName) =>
                   client
                     .request("mcpServer/oauth/login", { name: runtimeName, threadId })

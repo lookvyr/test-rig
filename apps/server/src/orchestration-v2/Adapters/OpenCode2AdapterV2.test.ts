@@ -4073,8 +4073,9 @@ it.effect(
           "location[directory]": WORK,
           config: {
             type: "remote",
-            url: "https://remote.example.test/mcp",
-            headers: { Authorization: "Bearer remote-secret" },
+            url: "http://localhost/mcp/app/remote",
+            headers: { Authorization: "Bearer builtin" },
+            oauth: false,
           },
         }),
         reply("mcp.add", null),

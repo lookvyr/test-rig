@@ -359,6 +359,23 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:mcp-runtime:authenticate",
       tag: WS_METHODS.mcpRuntimeAuthenticate,
     }),
+    listMcpOAuthStatuses: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:mcp-oauth:list",
+      tag: WS_METHODS.mcpOAuthList,
+      staleTimeMs: 0,
+    }),
+    beginMcpOAuth: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-oauth:begin",
+      tag: WS_METHODS.mcpOAuthBegin,
+    }),
+    completeMcpOAuth: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-oauth:complete",
+      tag: WS_METHODS.mcpOAuthComplete,
+    }),
+    signOutMcpOAuth: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:mcp-oauth:sign-out",
+      tag: WS_METHODS.mcpOAuthSignOut,
+    }),
     scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
