@@ -1,10 +1,7 @@
 import { RIGHT_PANEL_SHEET_LAYER } from "../rightPanelLayout";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  HIDDEN_BROWSER_WEBVIEW_OFFSET,
-  resolveHostedBrowserWebviewWrapperStyle,
-} from "./hostedBrowserWebviewStyle";
+import { resolveHostedBrowserWebviewWrapperStyle } from "./hostedBrowserWebviewStyle";
 
 describe("resolveHostedBrowserWebviewWrapperStyle", () => {
   it("places an active webview on its presented surface", () => {
@@ -41,7 +38,7 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
     });
   });
 
-  it("keeps an inactive webview paintable while moving it offscreen", () => {
+  it("keeps an inactive webview in the viewport behind the app", () => {
     const style = resolveHostedBrowserWebviewWrapperStyle({
       active: false,
       rect: { x: 12, y: 34, width: 800, height: 600 },
@@ -49,8 +46,8 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
     });
 
     expect(style).toEqual({
-      left: HIDDEN_BROWSER_WEBVIEW_OFFSET,
-      top: HIDDEN_BROWSER_WEBVIEW_OFFSET,
+      left: 0,
+      top: 0,
       width: 393,
       height: 852,
       zIndex: -1,

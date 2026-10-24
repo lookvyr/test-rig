@@ -78,6 +78,8 @@ use Open parent thread to return to the conversation that delegated the work.
 Working children remain visible after the parent finishes its response, including
 while you send a follow-up. Claude's native background children retain their tool
 activity and results as they finish.
+Delegated children can open and inspect their own integrated browser tabs while
+you keep the parent conversation selected, including in the desktop app.
 Background subagents can continue using conversation tools after the parent
 response ends, while their original provider account still owns the work.
 Stopping the work, archiving the conversation, or switching accounts ends that
