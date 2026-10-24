@@ -78,6 +78,11 @@ use Open parent thread to return to the conversation that delegated the work.
 Working children remain visible after the parent finishes its response, including
 while you send a follow-up. Claude's native background children retain their tool
 activity and results as they finish.
+When a direct native Codex child finishes after its parent has ended its turn,
+its result can automatically resume the parent. A parent already working receives
+the result through Codex instead of starting another turn. Stopped parents stay
+stopped, and grandchildren report to their own parent.
+
 Delegated children can open and inspect their own integrated browser tabs while
 you keep the parent conversation selected, including in the desktop app.
 Background subagents can continue using conversation tools after the parent

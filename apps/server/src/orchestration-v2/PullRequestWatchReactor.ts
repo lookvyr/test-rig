@@ -194,6 +194,8 @@ function watchesEqual(left: ThreadPullRequestWatch, right: ThreadPullRequestWatc
     left.remarksThrough === right.remarksThrough &&
     left.remarkIds.join("\n") === right.remarkIds.join("\n") &&
     left.conflicting === right.conflicting &&
+    (left.checksAwaitedSince ?? null) === (right.checksAwaitedSince ?? null) &&
+    (left.owedChecks ?? []).join("\n") === (right.owedChecks ?? []).join("\n") &&
     left.wakes === right.wakes
   );
 }
@@ -512,7 +514,7 @@ export const make = Effect.gen(function* () {
       remarks: fingerprint?.remarks ?? null,
     });
     yield* eachTarget(group, (target) => {
-      const report = evaluatePullRequestWatch(target.watch, detail, remarks);
+      const report = evaluatePullRequestWatch(target.watch, detail, remarks, now);
       if (report.changes.length > 0) {
         return record(
           target,

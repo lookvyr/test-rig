@@ -72,6 +72,11 @@ as while the agent is working. After an interrupted turn, **Resume thread** can
 continue where the agent left off when the composer is empty and the provider
 supports continuation. You can also send your own follow-up.
 
+The interruption row identifies whether you, an agent, or the provider stopped
+the run. An agent's supplied reason appears there too. If a saved command still
+shows Running after it finished on the server, Stop refreshes that command's
+status without removing the surrounding history.
+
 Stop also ends pull request watches and stops delegated descendants recursively.
 It discards pending wakes whose output lived only in the provider process and
 holds durable automatic notifications until you resume. Server restart recovery
@@ -100,6 +105,10 @@ it to answer. If its provider process can no longer accept an answer, the
 controls explain that it cannot resume instead of offering an unusable submission.
 
 ## Context compaction
+
+A fork can run `/compact` as its first message when it inherits conversation
+history. A fork whose transferred context contains no history still needs a
+conversation before it can compact.
 
 The work log distinguishes compaction in progress, completed compaction, a
 stopped compaction and a failed compaction. Stopping or interrupting compaction

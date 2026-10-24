@@ -116,6 +116,7 @@ export interface OrchestrationEventStoreShape {
   readonly streamProjectedApplicationEvents: <A extends { readonly sequence: number }>(input: {
     readonly afterSequence?: number;
     readonly project: (event: ApplicationStoredEvent) => A;
+    readonly filter?: (event: ApplicationStoredEvent) => boolean;
   }) => Stream.Stream<A, OrchestrationEventStoreError>;
 }
 

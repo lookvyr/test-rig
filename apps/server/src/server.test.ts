@@ -661,6 +661,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(CommandOutputHub.CommandOutputHub)({ subscribe: () => Stream.empty }),
           Layer.mock(ThreadManagement.ThreadManagementService)({
             dispatch: () => Effect.succeed({ sequence: 0, storedEvents: [] }),
+            listActiveSubagentThreadIds: () => Effect.succeed([]),
             readShellSnapshot: () =>
               Effect.succeed(
                 Effect.succeed({
@@ -4572,7 +4573,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("marks empty native shell replay synchronized", () =>
     Effect.gen(function* () {
-      yield* buildAppUnderTest();
+      yield* buildAppUnderTest({
+        layers: {
+          threads: {
+            listActiveSubagentThreadIds: () => Effect.succeed([]),
+            getShellSnapshot: () => Effect.die("shell resume must not load a full snapshot"),
+            readShellSnapshot: () => Effect.die("shell resume must not load a full snapshot"),
+          },
+        },
+      });
       const items = yield* Effect.scoped(
         withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
           client[ORCHESTRATION_V2_WS_METHODS.subscribeShell]({

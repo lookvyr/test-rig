@@ -130,6 +130,12 @@ state; it does not authorize the agent to merge. Readiness follows GitHub's merg
 rules, so optional checks may still be non-passing. Merge queue updates distinguish
 being ready for the queue from being in it or being ready for a direct merge.
 
+If required checks pass while other CI checks are still pending, the watch can
+send a second update when those remaining checks finish successfully. For a
+GitHub head that never reports checks, it sends one informational update after
+at least 15 minutes, on a subsequent read. This does not mean CI passed, and the
+watch continues in case checks arrive later.
+
 The monitor checks for changes about every two minutes and combines changes found
 in one pass into one update. Threads watching the same PR in a project share reads.
 On GitHub, unchanged activity is read again at least every 30 minutes, including

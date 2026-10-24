@@ -579,6 +579,7 @@ const makeEventStore = Effect.gen(function* () {
         latestSequence: latestApplicationSequence,
         afterSequence: input.afterSequence ?? 0,
         project: input.project,
+        ...(input.filter === undefined ? {} : { filter: input.filter }),
         replay: (throughSequence) =>
           catchUpApplicationEvents({
             afterSequence: input?.afterSequence ?? 0,

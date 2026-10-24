@@ -3244,6 +3244,21 @@ it.effect("omits run_interrupt_result when superseded attempt request is already
   }),
 );
 
+it.effect.each([true, false])("preserves the Stop reason when finalizing is %s", (finalize) =>
+  Effect.gen(function* () {
+    const { written } = yield* captureRootRunTermination({
+      key: `reason-${finalize}`,
+      shouldFinalizeRun: () => Effect.succeed(finalize),
+      hasUnpairedRunInterruptRequest: () => Effect.succeed(true),
+      loadRunInterruptReason: () => Effect.succeed("Stopped by an agent: Replace this attempt"),
+    });
+    assert.equal(
+      written.find((item) => item.type === "run_interrupt_result")?.message,
+      "Stopped by an agent: Replace this attempt",
+    );
+  }),
+);
+
 it.effect("emits run_interrupt_result when hard-stop finalizes the active attempt", () =>
   Effect.gen(function* () {
     const { written, observed } = yield* captureRootRunTermination({
@@ -3253,6 +3268,10 @@ it.effect("emits run_interrupt_result when hard-stop finalizes the active attemp
     assert.deepEqual(
       written.map((item) => item.type),
       ["run_interrupt_result"],
+    );
+    assert.equal(
+      written.find((item) => item.type === "run_interrupt_result")?.message,
+      "Stopped by the provider",
     );
     assert.deepEqual(observed, ["run:interrupted", "pull-requests-refreshed"]);
   }),
@@ -3512,6 +3531,7 @@ function captureRootRunTermination(input: {
   readonly key: string;
   readonly shouldFinalizeRun: () => Effect.Effect<boolean, ProjectionStore.ProjectionStoreV2Error>;
   readonly hasUnpairedRunInterruptRequest?: () => Effect.Effect<boolean, never>;
+  readonly loadRunInterruptReason?: () => Effect.Effect<string | undefined, never>;
   readonly seedOpenSubagent?: boolean;
   readonly events?: (
     ids: BackgroundScenarioIds,
@@ -3653,6 +3673,9 @@ function captureRootRunTermination(input: {
           : {
               hasUnpairedRunInterruptRequest: input.hasUnpairedRunInterruptRequest,
             }),
+        ...(input.loadRunInterruptReason === undefined
+          ? {}
+          : { loadRunInterruptReason: input.loadRunInterruptReason }),
         message: {
           messageId: MessageId.make(`message:${input.key}`),
           text: "interrupt projection",

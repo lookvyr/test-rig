@@ -307,6 +307,10 @@ export interface OrchestratorV2Shape {
     options?: ShellSnapshotOptions,
   ) => Effect.Effect<OrchestrationV2ThreadShellSnapshot, OrchestratorV2Error>;
   /** See `ProjectionStoreV2Shape.readShellSnapshot`. */
+  readonly listActiveSubagentThreadIds: () => Effect.Effect<
+    ReadonlyArray<ThreadId>,
+    OrchestratorV2Error
+  >;
   readonly readShellSnapshot: (
     options?: ShellSnapshotOptions,
   ) => Effect.Effect<
@@ -498,7 +502,9 @@ function withPullRequestWatch(
   watch: ThreadPullRequestWatch | undefined,
 ): ThreadPullRequestLink {
   const { watch: _previous, ...rest } = link;
-  return watch === undefined ? rest : { ...rest, watch };
+  return watch === undefined
+    ? { ...rest, ...(link.watch === undefined ? {} : { endedWatch: link.watch }) }
+    : { ...rest, watch };
 }
 
 /** A legacy single-PR link as a link entry. Re-linking a pull request keeps its watch. */
@@ -3139,14 +3145,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               : !command.watching
                 ? undefined
                 : (existing.watch ?? {
+                    ...existing.endedWatch,
                     startedAt,
-                    headSha: null,
-                    failedChecks: [],
-                    passed: false,
-                    passedChecks: [],
+                    headSha: existing.endedWatch?.headSha ?? null,
+                    failedChecks: existing.endedWatch?.failedChecks ?? [],
+                    passed: existing.endedWatch?.passed ?? false,
+                    passedChecks: existing.endedWatch?.passedChecks ?? [],
                     remarksThrough: startedAt,
                     remarkIds: [],
-                    conflicting: false,
+                    conflicting: existing.endedWatch?.conflicting ?? false,
                     wakes: 0,
                   });
           if (watch === existing.watch && links === linked) return thread;
@@ -8694,7 +8701,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         completedAt: now,
         updatedAt: now,
         type: "run_interrupt_request",
-        message: command.reason ?? "Interrupt requested",
+        message: command.reason ?? RunExecutionService.USER_STOP_REASON,
       },
     });
   });
@@ -8808,6 +8815,31 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
     });
+
+  const runInterruptReason = Effect.fnUntraced(function* (
+    command: Extract<
+      OrchestrationV2ServerCommand,
+      { readonly type: "run.interrupt" | "thread.background-work.settle" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    runId: RunId,
+  ) {
+    const isRequest = (
+      item: OrchestrationV2TurnItem,
+    ): item is Extract<OrchestrationV2TurnItem, { readonly type: "run_interrupt_request" }> =>
+      item.runId === runId && item.type === "run_interrupt_request";
+    const pending = (yield* Ref.get(events))
+      .flatMap((event) => (event.type === "turn-item.updated" ? [event.payload] : []))
+      .findLast(isRequest);
+    if (pending !== undefined) return pending.message;
+    const { turnItems } = yield* projectionStore
+      .getThreadRecords(command.threadId, ["turnItems"], {
+        turnItemTypes: ["run_interrupt_request"],
+        turnItemRunIds: [runId],
+      })
+      .pipe(mapDispatchError(command));
+    return turnItems.find(isRequest)?.message;
+  });
 
   // A successful Stop may have no terminal event to ingest: the session or
   // native turn already died, or its final write failed when storage filled.
@@ -8962,6 +8994,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             run,
             rootNode,
             providerThread,
+            reason: yield* runInterruptReason(input.command, input.events, run.id),
             completedAt: input.now,
           }),
         });
@@ -9196,7 +9229,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         completedAt: now,
         updatedAt: now,
         type: "run_interrupt_request",
-        message: command.reason ?? "Interrupt requested",
+        message: command.reason ?? RunExecutionService.USER_STOP_REASON,
       };
 
       // Background work can outlive a provider switch, such as a Codex dev
@@ -9290,7 +9323,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           completedAt: now,
           updatedAt: now,
           type: "run_interrupt_result",
-          message: "Run interrupted before provider start",
+          message: interruptRequestItem.message,
         };
         yield* emitEvent({
           type: "turn-item.updated",
@@ -11419,6 +11452,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause }))),
     getShellSnapshot: (options) =>
       projectionStore.getShellSnapshot(options).pipe(Effect.mapError(shellProjectionError)),
+    listActiveSubagentThreadIds: () =>
+      projectionStore.listActiveSubagentThreadIds().pipe(Effect.mapError(shellProjectionError)),
     readShellSnapshot: (options) =>
       projectionStore
         .readShellSnapshot(options)
@@ -11556,6 +11591,13 @@ const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
         }),
       ),
     getShellSnapshot: () =>
+      Effect.fail(
+        new OrchestratorProjectionError({
+          threadId: ThreadId.make("thread:shell"),
+          cause: "Orchestration V2 live runtime is not configured.",
+        }),
+      ),
+    listActiveSubagentThreadIds: () =>
       Effect.fail(
         new OrchestratorProjectionError({
           threadId: ThreadId.make("thread:shell"),

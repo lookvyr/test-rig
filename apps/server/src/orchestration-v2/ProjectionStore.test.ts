@@ -686,6 +686,36 @@ it.effect("memory shell snapshots scope to one project", () =>
   ),
 );
 
+it.effect("lists only active subagent IDs without loading shell data", () =>
+  Effect.gen(function* () {
+    const store = yield* ProjectionStore.ProjectionStoreV2;
+    const sql = yield* SqlClient.SqlClient;
+    const createdAt = "2026-01-05T00:00:00.000Z";
+    for (const [id, relationship, archivedAt, deletedAt] of [
+      ["parent", null, null, null],
+      ["active-subagent", "subagent", null, null],
+      ["archived-subagent", "subagent", createdAt, null],
+      ["deleted-subagent", "subagent", null, createdAt],
+    ] as const) {
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+          created_at, updated_at, archived_at, deleted_at, payload_json
+        ) VALUES (
+          ${id}, 'project:test', ${id}, 'codex', 'full-access', 'default',
+          ${createdAt}, ${createdAt}, ${archivedAt}, ${deletedAt},
+          ${encodeUnknownJsonString({ lineage: { relationshipToParent: relationship }, archivedAt })}
+        )
+      `;
+    }
+
+    assert.sameMembers(
+      [...(yield* store.listActiveSubagentThreadIds())],
+      [ThreadId.make("active-subagent")],
+    );
+  }).pipe(Effect.provide(TestLayer)),
+);
+
 it.layer(TestLayer)("ProjectionStoreV2", (it) => {
   it.effect("reads only the requested project's threads into a scoped shell snapshot", () =>
     Effect.gen(function* () {

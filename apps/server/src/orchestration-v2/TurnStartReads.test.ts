@@ -1,10 +1,14 @@
 import { assert, it } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  ContextTransferId,
+  ContextHandoffId,
+  ProviderThreadId,
   NodeId,
   EventId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   RunId,
   ThreadId,
@@ -390,6 +394,211 @@ it.effect.each(["sqlite", "memory"] as const)(
       assert.instanceOf(
         yield* store.getTurnStartContext(ThreadId.make("missing"), runId).pipe(Effect.flip),
         ProjectionStore.ProjectionStoreThreadNotFoundError,
+      );
+    }).pipe(
+      Effect.provide(
+        storage === "sqlite"
+          ? databaseLayer
+          : Layer.merge(SqlitePersistenceMemory, ProjectionStore.layerMemory),
+      ),
+    ),
+);
+
+it.effect.each(
+  (["sqlite", "memory"] as const).flatMap((storage) =>
+    (["native", "portable-empty", "portable-history"] as const).map((inheritance) => ({
+      storage,
+      inheritance,
+    })),
+  ),
+)(
+  "checks $inheritance inherited conversation for a first /compact in $storage",
+  ({ storage, inheritance }) =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const instanceId = ProviderInstanceId.make("claudeAgent");
+      const sourceId = ThreadId.make("thread:fork-source");
+      const forkId = ThreadId.make("thread:fork-target");
+      const sourceRunId = RunId.make("run:fork-source-third");
+      const forkRunId = RunId.make("run:fork-compact");
+      const source: OrchestrationV2AppThread = {
+        id: sourceId,
+        projectId: ProjectId.make("project:fork-compact"),
+        title: "Source",
+        providerInstanceId: instanceId,
+        modelSelection: { instanceId, model: "claude-opus-5-5" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        activeProviderThreadId: null,
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: sourceId },
+        forkedFrom: null,
+        createdBy: "user",
+        creationSource: "web",
+        createdAt: now,
+        updatedAt: now,
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        lastVisitedAt: null,
+        deletedAt: null,
+      };
+      const fork: OrchestrationV2AppThread = {
+        ...source,
+        id: forkId,
+        title: "Fork",
+        lineage: { parentThreadId: sourceId, relationshipToParent: "fork", rootThreadId: sourceId },
+        forkedFrom: { type: "run", threadId: sourceId, runId: sourceRunId },
+      };
+      const run = (threadId: ThreadId, id: RunId, status: OrchestrationV2Run["status"]) =>
+        ({
+          id,
+          threadId,
+          ordinal: 1,
+          providerInstanceId: instanceId,
+          modelSelection: source.modelSelection,
+          providerThreadId: null,
+          userMessageId: MessageId.make(`message:${id}`),
+          rootNodeId: NodeId.make(`node:${id}`),
+          activeAttemptId: null,
+          status,
+          requestedAt: now,
+          startedAt: null,
+          completedAt: null,
+          checkpointId: null,
+          contextHandoffId: null,
+        }) satisfies OrchestrationV2Run;
+      const userMessage = (threadId: ThreadId, runId: RunId, text: string) =>
+        store.apply({
+          id: EventId.make(`event:message:${runId}`),
+          type: "message.updated",
+          threadId,
+          runId,
+          occurredAt: now,
+          payload: {
+            id: MessageId.make(`message:${runId}`),
+            threadId,
+            runId,
+            nodeId: null,
+            role: "user",
+            text,
+            attachments: [],
+            streaming: false,
+            createdBy: "user",
+            creationSource: "web",
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      for (const thread of [source, fork]) {
+        yield* store.apply({
+          id: EventId.make(`event:thread:${thread.id}`),
+          type: "thread.created",
+          threadId: thread.id,
+          occurredAt: now,
+          payload: thread,
+        });
+      }
+      for (const [threadId, value] of [
+        [sourceId, run(sourceId, sourceRunId, "completed")],
+        [forkId, run(forkId, forkRunId, "queued")],
+      ] as const) {
+        yield* store.apply({
+          id: EventId.make(`event:run:${value.id}`),
+          type: "run.updated",
+          threadId,
+          runId: value.id,
+          occurredAt: now,
+          payload: value,
+        });
+      }
+      yield* userMessage(sourceId, sourceRunId, "THIRD");
+      yield* store.apply({
+        id: EventId.make("event:fork-transfer"),
+        type: "context-transfer.created",
+        threadId: forkId,
+        occurredAt: now,
+        payload: {
+          id: ContextTransferId.make("transfer:fork-compact"),
+          type: "fork",
+          sourceThreadId: sourceId,
+          targetThreadId: forkId,
+          sourcePoint: { threadId: sourceId, runId: sourceRunId },
+          basePoint: null,
+          sourceProviderInstanceId: instanceId,
+          targetProviderInstanceId: instanceId,
+          targetRunId: forkRunId,
+          status: "pending",
+          resolution:
+            inheritance === "native"
+              ? {
+                  strategy: "native_fork",
+                  providerThreadRef: {
+                    driver: ProviderDriverKind.make("claudeAgent"),
+                    nativeId: "native-fork-source",
+                    strength: "strong",
+                  },
+                }
+              : {
+                  strategy: "portable_context",
+                  contextHandoffId: ContextHandoffId.make("fork-handoff"),
+                },
+          createdBy: "user",
+          error: null,
+          createdAt: now,
+          updatedAt: now,
+          consumedAt: null,
+        },
+      });
+      if (inheritance !== "native") {
+        yield* store.apply({
+          id: EventId.make("event:fork-handoff"),
+          type: "context-handoff.updated",
+          threadId: forkId,
+          occurredAt: now,
+          payload: {
+            id: ContextHandoffId.make("fork-handoff"),
+            threadId: forkId,
+            targetRunId: forkRunId,
+            fromProviderThreadIds: [],
+            toProviderThreadId: ProviderThreadId.make("fork-provider"),
+            coveredRunOrdinals: { from: 1, to: 1 },
+            strategy: "full_thread_summary",
+            status: "ready",
+            summaryMessageId: null,
+            summaryText: "",
+            createdByProviderInstanceId: instanceId,
+            createdAt: now,
+            updatedAt: now,
+            history: {
+              coverage: "source",
+              omittedItems: 0,
+              messages:
+                inheritance === "portable-empty"
+                  ? []
+                  : [
+                      {
+                        role: "user",
+                        text: "Inherited conversation",
+                        threadId: sourceId,
+                        runId: sourceRunId,
+                        itemId: TurnItemId.make("source-user"),
+                        providerThreadId: null,
+                        status: "completed",
+                        kind: "user_message",
+                      },
+                    ],
+            },
+          },
+        });
+      }
+      yield* userMessage(forkId, forkRunId, "/compact");
+
+      assert.equal(
+        (yield* store.getTurnStartContext(forkId, forkRunId)).hasConversation,
+        inheritance !== "portable-empty",
       );
     }).pipe(
       Effect.provide(

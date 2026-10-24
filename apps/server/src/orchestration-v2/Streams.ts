@@ -1,3 +1,4 @@
+import type { ApplicationStoredEvent } from "@t3tools/contracts";
 import {
   buildActiveShellSnapshot,
   loadShellSnapshotParts,
@@ -12,6 +13,7 @@ import {
   shellStreamItemsFromInitialSnapshot,
   shellStreamItemsFromResumeSnapshot,
   toShellApplicationEvent,
+  shouldPublishShellApplicationEvent,
   type ShellApplicationEvent,
 } from "./ShellStream.ts";
 import { ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION } from "./ProjectionStore.ts";
@@ -318,6 +320,9 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     const projectService = yield* ProjectService.ProjectService;
     const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
 
+    let subagentThreadIds = new Set<string>();
+    const filterSubagentTranscript = (stored: ApplicationStoredEvent) =>
+      shouldPublishShellApplicationEvent(stored, subagentThreadIds);
     const enrichmentChanges = yield* projectEnrichment.subscribeChanges;
     const loadProjectMetadataSnapshot = Effect.fn("ws.orchestrationV2.loadProjectMetadataSnapshot")(
       function* (snapshotSequence: number) {
@@ -342,6 +347,11 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
           listProjects: projects.listShells(),
           latestSequence: applicationEvents.latestApplicationSequence,
         }),
+      );
+      subagentThreadIds = new Set(
+        base.threads
+          .filter((thread) => thread.lineage.relationshipToParent === "subagent")
+          .map((thread) => thread.id),
       );
       const enriched = yield* enrichProjectShells(base.projects);
       return {
@@ -409,6 +419,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
           applicationEvents.streamProjectedApplicationEvents({
             afterSequence,
             project: toShellApplicationEvent,
+            filter: filterSubagentTranscript,
           }),
         ),
       );
@@ -495,12 +506,15 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
         });
       }
 
+      subagentThreadIds = new Set(yield* threadManagement.listActiveSubagentThreadIds());
       const loaded = yield* loadProjectMetadataSnapshot(highWater);
       const replay = toShellStream(
-        applicationEvents.readApplicationEvents({
-          afterSequence: input.afterSequence,
-          throughSequence: highWater,
-        }),
+        applicationEvents
+          .readApplicationEvents({
+            afterSequence: input.afterSequence,
+            throughSequence: highWater,
+          })
+          .pipe(Stream.filter(filterSubagentTranscript)),
       );
       return composeShellStreamWithEnrichment({
         initial: initialEnrichmentItems(loaded),

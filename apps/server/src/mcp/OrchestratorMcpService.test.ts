@@ -505,7 +505,7 @@ describe("OrchestratorMcpService", () => {
         assert.equal(result.status, "completed");
         const commands = yield* Ref.get(dispatched);
         assert.lengthOf(commands, 1);
-        assert.equal(commands[0]?.type, "thread.stop");
+        assert.deepInclude(commands[0], { type: "thread.stop", reason: "Stopped by an agent" });
         assert.deepEqual(yield* Ref.get(cascaded), [childThreadId]);
         const status = yield* service.taskStatus(scope, taskId);
         assert.equal(status.summary, "Published result");
@@ -583,8 +583,12 @@ describe("OrchestratorMcpService", () => {
         const result = yield* service.cancelTask(scope, {
           taskId,
           clientRequestId: "cancel-dispose-failed-task",
+          reason: "A newer task replaces it",
         });
         assert.equal(result.status, "cancel_requested");
+        assert.deepInclude((yield* Ref.get(dispatched))[0], {
+          reason: "Stopped by an agent: A newer task replaces it",
+        });
         assert.deepEqual(
           (yield* Ref.get(dispatched)).map((command) => (command as { type: string }).type),
           ["thread.stop", "delegated_task.completion-delivery.dispose"],

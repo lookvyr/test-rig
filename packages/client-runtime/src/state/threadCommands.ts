@@ -11,6 +11,8 @@ import {
 } from "@t3tools/contracts";
 
 import { createOptimisticThreadLifecycle } from "./threadLifecycle.ts";
+import * as EnvironmentSupervisor from "../connection/supervisor.ts";
+import * as ThreadHistoryController from "./threadHistoryController.ts";
 import * as DateTime from "effect/DateTime";
 
 import {
@@ -89,8 +91,6 @@ import {
   watchThreadPullRequest,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
-import * as EnvironmentSupervisor from "../connection/supervisor.ts";
-import * as ThreadHistoryController from "./threadHistoryController.ts";
 
 export type LoadEarlierThreadHistoryInput = {
   readonly threadId: ThreadId;
@@ -143,6 +143,28 @@ export function createThreadEnvironmentAtoms<R, E>(
     key: ({ environmentId, input }: { environmentId: string; input: { threadId: string } }) =>
       JSON.stringify([environmentId, input.threadId]),
   };
+  // Runs whether or not the server accepted the interrupt, so a stale cached item still
+  // settles when Stop had nothing to interrupt; the interrupt's own failure still surfaces.
+  // The repair is detached: its lookups must not hold the thread's serial command key, and
+  // closing the thread cancels the repair, not the Stop that triggered it.
+  const interruptTurn = Effect.fn("ThreadCommands.interruptTurn")(function* (
+    input: InterruptThreadTurnInput,
+  ) {
+    const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+    const controller = yield* Effect.serviceOption(ThreadHistoryController.ThreadHistoryController);
+    return yield* interruptThreadTurn(input).pipe(
+      Effect.ensuring(
+        Option.match(controller, {
+          onNone: () => Effect.void,
+          onSome: (value) =>
+            value
+              .reconcilePendingWork(supervisor.target.environmentId, input.threadId)
+              .pipe(Effect.forkDetach, Effect.asVoid),
+        }),
+      ),
+    );
+  });
+
   const commands = {
     openSide: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:open-side",
@@ -291,7 +313,7 @@ export function createThreadEnvironmentAtoms<R, E>(
     }),
     interruptTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:interrupt-turn",
-      execute: (input: InterruptThreadTurnInput) => interruptThreadTurn(input),
+      execute: interruptTurn,
       scheduler,
       concurrency,
     }),

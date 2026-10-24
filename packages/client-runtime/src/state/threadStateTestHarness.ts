@@ -1,4 +1,6 @@
 import {
+  TurnItemId,
+  type OrchestrationV2TurnItem,
   EnvironmentId,
   EventId,
   ORCHESTRATION_V2_WS_METHODS,
@@ -102,6 +104,9 @@ export const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(funct
   readonly saveThread?: Persistence.EnvironmentCacheStore["Service"]["saveThread"];
   readonly historyPaging?: "enabled" | "no-http" | "no-controller";
   readonly historyHttpClient?: HttpClient.HttpClient;
+  readonly getTurnItem?: (input: {
+    readonly itemId: TurnItemId;
+  }) => Effect.Effect<{ readonly item: OrchestrationV2TurnItem | null }>;
 }) {
   const inputs = yield* Queue.unbounded<TestThreadInput>();
   const observed = yield* Queue.unbounded<EnvironmentThreadState>();
@@ -140,6 +145,8 @@ export const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(funct
           Effect.as(streamFrom(inputs)),
         ),
       ),
+    [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: (input: { readonly itemId: TurnItemId }) =>
+      options?.getTurnItem?.(input) ?? Effect.die("Unexpected getTurnItem request"),
   } as unknown as WsRpcProtocolClient;
   const supervisorSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
     Option.some(testSession(client, options)),
@@ -242,6 +249,7 @@ export const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(funct
   return {
     threadState,
     loadEarlier: () => historyController.loadEarlier(TARGET.environmentId, THREAD_ID),
+    reconcilePendingWork: historyController.reconcilePendingWork(TARGET.environmentId, THREAD_ID),
     inputs,
     observed,
     latest,

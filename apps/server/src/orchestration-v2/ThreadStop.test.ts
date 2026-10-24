@@ -490,6 +490,14 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
       const stopped = yield* orchestrator.getThreadProjection(threadId);
       const interrupted = stopped.runs.find((run) => run.id === queued!.id)!;
       assert.equal(interrupted.status, "interrupted");
+      const interruptResult = stopped.turnItems.find(
+        (item) => item.runId === interrupted.id && item.type === "run_interrupt_result",
+      );
+      assert.equal(interruptResult?.type, "run_interrupt_result");
+      assert.equal(
+        interruptResult?.type === "run_interrupt_result" ? interruptResult.message : undefined,
+        "Stopped by user",
+      );
       assert.equal(DateTime.toEpochMillis(interrupted.completedAt!), DateTime.toEpochMillis(now));
       yield* orchestrator.dispatch({
         type: "message.dispatch",

@@ -326,6 +326,26 @@ export interface ShellSnapshotOptions {
   readonly unsettledOnly?: boolean;
 }
 
+// A fork inherits its source's history before it has messages of its own,
+// unless a portable handoff's budget left none of that history to deliver.
+const inheritsForkConversation = ({
+  thread,
+  contextTransfers,
+  contextHandoffs,
+}: Pick<OrchestrationV2ThreadProjection, "thread" | "contextTransfers" | "contextHandoffs">) => {
+  if (thread.forkedFrom?.type !== "run") return false;
+  const resolution = contextTransfers.find(
+    (transfer) => transfer.type === "fork" && transfer.targetThreadId === thread.id,
+  )?.resolution;
+  return (
+    resolution?.strategy !== "portable_context" ||
+    contextHandoffs.some(
+      (handoff) =>
+        handoff.id === resolution.contextHandoffId && (handoff.history?.messages.length ?? 0) > 0,
+    )
+  );
+};
+
 export interface ProjectionStoreV2Shape {
   readonly getThreadAttachmentIds: (
     threadId: ThreadId,
@@ -355,6 +375,10 @@ export interface ProjectionStoreV2Shape {
   readonly getShellSnapshot: (
     options?: ShellSnapshotOptions,
   ) => Effect.Effect<OrchestrationV2ThreadShellSnapshot, ProjectionStoreV2Error>;
+  readonly listActiveSubagentThreadIds: () => Effect.Effect<
+    ReadonlyArray<ThreadId>,
+    ProjectionStoreV2Error
+  >;
   /**
    * Runs the shell snapshot's SQL reads and returns the step that decodes them.
    * Callers that combine the shell with other reads run this inside their own
@@ -4042,7 +4066,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ) AS present
             `;
             return {
-              hasConversation: conversation[0]?.present === 1,
+              hasConversation:
+                conversation[0]?.present === 1 ||
+                inheritsForkConversation({ thread, contextTransfers, contextHandoffs }),
               thread,
               runs,
               attempts,
@@ -5844,6 +5870,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     // Per-thread shell for the live shell streams: reads only the target thread
     // plus its fork-source chain instead of materializing every thread. Returns
     // null when the thread is deleted or unknown.
+    const listActiveSubagentThreadIds = Effect.fn("ProjectionStore.listActiveSubagentThreadIds")(
+      function* () {
+        const rows = yield* sql<{ readonly thread_id: string }>`
+          SELECT thread_id FROM orchestration_v2_projection_threads
+          WHERE deleted_at IS NULL
+            AND json_extract(payload_json, '$.archivedAt') IS NULL
+            AND json_extract(payload_json, '$.lineage.relationshipToParent') = 'subagent'
+        `;
+        return rows.map((row) => ThreadId.make(row.thread_id));
+      },
+      Effect.mapError(shellSnapshotReadError),
+    );
+
     const getThreadShell: ProjectionStoreV2Shape["getThreadShell"] = (threadId) =>
       sql
         .withTransaction(
@@ -5914,6 +5953,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     return {
       apply,
       getShellSnapshot,
+      listActiveSubagentThreadIds,
       readShellSnapshot,
       getThreadShell,
       getThread,
@@ -6015,6 +6055,19 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             archivedThreads: visible.filter((thread) => thread.archivedAt !== null),
           };
         }),
+      listActiveSubagentThreadIds: () =>
+        Ref.get(replayState).pipe(
+          Effect.map(({ projections }) =>
+            [...projections.values()]
+              .filter(
+                ({ thread }) =>
+                  thread.deletedAt === null &&
+                  thread.archivedAt === null &&
+                  thread.lineage.relationshipToParent === "subagent",
+              )
+              .map(({ thread }) => thread.id),
+          ),
+        ),
       readShellSnapshot: (options) =>
         service.getShellSnapshot(options).pipe(Effect.map(Effect.succeed)),
       getThreadShell: (threadId) =>
@@ -6482,12 +6535,13 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
         service.getThreadProjection(threadId).pipe(
           Effect.map((projection) => ({
             ...projection,
-            hasConversation: projection.messages.some(
-              (message) =>
-                message.role === "user" &&
-                (message.text.trim().toLowerCase() !== "/compact" ||
-                  message.attachments.length > 0),
-            ),
+            hasConversation:
+              projection.messages.some(
+                (message) =>
+                  message.role === "user" &&
+                  (message.text.trim().toLowerCase() !== "/compact" ||
+                    message.attachments.length > 0),
+              ) || inheritsForkConversation(projection),
             turnItems: projection.turnItems.filter((item) => item.runId === runId),
           })),
         ),

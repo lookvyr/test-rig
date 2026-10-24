@@ -112,6 +112,8 @@ export const ThreadPullRequestWatch = Schema.Struct({
   /** Last observed host verdicts; absent on historical watches and unsupported hosts. */
   approvalDecision: Schema.optionalKey(Schema.NullOr(PullRequestReviewDecision)),
   mergeReadiness: Schema.optionalKey(PullRequestMergeReadiness),
+  /** Checks pending when required checks passed, owed one completion notice. */
+  owedChecks: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   /** Remarks from others created or edited up to this host time were reported. */
   remarksThrough: IsoDateTime,
   /** Remarks active exactly at `remarksThrough` that were reported, so a late one still counts. */
@@ -119,6 +121,11 @@ export const ThreadPullRequestWatch = Schema.Struct({
   conflicting: Schema.Boolean,
   /** Comment-only wakes in a row. Watching stops at a limit, so bots cannot loop it. */
   wakes: NonNegativeInt,
+  /**
+   * When the head was first read without any check, until a check shows up or the agent is told
+   * none did. Null once either happened; absent on watches saved before it existed.
+   */
+  checksAwaitedSince: Schema.optional(Schema.NullOr(IsoDateTime)),
 });
 export type ThreadPullRequestWatch = typeof ThreadPullRequestWatch.Type;
 
@@ -130,5 +137,7 @@ export const ThreadPullRequestLink = Schema.Struct({
   snapshot: Schema.NullOr(ThreadPullRequestSnapshot),
   stack: Schema.NullOr(ThreadPullRequestStack),
   watch: Schema.optional(ThreadPullRequestWatch),
+  /** Last stopped watch, retained so rewatching does not repeat notifications. */
+  endedWatch: Schema.optional(ThreadPullRequestWatch),
 });
 export type ThreadPullRequestLink = typeof ThreadPullRequestLink.Type;
