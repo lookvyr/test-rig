@@ -27,7 +27,7 @@ import type {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -830,7 +830,7 @@ function AttributionTable({ entries }: { entries: ReadonlyArray<ResourceAttribut
   );
 }
 
-export function ResourceTelemetryDiagnostics() {
+export function ResourceTelemetryDiagnostics({ onRetry }: { onRetry?: () => void } = {}) {
   const [windowMs, setWindowMs] = useState(15 * 60_000);
   const selectedWindow =
     HISTORY_WINDOWS.find((option) => option.windowMs === windowMs) ?? HISTORY_WINDOWS[1];
@@ -841,6 +841,12 @@ export function ResourceTelemetryDiagnostics() {
     bucketMs: selectedWindow.bucketMs,
   });
   const primaryEnvironment = usePrimaryEnvironment();
+  const environmentId = primaryEnvironment?.environmentId ?? null;
+  const refreshHistory = history.refresh;
+  const selectedHistoryRef = useRef({ environmentId, windowMs, refreshHistory, onRetry });
+  useEffect(() => {
+    selectedHistoryRef.current = { environmentId, windowMs, refreshHistory, onRetry };
+  }, [environmentId, windowMs, refreshHistory, onRetry]);
   const signalServerProcess = useAtomCommand(serverEnvironment.signalProcess, {
     reportFailure: false,
   });
@@ -910,6 +916,23 @@ export function ResourceTelemetryDiagnostics() {
   const retryCollector = useCallback(() => {
     setIsRetrying(true);
     void retryTelemetry()
+      .then(() => {
+        refreshHistory();
+        onRetry?.();
+        const selectedHistory = selectedHistoryRef.current;
+        if (
+          selectedHistory.environmentId === environmentId &&
+          selectedHistory.windowMs !== windowMs
+        ) {
+          selectedHistory.refreshHistory();
+        }
+        if (
+          selectedHistory.environmentId === environmentId &&
+          selectedHistory.onRetry !== onRetry
+        ) {
+          selectedHistory.onRetry?.();
+        }
+      })
       .catch((error: unknown) => {
         toastManager.add({
           type: "error",
@@ -921,7 +944,7 @@ export function ResourceTelemetryDiagnostics() {
       .finally(() => {
         setIsRetrying(false);
       });
-  }, [retryTelemetry]);
+  }, [retryTelemetry, refreshHistory, environmentId, windowMs, onRetry]);
 
   const speedLimit = snapshot ? Option.getOrNull(snapshot.speedLimitPercent) : null;
   const collectorNeedsRetry = shouldShowResourceMonitorRetry({

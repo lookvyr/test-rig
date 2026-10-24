@@ -16,6 +16,10 @@ Pages run in an isolated frame without access to your app session or storage. Li
 
 Previews run on the server, so they work without an open desktop window. The first preview downloads a verified Chromium build into Test Rig’s own data directory. If installation takes longer than a tool call, the agent receives progress and can retry. Missing host libraries or sandbox support produce setup instructions.
 
+Preview screenshots honor the selected light or dark appearance, including
+pages that use `prefers-color-scheme`. Pages with fixed colors still use their
+own styling.
+
 A preview uses a fresh browser profile, with no app cookies or saved logins. It can load public resources but cannot read arbitrary local files or contact services on your private network. Referenced local images are embedded before rendering. Preview screenshots are feedback for the agent; the published visualization remains interactive.
 
 Keyboard focus outlines stay inside controls so they remain visible at the frame edges.

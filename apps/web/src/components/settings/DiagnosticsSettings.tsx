@@ -856,6 +856,10 @@ export function DiagnosticsSettingsPanel() {
         }),
   );
   const [isOpeningLogsDirectory, setIsOpeningLogsDirectory] = useState(false);
+  const refreshResourceDiagnostics = useCallback(() => {
+    refreshProcesses();
+    refreshResources();
+  }, [refreshProcesses, refreshResources]);
   const [openLogsDirectoryError, setOpenLogsDirectoryError] = useState<string | null>(null);
   const [signalingPid, setSignalingPid] = useState<number | null>(null);
 
@@ -970,7 +974,7 @@ export function DiagnosticsSettingsPanel() {
           label={primaryEnvironment.label}
         />
       ) : null}
-      <ResourceTelemetryDiagnostics />
+      <ResourceTelemetryDiagnostics onRetry={refreshResourceDiagnostics} />
 
       <SettingsSection
         title="Live Processes"

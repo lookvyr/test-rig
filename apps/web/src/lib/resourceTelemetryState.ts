@@ -26,6 +26,7 @@ export function useResourceTelemetry(): ResourceTelemetryState {
   const retryCommand = useAtomCommand(serverEnvironment.retryResourceTelemetry, {
     reportFailure: false,
   });
+  const refresh = query.refresh;
   const retry = useCallback(async () => {
     if (environmentId === null) {
       throw new Error("No environment is selected.");
@@ -34,8 +35,9 @@ export function useResourceTelemetry(): ResourceTelemetryState {
     if (result._tag === "Failure") {
       throw Cause.squash(result.cause);
     }
+    refresh();
     return result.value.snapshot;
-  }, [environmentId, retryCommand]);
+  }, [environmentId, retryCommand, refresh]);
 
   return { ...query, retry };
 }

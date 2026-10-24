@@ -7,11 +7,57 @@ import {
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 import { ServerConfig } from "../config.ts";
 import * as ResourceMonitorBinary from "./ResourceMonitorBinary.ts";
 
 describe("ResourceMonitorBinary", () => {
+  it.effect.each(["release", "debug"])(
+    "resolves a cargo %s binary from the built server layout",
+    (profile) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-resource-monitor-binary-",
+        });
+        const projectDirectory = path.join(baseDir, "repo");
+        const distDirectory = path.join(projectDirectory, "apps", "server", "dist");
+        const binaryDirectory = path.join(
+          projectDirectory,
+          "native",
+          "resource-monitor",
+          "target",
+          profile,
+        );
+        const binaryPath = path.join(binaryDirectory, "test-rig-resource-monitor.exe");
+        yield* fileSystem.makeDirectory(distDirectory, { recursive: true });
+        yield* fileSystem.makeDirectory(binaryDirectory, { recursive: true });
+        yield* fileSystem.writeFileString(binaryPath, "binary");
+        yield* fileSystem.chmod(binaryPath, 0o755);
+
+        const service = yield* ResourceMonitorBinary.make().pipe(
+          // The bundled module lives in dist rather than src/resourceTelemetry.
+          Effect.provideService(Path.Path, {
+            ...path,
+            resolve: (...segments) =>
+              path.resolve(
+                ...segments.map((segment) =>
+                  segment === import.meta.dirname ? distDirectory : segment,
+                ),
+              ),
+          }),
+          Effect.provide(ServerConfig.layerTest(projectDirectory, baseDir)),
+          Effect.provideService(HostProcessPlatform, "win32"),
+          Effect.provideService(HostProcessArchitecture, "arm64"),
+          Effect.provideService(HostProcessEnvironment, {}),
+        );
+
+        assert.equal(yield* service.resolve, binaryPath);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("resolves an executable override", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

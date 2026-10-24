@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { describe, expect, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as PreviewBrowser from "../preview/PreviewBrowser.ts";
@@ -40,6 +41,30 @@ const layerTest = layerHtmlRender();
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 describe("HtmlRender", () => {
+  it.live("matches preview media queries and text colors to the requested appearance", (ctx) =>
+    Effect.gen(function* () {
+      const executable = (yield* HostProcessEnvironment).TEST_RIG_TEST_BROWSER;
+      if (!executable) return ctx.skip("Set TEST_RIG_TEST_BROWSER to run this test.");
+      yield* Effect.gen(function* () {
+        const htmlRender = yield* HtmlRender.HtmlRender;
+        for (const appearance of [undefined, "dark", "light"] as const) {
+          const preview = yield* htmlRender.preview({
+            appearance,
+            html: [
+              "<style>h1{color:#18181b}@media(prefers-color-scheme:dark){h1{color:#fafafa}}</style>",
+              "<h1>The moon garden opens at dusk</h1>",
+              '<script>console.log(matchMedia("(prefers-color-scheme:dark)").matches,',
+              'getComputedStyle(document.querySelector("h1")).color);</script>',
+            ].join(""),
+          });
+          expect(preview.consoleMessages).toContainEqual({
+            level: "log",
+            text: appearance === "light" ? "false rgb(24, 24, 27)" : "true rgb(250, 250, 250)",
+          });
+        }
+      }).pipe(Effect.provide(layerHtmlRender(executable)));
+    }),
+  );
   it.effect("inlines local images by absolute path and leaves URLs and relative paths alone", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
