@@ -175,6 +175,81 @@ it.layer(TestLayer)("ThreadSearch", (it) => {
     }),
   );
 
+  it.effect(
+    "finds words apart through the index, ranks proximity, and hides internal messages",
+    () =>
+      Effect.gen(function* () {
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        const search = yield* ThreadSearch.ThreadSearch;
+        const sql = yield* SqlClient.SqlClient;
+        const project = ProjectId.make("project:search-words");
+        yield* createProject(project);
+        const phrase = ThreadId.make("thread:search-phrase");
+        const near = ThreadId.make("thread:search-near");
+        const far = ThreadId.make("thread:search-far");
+        const child = ThreadId.make("thread:search-child");
+        const notice = ThreadId.make("thread:search-notice");
+        const childEvent = thread(child, project);
+        if (childEvent.type !== "thread.created") throw new Error("Unexpected fixture");
+        yield* Effect.forEach(
+          [
+            thread(phrase, project),
+            message(phrase, "search-phrase", "user", "Database timeout"),
+            thread(near, project),
+            message(near, "search-near", "user", "Database connection timeout", { minute: 2 }),
+            thread(far, project),
+            message(far, "search-far", "user", `Database ${"details ".repeat(40)}timeout`, {
+              minute: 3,
+            }),
+            {
+              ...childEvent,
+              payload: {
+                ...childEvent.payload,
+                lineage: {
+                  rootThreadId: near,
+                  parentThreadId: near,
+                  relationshipToParent: "subagent" as const,
+                },
+              },
+            },
+            message(child, "search-child", "assistant", "Database timeout"),
+            thread(notice, project),
+            message(notice, "search-notice", "user", "Database timeout"),
+          ],
+          projections.apply,
+          { discard: true },
+        );
+        yield* sql`UPDATE orchestration_v2_projection_messages SET payload_json = json_set(payload_json, '$.createdBy', 'agent') WHERE message_id = 'search-notice'`;
+        const result = yield* search.search({ query: "database timeout" });
+        assert.deepEqual(
+          result.matches.map((match) => match.threadId),
+          [phrase, near, far],
+        );
+        assert.equal(result.matches[0]?.messageId, "search-phrase");
+        assert.include(result.matches[1]?.snippet, "Database connection timeout");
+        const plan =
+          yield* sql`EXPLAIN QUERY PLAN SELECT rowid FROM orchestration_v2_message_search WHERE orchestration_v2_message_search MATCH '"database" AND "timeout"' ORDER BY rowid DESC LIMIT 2000`;
+        assert.isTrue(plan.some((row) => String(row.detail).includes("VIRTUAL TABLE INDEX")));
+        yield* projections.apply(message(near, "search-cjk", "assistant", "搜索完成"));
+        assert.equal((yield* search.search({ query: "搜索" })).matches[0]?.messageId, "search-cjk");
+        assert.equal((yield* search.search({ query: "完成" })).matches[0]?.messageId, "search-cjk");
+        assert.deepEqual((yield* search.search({ query: "on" })).matches, []);
+        yield* projections.apply(
+          message(
+            near,
+            "search-link",
+            "assistant",
+            "[Useful label](https://example.test/invisible-needle)",
+          ),
+        );
+        assert.deepEqual((yield* search.search({ query: "invisible-needle" })).matches, []);
+        assert.equal(
+          (yield* search.search({ query: "Useful label" })).matches[0]?.snippet,
+          "Useful label",
+        );
+      }),
+  );
+
   it.effect("reports an unreadable match as a decode failure", () =>
     Effect.gen(function* () {
       const projections = yield* ProjectionStore.ProjectionStoreV2;

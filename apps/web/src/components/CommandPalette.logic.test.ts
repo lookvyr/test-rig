@@ -1,6 +1,6 @@
 import { makeTestThread } from "../test/threadFixtures";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { ProjectId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "../types";
 import {
   buildBrowseGroups,
@@ -8,6 +8,7 @@ import {
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
   buildThreadActionItems,
+  buildThreadMessageActionItems,
   enumerateCommandPaletteItems,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
@@ -418,5 +419,114 @@ describe("virtualized command palette rows", () => {
     expect(findHighlightedCommandPaletteItem(groups, "thread-b")?.value).toBe("thread-b");
     expect(findHighlightedCommandPaletteItem(groups, "offline")).toBeNull();
     expect(findHighlightedCommandPaletteItem(groups, null)).toBeNull();
+  });
+});
+
+describe("indexed message search items", () => {
+  it("deduplicates message matches against displayed threads by environment and thread", () => {
+    const id = ThreadId.make("shared-id");
+    const envA = EnvironmentId.make("environment-a");
+    const envB = EnvironmentId.make("environment-b");
+    const threadItems = buildThreadActionItems({
+      threads: [
+        makeThread({ id, environmentId: envA, title: "Compact context" }),
+        makeThread({ id, environmentId: envB, title: "Other thread" }),
+      ],
+      projectTitleById: new Map(),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async () => undefined,
+    });
+    const messageItems = buildThreadMessageActionItems({
+      threadItems,
+      matches: [envA, envB].map((environmentId) => ({
+        environmentId,
+        threadId: id,
+        messageId: "message",
+        source: "assistant" as const,
+        snippet: "Context compaction occurs",
+        messageCreatedAt: null,
+      })),
+      query: "compact",
+      openMatch: () => undefined,
+    });
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "compact",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: threadItems,
+      messageSearchItems: messageItems,
+    });
+    expect(groups.map((group) => [group.label, group.items.map((item) => item.title)])).toEqual([
+      ["Threads", ["Compact context"]],
+      ["In messages", ["Other thread"]],
+    ]);
+    expect(groups[1]?.items[0]?.threadSearchKey).toBe(JSON.stringify([envB, id]));
+    const onlyMetadata = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "compact",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: threadItems,
+      messageSearchItems: messageItems.slice(0, 1),
+    });
+    expect(onlyMetadata.map((group) => group.label)).toEqual(["Threads"]);
+  });
+
+  it("keeps indexed matches separate from title results and opens their scoped message", async () => {
+    const id = ThreadId.make("same-thread-id");
+    const envA = EnvironmentId.make("environment-a");
+    const envB = EnvironmentId.make("environment-b");
+    const runThread = vi.fn(async () => undefined);
+    const openMatch = vi.fn();
+    const threadItems = buildThreadActionItems({
+      threads: [
+        makeThread({ id, environmentId: envA, title: "Thread A" }),
+        makeThread({ id, environmentId: envB, title: "Thread B" }),
+      ],
+      projectTitleById: new Map(),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread,
+    });
+    const match = {
+      environmentId: envB,
+      threadId: id,
+      source: "assistant" as const,
+      snippet: "The indexed cache now refreshes the sidebar",
+      messageId: "message-b",
+      messageCreatedAt: null,
+    };
+    const messageItems = buildThreadMessageActionItems({
+      threadItems,
+      matches: [match, { ...match, threadId: ThreadId.make("hidden-subagent") }],
+      query: "sidebar cache",
+      openMatch,
+    });
+    expect(messageItems).toHaveLength(1);
+    expect(messageItems[0]?.title).toBe("Thread B");
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "sidebar cache",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: threadItems,
+      messageSearchItems: messageItems,
+    });
+    expect(groups.map((group) => group.label)).toEqual(["In messages"]);
+    await messageItems[0]?.run();
+    expect(runThread).toHaveBeenCalledWith(expect.objectContaining({ id, environmentId: envB }));
+    expect(openMatch).toHaveBeenCalledWith(match);
+    expect(
+      filterCommandPaletteGroups({
+        activeGroups: [],
+        query: ">sidebar",
+        isInSubmenu: false,
+        projectSearchItems: [],
+        threadSearchItems: threadItems,
+        messageSearchItems: messageItems,
+      }),
+    ).toEqual([]);
   });
 });

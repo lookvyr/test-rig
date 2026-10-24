@@ -21,53 +21,23 @@ import {
   CommandShortcut,
 } from "./ui/command";
 
-function foldAsciiCase(value: string): string {
-  return value.replace(/[A-Z]/g, (character) => character.toLowerCase());
-}
-
 function HighlightedSearchText(props: { text: string; query: string }) {
-  const query = props.query.trim();
-  if (query.length === 0) return props.text;
-
-  const normalizedText = foldAsciiCase(props.text);
-  const normalizedQuery = foldAsciiCase(query);
-  const parts: Array<{
-    readonly text: string;
-    readonly highlighted: boolean;
-    readonly start: number;
-  }> = [];
-  let cursor = 0;
-
-  while (cursor < props.text.length) {
-    const matchIndex = normalizedText.indexOf(normalizedQuery, cursor);
-    if (matchIndex === -1) {
-      parts.push({ text: props.text.slice(cursor), highlighted: false, start: cursor });
-      break;
-    }
-    if (matchIndex > cursor) {
-      parts.push({
-        text: props.text.slice(cursor, matchIndex),
-        highlighted: false,
-        start: cursor,
-      });
-    }
-    parts.push({
-      text: props.text.slice(matchIndex, matchIndex + query.length),
-      highlighted: true,
-      start: matchIndex,
-    });
-    cursor = matchIndex + query.length;
-  }
-
-  return parts.map((part) =>
-    part.highlighted ? (
-      <mark className="bg-transparent font-semibold text-foreground" key={part.start}>
-        {part.text}
+  const fold = (text: string) => text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+  const tokens = props.query.match(/[\p{L}\p{N}]+/gu)?.map(fold) ?? [];
+  return [...props.text.matchAll(/[\p{L}\p{N}\p{M}]+|[^\p{L}\p{N}\p{M}]+/gu)].map((part) => {
+    const text = part[0];
+    return tokens.some(
+      (token) =>
+        fold(text).startsWith(token) ||
+        (Array.from(token).length >= 4 && fold(text).includes(token)),
+    ) ? (
+      <mark className="bg-transparent font-semibold text-foreground" key={part.index}>
+        {text}
       </mark>
     ) : (
-      part.text
-    ),
-  );
+      text
+    );
+  });
 }
 
 function ThreadContentMatch(props: {

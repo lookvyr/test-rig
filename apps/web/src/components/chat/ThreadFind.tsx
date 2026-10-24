@@ -1,3 +1,5 @@
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { subscribeThreadFindQuery, takeThreadFindQuery } from "./threadFindActionBus";
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
@@ -59,6 +61,7 @@ export function ThreadFind({
   const inputRef = useRef<HTMLInputElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const navigationRef = useRef(false);
+  const requestedMessageRef = useRef<string | undefined>(undefined);
   const textCache = useRef(
     new Map<string, { source: string; cwd: string | undefined; text: string }>(),
   );
@@ -112,6 +115,21 @@ export function ThreadFind({
       cancelled = true;
     };
   }, [open, settledQuery, runSearch, threadRef]);
+
+  useEffect(() => {
+    const takeQuery = () => {
+      const find = takeThreadFindQuery(scopedThreadKey(threadRef));
+      if (!find) return;
+      requestedMessageRef.current = find.messageId;
+      navigationRef.current = true;
+      setQuery(find.query);
+      setSettledQuery(normalizeFindText(find.query));
+      setOpen(true);
+      setNavigationRequest((current) => current + 1);
+    };
+    takeQuery();
+    return subscribeThreadFindQuery(takeQuery);
+  }, [threadRef]);
 
   useEffect(() => {
     if (request === 0) return;
@@ -174,7 +192,10 @@ export function ThreadFind({
         if (cancelled) return;
       }
       setMatches(found);
-      setIndex((current) => Math.min(current, Math.max(0, found.length - 1)));
+      const target = requestedMessageRef.current;
+      const targetIndex = target ? found.findIndex((match) => match.messageId === target) : -1;
+      if (targetIndex >= 0) setIndex(targetIndex);
+      else setIndex((current) => Math.min(current, Math.max(0, found.length - 1)));
       setIndexing(false);
     }
     void buildMatches();
@@ -284,6 +305,7 @@ export function ThreadFind({
   }, [viewport, open, settledQuery, pending, active, listRef, navigationRequest]);
 
   const close = useCallback(() => {
+    requestedMessageRef.current = undefined;
     setOpen(false);
     onSelectMessage(null);
     navigationRef.current = false;
@@ -294,6 +316,7 @@ export function ThreadFind({
 
   function move(delta: number) {
     if (!matches.length || pending) return;
+    requestedMessageRef.current = undefined;
     navigationRef.current = true;
     setNavigationRequest((request) => request + 1);
     setIndex((current) => (current + delta + matches.length) % matches.length);
@@ -345,6 +368,7 @@ export function ThreadFind({
         spellCheck={false}
         className="min-w-0 flex-1 bg-transparent py-1 text-xs outline-none placeholder:text-muted-foreground"
         onChange={(event) => {
+          requestedMessageRef.current = undefined;
           setQuery(event.target.value);
           setIndex(0);
           navigationRef.current = true;

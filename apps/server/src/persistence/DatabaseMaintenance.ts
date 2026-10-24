@@ -1,3 +1,4 @@
+import { rebuildMessageSearch } from "../orchestration-v2/messageSearchIndex.ts";
 import { DatabaseStorageError, type DatabaseStorageStatus } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -178,6 +179,7 @@ export const compactDatabase = Effect.fn("compactDatabase")(function* (databaseP
       }),
     );
     yield* sql`VACUUM`;
+    yield* rebuildMessageSearch(sql);
     yield* sql`PRAGMA wal_checkpoint(TRUNCATE)`;
     const after = yield* readStorage;
     return {

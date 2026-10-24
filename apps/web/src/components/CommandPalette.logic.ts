@@ -91,6 +91,7 @@ export interface CommandPaletteItem {
   readonly threadContentMatch?: CommandPaletteThreadContentMatch;
   readonly timestamp?: string;
   readonly searchRecency?: string;
+  readonly threadSearchKey?: string;
   readonly icon: ReactNode;
   readonly disabled?: boolean;
   /** Optional content rendered inline before the title text. */
@@ -288,6 +289,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
       {
         kind: "action" as const,
         value: `thread:${thread.id}`,
+        threadSearchKey: JSON.stringify([thread.environmentId, thread.id]),
         searchTerms: [
           thread.title,
           projectTitle ?? ``,
@@ -311,6 +313,42 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
         },
       },
     );
+  });
+}
+
+export function buildThreadMessageActionItems(input: {
+  readonly threadItems: ReadonlyArray<CommandPaletteActionItem>;
+  readonly matches: ReadonlyArray<{
+    readonly environmentId: EnvironmentId;
+    readonly threadId: Thread["id"];
+    readonly messageId?: string;
+    readonly source: "user" | "assistant";
+    readonly snippet: string;
+    readonly messageCreatedAt: string | null;
+  }>;
+  readonly query: string;
+  readonly openMatch: (match: (typeof input.matches)[number]) => void;
+}): CommandPaletteActionItem[] {
+  if (input.matches.length === 0) return [];
+  const items = new Map(input.threadItems.map((item) => [item.threadSearchKey, item]));
+  return input.matches.flatMap((match) => {
+    const key = JSON.stringify([match.environmentId, match.threadId]);
+    const item = items.get(key);
+    if (!item) return [];
+    return [
+      {
+        ...item,
+        value: `message:${key}:${match.messageId ?? match.source}`,
+        ...(match.messageCreatedAt
+          ? { timestamp: formatRelativeTimeLabel(match.messageCreatedAt) }
+          : {}),
+        threadContentMatch: { source: match.source, snippet: match.snippet, query: input.query },
+        run: async () => {
+          await item.run();
+          input.openMatch(match);
+        },
+      },
+    ];
   });
 }
 
@@ -360,6 +398,7 @@ export function filterCommandPaletteGroups(input: {
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  messageSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
@@ -397,7 +436,7 @@ export function filterCommandPaletteGroups(input: {
     }
   }
 
-  return searchableGroups.flatMap((group) => {
+  const groups = searchableGroups.flatMap((group) => {
     const items = Arr.filterMap(group.items, (item, index) => {
       const haystack = normalizeSearchText(item.searchTerms.join(" "));
       if (!haystack.includes(normalizedQuery)) {
@@ -424,6 +463,23 @@ export function filterCommandPaletteGroups(input: {
 
     return [{ value: group.value, label: group.label, items }];
   });
+  // A thread already shown by its metadata does not need a second message row.
+  const listedThreads = new Set(
+    groups
+      .filter((group) => group.value === "threads-search")
+      .flatMap((group) =>
+        group.items.flatMap((item) => (item.threadSearchKey ? [item.threadSearchKey] : [])),
+      ),
+  );
+  const messageItems =
+    input.messageSearchItems?.filter(
+      (item) => !item.threadSearchKey || !listedThreads.has(item.threadSearchKey),
+    ) ?? [];
+  // Indexed word matches need not contain the query as one contiguous phrase.
+  if (!input.isInSubmenu && !isActionsFilter && messageItems.length > 0) {
+    groups.push({ value: "messages-search", label: "In messages", items: messageItems });
+  }
+  return groups;
 }
 
 export function buildBrowseGroups(input: {

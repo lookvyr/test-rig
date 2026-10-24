@@ -56,11 +56,16 @@ successful pick; its hover glow and badge preview the element and token that cli
 **Cancel** or `Escape` exits Inspect and clears its selection and spotlight.
 
 The command palette searches active thread titles, projects, branches, user messages, and final
-agent responses across connected environments. Message matches show one labeled excerpt while
-keeping the thread's project, branch, and machine context visible. Message search begins after two
-characters and uses SQLite's ASCII case-insensitive matching. Subagents stay out
-of Recent Threads and thread search; independent forks remain available. Search
-favors matches at the start of words over matches inside words. Exact titles rank
+agent responses across connected environments. **Threads** shows title and metadata matches;
+**In messages** shows matching excerpts below them. Message results arriving later do not move
+the thread matches above. Choose a message result to open the conversation with Find at the
+matching message, including older history.
+
+Message search matches all entered words and favors words close together. It ignores letter
+case and Latin accents, and accepts straight or curly apostrophes. At least one word needs three
+characters; two-character CJK words are also supported. Agent-generated notices, archived
+threads, and subagents stay out of message results. Independent forks remain available.
+Title search favors matches at the start of words over matches inside words. Exact titles rank
 first; otherwise, equally strong title matches favor recent conversations.
 
 Press **Cmd+F** on macOS or **Ctrl+F** elsewhere to find a word or phrase in the open
