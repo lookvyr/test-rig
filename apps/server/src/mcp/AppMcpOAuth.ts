@@ -21,6 +21,7 @@ import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { McpRuntimeError } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -83,6 +84,10 @@ export interface AppMcpOAuthShape {
 export class AppMcpOAuth extends Context.Service<AppMcpOAuth, AppMcpOAuthShape>()(
   "t3/mcp/AppMcpOAuth",
 ) {}
+
+class OAuthRefreshError extends Schema.TaggedError<OAuthRefreshError>()("OAuthRefreshError", {
+  cause: Schema.Defect(),
+}) {}
 
 const failure = (message: string) => new McpRuntimeError({ operation: "oauth", message });
 const canonicalUrl = (value: string) =>
@@ -185,7 +190,10 @@ export const makeWithOptions = Effect.fn("AppMcpOAuth.make")(function* (
         (record.expiresAt !== null && record.expiresAt <= now && !record.tokens.refresh_token)
           ? ("expired" as const)
           : ("signed-in" as const),
-      expiresAt: record.expiresAt === null ? null : new Date(record.expiresAt).toISOString(),
+      expiresAt:
+        record.expiresAt === null
+          ? null
+          : DateTime.formatIso(DateTime.makeUnsafe(record.expiresAt)),
       authenticationRequired: true,
     };
   });
@@ -369,10 +377,10 @@ export const makeWithOptions = Effect.fn("AppMcpOAuth.make")(function* (
               fetchFn,
             });
           },
-          catch: (cause) => cause,
+          catch: (cause) => new OAuthRefreshError({ cause }),
         }).pipe(Effect.result);
         if (refreshed._tag === "Failure") {
-          const cause = refreshed.failure;
+          const cause = refreshed.failure.cause;
           if (
             cause instanceof InvalidGrantError ||
             cause instanceof InvalidClientError ||

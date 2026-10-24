@@ -2,6 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { TestClock } from "effect/testing";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { makeWithOptions } from "./AppMcpOAuth.ts";
@@ -12,10 +13,14 @@ const callbackUrl = "http://localhost:4310/oauth/mcp/callback";
 const issuer = "https://auth.example.test/tenant";
 const metadataUrl = "https://mcp.example.test/.well-known/oauth-protected-resource/v2/mcp";
 
+const decodeSavedRefreshToken = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Struct({ tokens: Schema.Struct({ refresh_token: Schema.String }) })),
+);
+
 function fixture(options: { readonly refreshToken?: boolean } = {}) {
   const secrets = new Map<string, Uint8Array>();
   const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
-  let failRefresh = false;
+  let refreshError: string | undefined;
   const json = (value: unknown, status = 200) =>
     new Response(JSON.stringify(value), {
       status,
@@ -55,11 +60,8 @@ function fixture(options: { readonly refreshToken?: boolean } = {}) {
     if (url === `${issuer}/token`) {
       const body = new URLSearchParams(String(init?.body));
       if (body.get("grant_type") === "refresh_token") {
-        if (failRefresh)
-          return json(
-            { error: "invalid_grant", error_description: "secret server diagnostic" },
-            400,
-          );
+        if (refreshError !== undefined)
+          return json({ error: refreshError, error_description: "secret server diagnostic" }, 400);
         return json({ access_token: "refreshed-access", token_type: "Bearer", expires_in: 3600 });
       }
       assert.strictEqual(body.get("code"), "authorization-code");
@@ -93,8 +95,8 @@ function fixture(options: { readonly refreshToken?: boolean } = {}) {
     requests,
     store,
     fetch,
-    failRefresh: () => {
-      failRefresh = true;
+    failRefresh: (error = "invalid_grant") => {
+      refreshError = error;
     },
   };
 }
@@ -142,7 +144,9 @@ it.effect(
       assert.strictEqual((yield* restarted.status(endpoint)).state, "signed-in");
       assert.strictEqual(yield* restarted.accessToken(endpoint), "refreshed-access");
       assert.strictEqual((yield* restarted.status(endpoint)).state, "signed-in");
-      const saved = JSON.parse(new TextDecoder().decode([...test.secrets.values()][0]));
+      const saved = yield* decodeSavedRefreshToken(
+        new TextDecoder().decode([...test.secrets.values()][0]),
+      );
       assert.strictEqual(saved.tokens.refresh_token, "refresh-secret");
       yield* restarted.signOut(endpoint);
       assert.strictEqual(yield* restarted.accessToken(endpoint), null);
@@ -182,8 +186,27 @@ it.effect(
     }),
 );
 
+it.effect.each(["invalid_grant", "invalid_client", "unauthorized_client"] as const)(
+  "%s refresh failures expire credentials without exposing server errors; sign-out clears them",
+  (error) =>
+    Effect.gen(function* () {
+      const test = fixture();
+      const oauth = yield* makeWithOptions({ fetch: test.fetch }).pipe(
+        Effect.provideService(ServerSecretStore, test.store),
+      );
+      const started = yield* oauth.authenticate({ serverUrl: endpoint, callbackUrl });
+      yield* oauth.complete({ state: started.flowId!, code: "authorization-code" });
+      test.failRefresh(error);
+      assert.strictEqual(yield* oauth.accessToken(endpoint, { forceRefresh: true }), null);
+      assert.strictEqual((yield* oauth.status(endpoint)).state, "expired");
+      assert.strictEqual(yield* oauth.accessToken(endpoint), null);
+      yield* oauth.signOut(endpoint);
+      assert.strictEqual((yield* oauth.status(endpoint)).state, "signed-out");
+    }),
+);
+
 it.effect(
-  "invalid refresh grants expire credentials without exposing server errors; sign-out clears them",
+  "temporary refresh failures keep credentials and expose only the safe retry message",
   () =>
     Effect.gen(function* () {
       const test = fixture();
@@ -192,12 +215,20 @@ it.effect(
       );
       const started = yield* oauth.authenticate({ serverUrl: endpoint, callbackUrl });
       yield* oauth.complete({ state: started.flowId!, code: "authorization-code" });
-      test.failRefresh();
-      assert.strictEqual(yield* oauth.accessToken(endpoint, { forceRefresh: true }), null);
-      assert.strictEqual((yield* oauth.status(endpoint)).state, "expired");
-      assert.strictEqual(yield* oauth.accessToken(endpoint), null);
-      yield* oauth.signOut(endpoint);
-      assert.strictEqual((yield* oauth.status(endpoint)).state, "signed-out");
+      const saved = [...test.secrets.values()][0];
+      test.failRefresh("temporarily_unavailable");
+      const result = yield* oauth.accessToken(endpoint, { forceRefresh: true }).pipe(Effect.result);
+      assert.strictEqual(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        assert.strictEqual(result.failure.operation, "oauth");
+        assert.strictEqual(
+          result.failure.message,
+          "Could not refresh MCP sign-in. Try again or sign in again.",
+        );
+      }
+      assert.deepEqual([...test.secrets.values()][0], saved);
+      assert.strictEqual((yield* oauth.status(endpoint)).state, "signed-in");
+      assert.strictEqual(yield* oauth.accessToken(endpoint), "first-access");
     }),
 );
 

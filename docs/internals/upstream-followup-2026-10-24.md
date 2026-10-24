@@ -52,7 +52,8 @@ presentation, including answered Claude resume questions.
 Separate agents reviewed search and each Claude behavior for correctness and
 simplification. Focused tests cover index backfill/synchronization/maintenance,
 message matching and navigation, approval ownership and draft preservation, and
-compaction lifecycle and timeline states. No repository-wide checks were run.
+compaction lifecycle and timeline states. Initial verification used scoped checks;
+repository-wide validation followed as recorded below.
 
 The primary agent used an isolated running app to verify:
 
@@ -75,12 +76,36 @@ The primary agent used an isolated running app to verify:
 The fixtures test UI presentation, not real automatic-compaction timer behavior.
 Dispatch and lifecycle semantics have deterministic service/adapter tests.
 All three reviews finished without remaining findings. Scoped web, desktop,
-contracts, client-runtime, and shared typechecks passed. Server typechecking
-reports only the four pre-existing diagnostics in unchanged `AppMcpOAuth.ts`
-and `AppMcpOAuth.test.ts`.
+contracts, client-runtime, and shared typechecks passed. Initial server
+typechecking exposed four existing diagnostics in `AppMcpOAuth.ts` and
+`AppMcpOAuth.test.ts`; the follow-up below resolves them.
 
 The web app exercises the shared desktop renderer; this batch changes no desktop
 shell code. Real remote connections, a packaged desktop build, and the idle timer
 waiting for a real 200,000-token Claude session were not exercised. Environment
 identity, exact approval ownership, index maintenance, and idle dispatch have
 focused automated coverage.
+
+## Repository-wide validation
+
+The follow-up cleanup resolves all four OAuth Effect diagnostics with schema
+decoding in the test, Effect date formatting, and a typed refresh error that
+preserves the original OAuth failure for classification. Permanent grant/client
+errors still invalidate credentials; temporary failures retain credentials and
+return a sanitized retry message. Seven focused OAuth tests pass, and independent
+review found no remaining issues.
+
+The first full test run also exposed stale expectations for the migration ledger,
+the removed Claude Ultrathink effort, and the offline legacy-database cleanup
+boundary. Tests now require migration 046, preserve both ordinary and explicitly
+typed `ultrathink` prompts, and permit the cleanup reader only while requiring its
+sole importer to remain the offline doctor command. The targeted suites pass;
+these corrections received independent review.
+
+Repository-wide typechecking, lint, and formatting pass. Existing non-failing
+lint warnings and Effect suggestions remain. The native resource-monitor suite
+passes all 15 tests. The desktop build and smoke test pass with both Electron
+profile data and server state redirected to temporary directories.
+
+The final repository-wide test run passes all 904 files: 10,235 tests pass and
+six existing tests remain skipped. No failing tests remain.

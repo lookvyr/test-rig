@@ -75,6 +75,7 @@ The primary agent verified these behaviors in the running app:
 PR-watch timing and stale-cache event ordering are covered by deterministic
 tests; this record does not claim those scenarios were reproduced through the UI.
 The desktop build and scoped web, desktop, contracts, and client-runtime
-typechecks passed. The server typecheck reports four existing Effect diagnostics
-in unchanged `AppMcpOAuth.ts` and `AppMcpOAuth.test.ts`; none remain in changed
-files. No repository-wide test or typecheck was run.
+typechecks passed. Initial server typechecking exposed four existing Effect
+diagnostics in `AppMcpOAuth.ts` and `AppMcpOAuth.test.ts`. These were subsequently
+fixed and repository-wide validation was run; see the
+[follow-up verification record](upstream-followup-2026-10-24.md#repository-wide-validation).

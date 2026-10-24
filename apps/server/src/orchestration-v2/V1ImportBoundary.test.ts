@@ -74,12 +74,23 @@ it("keeps the V1 agent runtime and engine unreachable from the shipped CLI", () 
   assert.deepEqual(violations, []);
 });
 
-it("reads the V1 tables only from the legacy importer", () => {
+it("reads the V1 tables only from legacy import, schema history, or offline cleanup", () => {
   const readers = relativeSources
     .filter(({ source }) => legacyTable.test(source))
     .map(({ path }) => path)
-    .filter((path) => !legacyReaders.some((directory) => path.startsWith(directory)));
+    .filter((path) => !legacyReaders.some((directory) => path.startsWith(directory)))
+    // Offline deletion compares retained source rows before removing the rollback copy.
+    .filter((path) => path !== "persistence/LegacyDatabaseCleanup.ts");
   assert.deepEqual(readers, []);
+});
+
+it("keeps legacy database cleanup confined to the offline doctor command", () => {
+  const cleanupImporters = relativeSources
+    .filter(({ source }) =>
+      /(?:from\s*|import\s*(?:\(\s*)?)(["'])[^"']*LegacyDatabaseCleanup\.ts\1/.test(source),
+    )
+    .map(({ path }) => path);
+  assert.deepEqual(cleanupImporters, ["cli/doctor.ts"]);
 });
 
 it("keeps the legacy importer out of reach of new code", () => {
