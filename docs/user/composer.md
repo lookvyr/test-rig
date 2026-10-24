@@ -18,6 +18,11 @@ Fenced code uses syntax highlighting when its language is supported. Drafts and
 sent prompts remain Markdown, and copying formatted content copies Markdown.
 Links, tables, and task checkboxes remain literal Markdown in the composer.
 
+Nested lists use the same markers while editing and after sending: bullets use
+filled circles, hollow circles, then squares; numbered lists use numbers,
+lowercase letters, then lowercase Roman numerals. Deeper levels keep the third
+marker style.
+
 Tables in messages offer **Expand table cells** or **Collapse table cells** only
 when a cell would be cut off without wrapping. The control updates as content or
 the available width changes. Use **Copy table** to copy as Markdown or CSV.

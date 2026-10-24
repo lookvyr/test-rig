@@ -1768,19 +1768,23 @@ label:has(> select#reasoning-effort) select {
   list-style-type: decimal;
 }
 
-.chat-markdown ul ul {
+.chat-markdown ul ul,
+.composer-tiptap ul ul {
   list-style-type: circle;
 }
 
-.chat-markdown ul ul ul {
+.chat-markdown ul ul ul,
+.composer-tiptap ul ul ul {
   list-style-type: square;
 }
 
-.chat-markdown ol ol {
+.chat-markdown ol ol,
+.composer-tiptap ol ol {
   list-style-type: lower-alpha;
 }
 
-.chat-markdown ol ol ol {
+.chat-markdown ol ol ol,
+.composer-tiptap ol ol ol {
   list-style-type: lower-roman;
 }
 
