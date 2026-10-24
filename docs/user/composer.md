@@ -28,6 +28,9 @@ list item to leave the list; in code, use it after two trailing blank lines to
 continue below the block. **Tab** accepts a file, chat, skill, or command suggestion.
 File and skill references inside code remain literal text.
 
+Use **Shift+Enter** on an empty quoted line to leave a blockquote. Text typed
+after leaving the quote stays outside it when you send or copy the prompt.
+
 ## Referencing another chat
 
 Type **@** followed by part of a chat title to find it alongside file suggestions.

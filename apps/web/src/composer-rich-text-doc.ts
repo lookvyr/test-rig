@@ -532,8 +532,17 @@ export function serializeEditorDoc(doc: ProseMirrorNode): RichDocMap {
     if (node.type.name === "composer-terminal-context" && typeof node.attrs.contextId === "string")
       contextIds.push(node.attrs.contextId);
   });
-  const walk = (node: ProseMirrorNode, position: number, prefix = "") => {
+  const walk = (
+    node: ProseMirrorNode,
+    position: number,
+    prefix = "",
+    previous?: ProseMirrorNode,
+  ) => {
     const name = node.type.name;
+    // A plain paragraph after a quote needs a blank Markdown line to avoid
+    // lazy continuation. It adds no editable content, so map it as a prefix.
+    if (name === "paragraph" && node.content.size > 0 && previous?.type.name === "blockquote")
+      pushPrefix(acc, prefix + "\n", position + 1);
     if (name === "bulletList" || name === "orderedList") {
       let itemPos = position + 1;
       node.forEach((item, _offset, index) => {
@@ -544,7 +553,13 @@ export function serializeEditorDoc(doc: ProseMirrorNode): RichDocMap {
         item.forEach((child, _childOffset, childIndex) => {
           if (childIndex) pushBreakRun(acc);
           if (childIndex === 0 && child.isTextblock) appendInlineRuns(child, childPos + 1, acc);
-          else walk(child, childPos, prefix + " ".repeat(marker.length));
+          else
+            walk(
+              child,
+              childPos,
+              prefix + " ".repeat(marker.length),
+              childIndex ? item.child(childIndex - 1) : undefined,
+            );
           childPos += child.nodeSize;
         });
         itemPos += item.nodeSize;
@@ -555,7 +570,7 @@ export function serializeEditorDoc(doc: ProseMirrorNode): RichDocMap {
       let childPos = position + 1;
       node.forEach((child, _offset, index) => {
         if (index) pushBreakRun(acc);
-        walk(child, childPos, prefix + "> ");
+        walk(child, childPos, prefix + "> ", index ? node.child(index - 1) : undefined);
         childPos += child.nodeSize;
       });
       return;
@@ -612,13 +627,13 @@ export function serializeEditorDoc(doc: ProseMirrorNode): RichDocMap {
     let childPos = position + 1;
     node.forEach((child, _offset, index) => {
       if (index) pushBreakRun(acc);
-      walk(child, childPos, prefix);
+      walk(child, childPos, prefix, index ? node.child(index - 1) : undefined);
       childPos += child.nodeSize;
     });
   };
   doc.forEach((block, position, index) => {
     if (index) pushBreakRun(acc);
-    walk(block, position);
+    walk(block, position, "", index ? doc.child(index - 1) : undefined);
   });
   return { value: acc.value, runs: acc.runs, docLength: acc.flat, contextIds };
 }

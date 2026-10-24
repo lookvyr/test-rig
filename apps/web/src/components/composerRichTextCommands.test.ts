@@ -2,6 +2,9 @@ import { Editor, Node } from "@tiptap/core";
 import { closeHistory, history } from "@tiptap/pm/history";
 import { TextSelection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { buildDocJson, flatToPm, serializeEditorDoc } from "~/composer-rich-text-doc";
@@ -39,6 +42,21 @@ afterEach(() => {
 });
 
 describe("rich composer editing commands", () => {
+  it("keeps text outside a quote after exiting it with Shift-Enter", () => {
+    const editor = createEditor("> First quoted line");
+    continueComposerBlock(editor);
+    type(editor, "Second quoted line");
+    continueComposerBlock(editor);
+    continueComposerBlock(editor);
+    type(editor, "Outside the quote");
+
+    expect(editor.state.doc.lastChild?.type.name).toBe("paragraph");
+    expect(markdown(editor)).toBe("> First quoted line\n> Second quoted line\n\nOutside the quote");
+    expect(renderToStaticMarkup(createElement(ReactMarkdown, null, markdown(editor)))).toContain(
+      "</blockquote>\n<p>Outside the quote</p>",
+    );
+  });
+
   it("continues a list, then exits an empty bullet without sending", () => {
     const editor = createEditor("- First");
     expect(continueComposerBlock(editor)).toBe(true);

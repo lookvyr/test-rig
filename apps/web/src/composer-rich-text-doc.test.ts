@@ -199,6 +199,32 @@ describe("rich composer Markdown boundary", () => {
     expect(html).toContain("<li>Sibling</li>");
   });
 
+  it.each([
+    ["> Quote\nOutside", "> Quote\n\nOutside"],
+    ["> > Quote\n> Outside", "> > Quote\n> \n> Outside"],
+    ["- Item\n  > Quote\n  Outside", "- Item\n  > Quote\n  \n  Outside"],
+    ["> Quote\n\nOutside", "> Quote\n\nOutside"],
+  ])("preserves the paragraph boundary after a quote: %s", (source, expected) => {
+    const document = doc(source);
+    const map = serializeEditorDoc(document);
+    expect(map.value).toBe(expected);
+    expect(roundTrip(map.value)).toBe(expected);
+    expect(renderToStaticMarkup(createElement(ReactMarkdown, null, map.value))).toContain(
+      "</blockquote>\n<p>Outside</p>",
+    );
+    for (let position = 0; position <= map.docLength; position++) {
+      expect(pmToFlat(map, flatToPm(map, position)), `PM at ${position}`).toBe(position);
+      expect(collapsedToFlat(map, flatToCollapsed(map, position)), `collapsed at ${position}`).toBe(
+        position,
+      );
+    }
+    const outside = map.runs.find((run) => map.value.slice(run.mdStart).startsWith("Outside"))!;
+    expect(flatToMarkdown(map, outside.flatStart)).toBe(map.value.indexOf("Outside"));
+    const restored = serializeEditorDoc(doc(map.value));
+    const restoredCursor = collapsedToFlat(restored, flatToCollapsed(map, outside.flatStart));
+    expect(flatToMarkdown(restored, restoredCursor)).toBe(map.value.indexOf("Outside"));
+  });
+
   it("uses actual block nodes for supported Markdown", () => {
     const document = doc("# Header\n- One\n  2. Two\n```js\n  let n = 1;\n```");
     expect(document.child(0).type.name).toBe("heading");
