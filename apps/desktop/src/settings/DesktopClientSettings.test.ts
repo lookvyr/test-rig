@@ -34,7 +34,6 @@ const clientSettings: ClientSettings = {
   glassOpacity: 80,
   planModeEnabled: false,
   providerModelPreferences: {},
-  sidebarAutoSettleAfterDays: 3,
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",
@@ -44,6 +43,7 @@ const clientSettings: ClientSettings = {
   sidebarThreadPreviewCount: 6,
   sidebarV2Enabled: false,
   sidebarV2ConfiguredByUser: false,
+  sidebarWorkingShelfEnabled: false,
   timestampFormat: "24-hour",
   wordWrap: true,
 };
