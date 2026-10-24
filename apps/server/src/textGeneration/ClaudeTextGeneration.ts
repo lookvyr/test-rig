@@ -342,6 +342,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
   const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
     Effect.fn("ClaudeTextGeneration.generateThreadTitle")(function* (input) {
       const { prompt, outputSchema } = buildThreadTitlePrompt({
+        instructions: input.instructions,
         message: input.message,
         previousTitle: input.previousTitle,
         attachments: input.attachments,

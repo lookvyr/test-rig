@@ -58,7 +58,10 @@ successful pick; its hover glow and badge preview the element and token that cli
 The command palette searches active thread titles, projects, branches, user messages, and final
 agent responses across connected environments. Message matches show one labeled excerpt while
 keeping the thread's project, branch, and machine context visible. Message search begins after two
-characters and uses SQLite's ASCII case-insensitive matching.
+characters and uses SQLite's ASCII case-insensitive matching. Subagents stay out
+of Recent Threads and thread search; independent forks remain available. Search
+favors matches at the start of words over matches inside words. Exact titles rank
+first; otherwise, equally strong title matches favor recent conversations.
 
 Press **Cmd+F** on macOS or **Ctrl+F** elsewhere to find a word or phrase in the open
 thread. This shortcut is configurable as `thread.find`. The compact find bar only

@@ -23,6 +23,29 @@ const settings: ServerSettings = {
 };
 
 describe("project settings scope", () => {
+  it("inherits title instructions, preserves explicit empty overrides, and restores inheritance", () => {
+    const defaults = applyServerSettingsPatch(settings, {
+      threadTitleInstructions: "Use issue IDs.",
+    });
+    const overridden = applyServerSettingsPatch(
+      defaults,
+      projectSettingsPatch(defaults, [first], { threadTitleInstructions: "" }),
+    );
+    expect(
+      resolveProjectSettingsTargets(overridden, [first, second]).map(
+        (target) => target.settings.threadTitleInstructions,
+      ),
+    ).toEqual(["", "Use issue IDs."]);
+    const cleared = applyServerSettingsPatch(
+      overridden,
+      clearScopedProjectSettings(overridden, [first], "threadTitleInstructions"),
+    );
+    expect(
+      resolveProjectSettingsTargets(cleared, [first])[0]?.settings.threadTitleInstructions,
+    ).toBe("Use issue IDs.");
+    expect(cleared.projectSettingsOverrides[first]?.branchNamePrefix).toBe("first");
+  });
+
   it("uses defaults for unset values and reports mixed values across checkouts", () => {
     const targets = resolveProjectSettingsTargets(settings, [first, second]);
     expect(targets.map((target) => target.settings.branchNamePrefix)).toEqual(["first", "team"]);

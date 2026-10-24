@@ -183,6 +183,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "thread-title-instructions",
+    title: "Thread title instructions",
+    to: "/settings/general",
+  },
+  {
     id: "text-generation-model",
     title: "Text generation model",
     to: "/settings/general",

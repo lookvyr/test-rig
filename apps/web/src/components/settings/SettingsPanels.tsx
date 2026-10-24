@@ -1,3 +1,4 @@
+import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { BrowserProfilesSettings } from "./BrowserProfilesSettings";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import { ArchiveIcon, ArchiveX, LoaderIcon, SettingsIcon } from "lucide-react";
@@ -300,9 +301,11 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Delete confirmation"]
         : []),
       ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
+      ...(settings.threadTitleInstructions !== "" ? ["Thread title instructions"] : []),
     ],
     [
       isTextGenerationModelDirty,
+      settings.threadTitleInstructions,
       isBackgroundActivityDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
@@ -420,6 +423,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       confirmSideChatDiscard: DEFAULT_UNIFIED_SETTINGS.confirmSideChatDiscard,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+      threadTitleInstructions: DEFAULT_UNIFIED_SETTINGS.threadTitleInstructions,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
@@ -1923,6 +1927,7 @@ export function GeneralSettingsPanel() {
             </div>
           }
         />
+        <ThreadTitleInstructionsSettings />
       </SettingsSection>
 
       <SettingsSection title="About">

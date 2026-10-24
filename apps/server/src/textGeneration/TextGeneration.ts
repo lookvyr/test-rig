@@ -64,6 +64,7 @@ export interface BranchNameGenerationResult {
 }
 
 export interface ThreadTitleGenerationInput {
+  instructions?: string | undefined;
   linkedContext?: string | undefined;
   cwd: string;
   message: string;

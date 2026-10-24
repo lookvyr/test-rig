@@ -712,6 +712,22 @@ export function PreviewView({
     <div
       className="flex min-h-0 flex-1 flex-col bg-background"
       data-thread-key={scopedThreadKey(threadRef)}
+      onKeyDown={(event) => {
+        // The toolbar can retain focus after starting a pick; the guest handles its own Escape.
+        if (
+          !visible ||
+          !pickActive ||
+          !runtimeTabId ||
+          !previewBridge ||
+          event.key !== "Escape" ||
+          event.defaultPrevented ||
+          !event.currentTarget.contains(event.target as Node)
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        void previewBridge.cancelPickElement(runtimeTabId).catch(() => undefined);
+      }}
     >
       <PreviewChromeRow
         url={url}

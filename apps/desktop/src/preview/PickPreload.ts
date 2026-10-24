@@ -23,6 +23,7 @@ import {
   ELEMENT_PICKED_CHANNEL,
   START_PICK_CHANNEL,
 } from "./GuestProtocol.ts";
+const INPUT_LAYER_ATTRIBUTE = "data-t3code-annotation-input";
 const OVERLAY_ATTRIBUTE = "data-t3code-annotation-ui";
 const Z_INDEX_OVERLAY = 2147483646;
 const PRIMARY = "var(--t3-primary)";
@@ -133,7 +134,7 @@ function isAnnotationNode(element: Element): boolean {
 function pickFromPoint(clientX: number, clientY: number): Element | null {
   for (const candidate of document.elementsFromPoint(clientX, clientY)) {
     if (!(candidate instanceof Element)) continue;
-    if (isAnnotationNode(candidate)) continue;
+    if (isAnnotationNode(candidate) || candidate.hasAttribute(INPUT_LAYER_ATTRIBUTE)) continue;
     if (candidate === document.documentElement || candidate === document.body) continue;
     return candidate;
   }
@@ -421,7 +422,15 @@ function startAnnotation(): void {
   const strokes: PreviewAnnotationStrokeTarget[] = [];
   const styleChanges = new Map<string, PreviewAnnotationStyleChange>();
   const toolButtons = new Map<AnnotationTool, HTMLButtonElement>();
-  let tool: AnnotationTool = "select";
+  // The embedded PDF viewer consumes input, so focus a transparent layer above it.
+  const isPdf = document.contentType === "application/pdf";
+  const inputLayer = isPdf ? document.createElement("div") : null;
+  if (inputLayer) {
+    inputLayer.setAttribute(INPUT_LAYER_ATTRIBUTE, "");
+    inputLayer.tabIndex = -1;
+    inputLayer.style.cssText = `position:fixed;inset:0;z-index:${Z_INDEX_OVERLAY - 1};cursor:crosshair;outline:none`;
+  }
+  let tool: AnnotationTool = isPdf ? "marquee" : "select";
   let dragStart: PreviewAnnotationPoint | null = null;
   let activeStroke: { target: PreviewAnnotationStrokeTarget; path: SVGPathElement } | null = null;
   let pendingCapture = false;
@@ -1069,7 +1078,7 @@ function startAnnotation(): void {
       const rect = normalizeRect(dragStart.x, dragStart.y, event.clientX, event.clientY);
       marqueeBox.style.display = "none";
       if (isUsableRect(rect)) {
-        const found = selectElementsInRect(rect);
+        const found = isPdf ? 0 : selectElementsInRect(rect);
         if (found === 0) {
           const region: PreviewAnnotationRegionTarget = { id: nextId("region"), rect };
           regions.push(region);
@@ -1138,6 +1147,7 @@ function startAnnotation(): void {
     ipcRenderer.off(ANNOTATION_CAPTURED_CHANNEL, onCaptured);
     document.documentElement.removeAttribute("data-t3code-annotation-tool");
     cursorStyle.remove();
+    inputLayer?.remove();
     host.remove();
     activeSession = null;
     if (notifyMain) ipcRenderer.send(ELEMENT_PICKED_CHANNEL, null);
@@ -1227,6 +1237,10 @@ function startAnnotation(): void {
   window.addEventListener("resize", repaint, { passive: true });
   ipcRenderer.on(CANCEL_PICK_CHANNEL, onCancel);
   ipcRenderer.on(ANNOTATION_CAPTURED_CHANNEL, onCaptured);
+  if (inputLayer) {
+    document.documentElement.appendChild(inputLayer);
+    inputLayer.focus({ preventScroll: true });
+  }
   document.documentElement.appendChild(host);
   refreshToolButtons();
   updateStatus();

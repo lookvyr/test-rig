@@ -10,9 +10,9 @@ import {
 } from "@t3tools/shared/projectSettings";
 import * as Equal from "effect/Equal";
 
-export type BranchNamingPatch = Pick<
+export type ScopedProjectSettingsPatch = Pick<
   ServerSettingsPatch,
-  "branchNamingMode" | "branchNamePrefix" | "branchNameInstructions"
+  "branchNamingMode" | "branchNamePrefix" | "branchNameInstructions" | "threadTitleInstructions"
 >;
 
 export function resolveProjectSettingsTargets(
@@ -49,7 +49,7 @@ export function projectSettingSource(
 export function projectSettingsPatch(
   settings: ServerSettings,
   projectIds: readonly ProjectId[] | null,
-  patch: BranchNamingPatch,
+  patch: ScopedProjectSettingsPatch,
 ): ServerSettingsPatch {
   if (projectIds === null) return patch;
   return {

@@ -239,6 +239,18 @@ describe("buildBranchNamePrompt", () => {
 });
 
 describe("buildThreadTitlePrompt", () => {
+  it("appends instructions to initial and regenerated titles and preserves empty defaults", () => {
+    for (const previousTitle of [undefined, "Old title"]) {
+      const input = { message: "Fix reconnects", previousTitle };
+      expect(buildThreadTitlePrompt({ ...input, instructions: "  " }).prompt).toBe(
+        buildThreadTitlePrompt(input).prompt,
+      );
+      expect(buildThreadTitlePrompt({ ...input, instructions: "Use two words." }).prompt).toContain(
+        "Additional instructions:\nUse two words.",
+      );
+    }
+  });
+
   it("includes the user message in the prompt", () => {
     const result = buildThreadTitlePrompt({
       message: "Investigate reconnect regressions after session restore",

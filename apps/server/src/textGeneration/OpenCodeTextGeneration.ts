@@ -234,6 +234,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
   const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
     Effect.fn("OpenCodeTextGeneration.generateThreadTitle")(function* (input) {
       const { prompt, outputSchema } = buildThreadTitlePrompt({
+        instructions: input.instructions,
         message: input.message,
         previousTitle: input.previousTitle,
         attachments: input.attachments,

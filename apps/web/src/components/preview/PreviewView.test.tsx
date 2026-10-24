@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   openPictureInPicture: vi.fn(async (_tabId: string): Promise<void> => undefined),
   closePictureInPicture: vi.fn(async (_tabId: string): Promise<void> => undefined),
   pickElement: vi.fn(),
+  cancelPickElement: vi.fn(async () => undefined),
   previewAnnotationScreenshotFile: vi.fn(),
   addPreviewAnnotation: vi.fn(),
   addImage: vi.fn(),
@@ -169,6 +170,7 @@ vi.mock("./previewBridge", () => ({
     navigate: mocks.navigate,
     captureScreenshot: mocks.captureScreenshot,
     pickElement: mocks.pickElement,
+    cancelPickElement: mocks.cancelPickElement,
     pictureInPicture: {
       open: mocks.openPictureInPicture,
       close: mocks.closePictureInPicture,
@@ -257,6 +259,7 @@ describe("PreviewView navigation", () => {
     mocks.openPictureInPicture.mockClear();
     mocks.closePictureInPicture.mockClear();
     mocks.pickElement.mockReset();
+    mocks.cancelPickElement.mockClear();
     mocks.previewAnnotationScreenshotFile.mockReset();
     mocks.addPreviewAnnotation.mockClear();
     mocks.addImage.mockClear();
@@ -531,6 +534,45 @@ describe("PreviewView navigation", () => {
     await vi.waitFor(() =>
       expect(mocks.closePictureInPicture).toHaveBeenCalledWith(TEST_RUNTIME_TAB_ID),
     );
+  });
+
+  it("cancels annotations only for unhandled Escape inside the visible preview", async () => {
+    mocks.pickElement.mockReturnValue(new Promise(() => {}));
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible />);
+      });
+      const onKeyDown = (event: object) =>
+        renderer!.root
+          .findAllByType("div")[0]!
+          .props.onKeyDown({ currentTarget: { contains: () => true }, target: {}, ...event });
+      const escape = {
+        key: "Escape",
+        defaultPrevented: false,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      };
+      onKeyDown(escape);
+      expect(mocks.cancelPickElement).not.toHaveBeenCalled();
+      await act(async () => {
+        mocks.toggleAnnotation?.();
+      });
+      onKeyDown({ ...escape, defaultPrevented: true });
+      onKeyDown({ ...escape, currentTarget: { contains: () => false } });
+      expect(mocks.cancelPickElement).not.toHaveBeenCalled();
+      onKeyDown(escape);
+      expect(mocks.cancelPickElement).toHaveBeenCalledWith(TEST_RUNTIME_TAB_ID);
+      expect(escape.preventDefault).toHaveBeenCalledOnce();
+      await act(async () => {
+        renderer!.update(<PreviewView threadRef={TEST_THREAD_REF} tabId="tab-1" visible={false} />);
+      });
+      mocks.cancelPickElement.mockClear();
+      onKeyDown(escape);
+      expect(mocks.cancelPickElement).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => renderer?.unmount());
+    }
   });
 
   it("forwards Cmd/Ctrl+Enter annotations to the composer send path", async () => {

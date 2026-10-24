@@ -18,7 +18,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import {
-  type BranchNamingPatch,
+  type ScopedProjectSettingsPatch,
   clearScopedProjectSettings,
   createProjectSettingsSaver,
   projectSettingsAreMixed,
@@ -28,7 +28,10 @@ import {
 } from "./projectSettingsScope.logic";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 
-function useProjectSettingsScopeValue(environmentId: EnvironmentId) {
+function useProjectSettingsScopeValue(
+  environmentId: EnvironmentId,
+  route: "/settings/source-control" | "/settings/general",
+) {
   const registry = useContext(RegistryContext);
   const settings = useEnvironmentSettings(environmentId);
   const persist = useAtomCommand(serverEnvironment.updateSettings, "project settings update");
@@ -48,8 +51,8 @@ function useProjectSettingsScopeValue(environmentId: EnvironmentId) {
   const groups = useSettingsProjectGroups().filter((group) =>
     group.memberProjects.some((project) => project.environmentId === environmentId),
   );
-  const { project: projectKey } = useSearch({ from: "/settings/source-control" });
-  const navigate = useNavigate({ from: "/settings/source-control" });
+  const { project: projectKey } = useSearch({ from: route });
+  const navigate = useNavigate({ from: route });
   const group = groups.find((candidate) => candidate.projectKey === projectKey);
   const projectIds =
     projectKey === undefined
@@ -78,7 +81,7 @@ function useProjectSettingsScopeValue(environmentId: EnvironmentId) {
     },
     isMixed: (key: ProjectScopedServerSettingKey) => projectSettingsAreMixed(targets, key),
     source: (key: ProjectScopedServerSettingKey) => projectSettingSource(targets, key),
-    update: (patch: BranchNamingPatch) => {
+    update: (patch: ScopedProjectSettingsPatch) => {
       if (available) void save((current) => projectSettingsPatch(current, projectIds, patch));
     },
     clear: (key: ProjectScopedServerSettingKey) => {
@@ -96,16 +99,20 @@ const ProjectSettingsContext = createContext<ReturnType<
 export function ProjectSettingsScope({
   environmentId,
   children,
+  route = "/settings/source-control",
+  label = "branch naming",
 }: {
   environmentId: EnvironmentId;
   children: ReactNode;
+  route?: "/settings/source-control" | "/settings/general";
+  label?: string;
 }) {
-  const scope = useProjectSettingsScopeValue(environmentId);
+  const scope = useProjectSettingsScopeValue(environmentId, route);
   return (
     <ProjectSettingsContext value={scope}>
       <div className="mb-3 rounded-xl border border-border/60 py-3">
         <p className="flex flex-wrap items-center gap-1.5 px-3 text-sm text-muted-foreground sm:px-4">
-          Applying branch naming for
+          Applying {label} for
           <Menu>
             <MenuTrigger
               aria-label={`Project scope: ${scope.group?.displayName ?? (scope.projectKey ? "Unavailable project" : "All projects")}`}

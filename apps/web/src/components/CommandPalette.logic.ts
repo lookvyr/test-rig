@@ -90,6 +90,7 @@ export interface CommandPaletteItem {
   readonly description?: ReactNode;
   readonly threadContentMatch?: CommandPaletteThreadContentMatch;
   readonly timestamp?: string;
+  readonly searchRecency?: string;
   readonly icon: ReactNode;
   readonly disabled?: boolean;
   /** Optional content rendered inline before the title text. */
@@ -226,6 +227,7 @@ export function buildProjectActionItems(input: {
 export type BuildThreadActionItemsThread = Pick<
   SidebarThreadSummary,
   | "sideOfThreadId"
+  | "lineage"
   | "archivedAt"
   | "branch"
   | "createdAt"
@@ -253,7 +255,12 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   limit?: number;
 }): CommandPaletteActionItem[] {
   const sortedThreads = sortThreads(
-    input.threads.filter((thread) => thread.archivedAt === null && !thread.sideOfThreadId),
+    input.threads.filter(
+      (thread) =>
+        thread.archivedAt === null &&
+        !thread.sideOfThreadId &&
+        thread.lineage.relationshipToParent !== "subagent",
+    ),
     input.sortOrder,
   );
   const visibleThreads =
@@ -289,6 +296,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
         ],
         title: thread.title,
         description: descriptionParts.join(` · `),
+        searchRecency: thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
         timestamp: formatRelativeTimeLabel(
           thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
         ),
@@ -308,35 +316,42 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
 
 function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
   const normalizedField = normalizeSearchText(field);
-  if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {
-    return Number.NEGATIVE_INFINITY;
-  }
-  if (normalizedField === normalizedQuery) {
-    return 3;
-  }
-  if (normalizedField.startsWith(normalizedQuery)) {
-    return 2;
-  }
-  return 1;
+  if (!normalizedField.includes(normalizedQuery)) return Number.NEGATIVE_INFINITY;
+  if (normalizedField === normalizedQuery) return 3;
+  if (normalizedField.startsWith(normalizedQuery)) return 2;
+  const tokens = normalizedQuery.split(" ");
+  if (
+    tokens.every((token) => {
+      for (
+        let index = normalizedField.indexOf(token);
+        index !== -1;
+        index = normalizedField.indexOf(token, index + 1)
+      ) {
+        if (!/[\p{L}\p{N}]$/u.test(normalizedField.slice(0, index))) return true;
+      }
+      return false;
+    })
+  )
+    return 1;
+  return 0;
 }
 
 function rankCommandPaletteItemMatch(
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem,
   normalizedQuery: string,
 ): number {
-  const terms = item.searchTerms.filter((term) => term.length > 0);
-  if (terms.length === 0) {
-    return 0;
-  }
-
-  for (const [index, field] of terms.entries()) {
+  let best = 0;
+  for (const [index, field] of item.searchTerms.entries()) {
+    if (field.length === 0) continue;
     const fieldRank = rankSearchFieldMatch(field, normalizedQuery);
-    if (fieldRank !== Number.NEGATIVE_INFINITY) {
-      return 1_000 - index * 100 + fieldRank;
-    }
+    if (fieldRank === Number.NEGATIVE_INFINITY) continue;
+    const fieldScore =
+      index === 0 && item.searchRecency !== undefined
+        ? 1_000 + Number(fieldRank === 3)
+        : 1_000 - index * 100 + fieldRank;
+    best = Math.max(best, (fieldRank > 0 ? 10_000 : 0) + fieldScore);
   }
-
-  return 0;
+  return best;
 }
 
 export function filterCommandPaletteGroups(input: {
@@ -395,7 +410,12 @@ export function filterCommandPaletteGroups(input: {
         rank: rankCommandPaletteItemMatch(item, normalizedQuery),
       });
     })
-      .toSorted((left, right) => right.rank - left.rank || left.index - right.index)
+      .toSorted(
+        (left, right) =>
+          right.rank - left.rank ||
+          (right.item.searchRecency ?? "").localeCompare(left.item.searchRecency ?? "") ||
+          left.index - right.index,
+      )
       .map((entry) => entry.item);
 
     if (items.length === 0) {

@@ -283,6 +283,25 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
     );
   }
 
+  it.effect("forwards custom thread title instructions to the Claude prompt", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({ structured_output: { title: "Reconnect failures" } }),
+        stdinMustContain: "Additional instructions:\nUse two words.",
+      },
+      (textGeneration) =>
+        textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: "Fix reconnects",
+          instructions: "Use two words.",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-sonnet-4-6",
+          },
+        }),
+    ),
+  );
+
   it.effect("generates thread titles through the Claude provider", () =>
     withFakeClaudeEnv(
       {

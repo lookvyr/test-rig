@@ -88,7 +88,10 @@ function makeHarness(
       Layer.mergeAll(
         threadManagement,
         Layer.mock(TextGeneration.TextGeneration)({ generateThreadTitle }),
-        ServerSettings.layerTest({}),
+        ServerSettings.layerTest({
+          threadTitleInstructions: "Environment titles",
+          projectSettingsOverrides: { [projectId]: { threadTitleInstructions: "Project titles" } },
+        }),
       ).pipe(Layer.provideMerge(projectedProjects)),
     ),
   );
@@ -320,6 +323,7 @@ describe("ThreadTitleRegenerationService", () => {
 
         const call = harness.generateThreadTitle.mock.calls[0]?.[0];
         assert.equal(call?.previousTitle, "Seed title");
+        assert.equal(call?.instructions, "Project titles");
         assert.equal(call?.cwd, "/repo");
         assert.include(call?.message, "USER:\nInvestigate the flaky login test");
         const projection = yield* threads.getThreadProjection(threadId);

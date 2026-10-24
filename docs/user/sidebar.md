@@ -18,6 +18,14 @@ can recreate it.
 
 Repository grouping keeps each fork separate from its upstream repository and from other forks. Checkouts of the same fork can still group together, using that fork's repository name.
 
+## Generated titles
+
+In **Settings → General**, use **Thread title instructions**
+to ask for shorter titles, a particular language, or a naming convention. Choose
+**All projects** for the environment default, or select a project for its own
+instructions. The instructions apply to new and regenerated titles with any
+supported provider. Clear the override to inherit the default again.
+
 ## Working section
 
 Turn on **Working section** in **Settings → Beta** to fold busy threads into a

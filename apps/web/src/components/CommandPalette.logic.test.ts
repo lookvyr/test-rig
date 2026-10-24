@@ -118,6 +118,60 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 describe("buildThreadActionItems", () => {
+  it("hides delegated children but keeps forks and ranks word starts by user recency", () => {
+    const parentId = ThreadId.make("parent");
+    const items = buildThreadActionItems({
+      threads: [
+        makeThread({
+          id: ThreadId.make("child"),
+          lineage: {
+            rootThreadId: parentId,
+            parentThreadId: parentId,
+            relationshipToParent: "subagent",
+          },
+        }),
+        makeThread({
+          id: ThreadId.make("fork"),
+          title: "Auth",
+          lineage: {
+            rootThreadId: parentId,
+            parentThreadId: parentId,
+            relationshipToParent: "fork",
+          },
+        }),
+        makeThread({
+          id: ThreadId.make("prefix"),
+          title: "Auth old",
+          latestUserMessageAt: "2026-01-01T00:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("word"),
+          title: "Fix auth",
+          latestUserMessageAt: "2026-02-01T00:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("mid"),
+          title: "𠀀auth",
+          latestUserMessageAt: "2026-03-01T00:00:00.000Z",
+        }),
+      ],
+      projectTitleById: new Map(),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async () => undefined,
+    });
+    expect(items.some((item) => item.value === "thread:child")).toBe(false);
+    expect(
+      filterCommandPaletteGroups({
+        activeGroups: [],
+        query: "auth",
+        isInSubmenu: false,
+        projectSearchItems: [],
+        threadSearchItems: items,
+      })[0]?.items.map((item) => item.value),
+    ).toEqual(["thread:fork", "thread:word", "thread:prefix", "thread:mid"]);
+  });
+
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-25T12:00:00.000Z"));

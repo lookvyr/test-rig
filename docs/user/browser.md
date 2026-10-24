@@ -34,6 +34,15 @@ and spelling suggestions for misspelled words in editable text.
 Clipboard and spelling actions apply to the clicked page, including embedded
 frames.
 
+## Annotating a PDF
+
+In a native desktop browser tab, choose **Annotate** to mark a PDF. Annotation
+starts with **Region**; use **Draw** for freehand marks. The annotation shortcuts
+and **Escape** work even after clicking into the PDF viewer. Ending annotation
+restores normal PDF interaction. Attach sends the annotated screenshot and your
+comment to the composer; it does not edit the original PDF. Streamed browser
+tabs do not offer annotation.
+
 ## Browsing from the web app
 
 Browser tabs in the web app run on the connected environment. A `localhost`

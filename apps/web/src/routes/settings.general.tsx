@@ -7,5 +7,9 @@ function SettingsGeneralRoute() {
 }
 
 export const Route = createFileRoute("/settings/general")({
+  validateSearch: (search: Record<string, unknown>): { project?: string } =>
+    typeof search.project === "string" && search.project.length > 0
+      ? { project: search.project }
+      : {},
   component: SettingsGeneralRoute,
 });
