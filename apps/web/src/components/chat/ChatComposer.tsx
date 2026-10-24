@@ -1,3 +1,5 @@
+import { ComposerApprovalFeedback } from "./ComposerApprovalFeedback";
+import type { ApprovalResponder } from "@t3tools/client-runtime/state/thread-requests";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
@@ -22,7 +24,6 @@ import type {
   EnvironmentId,
   ModelSelection,
   PreviewAnnotationPayload,
-  ProviderApprovalDecision,
   ProviderInteractionMode,
   ResolvedKeybindingsConfig,
   RuntimeMode,
@@ -616,10 +617,7 @@ export interface ChatComposerProps {
   onOpenSideChat?: (() => void) | undefined;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
-  onRespondToApproval: (
-    requestId: RuntimeRequestId,
-    decision: ProviderApprovalDecision,
-  ) => Promise<unknown>;
+  onRespondToApproval: ApprovalResponder;
   onSelectActivePendingUserInputOption: (questionId: string, optionLabel: string) => void;
   onAdvanceActivePendingUserInput: () => void;
   onPreviousActivePendingUserInputQuestion: () => void;
@@ -3192,6 +3190,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onRespondToApproval={onRespondToApproval}
                   />
                 </div>
+                {activePendingApproval.supportsFeedback &&
+                activePendingApproval.responseCapability === "live" ? (
+                  <ComposerApprovalFeedback
+                    key={JSON.stringify([composerDraftTarget, activePendingApproval.requestId])}
+                    approval={activePendingApproval}
+                    respond={onRespondToApproval}
+                    disabled={
+                      isConnecting ||
+                      environmentUnavailable !== null ||
+                      respondingRequestIds.includes(activePendingApproval.requestId)
+                    }
+                  />
+                ) : null}
               </div>
             ) : pendingUserInputs.length > 0 ? (
               <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">

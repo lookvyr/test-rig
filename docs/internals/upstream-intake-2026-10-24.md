@@ -42,7 +42,8 @@ No migration or excluded product surface is introduced.
 - [#24334](https://github.com/pingdotgg/t3code/pull/24334): quieter automatic compaction.
 
 These items are outside this batch and are not implied by the related palette,
-interruption, or compaction changes.
+interruption, or compaction changes. They were subsequently addressed in the
+[search, approval feedback, and compaction follow-up](./upstream-followup-2026-10-24.md).
 
 ## Verification status
 

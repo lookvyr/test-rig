@@ -1169,7 +1169,10 @@ describe("ClaudeAdapterV2 Auto-accept edits", () => {
 describe("ClaudeAdapterV2 approval cancellation", () => {
   it.effect("observes an approval signal that was already aborted", () =>
     Effect.gen(function* () {
-      const decision = yield* Deferred.make<ProviderApprovalDecision>();
+      const decision = yield* Deferred.make<{
+        decision: ProviderApprovalDecision;
+        feedback?: string;
+      }>();
       const controller = new AbortController();
       controller.abort();
 
@@ -1178,13 +1181,16 @@ describe("ClaudeAdapterV2 approval cancellation", () => {
         controller.signal,
       );
 
-      assert.equal(result, "cancel");
+      assert.deepEqual(result, { decision: "cancel" });
     }),
   );
 
   it.effect("removes the cancellation listener after approval resolves", () =>
     Effect.gen(function* () {
-      const decision = yield* Deferred.make<ProviderApprovalDecision>();
+      const decision = yield* Deferred.make<{
+        decision: ProviderApprovalDecision;
+        feedback?: string;
+      }>();
       const controller = new AbortController();
       let removes = 0;
       const removeEventListener = controller.signal.removeEventListener.bind(controller.signal);
@@ -1196,10 +1202,10 @@ describe("ClaudeAdapterV2 approval cancellation", () => {
         ClaudeAdapterV2.awaitClaudeApprovalDecision(decision, controller.signal),
       );
       yield* Effect.yieldNow;
-      yield* Deferred.succeed(decision, "accept");
+      yield* Deferred.succeed(decision, { decision: "accept" });
       const result = yield* Fiber.join(fiber);
 
-      assert.equal(result, "accept");
+      assert.deepEqual(result, { decision: "accept" });
       assert.equal(removes, 1);
     }),
   );
@@ -2359,11 +2365,17 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         modelSelection: CLAUDE_TEST_MODEL_SELECTION,
         runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
       });
+      const runtimeRequestReceipts =
+        yield* Queue.unbounded<
+          Extract<ProviderAdapterV2Event, { type: "runtime_request.updated" }>
+        >();
       const events: Array<ProviderAdapterV2Event> = [];
       yield* runtime.events.pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             events.push(event);
+            if (event.type === "runtime_request.updated")
+              yield* Queue.offer(runtimeRequestReceipts, event);
             if (event.type === "turn.terminal") {
               yield* Queue.offer(terminalReceipts, event);
             }
@@ -2396,6 +2408,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         continuationRequests,
         events,
         terminalReceipts,
+        runtimeRequestReceipts,
         systemNoticeReceipts,
         getOpenedOptions: () => openedOptions,
         terminalEvents,
@@ -3701,6 +3714,153 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           });
         }
       }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect.each(["boundary", "success", "failed", "cancelled"] as const)(
+    "keeps one compaction item through %s and omits the command echo",
+    (outcome) =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make(`compact-${outcome}`),
+            text: "/compact",
+            attachments: [],
+          }),
+        );
+        const status = (extra: object) =>
+          claudeSdkFrame({
+            type: "system",
+            subtype: "status",
+            session_id: WAKE_NATIVE_SESSION,
+            uuid: "compact-status",
+            ...extra,
+          });
+        yield* Queue.offerAll(harness.sdkMessages, [
+          status({ status: "compacting" }),
+          status({ status: "compacting" }),
+          ...(outcome === "boundary"
+            ? []
+            : [
+                status({
+                  status: null,
+                  ...(outcome === "cancelled" ? {} : { compact_result: outcome }),
+                  ...(outcome === "failed"
+                    ? { compact_error: "Not enough messages to compact." }
+                    : {}),
+                }),
+              ]),
+          ...(outcome === "boundary" || outcome === "success"
+            ? [
+                claudeSdkFrame({
+                  type: "system",
+                  subtype: "compact_boundary",
+                  session_id: WAKE_NATIVE_SESSION,
+                  uuid: "compact-boundary",
+                  compact_metadata: { trigger: "manual", pre_tokens: 1500, post_tokens: 400 },
+                }),
+              ]
+            : []),
+          claudeSdkFrame({
+            ...makeAssistantTextFrame({ uuid: "compact-echo", text: "Compacted." }),
+            local_command_source: "<local-command-stdout>Compacted.</local-command-stdout>",
+          }),
+          claudeSdkFrame({
+            ...makeResultFrame({
+              uuid: "compact-result",
+              result: "Compacted.",
+              numTurns: 0,
+              terminalReason: null,
+            }),
+            local_command: "compact",
+          }),
+        ]);
+        yield* Queue.take(harness.terminalReceipts);
+        const updates = harness.events.flatMap((event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "compaction"
+            ? [event.turnItem]
+            : [],
+        );
+        assert.equal(new Set(updates.map((item) => item.id)).size, 1);
+        assert.equal(updates[0]?.status, "running");
+        assert.equal(
+          updates.at(-1)?.status,
+          outcome === "failed" ? "failed" : outcome === "cancelled" ? "interrupted" : "completed",
+        );
+        assert.equal(
+          updates.at(-1)?.summary,
+          outcome === "failed" ? "Not enough messages to compact." : undefined,
+        );
+        assert.isFalse(
+          harness.events.some(
+            (event) =>
+              event.type === "turn_item.updated" && event.turnItem.type === "assistant_message",
+          ),
+        );
+      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect("keeps an unreported /compact failure's reason on the compaction, not as a reply", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      const now = yield* DateTime.now;
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now,
+          attemptId: RunAttemptId.make("attempt-claude-compaction-unreported"),
+          text: "/compact",
+          attachments: [],
+        }),
+      );
+      // Claude can refuse a /compact without a compact_result: the only reason is the result text.
+      yield* Queue.offerAll(harness.sdkMessages, [
+        claudeSdkFrame({
+          type: "system",
+          subtype: "status",
+          status: "compacting",
+          uuid: "00000000-0000-4000-8000-000000000620",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+        claudeSdkFrame({
+          ...makeAssistantTextFrame({
+            uuid: "00000000-0000-4000-8000-000000000622",
+            text: "Not enough messages to compact.",
+          }),
+          local_command_source:
+            "<local-command-stdout>Not enough messages to compact.</local-command-stdout>",
+        }),
+        claudeSdkFrame({
+          ...makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000621",
+            result: "Not enough messages to compact.",
+            numTurns: 0,
+            terminalReason: null,
+          }),
+          local_command: "compact",
+        }),
+      ]);
+      yield* Queue.take(harness.terminalReceipts);
+      const settled = harness.events
+        .flatMap((event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "compaction"
+            ? [event.turnItem]
+            : [],
+        )
+        .at(-1);
+      assert.equal(settled?.status, "failed");
+      assert.equal(settled?.summary, "Not enough messages to compact.");
+      assert.isFalse(
+        harness.events.some(
+          (event) =>
+            event.type === "turn_item.updated" && event.turnItem.type === "assistant_message",
+        ),
+      );
+    }).pipe(Effect.provide(Layer.mergeAll(IdAllocator.layer, NodeServices.layer))),
   );
 
   it.effect("titles Claude reads, searches, and skills on tool completion", () =>
@@ -5765,6 +5925,80 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           );
         }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
       ),
+  );
+
+  it.effect("returns approval feedback only to the exact native tool callback", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          cwd: "/workspace",
+        });
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("approval-feedback"),
+            text: "Check safely",
+            attachments: [],
+            runtimePolicy,
+          }),
+        );
+        const request = Effect.fn("requestFeedbackApproval")(function* (
+          toolUseID: string,
+          agentID?: string,
+        ) {
+          const decision = yield* Effect.promise(() =>
+            harness.getOpenedOptions()!.canUseTool!(
+              "Bash",
+              { command: "git status" },
+              {
+                signal: new AbortController().signal,
+                toolUseID,
+                requestId: `permission-${toolUseID}`,
+                ...(agentID === undefined ? {} : { agentID }),
+              },
+            ),
+          ).pipe(Effect.forkChild);
+          const update = yield* Queue.take(harness.runtimeRequestReceipts);
+          if (update.type !== "runtime_request.updated")
+            throw new Error("Expected approval request");
+          return { request: update.runtimeRequest, decision };
+        });
+        const parent = yield* request("parent-command");
+        const child = yield* request("child-command", "child-worker");
+        assert.isTrue(
+          child.request.responseCapability.type === "live" &&
+            child.request.responseCapability.supportsFeedback === true,
+        );
+        const offered = harness.offeredMessages.length;
+        yield* harness.runtime.respondToRuntimeRequest({
+          requestId: child.request.id,
+          decision: "decline",
+          feedback: "Use a safer command.",
+        });
+        const childResult = yield* Fiber.join(child.decision);
+        assert.equal(childResult?.behavior, "deny");
+        if (childResult?.behavior === "deny") {
+          assert.equal(childResult.message, "Use a safer command.");
+          assert.equal(childResult.toolUseID, "child-command");
+          assert.isUndefined(childResult.interrupt);
+        }
+        assert.isUndefined(parent.decision.pollUnsafe());
+        assert.equal(harness.offeredMessages.length, offered);
+        yield* harness.runtime.respondToRuntimeRequest({
+          requestId: parent.request.id,
+          decision: "accept",
+        });
+        const parentResult = yield* Fiber.join(parent.decision);
+        assert.equal(parentResult?.behavior, "allow");
+        if (parentResult?.behavior === "allow")
+          assert.equal(parentResult.toolUseID, "parent-command");
+      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+    ),
   );
 
   it.effect("answers an approval a held wake turn raises without waiting for the echo", () =>

@@ -314,6 +314,9 @@ export const executorLayer: Layer.Layer<
                 threadId: effect.threadId,
                 providerSessionId: effect.request.providerSessionId,
                 requestId: effect.request.requestId,
+                ...(effect.request.feedback === undefined
+                  ? {}
+                  : { feedback: effect.request.feedback }),
                 ...(effect.request.decision === undefined
                   ? {}
                   : { decision: effect.request.decision }),

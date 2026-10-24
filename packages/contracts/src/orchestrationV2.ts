@@ -452,6 +452,38 @@ export function isProviderNativeSubagentThread(
   return thread.lineage.relationshipToParent === "subagent" && thread.creationSource === "provider";
 }
 
+export const IDLE_COMPACTION_TEXT = "/compact";
+
+interface CompactionMessageFields {
+  readonly role: string;
+  readonly text: string;
+  readonly attachments?: ReadonlyArray<unknown> | undefined;
+  readonly createdBy?: OrchestrationV2Actor | undefined;
+  readonly creationSource?: OrchestrationV2CreationSource | undefined;
+  readonly idleCompaction?: OrchestrationV2IdleCompaction | undefined;
+}
+
+/** A prompt that only asks the provider to compact, so its turn is the compaction itself. */
+export function isCompactionCommandMessage(message: CompactionMessageFields): boolean {
+  return (
+    message.role === "user" &&
+    message.text.trim().toLowerCase() === IDLE_COMPACTION_TEXT &&
+    (message.attachments?.length ?? 0) === 0
+  );
+}
+
+/** Why T3 Code sent this `/compact` on its own, or undefined for one someone asked for. */
+export function idleCompactionOf(
+  message: CompactionMessageFields,
+): OrchestrationV2IdleCompaction | undefined {
+  if (!isCompactionCommandMessage(message)) return undefined;
+  if (message.idleCompaction !== undefined) return message.idleCompaction;
+  // Servers before `idleCompaction` marked their own as agent-created.
+  return message.createdBy === "agent" && message.creationSource === "server"
+    ? "beforeCacheExpires"
+    : undefined;
+}
+
 export const OrchestrationV2RunStatus = Schema.Literals([
   "preparing",
   "queued",
@@ -1132,13 +1164,18 @@ export const OrchestrationV2RuntimeRequest = Schema.Struct({
   ]),
   status: Schema.Literals(["pending", "resolved", "expired", "cancelled"]),
   responseCapability: Schema.Union([
-    Schema.Struct({ type: Schema.Literal("live"), providerSessionId: ProviderSessionId }),
+    Schema.Struct({
+      type: Schema.Literal("live"),
+      providerSessionId: ProviderSessionId,
+      supportsFeedback: Schema.optional(Schema.Boolean),
+    }),
     Schema.Struct({ type: Schema.Literal("message") }),
     Schema.Struct({ type: Schema.Literal("not_resumable"), reason: Schema.String }),
   ]),
   createdAt: Schema.DateTimeUtc,
   resolvedAt: Schema.NullOr(Schema.DateTimeUtc),
   decision: Schema.optional(ProviderApprovalDecision),
+  feedback: Schema.optional(Schema.String),
   answers: Schema.optional(ProviderUserInputAnswers),
 });
 export type OrchestrationV2RuntimeRequest = typeof OrchestrationV2RuntimeRequest.Type;
@@ -1209,12 +1246,16 @@ export const OrchestrationV2Notification = Schema.Struct({
 });
 export type OrchestrationV2Notification = typeof OrchestrationV2Notification.Type;
 
+export const OrchestrationV2IdleCompaction = Schema.Literals(["beforeCacheExpires", "onReturn"]);
+export type OrchestrationV2IdleCompaction = typeof OrchestrationV2IdleCompaction.Type;
+
 export const OrchestrationV2ConversationMessage = Schema.Struct({
   notification: Schema.optional(OrchestrationV2Notification),
   ...OrchestrationV2CreationFields,
   scheduledTaskId: Schema.optional(ScheduledTaskId),
   // The sending agent's thread in this environment, separate from the receiving thread.
   senderThreadId: Schema.optional(ThreadId),
+  idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
   id: MessageId,
   threadId: ThreadId,
   runId: Schema.NullOr(RunId),
@@ -1483,6 +1524,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     messageId: MessageId,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     senderThreadId: Schema.optional(ThreadId),
+    idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
     inputIntent: OrchestrationV2UserMessageInputIntent,
     text: Schema.String,
     context: Schema.optional(OrchestrationMessageContext),
@@ -2234,6 +2276,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     messageId: MessageId,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     senderThreadId: Schema.optional(ThreadId),
+    idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
     inputIntent: OrchestrationV2UserMessageInputIntent,
     text: Schema.String,
     context: Schema.optional(OrchestrationMessageContext),
@@ -2919,6 +2962,7 @@ export const OrchestrationV2Command = Schema.Union([
     ...OrchestrationV2CreationFields,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     senderThreadId: Schema.optional(ThreadId),
+    idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
     commandId: CommandId,
     threadId: ThreadId,
     messageId: MessageId,
@@ -3035,6 +3079,7 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     requestId: RuntimeRequestId,
     decision: Schema.optional(ProviderApprovalDecision),
+    feedback: Schema.optional(Schema.String),
     answers: Schema.optional(ProviderUserInputAnswers),
     attachmentsByQuestionId: Schema.optional(UserInputAttachments),
   }),

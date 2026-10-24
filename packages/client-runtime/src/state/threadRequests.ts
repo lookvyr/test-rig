@@ -7,6 +7,25 @@ import type {
   RuntimeRequestId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import type { ProviderApprovalDecision } from "@t3tools/contracts";
+import type { AtomCommandResult } from "./runtime.ts";
+
+export type ApprovalResponder = (
+  requestId: RuntimeRequestId,
+  decision: ProviderApprovalDecision,
+  feedback?: string,
+) => Promise<AtomCommandResult<unknown, unknown> | undefined>;
+
+/** Feedback belongs to the displayed request, which may be a native child's tool call. */
+export async function sendApprovalFeedback(
+  approval: ThreadPendingApproval,
+  feedback: string,
+  respond: ApprovalResponder,
+): Promise<boolean> {
+  if (!approval.supportsFeedback || approval.responseCapability !== "live" || !feedback.trim())
+    return false;
+  return (await respond(approval.requestId, "decline", feedback.trim()))?._tag === "Success";
+}
 
 export interface ThreadPendingApproval {
   readonly requestId: RuntimeRequestId;
@@ -18,6 +37,7 @@ export interface ThreadPendingApproval {
   /** Approval choices advertised by the provider (#8058); defaults apply when absent. */
   readonly options?: ReadonlyArray<ProviderApprovalOption>;
   readonly responseCapability: "live" | "not_resumable";
+  readonly supportsFeedback?: boolean;
 }
 
 export interface ThreadUserInputQuestion extends Omit<
@@ -93,6 +113,9 @@ export function derivePendingThreadRequests(
         ? { options: item.options }
         : {}),
       responseCapability: responseCapability === "live" ? "live" : "not_resumable",
+      ...(request.responseCapability.type === "live" && request.responseCapability.supportsFeedback
+        ? { supportsFeedback: true }
+        : {}),
     });
   }
 

@@ -1243,7 +1243,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const compactionAwaitingRow =
-    isCompacting && !rows.some((row) => row.kind === "context-compaction" && row.active);
+    isCompacting &&
+    !rows.some(
+      (row) =>
+        (row.kind === "context-compaction" && row.active) ||
+        (row.kind === "working" && row.compacting),
+    );
   const backgroundWorktreeSetup =
     worktreeSetup !== null &&
     worktreeSetup.phase === "running" &&
@@ -1904,31 +1909,41 @@ function ContextCompactionTimelineRow({
 }: {
   row: Extract<TimelineRow, { kind: "context-compaction" }>;
 }) {
+  const label =
+    row.title && row.label.startsWith("Context compacted")
+      ? row.title + row.label.slice("Context compacted".length)
+      : row.label;
+  const content = (
+    <span className="flex min-w-0 items-center gap-1.5">
+      {row.failed ? (
+        <CircleAlertIcon aria-hidden="true" className="size-3 shrink-0" />
+      ) : (
+        <Minimize2Icon aria-hidden="true" className="size-3 shrink-0" />
+      )}
+      {label}
+      {row.failure ? (
+        <span className="min-w-0 truncate opacity-80">&middot; {row.failure}</span>
+      ) : null}
+    </span>
+  );
   return (
     <div
       role="separator"
-      aria-label={row.label}
-      className="mx-auto flex w-full max-w-(--chat-content-max-width) items-center gap-3 py-1 text-muted-foreground text-xs"
+      aria-label={row.failure ? `${label}: ${row.failure}` : label}
+      className={cn(
+        "mx-auto flex w-full max-w-(--chat-content-max-width) items-center gap-3 py-1 text-xs",
+        row.failed ? "text-destructive" : "text-muted-foreground",
+      )}
     >
-      <span className="h-px flex-1 bg-border/70" />
+      <span className={cn("h-px flex-1", row.failed ? "bg-destructive/30" : "bg-border/70")} />
       <span
         ref={row.active ? observeVisibleAnimation : undefined}
-        className="relative shrink-0 overflow-hidden"
+        className="relative min-w-0 overflow-hidden"
       >
-        <span className="flex items-center gap-1.5">
-          <Minimize2Icon aria-hidden="true" className="size-3" />
-          {row.label}
-        </span>
-        {row.active ? (
-          <ActivityShimmerOverlay>
-            <span className="flex items-center gap-1.5">
-              <Minimize2Icon aria-hidden="true" className="size-3" />
-              {row.label}
-            </span>
-          </ActivityShimmerOverlay>
-        ) : null}
+        {content}
+        {row.active ? <ActivityShimmerOverlay>{content}</ActivityShimmerOverlay> : null}
       </span>
-      <span className="h-px flex-1 bg-border/70" />
+      <span className={cn("h-px flex-1", row.failed ? "bg-destructive/30" : "bg-border/70")} />
     </div>
   );
 }
@@ -3445,11 +3460,12 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
     use(TimelineRowActivityCtx);
   // One span for every label so the setup-to-working handoff swaps text in
   // place instead of remounting the row.
-  const shimmer = isPreparingWorktree || isCompacting;
+  const compacting = row.compacting ?? (isCompacting ? "Compacting…" : undefined);
+  const shimmer = isPreparingWorktree || compacting !== undefined;
   const label = isPreparingWorktree ? (
     "Setting up worktree…"
-  ) : isCompacting ? (
-    <CompactingLabel />
+  ) : compacting !== undefined ? (
+    <CompactingLabel label={compacting} />
   ) : row.createdAt ? (
     <>
       Working for <WorkingTimer createdAt={row.createdAt} />
@@ -3517,11 +3533,11 @@ function BackgroundWorktreeSetupChip({ snapshot }: { snapshot: WorktreeSetupSnap
   );
 }
 
-function CompactingLabel() {
+function CompactingLabel({ label }: { label: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <Minimize2Icon aria-hidden="true" className="size-3" />
-      Compacting…
+      {label}
     </span>
   );
 }

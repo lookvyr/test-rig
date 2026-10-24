@@ -353,6 +353,7 @@ it.effect("sends /compact as Test Rig once the cache is about to expire", () =>
           type: "message.dispatch",
           threadId,
           text: "/compact",
+          idleCompaction: "beforeCacheExpires",
           createdBy: "agent",
           creationSource: "server",
         });

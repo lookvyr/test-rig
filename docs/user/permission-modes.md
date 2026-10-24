@@ -35,6 +35,12 @@ cancelling the turn or remembering permission for the session. Some providers
 also support persistent approval; that choice appears only when offered by the
 provider.
 
+When a Claude approval supports feedback, you can type a different approach in
+the approval's feedback field instead of approving the action. Sending feedback
+declines that displayed request and delivers the text to the agent that asked,
+including a subagent. Other pending approvals stay pending. Feedback accepts
+text only; your ordinary composer draft and attachments stay separate.
+
 ## Choosing a Mode
 
 Use **Full access** for work in a worktree or a sandbox you can throw away.

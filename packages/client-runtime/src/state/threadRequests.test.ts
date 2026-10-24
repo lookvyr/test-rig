@@ -5,7 +5,9 @@ import {
   TurnItemId,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { AsyncResult } from "effect/unstable/reactivity";
+import { sendApprovalFeedback, type ApprovalResponder } from "./threadRequests.ts";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { v2Now, v2Projection } from "./orchestrationV2TestFixtures.ts";
 import { createQuestionHistoryProjector, derivePendingThreadRequests } from "./threadRequests.ts";
 
@@ -150,4 +152,35 @@ it("restores old text answers without mutating history or replacing unchanged ro
   expect(row.item).not.toHaveProperty("questionAnswer");
   expect(project(answered)).toBe(result);
   expect(project({ ...answered, visibleTurnItems: [...rows] })[0]).toBe(result[0]);
+});
+
+it("sends trimmed approval feedback only to the exact supported live request", async () => {
+  const respond = vi.fn<ApprovalResponder>(async () => AsyncResult.success(undefined));
+  const pending = derivePendingThreadRequests({
+    runtimeRequests: [
+      {
+        ...projection.runtimeRequests[0]!,
+        kind: "command",
+        responseCapability: {
+          type: "live",
+          providerSessionId: ProviderSessionId.make("claude"),
+          supportsFeedback: true,
+        },
+      },
+      { ...projection.runtimeRequests[0]!, id: RuntimeRequestId.make("other"), kind: "command" },
+    ],
+    turnItems: [],
+  });
+  expect(await sendApprovalFeedback(pending.approvals[0]!, " Safer please. ", respond)).toBe(true);
+  expect(respond.mock.calls).toEqual([[requestId, "decline", "Safer please."]]);
+  expect(await sendApprovalFeedback(pending.approvals[1]!, "Do not send", respond)).toBe(false);
+  expect(
+    await sendApprovalFeedback(
+      { ...pending.approvals[0]!, responseCapability: "not_resumable" },
+      "Expired",
+      respond,
+    ),
+  ).toBe(false);
+  expect(await sendApprovalFeedback(pending.approvals[0]!, "  ", respond)).toBe(false);
+  expect(respond).toHaveBeenCalledTimes(1);
 });

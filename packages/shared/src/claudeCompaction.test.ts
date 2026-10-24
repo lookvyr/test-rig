@@ -3,9 +3,34 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   formatClaudeResumeCompactionQuestion,
   isClaudeResumeCompactionQuestion,
+  claudeResumeCompactionAge,
 } from "./claudeCompaction.ts";
 
 describe("claude resume compaction copy", () => {
+  it("only associates the idle age with an accepted compaction answer", () => {
+    const question = formatClaudeResumeCompactionQuestion({
+      ageMinutes: 72,
+      estimatedTokens: 275_123,
+    });
+    expect(
+      claudeResumeCompactionAge({
+        questionTextById: { resume: question },
+        answers: { resume: "Compact and continue" },
+      }),
+    ).toBe("1h 12m");
+    expect(claudeResumeCompactionAge({ answers: { [question]: ["Compact and continue"] } })).toBe(
+      "1h 12m",
+    );
+    expect(
+      claudeResumeCompactionAge({
+        questionTextById: { resume: question },
+        answers: { resume: "Continue without compacting" },
+      }),
+    ).toBeNull();
+    expect(
+      claudeResumeCompactionAge({ answers: { unrelated: "Compact and continue" } }),
+    ).toBeNull();
+  });
   // The matcher must recognize every question the formatter can produce.
   // This is the drift guard: rewording one side fails here.
   it.each([

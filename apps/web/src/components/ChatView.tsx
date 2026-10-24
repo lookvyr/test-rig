@@ -5676,7 +5676,7 @@ function ChatViewContent(props: ChatViewProps) {
   };
 
   const onRespondToApproval = useCallback(
-    async (requestId: RuntimeRequestId, decision: ProviderApprovalDecision) => {
+    async (requestId: RuntimeRequestId, decision: ProviderApprovalDecision, feedback?: string) => {
       if (!activeThreadId) return;
 
       setRespondingRequestIds((existing) =>
@@ -5688,6 +5688,7 @@ function ChatViewContent(props: ChatViewProps) {
           threadId: activeThreadId,
           requestId,
           decision,
+          ...(feedback === undefined ? {} : { feedback }),
         },
       });
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {

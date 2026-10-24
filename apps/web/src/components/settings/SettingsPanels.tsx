@@ -1630,7 +1630,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("compact-idle-threads")}
-          description="Compact long idle Claude threads just before their prompt cache expires, so coming back costs less. Off by default; the compaction shows in the thread as a /compact turn."
+          description="Compact long idle Claude threads just before their prompt cache expires, so coming back costs less. Off by default; the compaction appears as a status divider and stays quiet when it succeeds."
           resetAction={
             settings.compactIdleThreads ? (
               <SettingResetButton

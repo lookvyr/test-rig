@@ -1,4 +1,18 @@
-import { type OrchestrationV2Actor, ScheduledTaskId } from "@t3tools/contracts";
+import {
+  type OrchestrationV2Actor,
+  type OrchestrationV2IdleCompaction,
+  ScheduledTaskId,
+} from "@t3tools/contracts";
+
+export const IDLE_COMPACTING_LABELS = {
+  beforeCacheExpires: "Compacting before the cache expires…",
+  onReturn: "Compacting after being idle…",
+} satisfies Record<OrchestrationV2IdleCompaction, string>;
+
+export const IDLE_COMPACTION_TITLES = {
+  beforeCacheExpires: "Context automatically compacted before cache expiry",
+  onReturn: "Context compacted after being idle",
+} satisfies Record<OrchestrationV2IdleCompaction, string>;
 
 const LEGACY_AUTOMATION_PREFIX = /^\[Triggered by schedule task: [^\r\n]+\]\r?\n\r?\n/;
 const LEGACY_AUTOMATION_MESSAGE_ID = /^scheduled-task-message:(.+):\d+:(?:scheduled|manual)$/;

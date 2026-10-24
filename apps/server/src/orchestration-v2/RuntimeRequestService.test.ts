@@ -116,14 +116,16 @@ it.effect("forwards orchestrator-resolved runtime requests to the live adapter",
       threadId,
       providerSessionId,
       requestId,
-      decision: "accept",
+      decision: "decline",
+      feedback: "Use an explicit path.",
     });
 
     assert.equal(getSession.mock.calls.length, 1);
     assert.equal(respondToRuntimeRequest.mock.calls.length, 1);
     assert.deepEqual(respondToRuntimeRequest.mock.calls[0]?.[0], {
       requestId,
-      decision: "accept",
+      decision: "decline",
+      feedback: "Use an explicit path.",
     });
   }).pipe(Effect.provide(testLayer));
 });

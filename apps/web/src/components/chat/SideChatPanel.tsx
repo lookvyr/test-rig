@@ -417,11 +417,17 @@ export function SideChatPanel(props: {
   const onRespondToApproval = async (
     requestId: RuntimeRequestId,
     decision: ProviderApprovalDecision,
+    feedback?: string,
   ) => {
     setRespondingRequestIds((ids) => [...ids, requestId]);
     const result = await respondApproval({
       environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, requestId, decision },
+      input: {
+        threadId: threadRef.threadId,
+        requestId,
+        decision,
+        ...(feedback === undefined ? {} : { feedback }),
+      },
     });
     setRespondingRequestIds((ids) => ids.filter((id) => id !== requestId));
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result))
