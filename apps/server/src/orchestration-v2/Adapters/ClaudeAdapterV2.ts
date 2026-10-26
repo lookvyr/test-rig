@@ -49,8 +49,9 @@ import type {
   AskUserQuestionInput,
   WebSearchOutput,
 } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
+import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import { parseCliArgs } from "@t3tools/shared/cliArgs";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
 import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
@@ -932,6 +933,35 @@ const decodeClaudeSubagentCacheSettings = Schema.decodeUnknownOption(
   Schema.Struct({ subagentPromptCacheTtl: Schema.optionalKey(ClaudePromptCacheTtl) }),
 );
 
+// Claude Code's auto tool search sends every MCP schema in full while they fit under a share of the
+// context window, which T3's tools do on 1M models. auto:0 already means on and auto:100 off.
+export function claudeToolSearchOverride(value: string | undefined): "true" | undefined {
+  if (value === undefined) return undefined;
+  if (value === "auto") return "true";
+  if (!value.startsWith("auto:")) return undefined;
+  const percent = parseClaudeInteger(value.slice("auto:".length));
+  // Claude Code treats an unparsable auto:N as auto, and clamps N to 0..100.
+  if (Number.isNaN(percent)) return "true";
+  const clamped = Math.min(100, Math.max(0, percent));
+  return clamped > 0 && clamped < 100 ? "true" : undefined;
+}
+
+// Claude Code 2.1.310's integer parsing for auto:N. Scientific notation counts only when it is an
+// integer, grouped digits (1_000, 1,000, or 1 000) are joined, and anything else uses parseInt.
+const CLAUDE_SCIENTIFIC_INTEGER = /^[+-]?(\d+(\.\d*)?|\.\d+)[eE][+-]?\d+$/;
+const CLAUDE_GROUPED_INTEGER = /^[+-]?\d{1,3}([_,\u00A0\u202F ])\d{3}(?:\1\d{3})*$/;
+function parseClaudeInteger(text: string): number {
+  const value = text.trim();
+  if (value.length <= 32 && CLAUDE_SCIENTIFIC_INTEGER.test(value)) {
+    const number = Number(value);
+    return Number.isInteger(number) ? number : Number.NaN;
+  }
+  if (value.length <= 32 && CLAUDE_GROUPED_INTEGER.test(value)) {
+    return Number.parseInt(value.replace(/[_,\u00A0\u202F ]/g, ""), 10);
+  }
+  return Number.parseInt(value, 10);
+}
+
 export function makeClaudeQueryOptions(input: {
   readonly sideChat?: boolean;
   readonly modelSelection: ModelSelection;
@@ -948,6 +978,7 @@ export function makeClaudeQueryOptions(input: {
   readonly attachmentsDir?: string;
   readonly settings?: ClaudeSettings;
   readonly sdkSettings?: string | ClaudeSdkSettings;
+  readonly toolSearchOverride?: "true";
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   readonly skillCatalogue?: string | undefined;
@@ -986,12 +1017,20 @@ export function makeClaudeQueryOptions(input: {
       : typeof input.sdkSettings === "object" && input.sdkSettings !== null
         ? ({ ...input.sdkSettings, ...selectionSettings } as ClaudeSdkSettings)
         : selectionSettings;
-  const effectiveQuerySettings =
+  const compactQuerySettings =
     input.settings?.autoCompactWindow === undefined || input.settings.autoCompactWindow.length === 0
       ? querySettings
       : ({
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
           autoCompactWindow: Number(input.settings.autoCompactWindow),
+        } as ClaudeSdkSettings);
+  // A settings file path cannot take extra keys, so it goes through unchanged.
+  const effectiveQuerySettings =
+    input.toolSearchOverride === undefined || typeof compactQuerySettings === "string"
+      ? compactQuerySettings
+      : ({
+          ...compactQuerySettings,
+          env: { ...compactQuerySettings?.env, ENABLE_TOOL_SEARCH: input.toolSearchOverride },
         } as ClaudeSdkSettings);
   const options: ClaudeAgentSdkQueryOptions = {
     model: compiledSelection.apiModelId,
@@ -3371,6 +3410,15 @@ export function claudeProposedPlan(input: unknown): string | null {
   return typeof plan === "string" && plan.trim().length > 0 ? plan.trim() : null;
 }
 
+const decodeClaudeEnvSettings = Schema.decodeUnknownEffect(
+  fromLenientJson(
+    Schema.StructWithRest(
+      Schema.Struct({ env: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)) }),
+      [Schema.Record(Schema.String, Schema.Unknown)],
+    ),
+  ),
+);
+
 export interface ClaudeAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
   readonly settings: ClaudeSettings;
@@ -3427,6 +3475,80 @@ export function makeClaudeAdapterV2(
         Effect.orElseSucceed(() => Option.none()),
       );
       return Option.isSome(home) ? home.value.subagentPromptCacheTtl : undefined;
+    },
+  );
+
+  const readToolSearchSetting = (filePath: string) =>
+    fileSystem.readFileString(filePath).pipe(
+      Effect.flatMap(decodeClaudeEnvSettings),
+      Effect.map((settings) => {
+        const value = settings.env?.ENABLE_TOOL_SEARCH;
+        return typeof value === "string" ? value : undefined;
+      }),
+      Effect.orElseSucceed(() => undefined),
+    );
+  // A worktree's .git file points at <main>/.git/worktrees/<name>, whose commondir leads back to
+  // <main>/.git. A bare repository has no main checkout, so its worktree keeps its own file.
+  const mainCheckoutRoot = (checkout: string) =>
+    fileSystem.readFileString(path.join(checkout, ".git")).pipe(
+      Effect.flatMap((pointer) => {
+        const gitDir = /^gitdir:\s*(.+)$/m.exec(pointer)?.[1]?.trim();
+        if (gitDir === undefined) return Effect.succeed(checkout);
+        const worktreeGitDir = path.resolve(checkout, gitDir);
+        return fileSystem.readFileString(path.join(worktreeGitDir, "commondir")).pipe(
+          Effect.map((commonDir) => {
+            const common = path.resolve(worktreeGitDir, commonDir.trim());
+            return path.basename(common) === ".git" ? path.dirname(common) : checkout;
+          }),
+        );
+      }),
+      Effect.orElseSucceed(() => checkout),
+    );
+  // Claude Code keeps .claude/settings.local.json at the repository root, or in cwd outside a
+  // repository, on Windows, or when the root is home. Its owner check is skipped: missing it only
+  // leaves tool search on, Claude Code's default.
+  const localSettingsDirectory = Effect.fn("ClaudeAdapterV2.localSettingsDirectory")(function* (
+    cwd: string,
+  ) {
+    if ((yield* HostProcessPlatform) === "win32") return cwd;
+    for (let directory = cwd; ; directory = path.dirname(directory)) {
+      const isCheckout = yield* fileSystem
+        .exists(path.join(directory, ".git"))
+        .pipe(Effect.orElseSucceed(() => false));
+      if (isCheckout) {
+        const root = yield* mainCheckoutRoot(directory);
+        return root === (adapterOptions.environment.HOME?.trim() || NodeOS.homedir()) ? cwd : root;
+      }
+      if (path.dirname(directory) === directory) return cwd;
+    }
+  });
+  // Settings env beats the process env, local over project over user, and a local file an older
+  // Claude Code left in cwd applies under the root one. resolveSettings reads local from cwd only.
+  const resolveToolSearchOverride = Effect.fn("ClaudeAdapterV2.resolveToolSearchOverride")(
+    function* (cwd: string | null) {
+      // Custom CLI settings must keep their own precedence; leave tool search to Claude.
+      const flags = parseCliArgs(adapterOptions.settings.launchArgs).flags;
+      if (flags.settings !== undefined || flags["setting-sources"] !== undefined) return undefined;
+      const configOverride = adapterOptions.environment.CLAUDE_CONFIG_DIR?.trim();
+      const configDirectory = configOverride
+        ? path.resolve(cwd ?? ".", configOverride)
+        : path.join(adapterOptions.environment.HOME?.trim() || NodeOS.homedir(), ".claude");
+      const localDirectory = cwd === null ? null : yield* localSettingsDirectory(cwd);
+      const settingsFiles = [
+        ...(cwd === null || localDirectory === null
+          ? []
+          : [
+              path.join(localDirectory, ".claude", "settings.local.json"),
+              ...(localDirectory === cwd ? [] : [path.join(cwd, ".claude", "settings.local.json")]),
+              path.join(cwd, ".claude", "settings.json"),
+            ]),
+        path.join(configDirectory, "settings.json"),
+      ];
+      for (const settingsFile of settingsFiles) {
+        const value = yield* readToolSearchSetting(settingsFile);
+        if (value !== undefined) return claudeToolSearchOverride(value);
+      }
+      return claudeToolSearchOverride(adapterOptions.environment.ENABLE_TOOL_SEARCH);
     },
   );
 
@@ -8579,6 +8701,7 @@ export function makeClaudeAdapterV2(
             (turnInput.providerTurnOrdinal > 1 || turnInput.providerThread.forkedFrom !== null);
           const shouldResume =
             resumeSessionAt !== undefined || openedWithResume || hasPersistedProviderTurn;
+          const toolSearchOverride = yield* resolveToolSearchOverride(turnInput.runtimePolicy.cwd);
           const querySession = yield* queryRunner
             .open({
               threadId: turnInput.threadId,
@@ -8620,6 +8743,7 @@ export function makeClaudeAdapterV2(
                 canUseTool,
                 onUserDialog,
                 supportedDialogKinds: ["resume_return"],
+                ...(toolSearchOverride === undefined ? {} : { toolSearchOverride }),
               }),
             })
             .pipe(

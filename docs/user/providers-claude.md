@@ -30,6 +30,13 @@ Claude may send progress updates before its final answer. Test Rig keeps each
 message separate and shows the final answer even when Claude delivers it all at
 once instead of streaming it.
 
+## Tool-search caching
+
+When your Claude settings select automatic tool search, Test Rig keeps tool search
+enabled so MCP tool definitions stay deferred and the prompt cache stays stable.
+Explicit on/off settings, including `auto:0` and `auto:100`, are preserved.
+Existing sessions may rebuild their prompt cache once when reopened.
+
 ## Task lists
 
 When Claude tracks its work as a task list, the list appears above the
