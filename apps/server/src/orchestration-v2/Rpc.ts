@@ -176,8 +176,12 @@ export const makeHandlers = Effect.fn("orchestrationV2.makeRpcHandlers")(functio
         threads
           .getThreadSnapshotWindow(input.threadId, { rowLimit: THREAD_HISTORY_SNAPSHOT_ROW_LIMIT })
           .pipe(
-            Effect.map((snapshot) =>
-              projectThreadProjectionForWire(buildBoundedThreadProjection(snapshot).projection),
+            Effect.map(
+              (snapshot) =>
+                buildBoundedThreadProjection({
+                  ...snapshot,
+                  projection: projectThreadProjectionForWire(snapshot.projection),
+                }).projection,
             ),
             Effect.mapError(
               (cause) =>

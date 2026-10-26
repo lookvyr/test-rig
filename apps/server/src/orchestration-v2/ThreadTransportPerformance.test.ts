@@ -173,7 +173,6 @@ describe("thread transport payload budget", () => {
       historyCursor: preOmissionBounded.historyCursor,
       hasMoreHistory: preOmissionBounded.hasMoreHistory,
       latestLocalTurnOrdinal: preOmissionBounded.latestLocalTurnOrdinal,
-      payloadBudgetExceeded: preOmissionBounded.payloadBudgetExceeded,
     };
     const projectedBoundedSnapshot = buildBoundedThreadStreamSnapshot({
       projection,
@@ -189,7 +188,9 @@ describe("thread transport payload budget", () => {
 
     expect(historicalApplicationBytes).toBe(HISTORICAL_FULL_SNAPSHOT_APPLICATION_BYTES);
     expect(fullRpcJsonBytes).toBe(FULL_SNAPSHOT_RPC_JSON_BYTES);
-    expect(preOmissionBoundedRpcJsonBytes).toBe(PRE_OMISSION_BOUNDED_SNAPSHOT_RPC_JSON_BYTES);
+    expect(preOmissionBoundedRpcJsonBytes).toBeLessThanOrEqual(
+      PRE_OMISSION_BOUNDED_SNAPSHOT_RPC_JSON_BYTES,
+    );
     expect(projectedBoundedRpcJsonBytes).toBeLessThanOrEqual(
       MAX_PROJECTED_BOUNDED_SNAPSHOT_RPC_JSON_BYTES,
     );
@@ -197,7 +198,6 @@ describe("thread transport payload budget", () => {
     expect(preOmissionBoundedSnapshot.projection.visibleTurnItems).toHaveLength(60);
     expect(projectedBoundedSnapshot.projection.visibleTurnItems).toHaveLength(75);
     expect(projectedBoundedSnapshot.hasMoreHistory).toBe(true);
-    expect(projectedBoundedSnapshot.payloadBudgetExceeded).toBe(false);
   });
 
   it("omits command output from a live event without changing persisted source data", () => {

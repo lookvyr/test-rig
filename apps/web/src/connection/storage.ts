@@ -51,7 +51,7 @@ const StoredShellSnapshot = Schema.Struct({
 const StoredShellSnapshotJson = Schema.fromJsonString(StoredShellSnapshot);
 // V2 projections have a separate cache generation; legacy flattened transcripts are discarded.
 const StoredThreadSnapshot = Schema.Struct({
-  schemaVersion: Schema.Literal(4),
+  schemaVersion: Schema.Literal(5),
   environmentId: EnvironmentId,
   threadId: ThreadId,
   snapshot: OrchestrationV2ThreadDetailSnapshot.mapFields((fields) => ({
@@ -688,7 +688,7 @@ export const connectionStorageLayer = Layer.effectContext(
       saveThread: (environmentId, snapshot) =>
         Effect.gen(function* () {
           const encoded = yield* encodeStoredThreadSnapshot({
-            schemaVersion: 4,
+            schemaVersion: 5,
             environmentId,
             threadId: snapshot.projection.thread.id,
             snapshot,

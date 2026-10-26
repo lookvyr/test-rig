@@ -254,7 +254,8 @@ the conversation.
 ## Conversation history and Find
 
 Long conversations open with their recent turns. Choose **Load earlier turns** at
-the top to read further back. A turn stays together with its tool activity.
+the top to read further back. Ordinary turns stay together with their tool activity;
+very large turns load in smaller sections so opening a conversation stays responsive.
 
 Press **Cmd+F** on macOS or **Ctrl+F** elsewhere to find text throughout the
 conversation, including earlier turns that have not loaded yet. Previous and

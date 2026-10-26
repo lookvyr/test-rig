@@ -852,14 +852,12 @@ describe("orchestration V2 contracts", () => {
       historyCursor: "older-page",
       hasMoreHistory: true,
       latestLocalTurnOrdinal: 1,
-      payloadBudgetExceeded: false,
     });
     expect(boundedSnapshot).toMatchObject({
       kind: "snapshot",
       historyCursor: "older-page",
       hasMoreHistory: true,
       latestLocalTurnOrdinal: 1,
-      payloadBudgetExceeded: false,
     });
   });
 

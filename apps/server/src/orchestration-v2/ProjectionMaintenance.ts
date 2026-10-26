@@ -237,7 +237,7 @@ export const layer: Layer.Layer<
      * preserves first-seen order as well as final state.
      * Page every event, including non-candidates: filtering before LIMIT could
      * still scan the entire history when superseded events are sparse.
-     * turn-item.updated stays intact because replay assigns positions on first write.
+     * Subagent prompts and command-result turn items stay intact; other turn items keep first/latest.
      */
     const compactEventStore = Effect.gen(function* () {
       const bounds = yield* sql<{
@@ -275,6 +275,11 @@ export const layer: Layer.Layer<
             CASE
               WHEN event.application_event_version = 2
                 AND event.event_type IN ('message.updated', 'node.updated')
+              THEN json_extract(event.payload_json, '$.id')
+              WHEN event.application_event_version = 2
+                AND event.event_type = 'turn-item.updated'
+                AND event.command_id IS NULL
+                AND json_extract(event.payload_json, '$.type') <> 'subagent'
               THEN json_extract(event.payload_json, '$.id')
               ELSE NULL
             END AS entity_id,
@@ -315,7 +320,9 @@ export const layer: Layer.Layer<
               } else retainedReadStateThreadIds.add(row.stream_id);
             } else if (
               row.entity_id !== null &&
-              (row.event_type === "message.updated" || row.event_type === "node.updated")
+              (row.event_type === "message.updated" ||
+                row.event_type === "node.updated" ||
+                row.event_type === "turn-item.updated")
             ) {
               const key = encodeEntityKey([row.event_type, row.stream_id, row.entity_id]);
               const candidate = oldestCandidateByEntityKey.get(key);

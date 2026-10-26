@@ -58,7 +58,6 @@ const bounded = (cursor = "first", sequence = 10) => ({
   historyCursor: cursor,
   hasMoreHistory: true,
   latestLocalTurnOrdinal: 2,
-  payloadBudgetExceeded: false,
 });
 const pagingHarness = Effect.fn(function* () {
   const requested = yield* Deferred.make<void>();

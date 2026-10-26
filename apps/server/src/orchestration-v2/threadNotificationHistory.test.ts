@@ -13,6 +13,8 @@ import {
   buildBoundedThreadProjection,
   decodeThreadHistoryCursor,
   selectHistoryPageFromCursor,
+  THREAD_HISTORY_PAGE_POLICY,
+  THREAD_HISTORY_TURN_SNAPSHOT_ROW_LIMIT,
 } from "./threadHistoryPaging.ts";
 
 const TestLayer = ProjectionStore.layer.pipe(Layer.provideMerge(V2SqlitePersistenceMemory));
@@ -187,7 +189,7 @@ it.layer(TestLayer)("notification wake history", (it) => {
       // three of them are user turns, short of the 12 the user-turn window needs.
       assert.deepEqual(
         initial.projection.turnItems.map((item) => String(item.id)),
-        allIds.slice(allIds.indexOf(startIds[260]!)),
+        allIds.slice(-THREAD_HISTORY_TURN_SNAPSHOT_ROW_LIMIT),
       );
       // Each run's first input is read by run ID, newest run first, never by a
       // walk over every turn item in the thread.
@@ -209,11 +211,14 @@ it.layer(TestLayer)("notification wake history", (it) => {
         projection: initial.projection,
         snapshotSequence: 0,
       });
-      assert.strictEqual(bounded.projection.visibleTurnItems[0]?.sourceItemId, startIds[262]);
+      assert.deepEqual(
+        bounded.projection.visibleTurnItems.map((row) => row.sourceItemId),
+        allIds.slice(-THREAD_HISTORY_PAGE_POLICY.maxTurnItems),
+      );
       const loaded = bounded.projection.visibleTurnItems.map((row) => String(row.sourceItemId));
       let cursor = bounded.historyCursor;
       for (let pages = 0; cursor !== null; pages += 1) {
-        assert.isBelow(pages, 5);
+        assert.isBelow(pages, 30);
         const anchor = decodeThreadHistoryCursor(cursor);
         const snapshot = yield* projectionStore.getThreadSnapshotWindow(threadId, {
           rowLimit: 77,
@@ -222,7 +227,10 @@ it.layer(TestLayer)("notification wake history", (it) => {
           anchorThreadId: ThreadId.make(anchor.st),
         });
         // Older windows stay bounded too.
-        assert.isAtMost(snapshot.projection.turnItems.length, 152 * 4 + 1);
+        assert.isAtMost(
+          snapshot.projection.turnItems.length,
+          THREAD_HISTORY_TURN_SNAPSHOT_ROW_LIMIT,
+        );
         const page = selectHistoryPageFromCursor({
           items: snapshot.projection.visibleTurnItems,
           cursor,

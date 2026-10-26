@@ -171,7 +171,67 @@ describe("threadHistoryPaging", () => {
     expect(item.historyCursor).not.toBeNull();
     expect(item.hasMoreHistory).toBe(true);
     expect(item.latestLocalTurnOrdinal).toBe(90);
-    expect(item.payloadBudgetExceeded).toBe(false);
+  });
+
+  it("keeps a human turn whole up to the turn row budget and pages a longer one from inside", () => {
+    const humanTurn = (length: number) => {
+      const items: OrchestrationV2ProjectedTurnItem[] = Array.from({ length }, (_, index) =>
+        makeRow(index),
+      );
+      items[0] = {
+        ...items[0]!,
+        item: {
+          ...items[0]!.item,
+          type: "user_message",
+          createdBy: "user",
+          creationSource: "web",
+          inputIntent: "turn_start",
+          messageId: MessageId.make("long-human-turn"),
+          text: "Continue",
+          attachments: [],
+        },
+      } as OrchestrationV2ProjectedTurnItem;
+      return items;
+    };
+
+    const whole = selectRecentTimelineWindow({ items: humanTurn(180), snapshotSequence: 1 });
+    expect(whole.items).toHaveLength(180);
+    expect(whole.hasMoreHistory).toBe(false);
+
+    const items = humanTurn(THREAD_HISTORY_PAGE_POLICY.maxTurnItems + 100);
+    const recent = selectRecentTimelineWindow({ items, snapshotSequence: 1 });
+    expect(recent.items).toHaveLength(THREAD_HISTORY_PAGE_POLICY.maxItems);
+    const loaded = [...recent.items];
+    let cursor = recent.nextCursor;
+    for (let pages = 0; cursor !== null; pages += 1) {
+      expect(pages).toBeLessThan(items.length);
+      const page = selectHistoryPageFromCursor({ items, cursor, snapshotSequence: 1 });
+      expect(page.items.length).toBeGreaterThan(0);
+      expect(page.items.length).toBeLessThanOrEqual(
+        page.items[0]?.item.type === "user_message"
+          ? THREAD_HISTORY_PAGE_POLICY.maxTurnItems
+          : THREAD_HISTORY_PAGE_POLICY.maxItems,
+      );
+      loaded.unshift(...page.items);
+      cursor = page.nextCursor;
+    }
+    expect(loaded.map((row) => row.sourceItemId)).toEqual(items.map((row) => row.sourceItemId));
+
+    const large = items
+      .slice(0, 12)
+      .map((row) =>
+        row.item.type === "command_execution"
+          ? { ...row, item: { ...row.item, output: "x".repeat(200_000) } }
+          : row,
+      );
+    const bounded = buildBoundedThreadProjection({
+      projection: makeProjection(large),
+      snapshotSequence: 1,
+    });
+    expect(bounded.projection.visibleTurnItems.length).toBeLessThan(large.length);
+    expect(boundedTimelineEncodedBytes(bounded.projection)).toBeLessThanOrEqual(
+      THREAD_HISTORY_PAGE_POLICY.maxEncodedBytes,
+    );
   });
 
   it("keeps background turns with user turns, with main's 150-turn fan-out ceiling", () => {
@@ -193,13 +253,15 @@ describe("threadHistoryPaging", () => {
       };
       return [prompt, makeRow(turn * 2 + 1)];
     }).flat();
-    const first = selectRecentTimelineWindow({ items, snapshotSequence: 1 });
+    const policy = { ...THREAD_HISTORY_PAGE_POLICY, maxItems: 1_000, maxEncodedBytes: 10_000_000 };
+    const first = selectRecentTimelineWindow({ items, snapshotSequence: 1, policy });
     expect(first.items).toHaveLength(300);
     expect(first.items[0]?.sourceItemId).toBe("item-22");
     const older = selectHistoryPageFromCursor({
       items,
       cursor: first.nextCursor!,
       snapshotSequence: 1,
+      policy,
     });
     expect(older.items).toHaveLength(22);
     expect(older.hasMoreHistory).toBe(false);
@@ -246,13 +308,20 @@ describe("threadHistoryPaging", () => {
         (row) => ({ ...row, item: { ...row.item, runId: RunId.make(`run-${run}`) } }),
       );
     }).flat();
-    const first = selectRecentTimelineWindow({ items, snapshotSequence: 1 });
+    const policy = {
+      ...THREAD_HISTORY_PAGE_POLICY,
+      maxItems: 1000,
+      maxTurnItems: 1000,
+      maxEncodedBytes: 10_000_000,
+    };
+    const first = selectRecentTimelineWindow({ items, snapshotSequence: 1, policy });
     expect(first.items).toHaveLength(150 * 4 - 1);
     expect(first.items[0]?.sourceItemId).toBe("item-45");
     const older = selectHistoryPageFromCursor({
       items,
       cursor: first.nextCursor!,
       snapshotSequence: 1,
+      policy,
     });
     expect(older.hasMoreHistory).toBe(false);
     expect([...older.items, ...first.items].map((row) => row.sourceItemId)).toEqual(
@@ -362,26 +431,46 @@ describe("threadHistoryPaging", () => {
   });
 
   it("always includes at least one pathological oversized item", () => {
-    const items = [makeRow(0, { outputBytes: 2_000_000 }), makeRow(1, { outputBytes: 10 })];
-    const page = selectRecentTimelineWindow({
-      items,
-      snapshotSequence: 1,
-      policy: { maxItems: 50, maxEncodedBytes: 1_024 },
-    });
-    expect(page.items).toHaveLength(1);
-    expect(page.items[0]?.sourceItemId).toBe("item-1");
-    expect(page.hasMoreHistory).toBe(true);
+    for (const humanTurn of [false, true]) {
+      const oversized = makeRow(0, { outputBytes: 2_000_000 });
+      const items = [
+        humanTurn
+          ? ({
+              ...oversized,
+              item: {
+                ...oversized.item,
+                type: "user_message",
+                createdBy: "user",
+                creationSource: "web",
+                inputIntent: "turn_start",
+                messageId: MessageId.make("oversized-human-turn"),
+                text: "x".repeat(2_000_000),
+                attachments: [],
+              },
+            } as OrchestrationV2ProjectedTurnItem)
+          : oversized,
+        makeRow(1, { outputBytes: 10 }),
+      ];
+      const policy = { ...THREAD_HISTORY_PAGE_POLICY, maxItems: 50, maxEncodedBytes: 1_024 };
+      const page = selectRecentTimelineWindow({ items, snapshotSequence: 1, policy });
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0]?.sourceItemId).toBe("item-1");
+      expect(page.hasMoreHistory).toBe(true);
 
-    const older = selectHistoryPageFromCursor({
-      items,
-      cursor: page.nextCursor!,
-      snapshotSequence: 1,
-      policy: { maxItems: 50, maxEncodedBytes: 1_024 },
-    });
-    expect(older.items).toHaveLength(1);
-    expect(older.items[0]?.sourceItemId).toBe("item-0");
-    expect(older.hasMoreHistory).toBe(false);
-    expect(older.nextCursor).toBeNull();
+      const older = selectHistoryPageFromCursor({
+        items,
+        cursor: page.nextCursor!,
+        snapshotSequence: 1,
+        policy,
+      });
+      expect(older.items).toHaveLength(1);
+      expect(older.items[0]?.sourceItemId).toBe("item-0");
+      expect(older.hasMoreHistory).toBe(false);
+      expect(older.nextCursor).toBeNull();
+      expect([...older.items, ...page.items].map((row) => row.sourceItemId)).toEqual(
+        items.map((row) => row.sourceItemId),
+      );
+    }
   });
 
   it("recovers identity-miss cursors when position is past a shrunken timeline", () => {
@@ -750,7 +839,6 @@ describe("threadHistoryPaging", () => {
     const serializedBytes = Buffer.byteLength(JSON.stringify(bounded.projection), "utf8");
 
     expect(serializedBytes).toBeLessThanOrEqual(THREAD_HISTORY_PAGE_POLICY.maxEncodedBytes);
-    expect(bounded.payloadBudgetExceeded).toBe(false);
     expect(bounded.projection.plans).toEqual([]);
     expect(bounded.projection.contextHandoffs).toEqual([]);
     expect(populated.plans).toHaveLength(120);
@@ -759,7 +847,7 @@ describe("threadHistoryPaging", () => {
     ).toBe(2_097_152);
   });
 
-  it("preserves oversized actionable state and reports the budget exception", () => {
+  it("preserves oversized actionable state", () => {
     const projection = makeProjection([makeRow(0)]);
     const actionable = {
       ...projection,
@@ -778,7 +866,6 @@ describe("threadHistoryPaging", () => {
 
     const bounded = buildBoundedThreadProjection({ projection: actionable, snapshotSequence: 9 });
 
-    expect(bounded.payloadBudgetExceeded).toBe(true);
     expect(bounded.projection.plans[0]).toEqual(actionable.plans[0]);
     expect(bounded.projection.visibleTurnItems).toEqual(actionable.visibleTurnItems);
   });
@@ -824,6 +911,5 @@ describe("threadHistoryPaging", () => {
       markdown: "",
       detailInTurnItem: true,
     });
-    expect(bounded.payloadBudgetExceeded).toBe(false);
   });
 });

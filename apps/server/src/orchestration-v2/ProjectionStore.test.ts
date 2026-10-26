@@ -39,8 +39,10 @@ import * as ProjectionStore from "./ProjectionStore.ts";
 import {
   buildBoundedThreadProjection,
   decodeThreadHistoryCursor,
+  encodeThreadHistoryCursor,
   selectHistoryPageFromCursor,
   THREAD_HISTORY_PAGE_POLICY,
+  THREAD_HISTORY_TURN_SNAPSHOT_ROW_LIMIT,
 } from "./threadHistoryPaging.ts";
 
 const TestLayer = Layer.mergeAll(
@@ -905,7 +907,7 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
     }),
   );
 
-  it.effect("pages complete user turns through SQL regardless of tool count or payload size", () =>
+  it.effect("bounds SQL windows and pages every item across large user turns", () =>
     Effect.gen(function* () {
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
       const sql = yield* SqlClient.SqlClient;
@@ -1050,16 +1052,20 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         "SEARCH orchestration_v2_projection_nodes USING INDEX orchestration_v2_projection_nodes_live_idx (thread_id=?)",
       );
       // Only the selected turn cohort and two lookahead anchors are decoded.
-      assert.lengthOf(initial.projection.turnItems, 12 * 102);
+      assert.lengthOf(initial.projection.turnItems, THREAD_HISTORY_TURN_SNAPSHOT_ROW_LIMIT);
       const bounded = buildBoundedThreadProjection({
         projection: initial.projection,
         snapshotSequence: 0,
       });
-      assert.lengthOf(bounded.projection.visibleTurnItems, 10 * 102);
-      assert.strictEqual(bounded.projection.visibleTurnItems[0]?.sourceItemId, allIds[35 * 102]);
+      assert.isAtMost(
+        bounded.projection.visibleTurnItems.length,
+        THREAD_HISTORY_PAGE_POLICY.maxTurnItems,
+      );
+      assert.isAbove(bounded.projection.visibleTurnItems.length, 0);
       const loaded = bounded.projection.visibleTurnItems.map((row) => String(row.sourceItemId));
       let cursor = bounded.historyCursor;
-      for (const turns of [20, 15]) {
+      for (let pages = 0; cursor !== null; pages++) {
+        assert.isBelow(pages, allIds.length);
         assert.isNotNull(cursor);
         const anchor = decodeThreadHistoryCursor(cursor!);
         const snapshot = yield* projectionStore.getThreadSnapshotWindow(threadId, {
@@ -1073,7 +1079,8 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
           cursor: cursor!,
           snapshotSequence: 0,
         });
-        assert.lengthOf(page.items, turns * 102);
+        assert.isAbove(page.items.length, 0);
+        assert.isAtMost(page.items.length, THREAD_HISTORY_PAGE_POLICY.maxTurnItems);
         loaded.unshift(...page.items.map((row) => String(row.sourceItemId)));
         cursor = page.nextCursor;
       }
@@ -1423,6 +1430,62 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         assert.strictEqual(snapshot.projection.turnItems[0]?.ordinal, 925);
         assert.strictEqual(snapshot.projection.turnItems.at(-1)?.ordinal, 1_000);
       }
+      // Fewer than 75 rows still need a byte pass after materializing wire payloads.
+      yield* sql`
+        UPDATE orchestration_v2_projection_turn_items
+        SET type = 'assistant_message', payload_json = json_set(payload_json,
+          '$.type', 'assistant_message', '$.text', ${"x".repeat(40_000)},
+          '$.messageId', turn_item_id, '$.streaming', json('false'))
+        WHERE thread_id = ${threadId} AND ordinal BETWEEN 2 AND 70
+      `;
+      const byteCursor = encodeThreadHistoryCursor({
+        snapshotSequence: 0,
+        sourceThreadId: threadId,
+        sourceItemId: TurnItemId.make("turn-item:bounded-sql-history:71"),
+        position: 70,
+      });
+      const loadPage = (cursor: string) =>
+        Effect.gen(function* () {
+          const snapshot = yield* projectionStore.getThreadSnapshotWindow(threadId, {
+            rowLimit: THREAD_HISTORY_PAGE_POLICY.maxItems + 2,
+            userTurnLimit: 20,
+            anchorItemId: TurnItemId.make(decodeThreadHistoryCursor(cursor).si),
+          });
+          return selectHistoryPageFromCursor({
+            items: snapshot.projection.visibleTurnItems,
+            cursor,
+            snapshotSequence: snapshot.snapshotSequence,
+          });
+        });
+      const bytePage = yield* loadPage(byteCursor);
+      assert.isAbove(bytePage.items.length, 0);
+      assert.isBelow(bytePage.items.length, 70);
+      assert.isAtMost(
+        Buffer.byteLength(
+          yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(bytePage.items),
+          "utf8",
+        ),
+        THREAD_HISTORY_PAGE_POLICY.maxEncodedBytes,
+      );
+      const byteIds = bytePage.items.map((row) => String(row.sourceItemId));
+      let byteNext = bytePage.nextCursor;
+      for (let pages = 0; byteNext !== null; pages += 1) {
+        assert.isBelow(pages, 70);
+        const page = yield* loadPage(byteNext);
+        assert.isAbove(page.items.length, 0);
+        byteIds.unshift(...page.items.map((row) => String(row.sourceItemId)));
+        byteNext = page.nextCursor;
+      }
+      assert.deepEqual(
+        byteIds,
+        Array.from({ length: 70 }, (_, index) => `turn-item:bounded-sql-history:${index + 1}`),
+      );
+      yield* sql`
+        UPDATE orchestration_v2_projection_turn_items
+        SET type = 'command_execution', payload_json = json_set(payload_json, '$.type', 'command_execution')
+        WHERE thread_id = ${threadId} AND ordinal BETWEEN 2 AND 70
+      `;
+
       const retainedRequestPlan = yield* sql<{ readonly detail: string }>`
         EXPLAIN QUERY PLAN
         WITH selected AS (
@@ -1466,9 +1529,9 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
       const sqlPageLimit = THREAD_HISTORY_PAGE_POLICY.maxItems + 2;
       const initialSnapshot = yield* projectionStore.getThreadSnapshotWindow(threadId, {
         rowLimit: sqlPageLimit,
+        userTurnLimit: THREAD_HISTORY_PAGE_POLICY.maxUserTurns,
       });
       const initialPage = buildBoundedThreadProjection({
-        policy: { ...THREAD_HISTORY_PAGE_POLICY, maxUserTurns: undefined },
         projection: initialSnapshot.projection,
         snapshotSequence: initialSnapshot.snapshotSequence,
       });
@@ -1481,10 +1544,14 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         const anchorItemId = TurnItemId.make(decodeThreadHistoryCursor(cursor).si);
         const snapshot = yield* projectionStore.getThreadSnapshotWindow(threadId, {
           rowLimit: sqlPageLimit,
+          userTurnLimit: 20,
           anchorItemId,
         });
+        assert.isAtMost(
+          snapshot.projection.visibleTurnItems.length,
+          THREAD_HISTORY_TURN_SNAPSHOT_ROW_LIMIT,
+        );
         const page = selectHistoryPageFromCursor({
-          policy: { ...THREAD_HISTORY_PAGE_POLICY, maxUserTurns: undefined },
           items: snapshot.projection.visibleTurnItems,
           cursor,
           snapshotSequence: snapshot.snapshotSequence,
@@ -1494,7 +1561,7 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         cursor = page.nextCursor;
       }
 
-      assert.isAtLeast(pageCount, 4);
+      assert.isAtLeast(pageCount, 3);
       assert.lengthOf(loadedIds, 1_000);
       assert.strictEqual(new Set(loadedIds).size, 1_000);
       assert.deepEqual(

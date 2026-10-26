@@ -55,7 +55,6 @@ export function buildBoundedThreadStreamSnapshot(input: {
     historyCursor: bounded.historyCursor,
     hasMoreHistory: bounded.hasMoreHistory,
     latestLocalTurnOrdinal: bounded.latestLocalTurnOrdinal,
-    payloadBudgetExceeded: bounded.payloadBudgetExceeded,
   };
 }
 

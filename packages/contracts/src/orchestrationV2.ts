@@ -3464,7 +3464,6 @@ export const OrchestrationV2ThreadBoundedSnapshot = Schema.Struct({
    */
   latestLocalTurnOrdinal: Schema.NullOr(NonNegativeInt),
   /** True when complete turns or required live control state exceed the usual byte budget. */
-  payloadBudgetExceeded: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2ThreadBoundedSnapshot = typeof OrchestrationV2ThreadBoundedSnapshot.Type;
 
@@ -3534,7 +3533,6 @@ export const OrchestrationV2ThreadStreamItem = Schema.Union([
     historyCursor: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
     hasMoreHistory: Schema.optionalKey(Schema.Boolean),
     latestLocalTurnOrdinal: Schema.optionalKey(Schema.NullOr(NonNegativeInt)),
-    payloadBudgetExceeded: Schema.optionalKey(Schema.Boolean),
   }),
   Schema.Struct({
     kind: Schema.Literal("event"),

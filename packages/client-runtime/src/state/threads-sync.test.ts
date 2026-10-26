@@ -951,7 +951,6 @@ describe("EnvironmentThreads", () => {
         historyCursor: "socket-history-cursor",
         hasMoreHistory: true,
         latestLocalTurnOrdinal: 47,
-        payloadBudgetExceeded: false,
       });
 
       const state = yield* awaitThreadState(
@@ -1354,7 +1353,6 @@ describe("EnvironmentThreads", () => {
         historyCursor: "replacement-cursor",
         hasMoreHistory: true,
         latestLocalTurnOrdinal: 9,
-        payloadBudgetExceeded: false,
       });
 
       const state = yield* awaitThreadState(

@@ -24,6 +24,7 @@ import {
   decodeThreadHistoryCursor,
   InvalidThreadHistoryCursorError,
   selectHistoryPageFromCursor,
+  missingInterruptRequests,
   THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
   THREAD_HISTORY_PAGE_POLICY,
   OLDER_THREAD_USER_TURN_LIMIT,
@@ -190,7 +191,6 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
             historyCursor: bounded.historyCursor,
             hasMoreHistory: bounded.hasMoreHistory,
             latestLocalTurnOrdinal: bounded.latestLocalTurnOrdinal,
-            payloadBudgetExceeded: bounded.payloadBudgetExceeded,
           };
         }),
       )
@@ -230,7 +230,13 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
           }
           return {
             snapshotSequence: snapshot.snapshotSequence,
-            items: pageOrError.page.items,
+            items: [
+              ...missingInterruptRequests(
+                snapshot.projection.visibleTurnItems,
+                pageOrError.page.items,
+              ),
+              ...pageOrError.page.items,
+            ].map((row, position) => ({ ...row, position })),
             nextCursor: pageOrError.page.nextCursor,
             hasMoreHistory: pageOrError.page.hasMoreHistory,
           };
