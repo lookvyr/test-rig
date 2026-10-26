@@ -16,6 +16,7 @@ const isJsonRpcId = Schema.is(JsonRpcId);
 const isJsonRpcResponseEnvelope = Schema.is(JsonRpcResponseEnvelope);
 const isCodexAppServerError = Schema.is(CodexError.CodexAppServerError);
 const MAX_BUFFERED_RAW_MESSAGES = 32;
+const EXIT_STATUS_GRACE = "250 millis";
 
 export interface CodexAppServerProtocolLogEvent {
   readonly direction: "incoming" | "outgoing";
@@ -434,11 +435,20 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             Effect.matchEffect({
               onFailure: (error) => handleTermination(() => Effect.succeed(error)),
               onSuccess: () =>
-                handleTermination(
-                  () =>
-                    options.terminationError ??
-                    Effect.succeed(new CodexError.CodexAppServerInputStreamEndedError({})),
-                ),
+                handleTermination(() => {
+                  const ended = new CodexError.CodexAppServerInputStreamEndedError({});
+                  // Node ends stdout before it reports the exit of a crashed process, so
+                  // wait briefly for the exit status. stdout can also close while the
+                  // process keeps running, so the wait must not hang pending requests.
+                  return options.terminationError === undefined
+                    ? Effect.succeed(ended)
+                    : options.terminationError.pipe(
+                        Effect.timeoutOrElse({
+                          duration: EXIT_STATUS_GRACE,
+                          orElse: () => Effect.succeed(ended),
+                        }),
+                      );
+                }),
             }),
           ),
       }),

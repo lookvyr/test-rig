@@ -24,6 +24,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as SqlError from "effect/unstable/sql/SqlError";
 
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
@@ -61,6 +62,14 @@ export class ProviderEventPublishError extends Schema.TaggedError<ProviderEventP
     return `Failed to publish ${this.eventCount} normalized provider event(s).`;
   }
 }
+
+// A write that outlasts busy_timeout at BEGIN IMMEDIATE fails before anything
+// commits, and the sink publishes only after a commit, so repeating the whole
+// write is safe. Failing it would fail the run over a brief lock.
+const isLockTimeout = (error: EventSink.EventSinkV2Error) =>
+  SqlError.isSqlError(error.cause) && error.cause.reason._tag === "LockTimeoutError";
+const retryLockTimeout = <A, R>(write: Effect.Effect<A, EventSink.EventSinkV2Error, R>) =>
+  Effect.retry(write, { while: isLockTimeout, times: 2 });
 
 export const ProviderEventIngestorV2Error = Schema.Union([
   ProviderEventNormalizeError,
@@ -383,7 +392,7 @@ export const layer: Layer.Layer<
               },
               occurredAt: now,
             });
-            return yield* eventSink.write({ events: [event] });
+            return yield* eventSink.write({ events: [event] }).pipe(retryLockTimeout);
           }),
         );
       },
@@ -596,7 +605,7 @@ export const layer: Layer.Layer<
                 ...input.writeIfProviderThreadOwner,
                 events,
               })
-              .pipe(Effect.mapError(mapWriteError));
+              .pipe(retryLockTimeout, Effect.mapError(mapWriteError));
             return ownerResult.storedEvents;
           }
           if (input.writeIfRunCurrent === undefined) {
@@ -606,7 +615,7 @@ export const layer: Layer.Layer<
                 ...(input.commandId === undefined ? {} : { commandId: input.commandId }),
                 events,
               })
-              .pipe(Effect.mapError(mapWriteError));
+              .pipe(retryLockTimeout, Effect.mapError(mapWriteError));
           }
           const result = yield* eventSink
             .writeIfRunCurrent({
@@ -616,7 +625,7 @@ export const layer: Layer.Layer<
               ...input.writeIfRunCurrent,
               events,
             })
-            .pipe(Effect.mapError(mapWriteError));
+            .pipe(retryLockTimeout, Effect.mapError(mapWriteError));
           return result.storedEvents;
         }).pipe(
           Effect.flatMap((storedEvents) =>

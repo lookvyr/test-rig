@@ -145,6 +145,10 @@ Ask the parent to send a follow-up to an existing delegated child when you want
 to continue with its conversation history. A new follow-up turn gets its own
 tracked task and returns its result to the parent. The original task keeps its
 published result. An update that steers a running task stays with that task.
+If a child returns while a background command is still running, its later result
+is tracked as a follow-up and reported to the parent. Monitor progress updates
+do not create follow-up tasks.
+
 For an independent review round, ask for a new delegated agent.
 
 Agents can read effective snooze state and all linked pull requests through
