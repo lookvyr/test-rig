@@ -1235,15 +1235,16 @@ const make = Effect.gen(function* () {
         }
       }
 
+      // A new task inherits reasoning, but speed requires its own opt-in.
+      const options =
+        requestedOptions ??
+        (instanceId === inheritedSelection.instanceId && model === inheritedSelection.model
+          ? inheritedSelection.options?.filter(
+              (option) => option.id !== "fastMode" && option.id !== "serviceTier",
+            )
+          : undefined);
       return {
-        modelSelection:
-          instanceId === inheritedSelection.instanceId &&
-          model === inheritedSelection.model &&
-          requestedOptions === undefined
-            ? inheritedSelection
-            : requestedOptions === undefined
-              ? { instanceId, model }
-              : { instanceId, model, options: requestedOptions },
+        modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
       };
     });
 

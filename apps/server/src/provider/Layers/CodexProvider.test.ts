@@ -142,67 +142,69 @@ it("groups older GPT families under legacy models", () => {
   }
 });
 
-it("maps current Codex model capability fields", () => {
-  const capabilities = mapCodexModelCapabilities({
-    additionalSpeedTiers: [],
-    defaultReasoningEffort: "super-high",
-    description: "Test model",
-    displayName: "GPT Test",
-    hidden: false,
-    id: "gpt-test",
-    isDefault: true,
-    model: "gpt-test",
-    defaultServiceTier: "flex",
-    serviceTiers: [
-      {
-        id: "priority",
-        name: "Fast",
-        description: "Lower latency responses.",
-      },
-      {
-        id: "flex",
-        name: "Flex",
-        description: "Lower-cost asynchronous routing.",
-      },
-    ],
-    supportedReasoningEfforts: [
-      {
-        description: "Maximum reasoning",
-        reasoningEffort: "super-high",
-      },
-    ],
-  });
-
-  assert.deepStrictEqual(capabilities.optionDescriptors, [
-    {
-      id: "reasoningEffort",
-      label: "Reasoning",
-      type: "select",
-      options: [{ id: "super-high", label: "super-high", isDefault: true }],
-      currentValue: "super-high",
-    },
-    {
-      id: "serviceTier",
-      label: "Service Tier",
-      type: "select",
-      options: [
-        { id: "default", label: "Standard" },
+it.each(["priority", "fast", "flex"])(
+  "defaults to Standard even when the catalog defaults to %s",
+  (defaultServiceTier) => {
+    const capabilities = mapCodexModelCapabilities({
+      additionalSpeedTiers: [],
+      defaultReasoningEffort: "super-high",
+      description: "Test model",
+      displayName: "GPT Test",
+      hidden: false,
+      id: "gpt-test",
+      isDefault: true,
+      model: "gpt-test",
+      defaultServiceTier,
+      serviceTiers: [
         {
           id: "priority",
-          label: "Fast",
+          name: "Fast",
           description: "Lower latency responses.",
         },
         {
           id: "flex",
-          label: "Flex",
+          name: "Flex",
           description: "Lower-cost asynchronous routing.",
-          isDefault: true,
         },
       ],
-      currentValue: "flex",
-    },
-  ]);
-});
+      supportedReasoningEfforts: [
+        {
+          description: "Maximum reasoning",
+          reasoningEffort: "super-high",
+        },
+      ],
+    });
+
+    assert.deepStrictEqual(capabilities.optionDescriptors, [
+      {
+        id: "reasoningEffort",
+        label: "Reasoning",
+        type: "select",
+        options: [{ id: "super-high", label: "super-high", isDefault: true }],
+        currentValue: "super-high",
+      },
+      {
+        id: "serviceTier",
+        label: "Service Tier",
+        type: "select",
+        options: [
+          { id: "default", label: "Standard", isDefault: true },
+          {
+            id: "priority",
+            label: "Fast",
+            description: "Lower latency responses.",
+          },
+          {
+            id: "flex",
+            label: "Flex",
+            description: "Lower-cost asynchronous routing.",
+          },
+        ],
+        currentValue: "default",
+      },
+    ]);
+  },
+);
 
 it("uses standard routing when the catalog has no default service tier", () => {
   const capabilities = mapCodexModelCapabilities({

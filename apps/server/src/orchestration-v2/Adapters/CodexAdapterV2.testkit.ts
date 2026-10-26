@@ -227,8 +227,8 @@ const decodeCodexAppServerReplayTranscript = Schema.decodeUnknownEffect(
   CodexReplay.CodexAppServerReplayTranscript,
 );
 
-/** Adapt recorded client branding while retaining exact protocol frame matching. */
-export function withCodexReplayClientIdentity(
+/** Adapt recorded branding and omitted speed tiers while retaining exact frame matching. */
+export function withCodexReplayClientDefaults(
   transcript: ProviderReplayTranscript,
 ): ProviderReplayTranscript {
   return {
@@ -236,12 +236,14 @@ export function withCodexReplayClientIdentity(
     entries: transcript.entries.map((entry) => {
       if (entry.type !== "expect_outbound") return entry;
       const frame = entry.frame;
-      if (
-        !Predicate.isObject(frame) ||
-        frame.method !== "initialize" ||
-        !Predicate.isObject(frame.params)
-      )
-        return entry;
+      if (!Predicate.isObject(frame) || !Predicate.isObject(frame.params)) return entry;
+      if (frame.method === "turn/start" && frame.params.serviceTier === undefined) {
+        return {
+          ...entry,
+          frame: { ...frame, params: { ...frame.params, serviceTier: "default" } },
+        };
+      }
+      if (frame.method !== "initialize") return entry;
       return {
         ...entry,
         frame: {
@@ -259,7 +261,7 @@ export const CodexOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness
 > = {
   driver: CodexAdapterV2.CODEX_DRIVER_KIND,
   decodeTranscript: (transcript) =>
-    decodeCodexAppServerReplayTranscript(withCodexReplayClientIdentity(transcript)).pipe(
+    decodeCodexAppServerReplayTranscript(withCodexReplayClientDefaults(transcript)).pipe(
       Effect.mapError(
         (cause) =>
           new CodexReplayTranscriptDecodeError({

@@ -58,6 +58,10 @@ The child starts with the parent's provider and model unless another supported
 choice is requested. Permission and interaction modes inherit; a delegated
 agent cannot request broader permissions than its parent.
 
+App-owned children start at normal speed, even when the parent uses Fast mode.
+Fast mode or another service tier must be explicitly requested for that child.
+Other model options, such as reasoning effort, inherit when the model is unchanged.
+
 Results return to the parent conversation. Returning findings does not merge
 the child's conversation history or perform a Git merge. Shared-checkout edits
 are already present; changes made in a separate worktree need a separate Git

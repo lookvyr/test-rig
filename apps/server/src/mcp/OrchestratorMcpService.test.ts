@@ -1375,7 +1375,11 @@ describe("OrchestratorMcpService provider resolution", () => {
         const parentModelSelection = {
           instanceId: codexInstanceId,
           model: "gpt-5.4",
-          options: [{ id: "reasoningEffort", value: "high" }],
+          options: [
+            { id: "reasoningEffort", value: "high" },
+            { id: "serviceTier", value: "priority" },
+            { id: "fastMode", value: true },
+          ],
         } as const;
         const task = {
           id: taskId,
@@ -1566,7 +1570,28 @@ describe("OrchestratorMcpService provider resolution", () => {
               testCase.name,
             );
             if (testCase.name === "healthy-inherited") {
-              assert.deepEqual(request.modelSelection, parentModelSelection, testCase.name);
+              assert.deepEqual(
+                request.modelSelection,
+                {
+                  ...parentModelSelection,
+                  options: [{ id: "reasoningEffort", value: "high" }],
+                },
+                testCase.name,
+              );
+              for (const options of [
+                [{ id: "serviceTier", value: "priority" }],
+                [{ id: "fastMode", value: true }],
+                [{ id: "reasoningEffort", value: "low" }],
+                [],
+              ]) {
+                yield* service.delegateTask(scope, {
+                  task: "Explicit options",
+                  target: { model: parentModelSelection.model, options },
+                  mode: "async",
+                });
+                const explicitRequest = (yield* Ref.get(dispatched)).at(-1) as typeof request;
+                assert.deepEqual(explicitRequest.modelSelection.options, options);
+              }
             } else {
               assert.equal(request.modelSelection.model, "codex-alt-model", testCase.name);
             }

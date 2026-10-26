@@ -19,7 +19,7 @@ import {
 import {
   CodexOrchestratorReplayHarness,
   makeCodexProviderAdapterRegistryReplayLayer,
-  withCodexReplayClientIdentity,
+  withCodexReplayClientDefaults,
 } from "../Adapters/CodexAdapterV2.testkit.ts";
 import * as IdAllocator from "../IdAllocator.ts";
 import { makeV2SqlitePersistenceLive } from "../../persistence/Layers/V2Sqlite.ts";
@@ -65,7 +65,7 @@ const readCodexTranscript = Effect.fn("readCodexRecoveryTranscript")(function* (
     new URL("./fixtures/provider_thread_resume/codex_transcript.ndjson", import.meta.url),
   );
   const materialized = materializeReplayTranscriptWorkspace(transcript, workspace);
-  return yield* decodeCodexTranscript(withCodexReplayClientIdentity(materialized));
+  return yield* decodeCodexTranscript(withCodexReplayClientDefaults(materialized));
 });
 const decodePromptPair = Schema.decodeUnknownEffect(Schema.Tuple([Schema.String, Schema.String]));
 const readClaudeSubagentResumeTranscript = Effect.fn("readClaudeSubagentResumeTranscript")(

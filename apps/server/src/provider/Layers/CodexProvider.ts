@@ -142,12 +142,6 @@ export function mapCodexModelCapabilities(
           name: id === "fast" ? "Fast" : id,
           description: "",
         }));
-  const catalogDefaultServiceTier = serviceTiers.some(
-    (tier) => tier.id === model.defaultServiceTier,
-  )
-    ? model.defaultServiceTier
-    : null;
-  const defaultServiceTier = catalogDefaultServiceTier ?? DEFAULT_SERVICE_TIER_ID;
   const optionDescriptors: ProviderOptionDescriptor[] = [];
 
   if (reasoningOptions.length > 0) {
@@ -168,16 +162,15 @@ export function mapCodexModelCapabilities(
         {
           id: DEFAULT_SERVICE_TIER_ID,
           label: "Standard",
-          ...(defaultServiceTier === DEFAULT_SERVICE_TIER_ID ? { isDefault: true } : {}),
+          isDefault: true,
         },
         ...serviceTiers.map((tier) => ({
           id: tier.id,
           label: tier.name,
           ...(tier.description ? { description: tier.description } : {}),
-          ...(defaultServiceTier === tier.id ? { isDefault: true } : {}),
         })),
       ],
-      currentValue: defaultServiceTier,
+      currentValue: DEFAULT_SERVICE_TIER_ID,
     });
   }
 
