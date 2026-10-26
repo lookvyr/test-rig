@@ -90,6 +90,10 @@ If no PR is detected, an already-open panel offers **Refresh Git status**.
 This workspace does not publish reviews or merge pull requests. Use the pull
 request link to open GitHub for those actions.
 
+## Automatically linked pull requests
+
+When an agent creates a pull request with `gh pr create` or `glab mr create`, Test Rig links an unambiguous result URL to the conversation that ran the command. The corresponding source-control integration must be enabled. Other creation methods can still use the linking tool or **Link pull request**. Unlinking a pull request keeps repeated updates from that command from linking it again.
+
 ## Watching a pull request
 
 Expand the agent’s PR watch tool call in the conversation to see its arguments and
