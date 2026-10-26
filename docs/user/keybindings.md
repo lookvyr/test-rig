@@ -25,6 +25,13 @@ The file is a JSON array of rules.
 
 Invalid rules are ignored. An invalid file is ignored entirely, and the server logs a warning.
 
+## Command palette search
+
+**Cmd+K / Ctrl+K** also finds actions inside submenus. For example, search for
+“New thread in my-project” to start a draft in that project directly. Up to three
+matching submenu actions appear under **Suggestions**. If a submenu search has
+no matches, the palette searches commands, projects, threads, and messages globally.
+
 ## Rule Shape
 
 - `key` (required): shortcut string, like `mod+j`, `ctrl+k`, `cmd+shift+d`

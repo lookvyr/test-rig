@@ -396,10 +396,25 @@ export function filterCommandPaletteGroups(input: {
   activeGroups: ReadonlyArray<CommandPaletteGroup>;
   query: string;
   isInSubmenu: boolean;
+  /** Root options are also searched when a submenu has no match. */
+  allOptions?: {
+    readonly rootGroups: ReadonlyArray<CommandPaletteGroup>;
+    readonly nestedItems: ReadonlyArray<CommandPaletteActionItem>;
+  };
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   messageSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
+  if (input.allOptions && input.isInSubmenu) {
+    const { allOptions, ...submenuInput } = input;
+    const scoped = filterCommandPaletteGroups(submenuInput);
+    if (scoped.length > 0 || input.query.trim().length === 0) return scoped;
+    return filterCommandPaletteGroups({
+      ...input,
+      activeGroups: allOptions.rootGroups,
+      isInSubmenu: false,
+    });
+  }
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
   const normalizedQuery = normalizeSearchText(searchQuery);
@@ -420,6 +435,13 @@ export function filterCommandPaletteGroups(input: {
 
   const searchableGroups = [...baseGroups];
   if (!input.isInSubmenu && !isActionsFilter) {
+    if (input.allOptions && input.allOptions.nestedItems.length > 0) {
+      searchableGroups.push({
+        value: "nested-search",
+        label: "Suggestions",
+        items: input.allOptions.nestedItems,
+      });
+    }
     if (input.projectSearchItems.length > 0) {
       searchableGroups.push({
         value: "projects-search",
@@ -455,6 +477,7 @@ export function filterCommandPaletteGroups(input: {
           (right.item.searchRecency ?? "").localeCompare(left.item.searchRecency ?? "") ||
           left.index - right.index,
       )
+      .slice(0, group.value === "nested-search" ? 3 : undefined)
       .map((entry) => entry.item);
 
     if (items.length === 0) {
@@ -480,6 +503,52 @@ export function filterCommandPaletteGroups(input: {
     groups.push({ value: "messages-search", label: "In messages", items: messageItems });
   }
   return groups;
+}
+
+/** Only query message history when the palette can display global search results. */
+export function commandPaletteMessageSearchQuery(input: {
+  readonly query: string;
+  readonly isBrowsing: boolean;
+  readonly isCloning: boolean;
+  readonly submenuGroups: ReadonlyArray<CommandPaletteGroup> | null;
+}): string {
+  if (input.isBrowsing || input.isCloning || input.query.startsWith(">")) return "";
+  if (
+    input.submenuGroups !== null &&
+    filterCommandPaletteGroups({
+      activeGroups: input.submenuGroups,
+      query: input.query,
+      isInSubmenu: true,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    }).length > 0
+  )
+    return "";
+  return input.query;
+}
+
+/** Searchable submenu actions retain their original handler and environment target. */
+export function buildNestedSearchItems(
+  items: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>,
+  query: string,
+): CommandPaletteActionItem[] {
+  const topLevelNames = new Set(items.map((item) => item.title));
+  const normalizedQuery = normalizeSearchText(query);
+  return items.flatMap((parent) => {
+    if (parent.kind !== "submenu" || typeof parent.title !== "string") return [];
+    const stem = parent.title.replace(/(\.\.\.|…)$/u, "");
+    // Naming only the submenu should offer that row, not every option inside it.
+    if (normalizeSearchText(stem).startsWith(normalizedQuery)) return [];
+    const prefix = stem === parent.title ? `${stem}: ` : `${stem.trimEnd()} `;
+    return parent.groups.flatMap((group) =>
+      group.items.flatMap((child) => {
+        if (child.kind !== "action" || typeof child.title !== "string") return [];
+        const title = `${prefix}${child.title}`;
+        if (topLevelNames.has(title)) return [];
+        return [{ ...child, title, searchTerms: [title] }];
+      }),
+    );
+  });
 }
 
 export function buildBrowseGroups(input: {

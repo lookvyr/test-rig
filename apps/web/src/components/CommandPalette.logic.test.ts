@@ -4,6 +4,8 @@ import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "../types";
 import {
   buildBrowseGroups,
+  buildNestedSearchItems,
+  commandPaletteMessageSearchQuery,
   buildCommandPaletteRows,
   findHighlightedCommandPaletteItem,
   type CommandPaletteActionItem,
@@ -527,6 +529,107 @@ describe("indexed message search items", () => {
         threadSearchItems: threadItems,
         messageSearchItems: messageItems,
       }),
+    ).toEqual([]);
+  });
+});
+
+describe("submenu search", () => {
+  const action = (value: string, title: string): CommandPaletteActionItem => ({
+    kind: "action",
+    value,
+    title,
+    searchTerms: [title],
+    icon: null,
+    run: vi.fn(async () => undefined),
+  });
+  const projects = ["web", "web-tools", "web-app", "web-tests", "server"].map((name) =>
+    action(`new-thread-in:${name}`, name),
+  );
+  const submenu = {
+    kind: "submenu" as const,
+    value: "new-thread-in",
+    title: "New thread in...",
+    searchTerms: ["new thread", "project"],
+    icon: null,
+    addonIcon: null,
+    groups: [{ value: "projects", label: "Projects", items: projects }],
+  };
+  const addProject = action("add-project", "Add project");
+  const rootItems = [submenu, addProject];
+  const rootGroups = [{ value: "actions", label: "Actions", items: rootItems }];
+  const message = action("message:one", "Indexed message result");
+  const search = (query: string, isInSubmenu = false) =>
+    filterCommandPaletteGroups({
+      activeGroups: isInSubmenu ? submenu.groups : rootGroups,
+      query,
+      isInSubmenu,
+      allOptions: { rootGroups, nestedItems: buildNestedSearchItems(rootItems, query) },
+      projectSearchItems: [],
+      threadSearchItems: [],
+      messageSearchItems: query === "indexed words" ? [message] : [],
+    });
+
+  it("ranks exact submenu options first and limits suggestions to three", async () => {
+    const groups = search("new thread in web");
+    expect(groups.map((group) => group.label)).toEqual(["Suggestions"]);
+    expect(groups[0]?.items.map((item) => item.title)).toEqual([
+      "New thread in web",
+      "New thread in web-tools",
+      "New thread in web-app",
+    ]);
+    const suggestion = groups[0]!.items[0]!;
+    expect(suggestion).toMatchObject({ value: projects[0]!.value, run: projects[0]!.run });
+    if (suggestion.kind === "action") await suggestion.run();
+    expect(projects[0]!.run).toHaveBeenCalledOnce();
+  });
+
+  it("keeps empty and matching submenu searches scoped, and falls back otherwise", () => {
+    expect(search("", true)).toEqual(submenu.groups);
+    expect(search("web", true)[0]?.items).toEqual(projects.slice(0, 4));
+    expect(search("add project", true)[0]?.items).toEqual([addProject]);
+    expect(search("indexed words", true)).toEqual([
+      { value: "messages-search", label: "In messages", items: [message] },
+    ]);
+    expect(search("new thread").map((group) => group.value)).not.toContain("nested-search");
+    expect(search(">new thread in web")).toEqual([]);
+  });
+
+  it("only requests indexed messages when global results can be shown", () => {
+    const input = {
+      query: "indexed words",
+      isBrowsing: false,
+      isCloning: false,
+      submenuGroups: submenu.groups,
+    };
+    expect(commandPaletteMessageSearchQuery(input)).toBe("indexed words");
+    expect(commandPaletteMessageSearchQuery({ ...input, query: "web" })).toBe("");
+    expect(commandPaletteMessageSearchQuery({ ...input, query: "" })).toBe("");
+    expect(commandPaletteMessageSearchQuery({ ...input, query: ">add project" })).toBe("");
+    expect(
+      commandPaletteMessageSearchQuery({ ...input, isBrowsing: true, query: "/tmp/project" }),
+    ).toBe("");
+    expect(
+      commandPaletteMessageSearchQuery({ ...input, isCloning: true, query: "owner/repo" }),
+    ).toBe("");
+    expect(commandPaletteMessageSearchQuery({ ...input, submenuGroups: null })).toBe(
+      "indexed words",
+    );
+  });
+
+  it("preserves action state and skips existing top-level options", () => {
+    const disabled = { ...action("offline", "Offline"), disabled: true, keepOpen: true };
+    const parent = {
+      ...submenu,
+      groups: [{ value: "projects", label: "Projects", items: [disabled] }],
+    };
+    expect(buildNestedSearchItems([parent], "offline")[0]).toMatchObject({
+      disabled: true,
+      keepOpen: true,
+      run: disabled.run,
+      value: disabled.value,
+    });
+    expect(
+      buildNestedSearchItems([parent, action("existing", "New thread in Offline")], "offline"),
     ).toEqual([]);
   });
 });

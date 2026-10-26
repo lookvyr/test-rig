@@ -130,6 +130,8 @@ import {
   type CommandPaletteSubmenuItem,
   type CommandPaletteView,
   filterCommandPaletteGroups,
+  buildNestedSearchItems,
+  commandPaletteMessageSearchQuery,
   getCommandPaletteInputPlaceholder,
   getCommandPaletteMode,
   ITEM_ICON_CLASS,
@@ -665,8 +667,6 @@ function OpenCommandPaletteDialog(props: {
         .map((environment) => environment.environmentId),
     [environments],
   );
-  const threadSearchQuery = currentView === null && !isActionsOnly ? deferredQuery : "";
-  const threadSearch = useThreadSearch(environmentIds, threadSearchQuery);
   const [browseGeneration, setBrowseGeneration] = useState(0);
   const browseNavigationRef = useRef<ReturnType<typeof createBrowseNavigationCoordinator> | null>(
     null,
@@ -1099,20 +1099,6 @@ function OpenCommandPaletteDialog(props: {
         },
       }),
     [activeThreadId, clientSettings.sidebarThreadSortOrder, navigate, projectTitleById, threads],
-  );
-  const threadMessageItems = useMemo(
-    () =>
-      buildThreadMessageActionItems({
-        threadItems: allThreadItems,
-        matches: threadSearch.matches,
-        query: threadSearch.query,
-        openMatch: (match) =>
-          requestThreadFindQuery(
-            scopedThreadKey(scopeThreadRef(match.environmentId, match.threadId)),
-            findForMessageMatch(match, threadSearch.query),
-          ),
-      }),
-    [allThreadItems, threadSearch.matches, threadSearch.query],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 
@@ -1699,10 +1685,42 @@ function OpenCommandPaletteDialog(props: {
         )
       : (currentView?.groups ?? rootGroups);
 
+  const threadSearch = useThreadSearch(
+    environmentIds,
+    commandPaletteMessageSearchQuery({
+      query: deferredQuery,
+      isBrowsing,
+      isCloning: isRemoteProjectCloneFlow,
+      submenuGroups: currentView === null ? null : activeGroups,
+    }),
+  );
+  const threadMessageItems = useMemo(
+    () =>
+      buildThreadMessageActionItems({
+        threadItems: allThreadItems,
+        matches: threadSearch.matches,
+        query: threadSearch.query,
+        openMatch: (match) =>
+          requestThreadFindQuery(
+            scopedThreadKey(scopeThreadRef(match.environmentId, match.threadId)),
+            findForMessageMatch(match, threadSearch.query),
+          ),
+      }),
+    [allThreadItems, threadSearch.matches, threadSearch.query],
+  );
+
   const filteredGroups = filterCommandPaletteGroups({
     activeGroups,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
+    ...(deferredQuery.trim().length > 0
+      ? {
+          allOptions: {
+            rootGroups,
+            nestedItems: buildNestedSearchItems(actionItems, deferredQuery),
+          },
+        }
+      : {}),
     projectSearchItems: projectSearchItems,
     threadSearchItems: allThreadItems,
     messageSearchItems: threadMessageItems,
