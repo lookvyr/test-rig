@@ -182,7 +182,7 @@ export function ThreadDetailsCard({
         sideOffset={inline ? 0 : 8}
         collisionAvoidance={inline ? { side: "none", align: "none" } : undefined}
         padding="none"
-        className="w-70 rounded-3xl bg-transparent shadow-none transition-none before:hidden data-starting-style:scale-100 data-starting-style:opacity-100 [backdrop-filter:none]"
+        className="w-70 rounded-3xl redesign:rounded-xl bg-transparent shadow-none transition-none before:hidden data-starting-style:scale-100 data-starting-style:opacity-100 [backdrop-filter:none]"
         positionerClassName={inline ? "z-20 transition-none" : "z-40 transition-none"}
         role={inline ? "complementary" : "dialog"}
         aria-label="Thread details"
@@ -193,7 +193,7 @@ export function ThreadDetailsCard({
         <div data-thread-details-panel={inline ? "inline" : "popover"} data-density={density}>
           <div
             data-thread-details-card
-            className="dropdown-glass isolate contain-paint grid max-h-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-3xl shadow-none"
+            className="dropdown-glass isolate contain-paint grid max-h-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-3xl redesign:rounded-xl shadow-none"
             style={{ maxHeight: inline ? placement.height : "min(70dvh, var(--available-height))" }}
           >
             <ScrollArea scrollFade className="min-h-0">

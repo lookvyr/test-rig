@@ -1,3 +1,4 @@
+import { useClientSettings } from "~/hooks/useSettings";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import {
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
@@ -1763,11 +1764,24 @@ export default function GitActionsControl({
     [gitCwd, openInPreferredEditor, threadToastData],
   );
 
+  const redesign = useClientSettings((s) => s.redesignEnabled);
   const panel = displayMode === "panel";
   const canPublishRepository =
     isRepo && gitStatusForActions !== null && !hasPrimaryRemote && hasEnabledSourceControlProvider;
 
   if (!gitCwd) return null;
+  if (
+    redesign &&
+    !activeServerThread &&
+    activeDraftThread &&
+    !gitStatusError &&
+    gitStatus &&
+    !isGitActionRunning &&
+    quickAction.disabled &&
+    quickAction.kind === "run_action" &&
+    quickAction.action === "push"
+  )
+    return null;
 
   return (
     <>

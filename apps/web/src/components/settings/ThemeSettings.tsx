@@ -437,7 +437,7 @@ export function ThemeLibrary({
             className={cn(
               "flex cursor-pointer flex-col items-stretch gap-1.5 rounded-xl border p-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
               isActive
-                ? "border-transparent bg-accent/30"
+                ? "border-transparent bg-accent/30 ring-1 ring-inset ring-ring redesign:ring-2"
                 : "border-border/70 bg-card/60 hover:bg-accent/10",
             )}
             key={mode}

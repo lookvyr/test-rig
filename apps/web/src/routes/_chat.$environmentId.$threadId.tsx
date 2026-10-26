@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
+import { BackgroundThreadContext } from "../components/chat/backgroundThread";
 import ChatView from "../components/ChatView";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -17,11 +18,19 @@ import {
 import { useEnvironmentQuery } from "../state/query";
 import { environmentShell } from "../state/shell";
 
-function ChatThreadRouteView() {
+export function ChatThreadRouteView({
+  params,
+  background = false,
+}: {
+  params: { environmentId: string; threadId: string };
+  background?: boolean;
+}) {
   const navigate = useNavigate();
-  const threadRef = Route.useParams({
-    select: (params) => resolveThreadRouteRef(params),
-  });
+  const { environmentId, threadId } = params;
+  const threadRef = useMemo(
+    () => resolveThreadRouteRef({ environmentId, threadId }),
+    [environmentId, threadId],
+  );
   const shell = useEnvironmentQuery(
     threadRef === null ? null : environmentShell.stateAtom(threadRef.environmentId),
   );
@@ -62,17 +71,17 @@ function ChatThreadRouteView() {
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
 
   useEffect(() => {
-    if (!threadRef || !bootstrapComplete) {
+    if (background || !threadRef || !bootstrapComplete) {
       return;
     }
 
     if (renderState === "missing" && environmentHasAnyThreads) {
       void navigate({ to: "/", replace: true });
     }
-  }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, threadRef]);
+  }, [background, bootstrapComplete, environmentHasAnyThreads, navigate, renderState, threadRef]);
 
   useEffect(() => {
-    if (!threadRef || !serverThreadShell?.sideOfThreadId) return;
+    if (background || !threadRef || !serverThreadShell?.sideOfThreadId) return;
     const parentRef = scopeThreadRef(threadRef.environmentId, serverThreadShell.sideOfThreadId);
     useRightPanelStore.getState().openSideChat(parentRef, threadRef.threadId);
     void navigate({
@@ -80,7 +89,7 @@ function ChatThreadRouteView() {
       params: { environmentId: parentRef.environmentId, threadId: parentRef.threadId },
       replace: true,
     });
-  }, [navigate, serverThreadShell?.sideOfThreadId, threadRef]);
+  }, [background, navigate, serverThreadShell?.sideOfThreadId, threadRef]);
 
   useEffect(() => {
     if (!threadRef || !serverThreadStarted || !draftThread) {
@@ -94,19 +103,24 @@ function ChatThreadRouteView() {
   }
 
   return (
-    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
-      {renderState === "ready" || (renderState === "loading" && serverThreadShell !== null) ? (
-        <ChatView
-          environmentId={threadRef.environmentId}
-          threadId={threadRef.threadId}
-          routeKind="server"
-          threadSyncPhase={threadSyncPhase}
-        />
-      ) : null}
+    <SidebarInset
+      inert={background}
+      className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh"
+    >
+      <BackgroundThreadContext value={background}>
+        {renderState === "ready" || (renderState === "loading" && serverThreadShell !== null) ? (
+          <ChatView
+            environmentId={threadRef.environmentId}
+            threadId={threadRef.threadId}
+            routeKind="server"
+            threadSyncPhase={threadSyncPhase}
+          />
+        ) : null}
+      </BackgroundThreadContext>
     </SidebarInset>
   );
 }
 
 export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
-  component: ChatThreadRouteView,
+  component: () => null,
 });

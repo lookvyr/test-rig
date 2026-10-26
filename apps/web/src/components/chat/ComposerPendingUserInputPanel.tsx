@@ -1,5 +1,6 @@
+import { BackgroundThreadContext } from "./backgroundThread";
 import { type RuntimeRequestId } from "@t3tools/contracts";
-import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
+import { memo, useContext, useEffect, useEffectEvent, useRef, useState } from "react";
 import { type PendingUserInput } from "../../session-logic";
 import {
   derivePendingUserInputProgress,
@@ -68,6 +69,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   autoAdvance: boolean;
   globalShortcuts: boolean;
 }) {
+  const background = useContext(BackgroundThreadContext);
   const canRespond = prompt.responseCapability !== "not_resumable";
   const responseDisabled = isResponding || !canRespond;
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
@@ -146,7 +148,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // outside editable fields. Multi-select prompts toggle options in place; single-
   // select prompts keep the existing auto-advance behavior.
   useEffect(() => {
-    if (!activeQuestion || responseDisabled || isCollapsed || !globalShortcuts) return;
+    if (background || !activeQuestion || responseDisabled || isCollapsed || !globalShortcuts)
+      return;
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target;
@@ -170,7 +173,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, responseDisabled, isCollapsed, globalShortcuts]);
+  }, [background, activeQuestion, responseDisabled, isCollapsed, globalShortcuts]);
 
   if (!activeQuestion) {
     return null;

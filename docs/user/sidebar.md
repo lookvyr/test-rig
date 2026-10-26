@@ -3,6 +3,10 @@
 The sidebar in web and desktop shows a flat thread list,
 with active work shown as cards and settled threads as compact rows.
 
+The new design is on by default. It uses quieter read titles, clearer status
+colors, and shorter cards for threads without a branch. Turn off **New design**
+in **Settings → Beta** to return to the classic layout.
+
 A branching-arrow icon before the branch name marks active threads attached to
 a worktree, and search results show it too. Compact rows for settled threads
 leave it out; hover over any thread to see its worktree name under the branch.

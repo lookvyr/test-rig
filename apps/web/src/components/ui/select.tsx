@@ -87,7 +87,7 @@ function SelectTrigger({
     >
       {children}
       <SelectPrimitive.Icon data-slot="select-icon">
-        {icon ?? <ChevronDownIcon className="-me-1 size-3 opacity-50" />}
+        {icon ?? <ChevronDownIcon className="-me-1 size-3.5 opacity-70" />}
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );

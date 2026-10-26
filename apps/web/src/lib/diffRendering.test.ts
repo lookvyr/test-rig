@@ -6,6 +6,7 @@ import {
   buildPatchCacheKey,
   getDiffLineStat,
   getRenderablePatch,
+  resolveDiffThemeName,
 } from "./diffRendering";
 
 describe("buildPatchCacheKey", () => {
@@ -183,5 +184,14 @@ describe("getDiffLineStat", () => {
     if (parsed?.kind !== "files") return;
 
     expect(getDiffLineStat(parsed.files)).toEqual({ additions: 3, deletions: 2 });
+  });
+});
+
+describe("resolveDiffThemeName", () => {
+  it("uses readable syntax only for the new light design", () => {
+    expect(resolveDiffThemeName("light", true)).toBe("t3-light");
+    expect(resolveDiffThemeName("light", false)).toBe("pierre-light");
+    expect(resolveDiffThemeName("dark", true)).toBe("pierre-dark");
+    expect(resolveDiffThemeName("dark", false)).toBe("pierre-dark");
   });
 });

@@ -3,7 +3,7 @@ import { ImageIcon, TextIcon } from "lucide-react";
 import { Suspense, use, useMemo, type CSSProperties } from "react";
 
 import { useTheme } from "../../hooks/useTheme";
-import { resolveDiffThemeName } from "../../lib/diffRendering";
+import { useDiffTheme } from "~/hooks/useDiffTheme";
 import { getSyntaxHighlighterPromise } from "../../lib/syntaxHighlighting";
 import { cn } from "../../lib/utils";
 import { RenderErrorBoundary } from "../RenderErrorBoundary";
@@ -43,14 +43,15 @@ function HighlightedAccessibilityJson({
   content: string;
   theme: "light" | "dark";
 }) {
+  const diffThemeName = useDiffTheme(theme);
   const highlighter = use(getSyntaxHighlighterPromise("json"));
   const lines = useMemo(
     () =>
       highlighter.codeToTokens(content, {
         lang: "json",
-        theme: resolveDiffThemeName(theme),
+        theme: diffThemeName,
       }).tokens,
-    [content, highlighter, theme],
+    [content, highlighter, diffThemeName],
   );
 
   let lineOffset = 0;

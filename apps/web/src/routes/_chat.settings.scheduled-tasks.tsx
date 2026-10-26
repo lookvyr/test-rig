@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ScheduledTasksSettings } from "../components/settings/ScheduledTasksSettings";
 import { validateScheduledTasksSearch } from "../components/settings/scheduledTasksSettings.logic";
 
-export const Route = createFileRoute("/settings/scheduled-tasks")({
+export const Route = createFileRoute("/_chat/settings/scheduled-tasks")({
   validateSearch: validateScheduledTasksSearch,
   component: SettingsScheduledTasksRoute,
 });

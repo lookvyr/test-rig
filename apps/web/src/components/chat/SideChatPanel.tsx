@@ -609,7 +609,7 @@ export function SideChatPanel(props: {
           />
         )}
         <div className="chat-composer-glass-shell">
-          <div className="chat-composer-glass-host relative z-10 rounded-[22px]">
+          <div className="chat-composer-glass-host relative z-10 rounded-[22px] redesign:rounded-2xl">
             <ChatComposer
               composerDraftTarget={threadRef}
               environmentId={threadRef.environmentId}

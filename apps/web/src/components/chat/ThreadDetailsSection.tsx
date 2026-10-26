@@ -30,7 +30,10 @@ export function ThreadDetailsSection({
           <section
             {...props}
             aria-labelledby={headingId}
-            className={cn("px-2 pt-2 pb-2.5", separated && "border-t border-border/65")}
+            className={cn(
+              "px-2 pt-2 pb-2.5 redesign:px-1.5",
+              separated && "border-t border-border/65",
+            )}
           />
         }
       >
@@ -52,11 +55,11 @@ export function ThreadDetailsSection({
       {...props}
       aria-labelledby={showHeading ? headingId : undefined}
       aria-label={showHeading ? undefined : title}
-      className={cn("px-2 pt-2 pb-2.5", separated && "border-t border-border/65")}
+      className={cn("px-2 pt-2 pb-2.5 redesign:px-1.5", separated && "border-t border-border/65")}
     >
       <div
         className={cn(
-          "mb-1 flex min-h-8 min-w-0 items-center justify-between gap-2 px-1.5",
+          "mb-1 flex min-h-8 min-w-0 items-center justify-between gap-2 px-1.5 redesign:px-2.5",
           !showHeading && "hidden",
         )}
       >

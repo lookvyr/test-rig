@@ -4,7 +4,8 @@ import {
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
 } from "./threadDetailsPanelStyles";
 import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { memo, useCallback, useEffect, useMemo } from "react";
+import { BackgroundThreadContext } from "./backgroundThread";
+import { memo, useCallback, useContext, useEffect, useMemo } from "react";
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
 import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
@@ -239,8 +240,9 @@ export const OpenInPicker = memo(function OpenInPicker({
     [keybindings],
   );
 
+  const background = useContext(BackgroundThreadContext);
   useEffect(() => {
-    if (!enableShortcut) return;
+    if (!enableShortcut || background) return;
     const handler = (e: globalThis.KeyboardEvent) => {
       if (!isOpenFavoriteEditorShortcut(e, keybindings)) return;
       if (!openInCwd) return;
@@ -259,6 +261,7 @@ export const OpenInPicker = memo(function OpenInPicker({
     return () => window.removeEventListener("keydown", handler);
   }, [
     enableShortcut,
+    background,
     environmentId,
     keybindings,
     openInCwd,

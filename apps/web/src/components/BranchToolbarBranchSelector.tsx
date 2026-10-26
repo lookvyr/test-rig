@@ -810,6 +810,9 @@ export function BranchToolbarBranchSelector({
             >
               <ChangeRequestStatusIcon className="size-3" />
               <span>#{branchPr.number}</span>
+              {displayMode === "panel" && branchPr.title ? (
+                <span className="hidden max-w-40 truncate redesign:block">{branchPr.title}</span>
+              ) : null}
             </TooltipTrigger>
             <TooltipPopup side="top">{branchPrTooltip}</TooltipPopup>
           </Tooltip>

@@ -242,6 +242,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const isLocked = props.lockedProvider !== null;
   const isSearching = searchQuery.trim().length > 0;
+  const redesign = useClientSettings((s) => s.redesignEnabled);
+  const rowsMixProviders = !redesign || isSearching || selectedInstanceId === "favorites";
   const lockedDisabledInstanceIds = useMemo(() => {
     if (!isLocked) {
       return undefined;
@@ -769,7 +771,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         isSelected={
                           modelKey === modelPickerModelKey(props.activeInstanceId, props.model)
                         }
-                        showProvider
+                        showProvider={rowsMixProviders || Boolean(model.subProvider)}
                         preferShortName={!isLocked}
                         useTriggerLabel={false}
                         showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}

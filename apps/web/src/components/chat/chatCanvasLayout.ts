@@ -28,6 +28,7 @@ export function resolveChatCanvasLayout({
   minChatWidth = 640,
   composerHeight = 0,
   detailsCard = null,
+  centerBesideDetails = false,
 }: {
   container: PreviewMiniPlayerSize;
   preview: ChatCanvasPreview | null;
@@ -36,6 +37,8 @@ export function resolveChatCanvasLayout({
   minChatWidth?: number;
   composerHeight?: number;
   detailsCard?: PreviewMiniPlayerObstacles["detailsCard"];
+  /** Center in the available lane while the details card would crowd the chat. */
+  centerBesideDetails?: boolean;
 }) {
   const centeredWidth = Math.max(0, Math.min(maxChatWidth, container.width - padding * 2));
   // A workspace card that does not fit beside the centered chat first moves
@@ -45,9 +48,20 @@ export function resolveChatCanvasLayout({
     ? detailsCard.left - DETAILS_CARD_CLEARANCE
     : container.width - padding;
   const normalWidth = Math.max(0, Math.min(centeredWidth, laneRight - padding));
+  const canvasCenterLeft = (container.width - normalWidth) / 2;
+  const besideShift =
+    detailsCard && centerBesideDetails
+      ? Math.min(
+          (container.width - detailsCard.left) / 2,
+          Math.max(
+            0,
+            (container.width - detailsCard.left) / 2 - (laneRight - canvasCenterLeft - normalWidth),
+          ),
+        )
+      : 0;
   const normalLeft = Math.max(
     padding,
-    Math.min((container.width - normalWidth) / 2, laneRight - normalWidth),
+    Math.min(canvasCenterLeft - besideShift, laneRight - normalWidth),
   );
   let chat = {
     left: normalLeft,

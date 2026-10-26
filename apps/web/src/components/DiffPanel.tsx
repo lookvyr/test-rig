@@ -1,3 +1,4 @@
+import { useDiffTheme } from "~/hooks/useDiffTheme";
 import { DiffFilePathCopyButton } from "./DiffFilePathCopyButton";
 import GitActionsControl from "./GitActionsControl";
 import { useSourceControlActionRunning } from "~/lib/sourceControlActions";
@@ -58,7 +59,6 @@ import {
   getDiffCollapseIconClassName,
   getDiffLineStat,
   getRenderablePatch,
-  resolveDiffThemeName,
   resolveFileDiffPath,
   DIFF_SURFACE_THEME_UNSAFE_CSS,
 } from "../lib/diffRendering";
@@ -336,6 +336,7 @@ export default function DiffPanel({
   initialGitScope: initialGitScopeProp,
 }: DiffPanelProps) {
   const { resolvedTheme } = useTheme();
+  const diffThemeName = useDiffTheme(resolvedTheme);
   const settings = useClientSettings();
   const [initialGitScope] = useState(initialGitScopeProp);
   const diffRenderMode = useDiffPanelStore((state) => state.diffRenderMode);
@@ -1688,7 +1689,7 @@ export default function DiffPanel({
                       diffStyle: diffRenderMode === "split" ? "split" : "unified",
                       lineDiffType: "word",
                       overflow: wordWrap ? "wrap" : "scroll",
-                      theme: resolveDiffThemeName(resolvedTheme),
+                      theme: diffThemeName,
                       themeType: resolvedTheme as DiffThemeType,
                       unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
                       stickyHeaders: true,

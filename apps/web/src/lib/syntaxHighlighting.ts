@@ -5,7 +5,7 @@ import {
   type SupportedLanguages,
 } from "@pierre/diffs";
 
-import { resolveDiffThemeName } from "./diffRendering";
+import { DIFF_THEME_NAMES } from "./diffRendering";
 
 /**
  * Always highlight with the Oniguruma WASM engine — the JS regex engine can
@@ -22,7 +22,8 @@ export function getSyntaxHighlighterPromise(language: string): Promise<DiffsHigh
   if (cached) return cached;
 
   const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
+    // Every palette, so toggling the New design never needs a new highlighter.
+    themes: Object.values(DIFF_THEME_NAMES),
     langs: [language as SupportedLanguages],
     preferredHighlighter: PREFERRED_HIGHLIGHTER,
   }).catch((error) => {

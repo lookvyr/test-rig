@@ -138,6 +138,10 @@ function GlassAppearanceSync() {
 }
 
 function FontAppearanceSync() {
+  const redesignEnabled = useClientSettings((settings) => settings.redesignEnabled);
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-redesign", redesignEnabled);
+  }, [redesignEnabled]);
   const fontFamilySans = useClientSettings((settings) => settings.fontFamilySans);
   const fontFamilyCode = useClientSettings((settings) => settings.fontFamilyCode);
   const fontFamilyComposer = useClientSettings((settings) => settings.fontFamilyComposer);

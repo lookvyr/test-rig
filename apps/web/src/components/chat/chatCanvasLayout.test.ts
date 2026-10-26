@@ -290,3 +290,29 @@ describe("workspace card beside chat", () => {
     });
   });
 });
+
+describe("redesigned chat centering", () => {
+  it("centers within the lane beside a details card while preserving classic placement", () => {
+    const input = {
+      container: { width: 1500, height: 900 },
+      preview: null,
+      detailsCard: { left: 1160, right: 1480, bottom: 420 },
+    };
+    const classic = resolveChatCanvasLayout(input);
+    const redesigned = resolveChatCanvasLayout({ ...input, centerBesideDetails: true });
+    expect(classic.chat.left).toBe(360);
+    expect(redesigned.chat.left).toBe(196);
+    expect(redesigned.chat.width).toBe(classic.chat.width);
+  });
+
+  it("keeps the chat centered on very wide windows", () => {
+    const input = {
+      container: { width: 2400, height: 900 },
+      preview: null,
+      detailsCard: { left: 2060, right: 2380, bottom: 420 },
+    };
+    expect(resolveChatCanvasLayout({ ...input, centerBesideDetails: true }).chat).toEqual(
+      resolveChatCanvasLayout(input).chat,
+    );
+  });
+});

@@ -6,7 +6,7 @@ function SettingsGeneralRoute() {
   return <GeneralSettingsPanel />;
 }
 
-export const Route = createFileRoute("/settings/general")({
+export const Route = createFileRoute("/_chat/settings/general")({
   validateSearch: (search: Record<string, unknown>): { project?: string } =>
     typeof search.project === "string" && search.project.length > 0
       ? { project: search.project }

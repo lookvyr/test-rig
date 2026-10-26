@@ -10,12 +10,13 @@ const THREAD_DETAILS_PANEL_HOVER_SURFACE_CLASS =
 
 const THREAD_DETAILS_PANEL_ROW_SURFACE_CLASS = `${THREAD_DETAILS_PANEL_RESTING_BUTTON_SURFACE_CLASS} ${THREAD_DETAILS_PANEL_HOVER_SURFACE_CLASS}`;
 
-export const THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS = "gap-2.5 px-2.5 text-left";
+export const THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS =
+  "gap-2.5 px-2.5 text-left redesign:gap-2 redesign:px-2";
 
 // The row supplies the first tint; the hovered or open segment adds a second tint.
 const THREAD_DETAILS_PANEL_SPLIT_BUTTON_SURFACE_CLASS = `before:hidden ${THREAD_DETAILS_PANEL_ROW_SURFACE_CLASS} data-popup-open:!bg-black/[0.055] dark:data-popup-open:!bg-white/[0.075]`;
 
-const THREAD_DETAILS_PANEL_CONTROL_CLASS = `h-9 min-w-0 rounded-lg border-transparent ${THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS} text-[13px] font-medium text-foreground/80`;
+const THREAD_DETAILS_PANEL_CONTROL_CLASS = `h-9 min-w-0 rounded-lg redesign:rounded-md border-transparent ${THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS} text-[13px] font-medium text-foreground/80`;
 const THREAD_DETAILS_PANEL_SPLIT_GROUP_SURFACE_CLASS = `${THREAD_DETAILS_PANEL_HOVER_SURFACE_CLASS} has-[[data-popup-open]]:bg-black/[0.055] dark:has-[[data-popup-open]]:bg-white/[0.075]`;
 
 export const THREAD_DETAILS_PANEL_ROW_CLASS = `${THREAD_DETAILS_PANEL_CONTROL_CLASS} w-full justify-start ${THREAD_DETAILS_PANEL_ROW_SURFACE_CLASS}`;
@@ -25,7 +26,7 @@ export const THREAD_DETAILS_PANEL_SELECT_ROW_CLASS = `${THREAD_DETAILS_PANEL_ROW
 const THREAD_DETAILS_PANEL_TRAILING_GEOMETRY_CLASS = "w-8 shrink-0 justify-center";
 
 /** Match the trailing split button without changing the row's single-trigger semantics. */
-export const THREAD_DETAILS_PANEL_TRAILING_SLOT_CLASS = `${THREAD_DETAILS_PANEL_TRAILING_GEOMETRY_CLASS} relative -me-px flex h-full items-center before:absolute before:-left-px before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-border/65`;
+export const THREAD_DETAILS_PANEL_TRAILING_SLOT_CLASS = `${THREAD_DETAILS_PANEL_TRAILING_GEOMETRY_CLASS} relative -me-px flex h-full items-center before:absolute before:-left-px before:top-1/2 before:h-4 before:w-px before:-translate-y-1/2 before:bg-border/65 redesign:before:hidden`;
 
 // No transition on the group: the halves are Buttons whose background snaps (their base only
 // transitions shadow), so an eased group tint would land frames later and the hover would
@@ -51,6 +52,7 @@ export const THREAD_DETAILS_PANEL_SPLIT_PRIMARY_CLASS = `${THREAD_DETAILS_PANEL_
 
 export const THREAD_DETAILS_PANEL_SPLIT_SECONDARY_CLASS = `${THREAD_DETAILS_PANEL_CONTROL_CLASS} ${THREAD_DETAILS_PANEL_TRAILING_GEOMETRY_CLASS} rounded-s-none border-0 px-0 ${THREAD_DETAILS_PANEL_SPLIT_BUTTON_SURFACE_CLASS}`;
 
-export const THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS = "h-4 w-px shrink-0 bg-border/65";
+export const THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS =
+  "h-4 w-px shrink-0 bg-border/65 redesign:bg-transparent";
 
 export const THREAD_DETAILS_PANEL_SPLIT_CHECKS_CLASS = `${THREAD_DETAILS_PANEL_CONTROL_CLASS} justify-center gap-1.5 rounded-none ${THREAD_DETAILS_PANEL_SPLIT_BUTTON_SURFACE_CLASS}`;

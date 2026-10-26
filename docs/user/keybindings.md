@@ -3,6 +3,12 @@
 Edit keybindings from **Settings** → **Keybindings**. That page lists every command, its current
 shortcut, whether it is a default or your own, and warns about conflicts.
 
+Settings opens in a large dialog over your thread. Close it with **Escape**, the
+close button, or a click outside the dialog to return to the same conversation
+and unsent draft. If a menu or another dialog is open inside Settings, Escape
+closes that layer first. Thread and composer shortcuts are paused while Settings
+is open; settings search remains available with **/** or **Cmd+F / Ctrl+F**.
+
 The same configuration lives in `~/.test-rig/userdata/keybindings.json` on the machine running the
 server, if you prefer editing it directly. Test Rig writes the built-in defaults into that file on
 first run, and adds any new defaults on later startups unless a rule of yours already claims the

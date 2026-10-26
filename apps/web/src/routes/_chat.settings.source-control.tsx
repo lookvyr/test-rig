@@ -14,7 +14,7 @@ function SettingsSourceControlRoute() {
   );
 }
 
-export const Route = createFileRoute("/settings/source-control")({
+export const Route = createFileRoute("/_chat/settings/source-control")({
   validateSearch: (
     search: Record<string, unknown>,
   ): { project?: string; environmentId: string | undefined } => ({

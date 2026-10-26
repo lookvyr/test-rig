@@ -17,7 +17,7 @@ import {
 } from "@t3tools/shared/model";
 import { memo, useCallback, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { BrainIcon, ZapIcon } from "lucide-react";
+import { BrainIcon, GaugeIcon, ZapIcon } from "lucide-react";
 import { buttonVariants } from "../ui/button";
 import {
   Menu,
@@ -624,13 +624,23 @@ export const TraitsPicker = memo(function TraitsPicker({
       >
         {isCodexStyle ? (
           <span className="flex min-w-0 w-full items-center gap-1.5 overflow-hidden">
-            {fastModeIcon ?? <ComposerControlIcon icon={BrainIcon} />}
+            {fastModeIcon ?? (
+              <>
+                <ComposerControlIcon icon={BrainIcon} className="redesign:hidden" />
+                <ComposerControlIcon icon={GaugeIcon} className="hidden redesign:block" />
+              </>
+            )}
             <span className="min-w-0 truncate">{triggerLabel}</span>
             <ComposerControlChevron />
           </span>
         ) : (
           <>
-            {fastModeIcon ?? <ComposerControlIcon icon={BrainIcon} />}
+            {fastModeIcon ?? (
+              <>
+                <ComposerControlIcon icon={BrainIcon} className="redesign:hidden" />
+                <ComposerControlIcon icon={GaugeIcon} className="hidden redesign:block" />
+              </>
+            )}
             <span>{triggerLabel}</span>
             <ComposerControlChevron />
           </>

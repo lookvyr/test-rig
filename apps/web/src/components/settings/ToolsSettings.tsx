@@ -105,7 +105,7 @@ function ToolRow({
 }
 
 export function ToolsSettings() {
-  const search = useSearch({ from: "/settings/tools" });
+  const search = useSearch({ from: "/_chat/settings/tools" });
   const navigate = useNavigate({ from: "/settings/tools" });
   const primaryId = usePrimaryEnvironmentId();
   const { environments } = useEnvironments();
@@ -223,7 +223,7 @@ function EnvironmentTools({
   header: ReactNode;
 }) {
   const registry = useContext(RegistryContext);
-  const search = useSearch({ from: "/settings/tools" });
+  const search = useSearch({ from: "/_chat/settings/tools" });
   const navigate = useNavigate({ from: "/settings/tools" });
   const settings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
   const providers =

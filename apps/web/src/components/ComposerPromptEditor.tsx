@@ -66,6 +66,7 @@ import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTermin
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { continueComposerBlock, serializeComposerSelection } from "./composerRichTextCommands";
 import { useTheme } from "~/hooks/useTheme";
+import { useDiffTheme } from "~/hooks/useDiffTheme";
 import {
   composerCodeHighlightingKey,
   createComposerCodeHighlighting,
@@ -297,8 +298,9 @@ function readEditorSnapshot(editor: Editor) {
 export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
   const { value, cursor, terminalContexts, disabled, placeholder, className, editorRef } = props;
   const { resolvedTheme } = useTheme();
-  const themeRef = useRef(resolvedTheme);
-  themeRef.current = resolvedTheme;
+  const diffThemeName = useDiffTheme(resolvedTheme);
+  const themeRef = useRef(diffThemeName);
+  themeRef.current = diffThemeName;
   const latest = useRef(props);
   latest.current = props;
   const applyingControlled = useRef(false);
@@ -353,7 +355,7 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
   const editorAttributes = useMemo(
     () => ({
       class: cn(
-        "composer-tiptap block max-h-50 min-h-17.5 w-full overflow-y-auto [scrollbar-gutter:stable] whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
+        "composer-tiptap block max-h-50 min-h-17.5 redesign:min-h-12 w-full overflow-y-auto [scrollbar-gutter:stable] whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
         className,
       ),
       "data-testid": "composer-editor",
@@ -585,7 +587,7 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
   }, [editor, editorAttributes]);
   useEffect(() => {
     if (editor) editor.view.dispatch(editor.state.tr.setMeta(composerCodeHighlightingKey, true));
-  }, [editor, resolvedTheme]);
+  }, [editor, diffThemeName]);
   const contextIds = terminalContexts.map((context) => context.id).join("\0");
   const previousContextIds = useRef(contextIds);
   useLayoutEffect(() => {

@@ -4,7 +4,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import type { DiffsHighlighter } from "@pierre/diffs";
 
-import { resolveDiffThemeName } from "~/lib/diffRendering";
+import type { DiffThemeName } from "~/lib/diffRendering";
 import { getSyntaxHighlighterPromise } from "~/lib/syntaxHighlighting";
 
 export const composerCodeHighlightingKey = new PluginKey<DecorationSet>(
@@ -13,7 +13,7 @@ export const composerCodeHighlightingKey = new PluginKey<DecorationSet>(
 const MAX_HIGHLIGHT_LENGTH = 20_000;
 
 /** Decorations color the editable text itself, preserving native selection and input. */
-export function createComposerCodeHighlighting(getTheme: () => "light" | "dark") {
+export function createComposerCodeHighlighting(getTheme: () => DiffThemeName) {
   return Extension.create({
     name: "composer-code-highlighting",
     addProseMirrorPlugins() {
@@ -32,7 +32,7 @@ export function createComposerCodeHighlighting(getTheme: () => "light" | "dark")
 
       const decorations = (doc: ProseMirrorNode) => {
         const result: Decoration[] = [];
-        const theme = resolveDiffThemeName(getTheme());
+        const theme = getTheme();
         doc.descendants((node, pos) => {
           if (!eligible(node)) return;
           const highlighter = loaded.get(languageFor(node));

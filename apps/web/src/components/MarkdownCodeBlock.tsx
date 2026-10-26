@@ -1,3 +1,4 @@
+import { useDiffTheme } from "~/hooks/useDiffTheme";
 import React, {
   Children,
   Suspense,
@@ -16,7 +17,7 @@ import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Button } from "./ui/button";
-import { resolveDiffThemeName, fnv1a32, type DiffThemeName } from "../lib/diffRendering";
+import { fnv1a32, type DiffThemeName } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
@@ -381,6 +382,7 @@ export function MarkdownPre({
   ...props
 }: React.ComponentProps<"pre"> & ExtraProps & { isStreaming?: boolean }) {
   const { resolvedTheme } = useTheme();
+  const diffThemeName = useDiffTheme(resolvedTheme);
   const codeBlock = extractCodeBlock(children);
   if (!codeBlock) return <pre {...props}>{children}</pre>;
   const fallback = <pre {...props}>{children}</pre>;
@@ -396,7 +398,7 @@ export function MarkdownPre({
           <SuspenseShikiCodeBlock
             className={codeBlock.className}
             code={codeBlock.code}
-            themeName={resolveDiffThemeName(resolvedTheme)}
+            themeName={diffThemeName}
             isStreaming={isStreaming}
           />
         </Suspense>

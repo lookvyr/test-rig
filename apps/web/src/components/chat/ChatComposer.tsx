@@ -1,3 +1,4 @@
+import { BackgroundThreadContext } from "./backgroundThread";
 import { ComposerApprovalFeedback } from "./ComposerApprovalFeedback";
 import type { ApprovalResponder } from "@t3tools/client-runtime/state/thread-requests";
 import { useStableCallback } from "../../hooks/useStableCallback";
@@ -45,6 +46,7 @@ import {
   memo,
   type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -650,6 +652,7 @@ export interface ChatComposerProps {
 // --------------------------------------------------------------------------
 
 export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps) {
+  const background = useContext(BackgroundThreadContext);
   const {
     composerDraftTarget,
     environmentId,
@@ -1103,6 +1106,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const imageInputRef = useRef<HTMLInputElement>(null);
   const pasteAsTextUntilRef = useRef(0);
   useEffect(() => {
+    if (background) return;
     const arm = () => {
       if (document.activeElement && composerFormRef.current?.contains(document.activeElement))
         pasteAsTextUntilRef.current = Date.now() + 1_000;
@@ -1122,7 +1126,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("blur", clear);
     };
-  }, []);
+  }, [background]);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
   const composerSelectLockRef = useRef(false);
   const composerMenuOpenRef = useRef(false);
@@ -2575,6 +2579,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   }, [prompt]);
 
   useEffect(() => {
+    if (background) return;
     const handler = (event: globalThis.KeyboardEvent) => {
       const command = resolveShortcutCommand(event, keybindings, {
         context: {
@@ -2620,6 +2625,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [
+    background,
     activePendingProgress,
     isComposerApprovalState,
     isComposerModelPickerOpen,
@@ -3113,7 +3119,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     >
       <div
         className={cn(
-          "group rounded-[22px] p-px transition-colors duration-200",
+          "group rounded-[22px] redesign:rounded-2xl p-px transition-colors duration-200",
           composerProviderState.composerFrameClassName,
         )}
         onDragEnter={onComposerDragEnter}
@@ -3138,7 +3144,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ref={composerSurfaceRef}
           data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
           className={cn(
-            "rounded-[20px] transition-[background-color] duration-200",
+            "rounded-[20px] redesign:rounded-[15px] transition-[background-color] duration-200",
             isDragOverComposer ? "bg-accent/45 ring-1 ring-primary/70" : null,
             projectSelectionRequired ? "opacity-75" : null,
             composerProviderState.composerSurfaceClassName,
@@ -3674,7 +3680,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 showMobilePendingAnswerActions && "hidden sm:flex",
               )}
             >
-              <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 redesign:gap-0 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {selectedInstanceId === NO_PROVIDER_MODEL_SELECTION.instanceId ? (
                   <Button
                     type="button"

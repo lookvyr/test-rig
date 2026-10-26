@@ -1,7 +1,11 @@
+import { ChatThreadRouteView } from "./_chat.$environmentId.$threadId";
+import { DraftChatThreadRouteView } from "./_chat.draft.$draftId";
+import { isAppModalPage } from "../components/sidebar/mainAppLocation";
+import { SidebarInset } from "../components/ui/sidebar";
 import { LinkThreadPullRequestDialog } from "../components/LinkThreadPullRequestDialog";
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { Outlet, createFileRoute, redirect, useMatches } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { useClientSettings } from "../hooks/useSettings";
@@ -190,11 +194,37 @@ function ChatRouteGlobalShortcuts() {
 }
 
 function ChatRouteLayout() {
+  // Read the route and its params from the same committed matches. Location can
+  // advance before matches, briefly replacing the retained thread with Outlet.
+  const matches = useMatches();
+  const modalOpen = matches.some((match) => isAppModalPage(match.pathname));
+  const params: Partial<Record<"draftId" | "environmentId" | "threadId", string>> =
+    matches.at(-1)?.params ?? {};
+  const currentTarget = params.draftId
+    ? { kind: "draft" as const, draftId: params.draftId }
+    : params.environmentId && params.threadId
+      ? { kind: "server" as const, environmentId: params.environmentId, threadId: params.threadId }
+      : null;
+  const [backgroundTarget, setBackgroundTarget] = useState(currentTarget);
+  if (!modalOpen && JSON.stringify(backgroundTarget) !== JSON.stringify(currentTarget))
+    setBackgroundTarget(currentTarget);
+  const shownTarget = modalOpen ? backgroundTarget : currentTarget;
+  const view =
+    shownTarget?.kind === "draft" ? (
+      <DraftChatThreadRouteView rawDraftId={shownTarget.draftId} background={modalOpen} />
+    ) : shownTarget?.kind === "server" ? (
+      <ChatThreadRouteView params={shownTarget} background={modalOpen} />
+    ) : modalOpen ? (
+      <SidebarInset className="h-dvh" inert />
+    ) : (
+      <Outlet />
+    );
   return (
     <>
-      <ChatRouteGlobalShortcuts />
-      <LinkThreadPullRequestDialog />
-      <Outlet />
+      {modalOpen ? null : <ChatRouteGlobalShortcuts />}
+      {modalOpen ? null : <LinkThreadPullRequestDialog />}
+      {view}
+      {modalOpen ? <Outlet /> : null}
     </>
   );
 }

@@ -1193,7 +1193,7 @@ function ChatMarkdown(props: ChatMarkdownProps) {
   return (
     <div
       className={cn(
-        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80",
+        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80 redesign:text-foreground/90",
         className,
       )}
       onCopy={handleCopy}

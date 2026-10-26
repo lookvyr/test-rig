@@ -127,7 +127,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       <SidebarMenu>
         <PullRequestsSidebarItem />
         <SidebarMenuItem>
-          <SidebarMenuButton onClick={handleSettingsClick}>
+          <SidebarMenuButton onClick={handleSettingsClick} aria-haspopup="dialog">
             <SettingsIcon />
             <span>Settings</span>
           </SidebarMenuButton>

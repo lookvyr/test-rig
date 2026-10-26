@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ToolsSettings } from "../components/settings/ToolsSettings";
 
-export const Route = createFileRoute("/settings/tools")({
+export const Route = createFileRoute("/_chat/settings/tools")({
   validateSearch: (
     search: Record<string, unknown>,
   ): { project?: string; environmentId?: string; skill?: string; tab?: string } => ({

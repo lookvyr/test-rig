@@ -51,7 +51,10 @@ function useProjectSettingsScopeValue(
   const groups = useSettingsProjectGroups().filter((group) =>
     group.memberProjects.some((project) => project.environmentId === environmentId),
   );
-  const { project: projectKey } = useSearch({ from: route });
+  const { project: projectKey } = useSearch({
+    from:
+      route === "/settings/general" ? "/_chat/settings/general" : "/_chat/settings/source-control",
+  });
   const navigate = useNavigate({ from: route });
   const group = groups.find((candidate) => candidate.projectKey === projectKey);
   const projectIds =

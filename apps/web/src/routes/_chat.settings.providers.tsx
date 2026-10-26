@@ -6,6 +6,6 @@ function SettingsProvidersRoute() {
   return <ProviderSettingsPanel />;
 }
 
-export const Route = createFileRoute("/settings/providers")({
+export const Route = createFileRoute("/_chat/settings/providers")({
   component: SettingsProvidersRoute,
 });

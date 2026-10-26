@@ -36,6 +36,12 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
+  it("finds the new design toggle", () => {
+    expect(searchSettings("new design")[0]).toMatchObject({
+      id: "new-design",
+      to: "/settings/beta",
+    });
+  });
   it("finds both Tools library sections", () => {
     expect(searchSettings("MCP servers")[0]).toMatchObject({
       id: "mcp-servers",

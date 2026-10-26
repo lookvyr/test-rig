@@ -7,6 +7,7 @@ import {
   type ComponentProps,
   type CSSProperties,
 } from "react";
+import { useClientSettings } from "~/hooks/useSettings";
 import { flushSync } from "react-dom";
 import { ChatCanvasContext } from "./ChatCanvasContext";
 import { resolveChatCanvasLayout, type ChatCanvasPreview } from "./chatCanvasLayout";
@@ -23,6 +24,7 @@ export function ChatCanvas({
 }: Omit<ComponentProps<"div">, "className" | "style" | "ref"> & {
   composerOverlayElement: HTMLElement | null;
 }) {
+  const redesign = useClientSettings((s) => s.redesignEnabled);
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const widthProbeRef = useRef<HTMLDivElement | null>(null);
   const [timelineElement, registerTimeline] = useState<HTMLElement | null>(null);
@@ -114,7 +116,13 @@ export function ChatCanvas({
       container,
       getContainerRect,
       lane: { padding: measurements.padding, minChatWidth: measurements.minChatWidth },
-      layout: resolveChatCanvasLayout({ ...measurements, container, preview, detailsCard }),
+      layout: resolveChatCanvasLayout({
+        ...measurements,
+        container,
+        preview,
+        detailsCard,
+        centerBesideDetails: redesign,
+      }),
       previewKey: preview?.key ?? null,
       reportPreview,
       clearPreview,
@@ -125,6 +133,7 @@ export function ChatCanvas({
     measurements,
     preview,
     detailsCard,
+    redesign,
     reportPreview,
     clearPreview,
     reportDetailsCard,

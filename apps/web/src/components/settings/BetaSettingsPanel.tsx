@@ -8,7 +8,12 @@ import {
 } from "../../hooks/useSettings";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SettingResetButton,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 const AUTO_SETTLE_MIN_DAYS = 1;
@@ -64,6 +69,7 @@ export function BetaSettingsPanel() {
     (settings) => settings.sidebarAutoSettleOnMerge,
   );
   const updatePrimarySettings = useUpdatePrimarySettings();
+  const redesignEnabled = useClientSettings((settings) => settings.redesignEnabled);
   const planModeEnabled = useClientSettings((settings) => settings.planModeEnabled);
   const workingShelfEnabled = useClientSettings((settings) => settings.sidebarWorkingShelfEnabled);
   const updateSettings = useUpdateClientSettings();
@@ -71,6 +77,25 @@ export function BetaSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title="Beta features">
+        <SettingsRow
+          {...searchableSetting("new-design")}
+          description="The new design is on by default. Turn it off to return to the classic look."
+          resetAction={
+            !redesignEnabled ? (
+              <SettingResetButton
+                label="new design"
+                onClick={() => updateSettings({ redesignEnabled: true })}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={redesignEnabled}
+              onCheckedChange={(checked) => updateSettings({ redesignEnabled: Boolean(checked) })}
+              aria-label="New design"
+            />
+          }
+        />
         <SettingsRow
           {...searchableSetting("sidebar-working-shelf")}
           description="Move busy threads into a collapsed Working section. They return to the top when they finish or need your attention. Pinned threads stay visible."

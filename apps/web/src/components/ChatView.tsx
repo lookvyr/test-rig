@@ -1,3 +1,5 @@
+import { BackgroundThreadContext } from "./chat/backgroundThread";
+import { useContext } from "react";
 import { AttachmentFilePreview } from "./files/AttachmentFilePreview";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useThreadDetailsStore } from "../threadDetailsStore";
@@ -1126,6 +1128,7 @@ function chatActionErrorMessage(error: unknown): string {
 }
 
 function ChatViewContent(props: ChatViewProps) {
+  const background = useContext(BackgroundThreadContext);
   const {
     environmentId,
     threadId,
@@ -4706,6 +4709,7 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThreadKey, focusComposer, terminalUiState.terminalOpen]);
 
   useEffect(() => {
+    if (background) return;
     const handler = (event: globalThis.KeyboardEvent) => {
       if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
         event.stopPropagation();
@@ -4990,6 +4994,7 @@ function ChatViewContent(props: ChatViewProps) {
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [
+    background,
     routeThreadKey,
     activeTerminalLabelsById,
     restoreLastClosedView,
@@ -6729,7 +6734,7 @@ function ChatViewContent(props: ChatViewProps) {
                             showComposerContextStrip && "chat-composer-glass-shell-with-context",
                           )}
                         >
-                          <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
+                          <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px] redesign:rounded-2xl">
                             <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                               <ChatComposer
                                 composerRef={composerRef}
@@ -7013,9 +7018,12 @@ function ChatViewContent(props: ChatViewProps) {
       ) : null}
       {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelSheet
-          open
-          onClose={closePreviewPanel}
+          open={!background}
+          onClose={() => {
+            if (!background) closePreviewPanel();
+          }}
           modal={
+            !background &&
             !(
               activeRightPanelKind === "preview" &&
               isPreviewSupportedInRuntime(activeThreadRef?.environmentId)

@@ -1,3 +1,4 @@
+import { useClientSettings } from "~/hooks/useSettings";
 import { useEnvironmentQuery } from "../../state/query";
 import { vcsEnvironment } from "../../state/vcs";
 import { preloadDiffPanel } from "../diffPanelLoader";
@@ -43,6 +44,7 @@ export function ThreadDetailsPanel(props: {
   onUpdateScript: (id: string, input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onDeleteScript: (id: string) => Promise<ProjectScriptActionResult>;
 }) {
+  const redesign = useClientSettings((s) => s.redesignEnabled);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const gitStatus = useEnvironmentQuery(
     props.gitCwd
@@ -117,18 +119,25 @@ export function ThreadDetailsPanel(props: {
           headingId="thread-details-git"
           showHeading={false}
         >
-          <ThreadDetailsControl
-            onClick={props.onOpenChanges}
-            onPointerEnter={preloadDiffPanel}
-            onFocus={preloadDiffPanel}
-          >
-            <FileDiffIcon />
-            <span className="flex-1 text-left">Changes</span>
-            <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
-              <span className="text-success">+{changesTotals?.insertions ?? "…"}</span>
-              <span className="text-destructive">-{changesTotals?.deletions ?? "…"}</span>
-            </span>
-          </ThreadDetailsControl>
+          {(!redesign ||
+            !props.isDraft ||
+            !changesTotals ||
+            changesTotals.insertions > 0 ||
+            changesTotals.deletions > 0 ||
+            gitStatus?.hasWorkingTreeChanges) && (
+            <ThreadDetailsControl
+              onClick={props.onOpenChanges}
+              onPointerEnter={preloadDiffPanel}
+              onFocus={preloadDiffPanel}
+            >
+              <FileDiffIcon />
+              <span className="flex-1 text-left">Changes</span>
+              <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
+                <span className="text-success">+{changesTotals?.insertions ?? "…"}</span>
+                <span className="text-destructive">-{changesTotals?.deletions ?? "…"}</span>
+              </span>
+            </ThreadDetailsControl>
+          )}
           {props.onShowPullRequest ? (
             <ThreadDetailsControl onClick={props.onShowPullRequest}>
               <GitPullRequestIcon />

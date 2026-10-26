@@ -6,6 +6,6 @@ function SettingsBetaRoute() {
   return <BetaSettingsPanel />;
 }
 
-export const Route = createFileRoute("/settings/beta")({
+export const Route = createFileRoute("/_chat/settings/beta")({
   component: SettingsBetaRoute,
 });

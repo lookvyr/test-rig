@@ -1,3 +1,4 @@
+import { useDiffTheme } from "~/hooks/useDiffTheme";
 import type {
   EnvironmentId,
   OrchestrationV2ProjectedTurnItem,
@@ -16,7 +17,6 @@ import { memo, type ReactNode, Suspense, use, useMemo } from "react";
 
 import { useTheme } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
-import { resolveDiffThemeName } from "../../lib/diffRendering";
 import { getSyntaxHighlighterPromise } from "../../lib/syntaxHighlighting";
 import { useTurnItemDetail } from "../../state/queries";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
@@ -40,11 +40,11 @@ interface V2ItemInspectorProps {
 
 function JsonTokens({ text }: { readonly text: string }) {
   const { resolvedTheme } = useTheme();
+  const diffThemeName = useDiffTheme(resolvedTheme);
   const highlighter = use(getSyntaxHighlighterPromise("json"));
   const { tokens } = useMemo(
-    () =>
-      highlighter.codeToTokens(text, { lang: "json", theme: resolveDiffThemeName(resolvedTheme) }),
-    [highlighter, text, resolvedTheme],
+    () => highlighter.codeToTokens(text, { lang: "json", theme: diffThemeName }),
+    [highlighter, text, diffThemeName],
   );
   return tokens.flatMap((line, lineIndex) => [
     lineIndex > 0 ? "\n" : "",

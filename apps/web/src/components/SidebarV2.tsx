@@ -1,3 +1,5 @@
+import { useLocation } from "@tanstack/react-router";
+import { isAppModalPage } from "./sidebar/mainAppLocation";
 import { THREAD_CONTEXT_DRAG_TYPE } from "./chat/threadContextDrag";
 import { useUnlinkPullRequest } from "../hooks/useUnlinkPullRequest";
 import { openLinkThreadPullRequest } from "./LinkThreadPullRequestDialog";
@@ -811,7 +813,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     isInFlight &&
       !props.isActive &&
       !isSelected &&
-      "opacity-70 transition-opacity hover:opacity-100",
+      "opacity-70 transition-opacity hover:opacity-100 redesign:opacity-100",
   );
 
   const title = isRenaming ? (
@@ -838,7 +840,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               isUnread || isWoke
                 ? "text-foreground"
                 : shouldRecede
-                  ? "text-secondary-label"
+                  ? "text-secondary-label redesign:text-foreground/75 redesign:group-hover/v2-row:text-foreground redesign:group-focus-visible/v2-row:text-foreground"
                   : status === "failed"
                     ? "text-foreground/95"
                     : "text-foreground/90",
@@ -849,7 +851,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 ? "text-foreground"
                 : isUnread
                   ? "text-muted-foreground"
-                  : "text-secondary-label/70",
+                  : "text-secondary-label/70 redesign:text-foreground/75 redesign:group-hover/v2-row:text-foreground redesign:group-focus-visible/v2-row:text-foreground",
             ),
         isRegeneratingTitle && "opacity-[0.55]",
       )}
@@ -867,7 +869,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         className={cn(
           // Sidebar chrome follows the interface font; tabular digits keep the
           // number from reflowing as PR states stream in.
-          "shrink-0 text-xs tabular-nums hover:underline",
+          "shrink-0 text-xs tabular-nums hover:underline redesign:text-secondary-label",
           variant === "slim" && variantAction === "unsettle"
             ? props.isActive
               ? "text-secondary-label"
@@ -929,7 +931,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               className={cn(
                 "shrink-0 transition-opacity",
                 !props.isActive &&
-                  "opacity-40 grayscale group-hover/v2-row:opacity-100 group-hover/v2-row:grayscale-0",
+                  "opacity-40 grayscale group-hover/v2-row:opacity-100 group-hover/v2-row:grayscale-0 redesign:opacity-100 redesign:grayscale-0",
               )}
             >
               <ProjectFavicon
@@ -966,7 +968,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 {variantAction === "unsnooze" && props.snoozeWakeLabelText !== null ? (
                   // Snoozed rows show when they come BACK, not when they were
                   // last touched — the return ticket is the row's whole story.
-                  <span className="text-xs text-blue-600 tabular-nums dark:text-blue-400">
+                  <span className="inline-flex items-center gap-1 text-xs text-blue-600 tabular-nums dark:text-blue-400">
+                    <AlarmClockIcon aria-hidden className="hidden size-3 redesign:block" />
                     {props.snoozeWakeLabelText}
                   </span>
                 ) : isWoke ? (
@@ -1043,11 +1046,22 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   }
 
   const diff = latestRunDiff(thread);
+  const metaLineEmpty =
+    !thread.branch &&
+    !thread.worktreePath &&
+    !thread.planProgress &&
+    !prBadge &&
+    !diff &&
+    !isRemote &&
+    !terminalStatusIcon;
 
   return (
     <li
       data-thread-item
-      className="list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]"
+      className={cn(
+        "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
+        metaLineEmpty && "redesign:[contain-intrinsic-size:auto_58px]",
+      )}
     >
       <Tooltip>
         <TooltipTrigger
@@ -1067,7 +1081,12 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             />
           }
         >
-          <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
+          <div
+            className={cn(
+              "relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]",
+              metaLineEmpty && "redesign:h-auto",
+            )}
+          >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               <ThreadDraftIndicator threadRef={threadRef} isActive={props.isActive} />
               <ProjectFavicon
@@ -1078,8 +1097,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               {props.projectTitle ? (
                 <span
                   className={cn(
-                    "min-w-0 flex-1 truncate text-secondary-label text-xs",
-                    shouldRecede ? "font-normal" : "font-medium",
+                    "min-w-0 flex-1 truncate text-secondary-label text-xs redesign:text-muted-foreground/60",
+                    shouldRecede ? "font-normal" : "font-medium redesign:font-normal",
                   )}
                 >
                   {props.projectTitle}
@@ -1200,15 +1219,29 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
+            <div className="mt-1 flex min-w-0 items-center gap-1.5">
               {title}
+              {metaLineEmpty && driverKind ? (
+                <span aria-hidden className="hidden shrink-0 opacity-60 redesign:inline-flex">
+                  <ProviderInstanceIcon
+                    driverKind={driverKind}
+                    displayName={thread.runtime?.providerName ?? modelInstanceId}
+                    iconClassName="size-3.5"
+                  />
+                </span>
+              ) : null}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
                   Regenerating title
                 </span>
               ) : null}
             </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+            <div
+              className={cn(
+                "mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs redesign:text-muted-foreground/60",
+                metaLineEmpty && "redesign:hidden",
+              )}
+            >
               <ThreadWorktreeIndicator thread={thread} isScratch={props.isScratch} />
               {/* While working, the current plan step outranks the branch:
                   it's the one line that says what the thread is doing. */}
@@ -1382,6 +1415,8 @@ const SidebarV2SearchResultRow = memo(function SidebarV2SearchResultRow(props: {
 const inboxReturns = createInboxReturnTracker();
 
 export default function SidebarV2() {
+  const modalPage = useLocation({ select: (location) => isAppModalPage(location.pathname) });
+  const redesign = useClientSettings((s) => s.redesignEnabled);
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
@@ -2913,7 +2948,7 @@ export default function SidebarV2() {
   );
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat) return;
+      if (modalPage || event.defaultPrevented || event.repeat) return;
       const command = resolveShortcutCommand(event, keybindings, {
         platform: navigator.platform,
         context: {
@@ -2949,6 +2984,7 @@ export default function SidebarV2() {
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
   }, [
+    modalPage,
     keybindings,
     navigateToThread,
     orderedThreadKeys,
@@ -3366,14 +3402,19 @@ export default function SidebarV2() {
                           onClick={toggleWorkingShelf}
                           aria-expanded={workingShelfExpanded}
                           data-testid="sidebar-v2-working-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left redesign:gap-1.5 redesign:text-secondary-label"
                         >
-                          <span className="text-xs font-medium text-sidebar-muted-foreground">
-                            {workingShelfExpanded
+                          <span className="text-xs font-medium text-sidebar-muted-foreground redesign:text-secondary-label">
+                            {redesign
                               ? "Working"
-                              : `Working (${workingThreads.length})`}
+                              : workingShelfExpanded
+                                ? "Working"
+                                : `Working (${workingThreads.length})`}
                           </span>
-                          <span className="h-px flex-1 bg-sidebar-border/60" />
+                          <span className="hidden text-xs tabular-nums redesign:inline">
+                            {workingThreads.length}
+                          </span>
+                          <span className="h-px flex-1 redesign:hidden bg-sidebar-border/60" />
                           <ChevronDownIcon
                             aria-hidden
                             className={cn(
@@ -3405,18 +3446,23 @@ export default function SidebarV2() {
                           onClick={toggleSnoozedShelf}
                           aria-expanded={snoozedShelfExpanded}
                           data-testid="sidebar-v2-snoozed-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left redesign:gap-1.5 redesign:text-secondary-label"
                         >
-                          <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                            {snoozedShelfExpanded
+                          <span className="text-xs font-medium text-blue-600 dark:text-blue-400 redesign:text-secondary-label">
+                            {redesign
                               ? "Snoozed"
-                              : `Snoozed (${snoozedThreads.length})`}
+                              : snoozedShelfExpanded
+                                ? "Snoozed"
+                                : `Snoozed (${snoozedThreads.length})`}
                           </span>
-                          <span className="h-px flex-1 bg-blue-500/20 dark:bg-blue-400/15" />
+                          <span className="hidden text-xs tabular-nums redesign:inline">
+                            {snoozedThreads.length}
+                          </span>
+                          <span className="h-px flex-1 redesign:hidden bg-blue-500/20 dark:bg-blue-400/15" />
                           <ChevronDownIcon
                             aria-hidden
                             className={cn(
-                              "size-3 text-blue-600 transition-transform dark:text-blue-400",
+                              "size-3 text-blue-600 transition-transform dark:text-blue-400 redesign:text-secondary-label",
                               snoozedShelfExpanded && "rotate-180",
                             )}
                           />
@@ -3439,14 +3485,19 @@ export default function SidebarV2() {
                           onClick={toggleSettledShelf}
                           aria-expanded={settledShelfExpanded}
                           data-testid="sidebar-v2-settled-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left redesign:gap-1.5 redesign:text-secondary-label"
                         >
-                          <span className="text-xs font-medium text-muted-foreground/50">
-                            {settledShelfExpanded
+                          <span className="text-xs font-medium text-muted-foreground/50 redesign:text-secondary-label">
+                            {redesign
                               ? "Settled"
-                              : `Settled (${settledThreads.length})`}
+                              : settledShelfExpanded
+                                ? "Settled"
+                                : `Settled (${settledThreads.length})`}
                           </span>
-                          <span className="h-px flex-1 bg-sidebar-border/60" />
+                          <span className="hidden text-xs tabular-nums redesign:inline">
+                            {settledThreads.length}
+                          </span>
+                          <span className="h-px flex-1 redesign:hidden bg-sidebar-border/60" />
                           <ChevronDownIcon
                             aria-hidden
                             className={cn(
