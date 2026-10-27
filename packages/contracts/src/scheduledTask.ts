@@ -19,39 +19,29 @@ import { ProviderInteractionMode, RuntimeMode } from "./providerPolicy.ts";
 /** 24-hour "HH:MM" wall-clock time. Mirrors `parseTimeOfDay` on the server. */
 const TimeOfDay = TrimmedNonEmptyString.check(
   Schema.isPattern(/^([01]?\d|2[0-3]):([0-5]\d)$/),
-).annotate({ description: "Local wall-clock time in 24-hour HH:MM form, such as 09:30." });
+).annotate({ description: "Local time as HH:MM, such as 09:30." });
 
 export const MIN_SCHEDULED_TASK_INTERVAL_MS = 60_000;
 
-const ScheduledTaskIntervalMs = Schema.Int.check(Schema.isGreaterThan(0)).annotate({
-  description: "Positive interval in milliseconds.",
-});
+const ScheduledTaskIntervalMs = Schema.Int.check(Schema.isGreaterThan(0));
 
 const ScheduledTaskIntervalSchedule = Schema.Struct({
-  type: Schema.Literal("interval").annotate({
-    description: "Select interval scheduling.",
-  }),
+  type: Schema.Literal("interval"),
   everyMs: ScheduledTaskIntervalMs,
-}).annotate({
-  description: "Run repeatedly after a fixed number of milliseconds.",
 });
 
 const ScheduledTaskFixedTimeSchedule = Schema.Struct({
-  type: Schema.Literal("fixed_time").annotate({
-    description: "Select a fixed local wall-clock time.",
-  }),
+  type: Schema.Literal("fixed_time"),
   timeOfDay: TimeOfDay,
   weekdays: Schema.optional(
     Schema.Array(
       Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 6 })).annotate({
-        description: "Weekday number where 0 is Sunday and 6 is Saturday.",
+        description: "Weekday. 0 is Sunday, 6 is Saturday.",
       }),
     ).annotate({
-      description: "Optional weekdays; omit to run every day.",
+      description: "Default: every day.",
     }),
   ),
-}).annotate({
-  description: "Run at a fixed local wall-clock time on selected weekdays.",
 });
 
 /**
@@ -70,16 +60,12 @@ export type ScheduledTaskSchedule = typeof ScheduledTaskSchedule.Type;
 /** Mutation model: newly created or updated interval schedules run at most once per minute. */
 export const ScheduledTaskUpsertSchedule = Schema.Union([
   Schema.Struct({
-    type: Schema.Literal("interval").annotate({
-      description: "Select interval scheduling.",
-    }),
+    type: Schema.Literal("interval"),
     everyMs: ScheduledTaskIntervalMs.check(
       Schema.isGreaterThanOrEqualTo(MIN_SCHEDULED_TASK_INTERVAL_MS),
     ).annotate({
-      description: "Interval in milliseconds, with a minimum of 60000 (one minute).",
+      description: "Min 60000.",
     }),
-  }).annotate({
-    description: "Run repeatedly after a fixed number of milliseconds.",
   }),
   ScheduledTaskFixedTimeSchedule,
 ]).annotate({

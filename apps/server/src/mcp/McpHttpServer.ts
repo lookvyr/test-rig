@@ -1,3 +1,4 @@
+import { advertisedJsonSchema, compactToolkit } from "./advertisedJsonSchema.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import * as ThreadMetadataMcpService from "./ThreadMetadataMcpService.ts";
 import * as WorktreeMcpService from "./WorktreeMcpService.ts";
@@ -171,7 +172,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
     tool: new McpSchema.Tool({
       name: tool.name,
       description: Tool.getDescription(tool),
-      inputSchema: Tool.getJsonSchema(tool),
+      inputSchema: advertisedJsonSchema(tool),
       annotations: {
         ...Context.getOption(tool.annotations, Tool.Title).pipe(
           Option.map((title) => ({ title })),
@@ -234,7 +235,7 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
   });
 });
 
-const PreviewStandardToolkitRegistrationLive = McpServer.toolkit(PreviewStandardToolkit).pipe(
+const PreviewStandardToolkitRegistrationLive = compactToolkit(PreviewStandardToolkit).pipe(
   Layer.provide(PreviewStandardToolkitHandlersLive),
 );
 
@@ -247,30 +248,30 @@ export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewSnapshotRegistrationLive,
 );
 
-export const OrchestratorToolkitRegistrationLive = McpServer.toolkit(OrchestratorToolkit).pipe(
+export const OrchestratorToolkitRegistrationLive = compactToolkit(OrchestratorToolkit).pipe(
   Layer.provide(OrchestratorToolkitHandlersLive),
   Layer.provide(OrchestratorMcpService.layer),
   Layer.provide(ThreadMetadataMcpService.layer),
 );
 
-export const ThreadToolkitRegistrationLive = McpServer.toolkit(ThreadToolkit).pipe(
+export const ThreadToolkitRegistrationLive = compactToolkit(ThreadToolkit).pipe(
   Layer.provide(ThreadToolkitHandlersLive),
 );
 
-const WorktreeToolkitRegistrationLive = McpServer.toolkit(WorktreeToolkit).pipe(
+const WorktreeToolkitRegistrationLive = compactToolkit(WorktreeToolkit).pipe(
   Layer.provide(WorktreeToolkitHandlersLive),
   Layer.provide(WorktreeMcpService.layer),
 );
 
-const PreviewControlsRegistrationLive = McpServer.toolkit(PreviewControlsToolkit).pipe(
+const PreviewControlsRegistrationLive = compactToolkit(PreviewControlsToolkit).pipe(
   Layer.provide(PreviewControlsHandlersLive),
 );
 
-const EnvironmentRegistrationLive = McpServer.toolkit(EnvironmentToolkit).pipe(
+const EnvironmentRegistrationLive = compactToolkit(EnvironmentToolkit).pipe(
   Layer.provide(EnvironmentHandlersLive),
 );
 
-const ProjectRegistrationLive = McpServer.toolkit(ProjectToolkit).pipe(
+const ProjectRegistrationLive = compactToolkit(ProjectToolkit).pipe(
   Layer.provide(ProjectHandlersLive),
 );
 
@@ -286,7 +287,7 @@ const registerHtmlPreview = Effect.fn("McpHttpServer.registerHtmlPreview")(funct
     tool: new McpSchema.Tool({
       name: tool.name,
       description: Tool.getDescription(tool),
-      inputSchema: Tool.getJsonSchema(tool),
+      inputSchema: advertisedJsonSchema(tool),
       annotations: {
         title: "Preview HTML",
         readOnlyHint: true,
@@ -351,15 +352,15 @@ export const HtmlPreviewRegistrationLive = Layer.effectDiscard(registerHtmlPrevi
 );
 
 const HtmlRenderRegistrationLive = Layer.mergeAll(
-  McpServer.toolkit(HtmlRenderToolkit).pipe(Layer.provide(HtmlRenderHandlersLive)),
+  compactToolkit(HtmlRenderToolkit).pipe(Layer.provide(HtmlRenderHandlersLive)),
   HtmlPreviewRegistrationLive,
 ).pipe(Layer.provide(HtmlRender.layer), Layer.provide(PreviewBrowser.layer));
 
-const AttachmentRegistrationLive = McpServer.toolkit(AttachmentToolkit).pipe(
+const AttachmentRegistrationLive = compactToolkit(AttachmentToolkit).pipe(
   Layer.provide(AttachmentHandlersLive),
 );
 
-export const PullRequestsToolkitRegistrationLive = McpServer.toolkit(PullRequestsToolkit).pipe(
+export const PullRequestsToolkitRegistrationLive = compactToolkit(PullRequestsToolkit).pipe(
   Layer.provide(PullRequestsToolkitHandlersLive),
 );
 

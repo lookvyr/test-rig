@@ -78,8 +78,7 @@ const queueEntry = Schema.Struct({
 });
 const QueueListTool = Tool.make("t3_queue_list", {
   ...commandTool,
-  description:
-    "List queued messages in delivery order. Results are a live offset page; use t3_thread_read for full thread history.",
+  description: "List queued messages in send order. For full history, use `t3_thread_read`.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     cursor: Schema.optional(NonNegativeInt),
@@ -103,7 +102,7 @@ const QueueReadTool = Tool.make("t3_queue_read", {
 const QueueEditTool = Tool.make("t3_queue_edit", {
   ...commandTool,
   description:
-    "Replace a queued message's text, preserving its attachments. The service rejects runs that are no longer queued.",
+    "Replace one queued message's text. Attachments stay. Fails if the run is no longer queued.",
   parameters: Schema.Struct({
     ...queueTarget,
     text: Schema.String.check(Schema.isMaxLength(100000)),
@@ -111,18 +110,17 @@ const QueueEditTool = Tool.make("t3_queue_edit", {
 }).annotate(Tool.Destructive, true);
 const QueueCancelTool = Tool.make("t3_queue_cancel", {
   ...commandTool,
-  description: "Cancel a queued run using the existing queue command.",
+  description: "Cancel one queued run.",
   parameters: Schema.Struct(queueTarget),
 }).annotate(Tool.Destructive, true);
 const QueueReorderTool = Tool.make("t3_queue_reorder", {
   ...commandTool,
-  description: "Move a queued run before another queued run, or to the end with beforeRunId=null.",
+  description: "Move one queued run before another, or to the end with `beforeRunId=null`.",
   parameters: Schema.Struct({ ...queueTarget, beforeRunId: Schema.NullOr(RunId) }),
 }).annotate(Tool.Destructive, true);
 const QueuePromoteTool = Tool.make("t3_queue_promote_to_steer", {
   ...commandTool,
-  description:
-    "Deliver a queued message as steering to the specified active run. Existing provider and run-state rules apply.",
+  description: "Send one queued message now as steering to the given active run.",
   parameters: Schema.Struct({ ...queueTarget, targetRunId: RunId }),
 }).annotate(Tool.Destructive, true);
 
@@ -157,8 +155,7 @@ const PendingRequestListTool = Tool.make("t3_pending_request_list", {
   .annotate(Tool.Destructive, false);
 const PendingRequestReadTool = Tool.make("t3_pending_request_read", {
   ...commandTool,
-  description:
-    "Read a pending user question. Answer with t3_pending_request_respond; existing live or message response handling is used.",
+  description: "Read one pending user question. Answer it with `t3_pending_request_respond`.",
   parameters: Schema.Struct(requestTarget),
   success: pendingRequest,
 })
@@ -166,8 +163,7 @@ const PendingRequestReadTool = Tool.make("t3_pending_request_read", {
   .annotate(Tool.Destructive, false);
 const PendingRequestRespondTool = Tool.make("t3_pending_request_respond", {
   ...commandTool,
-  description:
-    "Answer a pending user-input request using the existing runtime response command. This cannot approve a permission request.",
+  description: "Answer one pending user question. This cannot approve a permission request.",
   parameters: Schema.Struct({ ...requestTarget, answers: ProviderUserInputAnswers }),
 })
   .annotate(Tool.Destructive, true)

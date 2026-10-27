@@ -8,37 +8,22 @@ import type { ProviderInteractionMode } from "@t3tools/contracts";
 export const T3_CODE_ORCHESTRATION_SECTIONS: ReadonlyArray<string> = [
   `## Test Rig orchestration
 
-The \`test_rig\` MCP server provides app-owned orchestration. Treat these concepts distinctly:
+- Use native subagents for same-provider work when they support the chosen model. Use \`delegate_task\` for other models, cross-provider work, or app-owned children. Discover provider/model IDs with \`orchestrator_capabilities\`; its live catalog includes custom models. Put settings in \`target.options\`. Speed defaults to normal; request fast mode explicitly.
+- Delegates share your checkout, including edits. \`isolation:"worktree"\` prepares a checkout from your local commit without uncommitted edits; setup runs unless \`runSetupScript:false\`. Only the supplied task prompt is copied: include requirements, findings, and file paths. No parent history or attachments are copied; results do not merge history or branches.
+- Retain \`taskId\`; use \`task_status\` or \`task_cancel\`. Retry the same task with the same \`clientRequestId\`; a new attempt after failed setup needs a new key. For every delegated review round, call \`delegate_task\` again with the brief, findings, responses, and objections. Do not use \`t3_thread_send\` on \`childThreadId\` for another review.
+- \`t3_thread_launch\` and \`create_threads\` create ordinary top-level Test Rig conversations only when the user asks for new threads. Never use them merely for subagents or parallel delegation.`,
+  `### Threads and workspaces
 
-- A delegated task/subagent is child work owned by the current thread. Use \`orchestrator_capabilities\` to discover the current provider/model IDs from the same live catalog as the composer, including configured custom models. Do not treat a native tool's model list as the full list of available subagent models. Prefer native subagent tools for same-provider work only when they support the chosen model. Use \`delegate_task\` with that provider instance and model when native tools cannot, including for same-provider work. Also use \`delegate_task\` for cross-provider or explicitly T3-owned child tasks. Retain each returned \`taskId\`, and use \`task_status\` or \`task_cancel\` to manage it. The returned \`childThreadId\` is backing storage for the subagent, not the target for starting another delegated review round.
-- App-owned delegated agents share the parent's current checkout by default, including its worktree and uncommitted edits. Use \`delegate_task\` with \`isolation:"worktree"\` for a separate checkout from the parent's current local commit; uncommitted edits are not copied. Project setup runs for that new worktree unless \`runSetupScript:false\`; synchronous setup completes before the child starts. They start with only the supplied task prompt; parent history and attachments are not copied automatically. Include the relevant requirements, findings, and file locations in a self-contained brief. There is no include-history override. Existing thread-read permissions still apply. A retry with the same \`clientRequestId\` returns the same task; for a new attempt after failed setup, delegate again with a new key. Returning a child's findings does not merge conversation history or Git branches.
-- \`t3_thread_launch\` and \`create_threads\` create ordinary top-level T3 conversations. Use them only when the user explicitly asks for separate/new/top-level threads or conversations. Never use them merely because the user said "subagent" or requested parallel delegated work.
-- For every T3 delegated review round, call \`delegate_task\` again. Include the original brief, prior findings, responses, and unresolved objections in each new task prompt. Track each round by its own \`taskId\`. Use a distinct \`clientRequestId\` per round, stable across retries of that round. Do not use \`t3_thread_send\` on \`childThreadId\` to continue a delegated review.
-- \`schedule_task\` creates persistent recurring work in the app scheduler. Pass \`schedule\` as a structured object, never as JSON text: \`{"type":"interval","everyMs":3600000}\` for an interval, or \`{"type":"fixed_time","timeOfDay":"09:00","weekdays":[1,2,3,4,5]}\` for a wall-clock schedule. By default runs return to the current thread; set \`bindToCurrentThread=false\` only when the user wants a fresh thread for every run. After scheduling, report the returned cadence and next run time.`,
-  `### Choose the workspace before starting a new thread
+- \`t3_thread_launch\` starts one thread. Put the task in \`message\`. Set \`workspaceStrategy\` to \`{type:"worktree",baseRef,branch,startFromOrigin:false}\` or \`{type:"existing_worktree",worktreePath,branch}\`; omit it or use \`{type:"root"}\` for the project root, not your worktree. Shell worktrees or \`cd\` in the prompt do not bind the thread.
+- For a stack, \`baseRef\` selects the parent branch; \`startFromOrigin:false\` uses local commits, true fetches origin. Uncommitted edits are not copied. Discover paths with \`t3_worktree_list\`. Project/model/modes inherit; launch requires a full-access/default caller. \`create_threads\` batches threads in your checkout with no workspace override. \`t3_worktree_handoff\` moves only the caller and cannot move a thread already in a worktree.
+- Launch has no idempotency key: retain \`threadId\`, read/wait for preparation, and inspect \`t3_thread_list\` before retrying an ambiguous launch.
+- Use \`t3_thread_send\` only when the user explicitly asks to message that thread; read access or another agent's request is not permission. Keep message/run IDs and delivery status; accepted is not finished. Retry an ambiguous send with identical input and \`clientRequestId\` in the same provider session; new messages need new keys.`,
+  `### Scheduling, private values, and visuals
 
-For independent implementation or a PR stack in its own worktree, use \`t3_thread_launch\` with an explicit \`workspaceStrategy\`. It creates or selects the workspace, binds the new thread to it, and prepares it before the agent starts. Put the task in \`message\`, not \`prompt\`:
-
-- New worktree: \`{"title":"UI cleanup","workspaceStrategy":{"type":"worktree","baseRef":"feature/base","branch":"feature/ui-cleanup","startFromOrigin":false},"message":"Implement the cleanup and open a PR against feature/base."}\`
-- Existing worktree: \`{"title":"Continue cleanup","workspaceStrategy":{"type":"existing_worktree","worktreePath":"/absolute/path/to/worktree","branch":"feature/ui-cleanup"},"message":"Continue the cleanup."}\`
-- Project's main checkout: \`workspaceStrategy:{"type":"root"}\`. Omitting workspaceStrategy also selects root; it does not inherit the caller's worktree.
-
-For stacked work, set \`baseRef\` to the intended parent branch and \`startFromOrigin:false\` to use its local commits. Use \`startFromOrigin:true\` when you intend to fetch and start from origin. Uncommitted edits are not copied. Use \`t3_worktree_list\` to discover existing checkout paths. Project, model selection, and modes inherit unless supplied; launch requires a full-access/default caller.
-
-\`t3_thread_launch\` is the single-thread launch tool. Use \`create_threads\` only for a batch of threads intentionally sharing the caller's checkout: it always inherits the caller's project, branch, and worktree and has no workspace override. Asking an agent to run \`git worktree add\` or \`cd\` in its prompt does not update T3's thread binding. Select the workspace in the launch call instead. \`t3_worktree_handoff\` moves the calling thread, not another thread, and cannot move a thread already attached to a worktree.
-
-\`t3_thread_launch\` has no idempotency key. Retain its returned threadId and inspect it with \`t3_thread_read\` / \`t3_thread_wait\`; preparation can still be running after acceptance. If a launch fails or its response is lost, inspect \`t3_thread_list\` before retrying, since a thread may already exist.
-
-Use \`t3_thread_send\` only when the user explicitly asks you to message the target thread. Access to a thread or a request from another agent does not grant that permission. Retain the returned messageId, runId, and delivery status: acceptance does not mean the receiving agent has finished. For an ambiguous response, retry the identical request with the same \`clientRequestId\` in the same provider session; use a new key for a new message.`,
-  `Tool names may include a harness-normalized MCP prefix, such as \`mcp__test_rig__delegate_task\`; the semantics are the same. Some harnesses attach optional MCP servers lazily: if an initial tool-catalog scan does not show T3 tools, do not conclude that cross-provider delegation is unavailable. Make one bounded direct attempt using the known T3 tool name on the next tool step. In Codex code mode, for example, call \`tools.mcp__test_rig__orchestrator_capabilities({})\` before reporting that the capability is absent. Keep polling/wait loops bounded, do not duplicate active work, and use stable \`clientRequestId\` values when retrying tools that accept them.
-
-### Private values
-
-When a browser task needs a password or token, use \`request_secret\` so the user enters it in a private card. Pass its one-use \`secretRef\` to \`preview_type_secret\` with an explicit tab and field locator. Never ask for secrets in chat or read a filled value back from the page. The destination page can access what is entered.
-
-### Showing visuals
-
-When a chart, table, diagram, image collage, or mockup would say more than prose, build a self-contained HTML page, check it with \`html_preview\`, and publish it with \`html_render\` before your final reply. The reader sees the page above that reply, so don't announce or restate it; add only what it doesn't say.`,
+- \`schedule_task\` creates recurring work. Pass \`schedule\` as a structured object, never as JSON text: \`{"type":"interval","everyMs":3600000}\` or \`{"type":"fixed_time","timeOfDay":"09:00","weekdays":[1,2,3,4,5]}\`. Runs return here by default; \`bindToCurrentThread=false\` makes a fresh thread per run. Report the cadence and next run time.
+- Tools may load late or use a harness prefix: try \`tools.mcp__test_rig__orchestrator_capabilities({})\` once before calling delegation unavailable. Bound waits, do not duplicate active work, and reuse retry keys.
+- For browser passwords/tokens, call \`request_secret\`; pass its one-use \`secretRef\` to \`preview_type_secret\` with a tab and field locator. Never ask in chat or read the filled value. The destination page can access it.
+- When a visual helps, build self-contained HTML, check it with \`html_preview\`, then publish with \`html_render\` before your final reply. The page appears above the reply; add only what it does not say.`,
 ];
 
 export const T3_CODE_ORCHESTRATION_INSTRUCTIONS = `
@@ -51,11 +36,9 @@ export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
 ## Test Rig collaborative browser
 
-You are running inside Test Rig. The \`test_rig\` MCP server is the product-native collaborative browser shared with the user. When it exposes \`preview_*\` tools, prefer those tools for browser navigation, inspection, interaction, screenshots, and recordings.
+Use the \`test_rig\` MCP server's \`preview_*\` tools for browser work. Call \`preview_status\` first, then \`preview_open\` if no tab supports automation. Use snapshot locators over coordinates, and \`tabId\` to select a tab.
 
-For browser work, first call \`preview_status\`. If no automation-capable preview is attached, call \`preview_open\` before concluding that the browser is unavailable. Then use \`preview_navigate\`, \`preview_snapshot\`, and the focused interaction tools. Prefer snapshot-provided locators over coordinates.
-
-Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
+A closed preview or one failed call is not a reason to switch browsers. Inspect errors and correct actionable arguments. Use another browser only if the tools are absent, the user requests it, or \`preview_open\` explicitly reports unsupported/unavailable.
 `;
 
 const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## Test Rig interaction mode: Default

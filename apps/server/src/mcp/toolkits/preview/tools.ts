@@ -52,7 +52,7 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 export const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report whether a collaborative browser tab is automation-capable, including its URL, title, visibility, loading state, viewport mode, and measured CSS-pixel size. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab.",
+    "Report automation availability, URL, title, visibility, loading, viewport, and size. Select tabId or omit it for this session's current tab.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
   failure: PreviewAutomationError,
@@ -66,7 +66,7 @@ export const PreviewStatusTool = Tool.make("preview_status", {
 export const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Initialize a collaborative browser tab and open its thread-bound inline preview by default. Set open=false for background-only automation. Pass tabId to reuse a specific existing tab, set reuseExistingTab=false to create another tab, or omit both to use this agent session's current tab.",
+      "Open and show a browser tab. open=false keeps it in the background. Use tabId for an existing tab, reuseExistingTab=false for a new one, or omit both for this session's current tab.",
     parameters: PreviewAutomationOpenInput,
     success: PreviewAutomationStatus,
     failure: PreviewAutomationError,
@@ -79,7 +79,7 @@ export const PreviewOpenTool = browserTool(
 export const PreviewNavigateTool = safeBrowserTool(
   Tool.make("preview_navigate", {
     description:
-      "Navigate a collaborative browser tab. Pass tabId to target a specific tab, plus {url:'https://t3.chat'} for a website or {target:{kind:'environment-port',port:5173}} for a dev server. Exactly one of url or target is required.",
+      "Navigate the chosen tab. Pass `url` for a website, or `target:{kind:'environment-port',port}` for a dev server. Exactly one of `url` and `target`.",
     parameters: PreviewAutomationNavigateInput,
     success: PreviewAutomationStatus,
     failure: PreviewAutomationError,
@@ -90,7 +90,7 @@ export const PreviewNavigateTool = safeBrowserTool(
 export const PreviewResizeTool = safeBrowserTool(
   Tool.make("preview_resize", {
     description:
-      "Resize a collaborative browser tab, optionally selected by tabId. Use {mode:'fill'}, {mode:'freeform',width:1024,height:768}, or {mode:'preset',preset:'iphone-12-pro',orientation:'portrait'}. This changes CSS layout breakpoints without changing the desktop browser user agent.",
+      "Resize the chosen tab: {mode:'fill'}, {mode:'freeform',width,height}, or {mode:'preset',preset,orientation}. Changes CSS size only, not the user agent.",
     parameters: PreviewAutomationResizeInput,
     success: PreviewAutomationResizeResult,
     failure: PreviewAutomationError,
@@ -103,7 +103,7 @@ export const PreviewResizeTool = safeBrowserTool(
 export const PreviewSetAppearanceTool = safeBrowserTool(
   Tool.make("preview_set_appearance", {
     description:
-      "Emulate prefers-color-scheme in a collaborative browser tab, optionally selected by tabId. Use {colorScheme:'dark'} or {colorScheme:'light'} to preview the page in that appearance, and {colorScheme:'system'} to clear the override and follow the OS appearance.",
+      "Set `prefers-color-scheme` for the chosen tab: 'dark', 'light', or 'system' to clear the override.",
     parameters: PreviewAutomationSetColorSchemeInput,
     success: PreviewAutomationSetColorSchemeResult,
     failure: PreviewAutomationError,
@@ -116,7 +116,7 @@ export const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = readonlyBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a page before interacting. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab. Returns bounded page text, interactive elements with selectors, recent diagnostics, and a PNG screenshot. Omission notes explain trimmed data; use preview_evaluate for targeted inspection. Set includeImage=false for text-only output. Set save=true to save the PNG and return its local screenshotPath and portable screenshotMarkdown. Include screenshotMarkdown verbatim in your reply to show the saved image in chat.",
+      "Inspect before interacting: bounded text, element selectors, diagnostics, and PNG. Select tabId or omit for the current tab. Trimmed-data notes guide targeted preview_evaluate reads. includeImage=false omits PNG; save=true returns local screenshotPath and screenshotMarkdown. Include screenshotMarkdown verbatim to show it in chat.",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(Schema.Boolean).annotate({
@@ -136,7 +136,7 @@ export const PreviewSnapshotTool = readonlyBrowserTool(
 export const PreviewClickTool = browserTool(
   Tool.make("preview_click", {
     description:
-      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together.",
+      "Click exactly one target. Prefer a Playwright locator; selector is CSS. Coordinates x/y go together. Select tabId or omit for the current tab.",
     parameters: PreviewAutomationClickInput,
     success: Schema.Null,
     failure: PreviewAutomationError,
@@ -146,8 +146,7 @@ export const PreviewClickTool = browserTool(
 
 export const PreviewTypeTool = browserTool(
   Tool.make("preview_type", {
-    description:
-      "Insert literal text into one input in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; set clear=true to replace existing text.",
+    description: "Type literal text into one input. `clear=true` replaces the current text.",
     parameters: PreviewAutomationTypeInput,
     success: Schema.Null,
     failure: PreviewAutomationError,
@@ -172,8 +171,7 @@ export const PreviewTypeSecretTool = browserTool(
 
 export const PreviewPressTool = browserTool(
   Tool.make("preview_press", {
-    description:
-      "Press one keyboard key in the tab selected by tabId, or this agent session's current tab when omitted. Examples: {key:'Enter'}, {key:'Escape'}, or {key:'a',modifiers:['Meta']}.",
+    description: "Press one key, such as {key:'Enter'} or {key:'a',modifiers:['Meta']}.",
     parameters: PreviewAutomationPressInput,
     success: Schema.Null,
     failure: PreviewAutomationError,
@@ -184,7 +182,7 @@ export const PreviewPressTool = browserTool(
 export const PreviewScrollTool = safeBrowserTool(
   Tool.make("preview_scroll", {
     description:
-      "Scroll the tab selected by tabId, or this agent session's current tab when omitted. Positive deltaY scrolls down and positive deltaX scrolls right; a locator/selector targets a container.",
+      "Scroll the chosen tab, or one container with a locator or selector. Positive `deltaY` scrolls down. Positive `deltaX` scrolls right.",
     parameters: PreviewAutomationScrollInput,
     success: Schema.Null,
     failure: PreviewAutomationError,
@@ -206,7 +204,7 @@ export const PreviewEvaluateTool = browserTool(
 export const PreviewWaitForTool = readonlyBrowserTool(
   Tool.make("preview_wait_for", {
     description:
-      "Wait in the tab selected by tabId, or this agent session's current tab when omitted, until all supplied locator, selector, text, and URL conditions match.",
+      "Wait until all given locator, selector, text, and URL conditions match in the chosen tab.",
     parameters: PreviewAutomationWaitForInput,
     success: Schema.Null,
     failure: PreviewAutomationError,
@@ -252,8 +250,7 @@ const PreviewDialogTool = browserTool(
 
 const PreviewHoverTool = safeBrowserTool(
   Tool.make("preview_hover", {
-    description:
-      "Move the mouse over exactly one target in the tab selected by tabId, or this agent session's current tab when omitted, to reveal hover menus and tooltips. Server browser tabs only.",
+    description: "Hover one target to show menus or tooltips.",
     parameters: PreviewAutomationHoverInput,
     success: Schema.Null,
     failure: PreviewAutomationError,
@@ -264,7 +261,7 @@ const PreviewHoverTool = safeBrowserTool(
 const PreviewSelectTool = browserTool(
   Tool.make("preview_select", {
     description:
-      "Choose options in one native <select> in the tab selected by tabId, or this agent session's current tab when omitted, by option value or visible label. Custom dropdowns are not <select>; click them open and click the option instead. Server browser tabs only.",
+      "Pick options in one native <select>, by value or label. For a custom dropdown, click it open, then click the option.",
     parameters: PreviewAutomationSelectInput,
     success: PreviewAutomationSelectResult,
     failure: PreviewAutomationError,
@@ -274,8 +271,7 @@ const PreviewSelectTool = browserTool(
 
 const PreviewDragTool = browserTool(
   Tool.make("preview_drag", {
-    description:
-      "Drag one element onto another in the tab selected by tabId, or this agent session's current tab when omitted. Server browser tabs only.",
+    description: "Drag one element onto another.",
     parameters: PreviewAutomationDragInput,
     success: Schema.Null,
     failure: PreviewAutomationError,
@@ -286,7 +282,7 @@ const PreviewDragTool = browserTool(
 const PreviewUploadTool = browserTool(
   Tool.make("preview_upload", {
     description:
-      "Give files on the environment to the page in the tab selected by tabId, or this agent session's current tab when omitted. After clicking an upload control, preview_status reports the open fileChooser; call this with absolute paths to answer it, or with an empty list to cancel. Pass a locator for an <input type=file> to set its files without a picker. Server browser tabs only.",
+      "Give files from this environment to the page. After a click opens a file picker, `preview_status` reports it. Pass absolute paths to answer it, or an empty list to cancel. Or pass a locator for an <input type=file>.",
     parameters: PreviewAutomationUploadInput,
     success: Schema.Null,
     failure: PreviewAutomationError,

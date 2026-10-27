@@ -19,9 +19,6 @@ const dependencies = [
   ProjectService.ProjectService,
 ];
 
-const REGISTER_EVERY_PR =
-  "Register every pull request you open for this thread, including each layer of a stack, right after creating it.";
-
 /**
  * Either the pull request's URL or its repository and number. Both forms
  * resolve to the same host-level identity, so the agent can pass whichever
@@ -48,7 +45,7 @@ export const PullRequestTargetInput = Schema.Struct({
   ),
   number: Schema.optional(
     PositiveInt.annotate({
-      description: "Pull request number. Required with repository when url is omitted.",
+      description: "With `repository`, when no `url`.",
     }),
   ),
   host: Schema.optional(
@@ -174,9 +171,7 @@ const PullRequestIdentity = {
 
 export const LinkPullRequestResult = Schema.Struct({
   ...PullRequestIdentity,
-  alreadyLinked: Schema.Boolean.annotate({
-    description: "True when the pull request was linked to this thread before the call.",
-  }),
+  alreadyLinked: Schema.Boolean,
 });
 export type LinkPullRequestResult = typeof LinkPullRequestResult.Type;
 
@@ -184,20 +179,14 @@ export const UnlinkPullRequestResult = Schema.Struct({
   host: Schema.String,
   repository: Schema.String,
   number: Schema.Int,
-  wasLinked: Schema.Boolean.annotate({
-    description: "False when the pull request was not linked to this thread to begin with.",
-  }),
+  wasLinked: Schema.Boolean,
 });
 export type UnlinkPullRequestResult = typeof UnlinkPullRequestResult.Type;
 
 export const WatchPullRequestResult = Schema.Struct({
   ...PullRequestIdentity,
-  watching: Schema.Boolean.annotate({
-    description: "Whether T3 Code now watches the pull request for this thread.",
-  }),
-  wasWatching: Schema.Boolean.annotate({
-    description: "Whether it was already watched before the call.",
-  }),
+  watching: Schema.Boolean,
+  wasWatching: Schema.Boolean,
 });
 export type WatchPullRequestResult = typeof WatchPullRequestResult.Type;
 
@@ -234,7 +223,8 @@ export const ListThreadPullRequestsResult = Schema.Struct({
 export type ListThreadPullRequestsResult = typeof ListThreadPullRequestsResult.Type;
 
 const LinkPullRequestTool = Tool.make("link_pull_request", {
-  description: `${REGISTER_EVERY_PR} Links a pull request to this thread so T3 Code tracks it, shows its status beside the thread, and settles the thread when it merges. Pass a full PR URL in url, or a repository path plus number, for example {repository: "owner/repo", number: 123}. Repository is a path, not a URL; host defaults to this thread's project. Linking an already-linked pull request succeeds with alreadyLinked=true.`,
+  description:
+    "Register every PR you create or work on, including each stack layer, immediately after creating or taking it over. Links it to this thread for status and settlement on merge. Pass url or repository plus number; repository is a path, host defaults to the project. Repeating a link succeeds with alreadyLinked=true.",
   parameters: PullRequestTargetInput,
   success: LinkPullRequestResult,
   failure: PullRequestToolError,
@@ -248,7 +238,7 @@ const LinkPullRequestTool = Tool.make("link_pull_request", {
 
 const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
   description:
-    "Remove a pull request link from this thread, for example after closing a pull request you opened by mistake. Pass the URL, or repository plus number. Unlinking a pull request that is not linked succeeds with wasLinked=false.",
+    "Remove a PR link from this thread. Succeeds with `wasLinked=false` when it was not linked.",
   parameters: PullRequestTargetInput,
   success: UnlinkPullRequestResult,
   failure: PullRequestToolError,
@@ -261,7 +251,7 @@ const UnlinkPullRequestTool = Tool.make("unlink_pull_request", {
   .annotate(Tool.OpenWorld, false);
 
 const ListThreadPullRequestsTool = Tool.make("list_thread_pull_requests", {
-  description: `List the pull requests linked to this thread with their last known host state, and how they chain into stacks (bottom to top). ${REGISTER_EVERY_PR}`,
+  description: `List the pull requests linked to this thread with their last known host state, and how they chain into stacks (bottom to top). Register every PR created or worked on, including each stack layer.`,
   success: ListThreadPullRequestsResult,
   failure: PullRequestToolError,
   dependencies,
@@ -287,8 +277,7 @@ const WatchPullRequestTool = Tool.make("watch_pull_request", {
   .annotate(Tool.OpenWorld, false);
 
 const UnwatchPullRequestTool = Tool.make("unwatch_pull_request", {
-  description:
-    "Stop T3 Code from watching a pull request for this thread. The pull request stays linked. Pass the URL, or repository plus number.",
+  description: "Stop watching a PR for this thread. It stays linked.",
   parameters: PullRequestTargetInput,
   success: WatchPullRequestResult,
   failure: PullRequestToolError,
