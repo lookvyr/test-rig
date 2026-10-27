@@ -1,4 +1,4 @@
-import { EnvironmentId, type VcsRef } from "@t3tools/contracts";
+import { EnvironmentId, type VcsRef, type VcsStatusResult } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   dedupeRemoteBranchesWithLocalMatches,
@@ -12,6 +12,7 @@ import {
   resolveBranchTriggerLabel,
   resolveBranchToolbarPrBranch,
   resolveBranchToolbarValue,
+  resolveBranchToolbarSync,
   resolveLockedWorkspaceLabel,
   resolveWorkspaceDisplayName,
   resolveLocalCheckoutBranchMismatch,
@@ -749,5 +750,94 @@ describe("workspace identity and preparation", () => {
     expect(resolveWorkspaceDisplayName("C:\\projects\\repo\\")).toBe("repo");
     expect(resolveWorkspaceDisplayName("/")).toBe("/");
     expect(resolveWorkspaceDisplayName(null)).toBeNull();
+  });
+});
+
+describe("resolveBranchToolbarSync", () => {
+  const gitStatus: VcsStatusResult = {
+    isRepo: true,
+    hasPrimaryRemote: false,
+    isDefaultRef: true,
+    refName: "main",
+    hasWorkingTreeChanges: false,
+    workingTree: { files: [], insertions: 0, deletions: 0 },
+    hasUpstream: false,
+    aheadCount: 0,
+    behindCount: 0,
+    pr: null,
+  };
+  const localDraft = {
+    envMode: "local" as const,
+    worktreePath: null,
+    threadBranch: null,
+    hasServerThread: false,
+    gitStatus,
+  };
+
+  it("captures the checkout for a new local draft without opening Changes", () => {
+    expect(resolveBranchToolbarSync(localDraft)).toEqual({ branch: "main" });
+  });
+
+  it("fills an existing thread's missing branch after status arrives", () => {
+    expect(
+      resolveBranchToolbarSync({ ...localDraft, hasServerThread: true, gitStatus: null }),
+    ).toBeNull();
+    expect(resolveBranchToolbarSync({ ...localDraft, hasServerThread: true })).toEqual({
+      branch: "main",
+    });
+  });
+
+  it("preserves a saved thread's branch when another thread switches the shared checkout", () => {
+    expect(
+      resolveBranchToolbarSync({
+        ...localDraft,
+        hasServerThread: true,
+        threadBranch: "feature/saved",
+      }),
+    ).toBeNull();
+    expect(resolveBranchToolbarSync({ ...localDraft, threadBranch: "feature/saved" })).toEqual({
+      branch: "main",
+    });
+  });
+
+  it.each([false, true])(
+    "does not replace a pending worktree base (saved: %s)",
+    (hasServerThread) => {
+      expect(
+        resolveBranchToolbarSync({
+          ...localDraft,
+          hasServerThread,
+          envMode: "worktree",
+          threadBranch: "release",
+        }),
+      ).toBeNull();
+      expect(
+        resolveBranchToolbarSync({ ...localDraft, hasServerThread, envMode: "worktree" }),
+      ).toBeNull();
+    },
+  );
+
+  it("uses the actual worktree status when filling a worktree thread", () => {
+    expect(
+      resolveBranchToolbarSync({
+        ...localDraft,
+        hasServerThread: true,
+        envMode: "worktree",
+        worktreePath: "/repo-worktree",
+        gitStatus: { ...gitStatus, refName: "feature/worktree" },
+      }),
+    ).toEqual({ branch: "feature/worktree" });
+  });
+
+  it("does not invent a branch for detached HEAD or a non-repository", () => {
+    expect(
+      resolveBranchToolbarSync({ ...localDraft, gitStatus: { ...gitStatus, refName: null } }),
+    ).toBeNull();
+    expect(
+      resolveBranchToolbarSync({
+        ...localDraft,
+        gitStatus: { ...gitStatus, isRepo: false, refName: null },
+      }),
+    ).toBeNull();
   });
 });

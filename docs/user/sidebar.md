@@ -7,6 +7,10 @@ The new design is on by default. It uses quieter read titles, clearer status
 colors, and shorter cards for threads without a branch. Turn off **New design**
 in **Settings → Beta** to return to the classic layout.
 
+New threads in a repository show their branch even if you never open **Changes**.
+Opening a thread with a missing branch label fills it from that thread's current
+checkout. Existing branch associations stay unchanged.
+
 A branching-arrow icon before the branch name marks active threads attached to
 a worktree, and search results show it too. Compact rows for settled threads
 leave it out; hover over any thread to see its worktree name under the branch.

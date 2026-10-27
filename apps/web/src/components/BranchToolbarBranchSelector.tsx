@@ -28,6 +28,7 @@ import {
 } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { useSourceControlActionRunning } from "../lib/sourceControlActions";
 import { useEnvironmentSettings } from "../hooks/useSettings";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
@@ -54,6 +55,7 @@ import {
   resolveBranchToolbarPrBranch,
   resolveBranchSelectionTarget,
   resolveBranchToolbarValue,
+  resolveBranchToolbarSync,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
   shouldIncludeBranchPickerItem,
@@ -543,6 +545,34 @@ export function BranchToolbarBranchSelector({
       }
     });
   };
+
+  const isGitActionRunning = useSourceControlActionRunning({ environmentId, cwd: branchCwd }, [
+    "runStackedAction",
+    "pull",
+    "publishRepository",
+  ]);
+
+  useEffect(() => {
+    if (isBranchActionPending || isGitActionRunning || branchStatusQuery.isPending) return;
+    const update = resolveBranchToolbarSync({
+      envMode: effectiveEnvMode,
+      worktreePath: activeWorktreePath,
+      threadBranch: activeThreadBranch,
+      hasServerThread,
+      gitStatus: branchStatusQuery.data,
+    });
+    if (update) setThreadBranch(update.branch, activeWorktreePath);
+  }, [
+    activeThreadBranch,
+    activeWorktreePath,
+    branchStatusQuery.data,
+    branchStatusQuery.isPending,
+    effectiveEnvMode,
+    hasServerThread,
+    isBranchActionPending,
+    isGitActionRunning,
+    setThreadBranch,
+  ]);
 
   // Default the worktree base to the repo default branch (origin/HEAD), only
   // falling back to the checked-out branch when no default is known.

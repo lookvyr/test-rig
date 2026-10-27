@@ -1,4 +1,5 @@
-import type { EnvironmentId, VcsRef, ProjectId } from "@t3tools/contracts";
+import type { EnvironmentId, VcsRef, VcsStatusResult, ProjectId } from "@t3tools/contracts";
+import { resolveLiveThreadBranchUpdate } from "./GitActionsControl.logic";
 import * as Schema from "effect/Schema";
 import { toSortableTimestamp } from "../lib/threadSort";
 export {
@@ -166,6 +167,23 @@ export function resolveDraftEnvModeAfterBranchChange(input: {
     return "worktree";
   }
   return "local";
+}
+
+/** Drafts follow their checkout; saved threads only need missing branch metadata filled in. */
+export function resolveBranchToolbarSync(input: {
+  envMode: EnvMode;
+  worktreePath: string | null;
+  threadBranch: string | null;
+  hasServerThread: boolean;
+  gitStatus: VcsStatusResult | null;
+}) {
+  if (
+    (input.envMode === "worktree" && input.worktreePath === null) ||
+    (input.hasServerThread && input.threadBranch !== null)
+  ) {
+    return null;
+  }
+  return resolveLiveThreadBranchUpdate(input);
 }
 
 export function resolveBranchToolbarValue(input: {
