@@ -1,6 +1,6 @@
 import type { LegendListRef } from "@legendapp/list/react";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { resolveTimelineIsAtEnd } from "./MessagesTimeline.logic";
+import { resolveTimelineDistanceFromEnd, resolveTimelineIsAtEnd } from "./MessagesTimeline.logic";
 import {
   readTimelinePosition,
   timelineContentOverflowsViewport,
@@ -27,12 +27,9 @@ export function useTimelineScroll({
   const [scrollNode, onScrollElementChange] = useState<HTMLElement | null>(null);
   const scrollFrame = useRef<number | null>(null);
   const navigationScrollOffset = useRef<number | null>(null);
-  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancelButtonReveal = useCallback(() => {
-    if (revealTimer.current !== null) {
-      clearTimeout(revealTimer.current);
-      revealTimer.current = null;
-    }
+  const anchoredEndSpaceSize = useRef(0);
+  const onAnchoredEndSpaceChange = useCallback((size: number) => {
+    anchoredEndSpaceSize.current = size;
   }, []);
   const cancelPendingScroll = useCallback(() => {
     if (scrollFrame.current !== null) {
@@ -46,10 +43,8 @@ export function useTimelineScroll({
       modeRef.current = mode;
       navigationScrollOffset.current = null;
       setLiveFollowEnabled(true);
-      cancelButtonReveal();
-      setShowScrollToBottom(false);
     },
-    [cancelPendingScroll, cancelButtonReveal],
+    [cancelPendingScroll],
   );
   const cancelForUserNavigation = useCallback(() => {
     cancelPendingScroll();
@@ -60,6 +55,8 @@ export function useTimelineScroll({
   }, [cancelPendingScroll, listRef, onManualNavigation]);
   const onIsAtEndChange = useCallback(
     (isAtEnd: boolean) => {
+      // Visibility describes the viewport, independently of follow intent.
+      setShowScrollToBottom(!isAtEnd);
       if (modeRef.current !== "free-scrolling") return;
       const offset = listRef.current?.getState().scroll ?? null;
       const movedDown =
@@ -71,9 +68,6 @@ export function useTimelineScroll({
       // Only returning toward the end should re-arm follow, even for a tiny scroll.
       if (isAtEnd && movedDown) {
         resumeFollowing();
-      } else if (!isAtEnd && revealTimer.current === null) {
-        // Schedule once per departure; stream/scroll reports must not postpone the button.
-        revealTimer.current = setTimeout(() => setShowScrollToBottom(true), 150);
       }
     },
     [listRef, resumeFollowing],
@@ -89,23 +83,37 @@ export function useTimelineScroll({
     [listRef, resumeFollowing],
   );
 
+  // Call before adding the outgoing row or clearing the composer. Sending from
+  // history preserves the viewport; near the end, the caller can frame the new turn.
+  const prepareForSend = useCallback(
+    ({ anchorNewTurn = false, forceFollow = false } = {}) => {
+      const distance = resolveTimelineDistanceFromEnd(
+        listRef.current?.getState(),
+        anchoredEndSpaceSize.current,
+        composerInset,
+      );
+      if (!forceFollow && distance !== undefined && distance > 300) {
+        cancelForUserNavigation();
+        return false;
+      }
+      if (anchorNewTurn) resumeFollowing("anchoring-new-turn");
+      else scrollToEnd();
+      return true;
+    },
+    [listRef, composerInset, cancelForUserNavigation, resumeFollowing, scrollToEnd],
+  );
+
   useEffect(() => {
-    if (threadKey !== null && readTimelinePosition(threadKey)?.atEnd === false) {
+    const restoredAwayFromEnd =
+      threadKey !== null && readTimelinePosition(threadKey)?.atEnd === false;
+    setShowScrollToBottom(restoredAwayFromEnd);
+    if (restoredAwayFromEnd) {
       cancelForUserNavigation();
     } else {
       resumeFollowing();
     }
-    return () => {
-      cancelPendingScroll();
-      cancelButtonReveal();
-    };
-  }, [
-    threadKey,
-    cancelForUserNavigation,
-    resumeFollowing,
-    cancelPendingScroll,
-    cancelButtonReveal,
-  ]);
+    return cancelPendingScroll;
+  }, [threadKey, cancelForUserNavigation, resumeFollowing, cancelPendingScroll]);
 
   // The timeline supplies its actual node, including when an empty/loading list mounts later.
   useEffect(() => {
@@ -116,7 +124,11 @@ export function useTimelineScroll({
         anchorOffset,
       });
     const viewportIsAwayFromEnd = () =>
-      resolveTimelineIsAtEnd(listRef.current?.getState()) === false;
+      resolveTimelineIsAtEnd(
+        listRef.current?.getState(),
+        anchoredEndSpaceSize.current,
+        composerInset,
+      ) === false;
     const handleWheel = (event: WheelEvent) => {
       if (event.deltaY < 0 && contentScrollsUp()) cancelForUserNavigation();
     };
@@ -177,8 +189,10 @@ export function useTimelineScroll({
     showScrollToBottom,
     resumeFollowing,
     scrollToEnd,
+    prepareForSend,
     cancelForUserNavigation,
     onIsAtEndChange,
+    onAnchoredEndSpaceChange,
     onScrollElementChange,
   };
 }

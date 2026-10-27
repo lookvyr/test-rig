@@ -10,7 +10,7 @@ The side chat receives a snapshot of the parent’s context when it opens. If th
 
 Side chats use the same checkout as their parent. Both can work at the same time, and both see file changes made by either conversation. Their later messages are separate.
 
-New replies stay in view as they arrive. Scroll up to read earlier messages without being pulled back down. Returning to the bottom, choosing **Scroll to end**, or sending a message resumes following the conversation.
+New replies stay in view as they arrive. Scroll up to read earlier messages without being pulled back down. Returning to the bottom or choosing **Scroll to end** resumes following the conversation. Sending within 300 pixels of the content end also resumes following; sending while further up preserves your reading position.
 
 - Switching tabs, changing the main conversation, or hiding the right panel preserves each conversation and draft. Reopen the panel and select the existing tab to return to it; `/side` creates another chat.
 - Closing the Side chat tab with its **×**, the close-tab shortcut (**Ctrl+W** on Windows/Linux, **Cmd+W** on macOS), or a tab menu close action discards it. The shortcut closes the active right-panel tab when the panel is open; a focused terminal retains its own close shortcut.

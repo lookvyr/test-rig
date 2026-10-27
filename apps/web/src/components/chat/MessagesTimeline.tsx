@@ -75,6 +75,7 @@ import {
   use,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -458,6 +459,7 @@ interface MessagesTimelineProps {
   anchorMessageId: MessageId | null;
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
   onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
+  onAnchoredEndSpaceChange?: (size: number) => void;
   contentInsetEndAdjustment: number;
   onIsAtEndChange: (isAtEnd: boolean) => void;
   onScrollElementChange?: (element: HTMLElement | null) => void;
@@ -533,6 +535,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   anchorMessageId,
   onAnchorReady,
   onAnchorSizeChanged,
+  onAnchoredEndSpaceChange,
   contentInsetEndAdjustment,
   onIsAtEndChange,
   onScrollElementChange,
@@ -602,6 +605,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [listIdentityKey, rememberedPosition],
   );
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
+  const anchoredEndSpaceSizeRef = useRef(0);
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
@@ -650,13 +654,20 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           disclosureSettleSecondFrameRef.current = null;
           // Wait for row measurement and the disclosure click's blur check.
           // Closing output can reveal the end without a scroll event.
-          if (collapsed && resolveTimelineIsAtEnd(listRef.current?.getState()) === true) {
+          if (
+            collapsed &&
+            resolveTimelineIsAtEnd(
+              listRef.current?.getState(),
+              anchoredEndSpaceSizeRef.current,
+              contentInsetEndAdjustment,
+            ) === true
+          ) {
             onToolOutputCollapsedAtEnd?.();
           }
         });
       });
     },
-    [listRef, onToolOutputCollapsedAtEnd],
+    [listRef, onToolOutputCollapsedAtEnd, contentInsetEndAdjustment],
   );
 
   const shouldRestoreVisibleContentPosition = useCallback((row: MessagesTimelineRow) => {
@@ -974,11 +985,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const handleAnchorSizeChanged = useCallback(
     (size: number) => {
+      anchoredEndSpaceSizeRef.current = size;
+      onAnchoredEndSpaceChange?.(size);
       if (anchorMessageId !== null) {
         onAnchorSizeChanged(anchorMessageId, size);
       }
     },
-    [anchorMessageId, onAnchorSizeChanged],
+    [anchorMessageId, onAnchorSizeChanged, onAnchoredEndSpaceChange],
   );
   const anchoredEndSpace = useMemo(() => {
     const config = resolveChatListAnchoredEndSpace(
@@ -991,6 +1004,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       ? { ...config, onReady: handleAnchorReady, onSizeChanged: handleAnchorSizeChanged }
       : undefined;
   }, [anchorMessageId, handleAnchorReady, handleAnchorSizeChanged, rows]);
+  useLayoutEffect(() => {
+    if (!anchoredEndSpace) {
+      anchoredEndSpaceSizeRef.current = 0;
+      onAnchoredEndSpaceChange?.(0);
+    }
+  }, [anchoredEndSpace, onAnchoredEndSpaceChange]);
   const maintainVisibleContentPosition = useMemo(
     () => ({
       data: true,
@@ -1012,38 +1031,20 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }),
     [contentInsetEndAdjustment, listRef],
   );
-  // LegendList lays rows out from layout effects, so a read on the next frame
-  // sees the settled positions. One frame is shared across bursts of size
-  // changes.
-  const contentOverflowFrameRef = useRef<number | null>(null);
-  const cancelContentOverflowFrame = useCallback(() => {
-    if (contentOverflowFrameRef.current !== null) {
-      cancelAnimationFrame(contentOverflowFrameRef.current);
-      contentOverflowFrameRef.current = null;
-    }
-  }, []);
-  const reportContentOverflow = useCallback(() => {
-    if (!onContentOverflowChange || contentOverflowFrameRef.current !== null) return;
-    contentOverflowFrameRef.current = requestAnimationFrame(() => {
-      contentOverflowFrameRef.current = null;
-      onContentOverflowChange(measureContentOverflow());
-    });
-  }, [measureContentOverflow, onContentOverflowChange]);
-  useEffect(() => cancelContentOverflowFrame, [cancelContentOverflowFrame]);
-  // The list's own layout effects have already run here, so estimated row
-  // positions are in place. Reporting before the first paint lets a thread
-  // open in its final composer layout instead of correcting it a frame later.
-  // A frame scheduled with the previous inset would overwrite this read, so
-  // it is dropped first.
+  // Report estimated row positions before paint so the composer opens in its
+  // final layout. Later row and viewport measurements share the layout frame.
   useLayoutEffect(() => {
-    cancelContentOverflowFrame();
     onContentOverflowChange?.(measureContentOverflow());
-  }, [cancelContentOverflowFrame, measureContentOverflow, onContentOverflowChange, rows.length]);
+  }, [measureContentOverflow, onContentOverflowChange, rows.length]);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
     if (restoringThreadPosition || state?.data !== rows) return;
-    const isAtEnd = resolveTimelineIsAtEnd(state);
+    const isAtEnd = resolveTimelineIsAtEnd(
+      state,
+      anchoredEndSpaceSizeRef.current,
+      contentInsetEndAdjustment,
+    );
     const position = state?.data?.length ? resolveWorkGroupScrollAnchor(state) : undefined;
     if (position && state && isAtEnd !== undefined) {
       const index = state.indexByKey(position.rowId);
@@ -1068,7 +1069,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (isAtEnd !== undefined && !citationPositioning) {
       onIsAtEndChange(isAtEnd);
     }
-    reportContentOverflow();
+    onContentOverflowChange?.(measureContentOverflow());
     if (!state || minimapItems.length === 0) {
       return;
     }
@@ -1116,18 +1117,35 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     listIdentityKey,
     liveFollowEnabled,
     anchoredEndSpace,
+    contentInsetEndAdjustment,
     restoringThreadPosition,
     listRef,
     minimapItems,
     minimapStripMap,
     onIsAtEndChange,
-    reportContentOverflow,
+    measureContentOverflow,
+    onContentOverflowChange,
   ]);
 
+  // Content can grow, collapse, or reflow without a scroll event. Read after
+  // LegendList's layout pass, sharing one frame across a burst of measurements.
+  const layoutFrameRef = useRef<number | null>(null);
+  const reportTimelineLayout = useCallback(() => {
+    if (layoutFrameRef.current !== null) return;
+    layoutFrameRef.current = requestAnimationFrame(() => {
+      layoutFrameRef.current = null;
+      handleScroll();
+    });
+  }, [handleScroll]);
   useEffect(() => {
-    const frame = requestAnimationFrame(handleScroll);
-    return () => cancelAnimationFrame(frame);
-  }, [handleScroll, rows.length]);
+    reportTimelineLayout();
+    return () => {
+      if (layoutFrameRef.current !== null) {
+        cancelAnimationFrame(layoutFrameRef.current);
+        layoutFrameRef.current = null;
+      }
+    };
+  }, [reportTimelineLayout]);
 
   const savedLiveFollowEnabledRef = useRef(liveFollowEnabled);
   useLayoutEffect(() => {
@@ -1136,6 +1154,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (wasFollowing && !liveFollowEnabled) handleScroll();
   }, [handleScroll, liveFollowEnabled]);
 
+  const reportViewportLayout = useEffectEvent(reportTimelineLayout);
   useEffect(() => {
     if (!timelineViewportElement) {
       return;
@@ -1156,7 +1175,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         current === nextHasPersistentGutter ? current : nextHasPersistentGutter,
       );
       setMinimapHitStripWidth(resolveTimelineMinimapHitStripWidth(viewportWidth, contentWidth));
-      reportContentOverflow();
+      reportViewportLayout();
     };
 
     const frame = requestAnimationFrame(measure);
@@ -1168,7 +1187,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [timelineViewportElement, rows.length, reportContentOverflow]);
+  }, [timelineViewportElement, rows.length]);
 
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
@@ -1412,7 +1431,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             }
             maintainScrollAtEndThreshold={1}
             onScroll={handleScroll}
-            onItemSizeChanged={reportContentOverflow}
+            onItemSizeChanged={reportTimelineLayout}
+            onMetricsChange={reportTimelineLayout}
             className={cn(
               "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
               topFadeEnabled && "topbar-scroll-fade",

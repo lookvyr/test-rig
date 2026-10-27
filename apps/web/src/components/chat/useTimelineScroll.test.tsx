@@ -40,7 +40,6 @@ function reportEnd(atEnd: boolean) {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("Element", ScrollNode);
@@ -70,17 +69,17 @@ afterEach(() => {
   act(() => renderer?.unmount());
   renderer = undefined;
   frame = undefined;
-  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("timeline follow intent", () => {
-  it("keeps following when streaming or layout moves the end out of view", () => {
+  it("shows the button without cancelling follow when content grows out of view", () => {
     render();
     contentLength += 400;
     reportEnd(false);
-    act(() => vi.advanceTimersByTime(200));
     expect(controller.liveFollowEnabled).toBe(true);
+    expect(controller.showScrollToBottom).toBe(true);
+    reportEnd(true);
     expect(controller.showScrollToBottom).toBe(false);
   });
 
@@ -90,7 +89,6 @@ describe("timeline follow intent", () => {
     fire("wheel", { deltaY: -120 });
     node.scrollTop -= 120;
     reportEnd(false);
-    act(() => vi.advanceTimersByTime(200));
     expect(controller.liveFollowEnabled).toBe(false);
     expect(controller.showScrollToBottom).toBe(true);
     node.scrollTop += 120;
@@ -126,24 +124,19 @@ describe("timeline follow intent", () => {
     render();
     act(() => controller.cancelForUserNavigation());
     reportEnd(false);
-    for (let i = 0; i < 4; i++) {
-      act(() => vi.advanceTimersByTime(50));
-      reportEnd(false);
-    }
+    reportEnd(false);
     expect(controller.showScrollToBottom).toBe(true);
     node.scrollTop += 120;
     reportEnd(true);
     expect(controller.showScrollToBottom).toBe(false);
   });
 
-  it("cancels a delayed button reveal when the user returns to the bottom", () => {
+  it("hides the button when the user returns to the bottom", () => {
     render();
     act(() => controller.cancelForUserNavigation());
     reportEnd(false);
-    act(() => vi.advanceTimersByTime(50));
     node.scrollTop += 120;
     reportEnd(true);
-    act(() => vi.advanceTimersByTime(200));
     expect(controller.showScrollToBottom).toBe(false);
     expect(controller.liveFollowEnabled).toBe(true);
   });
@@ -183,7 +176,7 @@ describe("timeline follow intent", () => {
     expect(controller.liveFollowEnabled).toBe(false);
   });
 
-  it("explicitly scrolls on send/jump even when history is several screens away", () => {
+  it("keeps the button available during an explicit jump until the end is visible", () => {
     render();
     act(() => controller.cancelForUserNavigation());
     reportEnd(false);
@@ -192,7 +185,8 @@ describe("timeline follow intent", () => {
     act(() => frame?.(0));
     expect(scrollToEnd).toHaveBeenCalledWith({ animated: false });
     expect(controller.liveFollowEnabled).toBe(true);
-    act(() => vi.advanceTimersByTime(200));
+    expect(controller.showScrollToBottom).toBe(true);
+    reportEnd(true);
     expect(controller.showScrollToBottom).toBe(false);
   });
 
@@ -233,7 +227,9 @@ describe("timeline follow intent", () => {
     render();
     act(() => controller.resumeFollowing("anchoring-new-turn"));
     reportEnd(false);
+    expect(controller.showScrollToBottom).toBe(true);
     reportEnd(true);
+    expect(controller.showScrollToBottom).toBe(false);
     expect(controller.modeRef.current).toBe("anchoring-new-turn");
     act(() => controller.cancelForUserNavigation());
     node.scrollTop += 120;
@@ -258,7 +254,7 @@ describe("timeline follow intent", () => {
     expect(controller.liveFollowEnabled).toBe(false);
   });
 
-  it("cancels a pending jump and button reveal when switching threads", () => {
+  it("cancels a pending jump and resets visibility when switching threads", () => {
     render();
     act(() => controller.cancelForUserNavigation());
     reportEnd(false);
@@ -266,9 +262,80 @@ describe("timeline follow intent", () => {
     render({ threadKey: "another-scroll-thread" });
     act(() => {
       frame?.(0);
-      vi.advanceTimersByTime(200);
     });
     expect(scrollToEnd).not.toHaveBeenCalled();
     expect(controller.showScrollToBottom).toBe(false);
+  });
+});
+
+describe("sending from history", () => {
+  it.each([false, true])("preserves a distant reading position (anchor: %s)", (anchorNewTurn) => {
+    render();
+    node.scrollTop = 1199;
+    reportEnd(false);
+    act(() => expect(controller.prepareForSend({ anchorNewTurn })).toBe(false));
+    act(() => frame?.(0));
+    expect(scrollToEnd).not.toHaveBeenCalled();
+    expect(controller.liveFollowEnabled).toBe(false);
+    expect(controller.showScrollToBottom).toBe(true);
+    expect(node.scrollTop).toBe(1199);
+  });
+
+  it("frames a new turn within 300 pixels without prematurely hiding the button", () => {
+    render();
+    node.scrollTop = 1200;
+    act(() => controller.cancelForUserNavigation());
+    reportEnd(false);
+    act(() => expect(controller.prepareForSend({ anchorNewTurn: true })).toBe(true));
+    expect(controller.modeRef.current).toBe("anchoring-new-turn");
+    expect(controller.liveFollowEnabled).toBe(true);
+    expect(controller.showScrollToBottom).toBe(true);
+    reportEnd(true);
+    expect(controller.showScrollToBottom).toBe(false);
+  });
+
+  it("jumps on a near-end side-chat send", () => {
+    render();
+    node.scrollTop = 1200;
+    act(() => controller.prepareForSend());
+    act(() => frame?.(0));
+    expect(scrollToEnd).toHaveBeenCalledWith({ animated: false });
+    expect(controller.liveFollowEnabled).toBe(true);
+  });
+
+  it("excludes reserved blank space while keeping content behind the composer in the distance", () => {
+    render({ inset: 200 });
+    node.scrollTop = 900;
+    act(() => controller.onAnchoredEndSpaceChange(500));
+    act(() => expect(controller.prepareForSend({ anchorNewTurn: true })).toBe(true));
+    node.scrollTop = 899;
+    act(() => expect(controller.prepareForSend({ anchorNewTurn: true })).toBe(false));
+  });
+
+  it("can explicitly return from a separate search-history slice", () => {
+    render();
+    node.scrollTop = 0;
+    act(() =>
+      expect(controller.prepareForSend({ anchorNewTurn: true, forceFollow: true })).toBe(true),
+    );
+    expect(controller.modeRef.current).toBe("anchoring-new-turn");
+  });
+
+  it("allows a first send before the timeline mounts", () => {
+    render();
+    listRef.current = null;
+    act(() => expect(controller.prepareForSend({ anchorNewTurn: true })).toBe(true));
+  });
+
+  it("hides the button after a layout change reveals the end without re-arming follow", () => {
+    render();
+    act(() => controller.cancelForUserNavigation());
+    node.scrollTop = 1000;
+    reportEnd(false);
+    expect(controller.showScrollToBottom).toBe(true);
+    contentLength = 1500;
+    reportEnd(true);
+    expect(controller.showScrollToBottom).toBe(false);
+    expect(controller.liveFollowEnabled).toBe(false);
   });
 });

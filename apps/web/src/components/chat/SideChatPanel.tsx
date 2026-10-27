@@ -224,7 +224,7 @@ export function SideChatPanel(props: {
       return;
     sending.current = true;
     dispatch.beginLocalDispatch();
-    scroll.scrollToEnd();
+    scroll.prepareForSend();
     setError(null);
     try {
       const createdAt = new Date().toISOString();
@@ -321,7 +321,7 @@ export function SideChatPanel(props: {
     sending.current = true;
     setError(null);
     dispatch.beginLocalDispatch();
-    scroll.scrollToEnd();
+    scroll.prepareForSend();
     const draftStore = useComposerDraftStore.getState();
     const submittedDraft = draftStore.getComposerDraft(threadRef);
     draftStore.clearComposerContent(threadRef);

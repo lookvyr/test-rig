@@ -296,28 +296,33 @@ export interface TimelineEndState {
   readonly scrollLength?: number;
 }
 
-/**
- * The follow re-arm band (#5566): strict isAtEnd flickers false for a frame
- * while streaming content grows under the viewport, so follow re-arms within
- * this distance of the real content bottom instead.
- */
-const TIMELINE_FOLLOW_REARM_THRESHOLD_PX = 40;
+const TIMELINE_END_THRESHOLD_PX = 24;
 
-export function resolveTimelineIsAtEnd(state: TimelineEndState | undefined): boolean | undefined {
+export function resolveTimelineDistanceFromEnd(
+  state: TimelineEndState | undefined,
+  anchoredEndSpaceSize = 0,
+  composerInset = 0,
+): number | undefined {
   if (!state) {
     return undefined;
   }
   const { contentLength, scroll, scrollLength } = state;
   if (contentLength === undefined || scroll === undefined || scrollLength === undefined) {
-    return state.isAtEnd;
+    return undefined;
   }
-  // contentLength includes the composer inset spacer, but the composer hides
-  // the same amount of viewport, so the inset cancels: plain
-  // contentLength - scroll - scrollLength is the gap between the last real row
-  // and the visible edge above the composer. LegendList's own isAtEnd subtracts
-  // the inset and is true anywhere in the bottom composer-height band, so it is
-  // only a fallback here, never a short-circuit.
-  return contentLength - scroll - scrollLength <= TIMELINE_FOLLOW_REARM_THRESHOLD_PX;
+  // LegendList uses the larger of the composer inset and the reserved turn
+  // space. Only the space beyond the composer is blank, visible padding.
+  const blankEndSpace = Math.max(0, anchoredEndSpaceSize - composerInset);
+  return Math.max(0, contentLength - scroll - scrollLength - blankEndSpace);
+}
+
+export function resolveTimelineIsAtEnd(
+  state: TimelineEndState | undefined,
+  anchoredEndSpaceSize = 0,
+  composerInset = 0,
+): boolean | undefined {
+  const distance = resolveTimelineDistanceFromEnd(state, anchoredEndSpaceSize, composerInset);
+  return distance === undefined ? state?.isAtEnd : distance <= TIMELINE_END_THRESHOLD_PX;
 }
 
 export function shouldPreserveAssistantLineBreaks(text: string): boolean {

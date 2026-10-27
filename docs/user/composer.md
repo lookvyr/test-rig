@@ -82,6 +82,19 @@ It discards pending wakes whose output lived only in the provider process and
 holds durable automatic notifications until you resume. Server restart recovery
 also discards those provider wakes and holds durable notifications.
 
+## Reading earlier messages
+
+**Scroll to end** appears when the latest content is below the visible conversation,
+including while a new prompt is being positioned. Blank space reserved beneath a
+new prompt does not count as unread content. The button disappears once the end
+is visible, including after resizing the window or collapsing output.
+
+Sending near the end brings the new prompt into view. If you are more than 300
+pixels above the content end, sending preserves your reading position instead.
+Choose **Scroll to end** or scroll back to the bottom to resume following replies.
+This also applies to side chats. Sending from search-history results returns to
+the live conversation.
+
 ## Incoming approvals and questions
 
 A new approval or blocking question waits while you are typing in the focused

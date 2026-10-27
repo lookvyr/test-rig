@@ -955,7 +955,7 @@ describe("MessagesTimeline", () => {
       resolveTimelineIsAtEnd({
         isAtEnd: false,
         contentLength: 2000,
-        scroll: 1170,
+        scroll: 1176,
         scrollLength: 800,
       }),
     ).toBe(true);
@@ -1046,6 +1046,7 @@ describe("MessagesTimeline", () => {
   it("anchors a sent attachment message using its measured height", () => {
     const onAnchorReady = vi.fn();
     const onAnchorSizeChanged = vi.fn();
+    const onAnchoredEndSpaceChange = vi.fn();
     // Since #7897 only the first user row after the live edge may anchor, so
     // the preceding row is an assistant reply rather than an older prompt.
     const firstEntry = buildAssistantTimelineEntry("Earlier reply.");
@@ -1073,6 +1074,7 @@ describe("MessagesTimeline", () => {
         anchorMessageId={secondEntry.message.id}
         onAnchorReady={onAnchorReady}
         onAnchorSizeChanged={onAnchorSizeChanged}
+        onAnchoredEndSpaceChange={onAnchoredEndSpaceChange}
         contentInsetEndAdjustment={144}
         timelineEntries={[firstEntry, secondEntry]}
       />,
@@ -1092,6 +1094,7 @@ describe("MessagesTimeline", () => {
     expect(onAnchorReady).toHaveBeenCalledOnce();
     expect(onAnchorReady).toHaveBeenCalledWith(secondEntry.message.id, 1);
     expect(onAnchorSizeChanged).toHaveBeenCalledWith(secondEntry.message.id, 240);
+    expect(onAnchoredEndSpaceChange).toHaveBeenCalledWith(240);
   });
 
   it("renders SnapShot window details after the preview resolves", () => {

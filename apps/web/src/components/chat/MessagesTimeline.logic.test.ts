@@ -30,6 +30,8 @@ import {
   liveWorkEntryLabel,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineDistanceFromEnd,
+  resolveTimelineIsAtEnd,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
   shouldPreserveAssistantLineBreaks,
@@ -5310,5 +5312,34 @@ describe("live subagents after their parent turn settles", () => {
       turnDiffSummaries: [],
     });
     expect(rows.map((row) => row.id)).toEqual([`attempt-fold:${attempt.id}`, "child"]);
+  });
+});
+
+describe("timeline distance from visible content", () => {
+  const state = { contentLength: 2000, scroll: 1176, scrollLength: 800 };
+
+  it("uses a 24 pixel end band", () => {
+    expect(resolveTimelineDistanceFromEnd(state)).toBe(24);
+    expect(resolveTimelineIsAtEnd(state)).toBe(true);
+    expect(resolveTimelineIsAtEnd({ ...state, scroll: 1175 })).toBe(false);
+  });
+
+  it("ignores blank turn space beyond the composer inset", () => {
+    expect(resolveTimelineDistanceFromEnd(state, 400, 150)).toBe(0);
+    expect(resolveTimelineIsAtEnd(state, 400, 150)).toBe(true);
+    expect(resolveTimelineDistanceFromEnd({ ...state, scroll: 925 }, 400, 150)).toBe(25);
+    expect(resolveTimelineIsAtEnd({ ...state, scroll: 925 }, 400, 150)).toBe(false);
+  });
+
+  it("retains the composer-covered distance when the reserved space is smaller", () => {
+    expect(resolveTimelineDistanceFromEnd(state, 100, 150)).toBe(24);
+    expect(resolveTimelineDistanceFromEnd({ ...state, scroll: 1100 }, 100, 150)).toBe(100);
+  });
+
+  it("clamps fitting content and falls back only when geometry is unavailable", () => {
+    expect(resolveTimelineDistanceFromEnd({ ...state, contentLength: 300 })).toBe(0);
+    expect(resolveTimelineDistanceFromEnd(undefined)).toBeUndefined();
+    expect(resolveTimelineIsAtEnd({ isAtEnd: true })).toBe(true);
+    expect(resolveTimelineIsAtEnd({ ...state, scroll: 1100, isAtEnd: true })).toBe(false);
   });
 });

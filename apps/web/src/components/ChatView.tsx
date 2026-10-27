@@ -3858,10 +3858,11 @@ function ChatViewContent(props: ChatViewProps) {
     modeRef: timelineScrollModeRef,
     liveFollowEnabled: timelineLiveFollowEnabled,
     showScrollToBottom,
-    resumeFollowing: resumeTimelineFollowing,
+    prepareForSend: prepareTimelineScrollForSend,
     scrollToEnd: scrollTimelineToEnd,
     cancelForUserNavigation: cancelTimelineLiveFollowForUserNavigation,
     onIsAtEndChange,
+    onAnchoredEndSpaceChange,
     onScrollElementChange,
   } = useTimelineScroll({
     threadKey: activeThreadKey,
@@ -3898,6 +3899,22 @@ function ChatViewContent(props: ChatViewProps) {
       scrollTimelineToEnd(animated);
     },
     [clearTimelineAnchorTracking, scrollTimelineToEnd],
+  );
+
+  const prepareTimelineForSend = useCallback(
+    (messageId: MessageId | null) => {
+      const shouldFollow = prepareTimelineScrollForSend({
+        anchorNewTurn: messageId !== null,
+        // Search history is a separate slice; sending returns to the live conversation.
+        forceFollow: searchHistory !== null,
+      });
+      setThreadSearchHistory(null);
+      if (!shouldFollow) return;
+      clearTimelineAnchorTracking();
+      pendingTimelineAnchorRef.current = messageId;
+      setTimelineAnchor({ threadKey: activeThreadKey, messageId });
+    },
+    [activeThreadKey, clearTimelineAnchorTracking, prepareTimelineScrollForSend, searchHistory],
   );
 
   const onTimelineAnchorReady = useCallback((messageId: MessageId, anchorIndex: number) => {
@@ -5112,6 +5129,7 @@ function ChatViewContent(props: ChatViewProps) {
     const messageId = newMessageId();
     const createdAt = new Date().toISOString();
     sendInFlightRef.current = true;
+    prepareTimelineForSend(null);
     beginLocalDispatch();
     setThreadError(commandThreadId, null);
     setOptimisticUserMessages((messages) => [
@@ -5126,7 +5144,6 @@ function ChatViewContent(props: ChatViewProps) {
         streaming: false,
       },
     ]);
-    scrollToEnd();
     try {
       const settingsResult = await persistThreadSettingsForNextTurn({
         threadId: commandThreadId,
@@ -5414,8 +5431,9 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
 
+    const messageIdForSend = newMessageId();
     sendInFlightRef.current = true;
-    setThreadSearchHistory(null);
+    prepareTimelineForSend(messageIdForSend);
     if (isDraftHeroState && activeThreadKey) {
       let resolveDockStarted: (() => void) | undefined;
       const dockStarted = new Promise<void>((resolve) => {
@@ -5439,7 +5457,6 @@ function ChatViewContent(props: ChatViewProps) {
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
     const messageTextForSend = preparedMessage.text;
-    const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
@@ -5465,16 +5482,6 @@ function ChatViewContent(props: ChatViewProps) {
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }));
-    // Sending always returns to the live edge. The new row becomes the
-    // anchored end-space target so it lands near the top while the response
-    // streams into the reserved space below it.
-    resumeTimelineFollowing("anchoring-new-turn");
-    pendingTimelineAnchorRef.current = messageIdForSend;
-    activeTimelineAnchorIndexRef.current = null;
-    setTimelineAnchor({
-      threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
-      messageId: messageIdForSend,
-    });
     setOptimisticUserMessages((existing) => [
       ...existing,
       {
@@ -5804,18 +5811,9 @@ function ChatViewContent(props: ChatViewProps) {
       });
 
       sendInFlightRef.current = true;
-      setThreadSearchHistory(null);
+      prepareTimelineForSend(messageIdForSend);
       beginLocalDispatch({ preparingWorktree: false });
       setThreadError(threadIdForSend, null);
-
-      // Position this sent row once LegendList has measured the anchored tail.
-      resumeTimelineFollowing("anchoring-new-turn");
-      pendingTimelineAnchorRef.current = messageIdForSend;
-      activeTimelineAnchorIndexRef.current = null;
-      setTimelineAnchor({
-        threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
-        messageId: messageIdForSend,
-      });
 
       setOptimisticUserMessages((existing) => [
         ...existing,
@@ -5910,6 +5908,7 @@ function ChatViewContent(props: ChatViewProps) {
       isServerThread,
       localCheckoutBranchMismatch,
       persistThreadSettingsForNextTurn,
+      prepareTimelineForSend,
       resetLocalDispatch,
       runtimeMode,
       setComposerDraftInteractionMode,
@@ -6584,6 +6583,7 @@ function ChatViewContent(props: ChatViewProps) {
                 contentInsetEndAdjustment={composerOverlayHeight}
                 liveFollowEnabled={timelineLiveFollowEnabled && searchHistory === null}
                 onIsAtEndChange={onIsAtEndChange}
+                onAnchoredEndSpaceChange={onAnchoredEndSpaceChange}
                 onScrollElementChange={onScrollElementChange}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
