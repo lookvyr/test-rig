@@ -6,7 +6,7 @@ import * as DateTime from "effect/DateTime";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
 
 import { PrimaryConnectionTarget } from "../connection/model.ts";
-import type { EnvironmentShellState } from "./shell.ts";
+import { EMPTY_SHELL_STATE, type EnvironmentShellState } from "./shell.ts";
 import {
   createEnvironmentShellHasSnapshotAtom,
   createEnvironmentServerConfigsAtom,
@@ -37,6 +37,7 @@ function shellState(input: {
   readonly snapshotSequence?: number;
 }): EnvironmentShellState {
   return {
+    ...EMPTY_SHELL_STATE,
     snapshot:
       input.updatedAt === undefined
         ? Option.none()

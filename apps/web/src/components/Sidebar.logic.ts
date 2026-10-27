@@ -672,7 +672,9 @@ export function sortSettledThreadsForSidebarV2<
     return timestamp === null ? 0 : Date.parse(timestamp);
   };
   return [...threads].toSorted(
-    (left, right) => timestampMs(right) - timestampMs(left) || left.id.localeCompare(right.id),
+    (left, right) =>
+      timestampMs(right) - timestampMs(left) ||
+      (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
   );
 }
 

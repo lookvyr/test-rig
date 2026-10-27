@@ -61,6 +61,10 @@ See [Side chats](./side-chats.md) for how their context and lifetime work.
 
 ## Settle, snooze, and archive
 
+Older settled threads load as you expand the Settled section and choose **Show
+more**. Its count includes threads that have not loaded yet. Search, thread
+mentions, and direct links can still find and open those older conversations.
+
 Use a thread's actions menu from its heading or sidebar row. **Settle thread**
 moves it out of Active; **Un-settle** brings it back. **Auto-settle behavior**
 lets you disable automatic settlement for an individual thread.

@@ -605,6 +605,8 @@ const makeWsRpcLayer = (
           },
           settings,
           shellResumeCompletionMarker: true,
+          shellThreadFamilies: true,
+          shellOlderSettled: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
         };

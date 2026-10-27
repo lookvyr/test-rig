@@ -542,6 +542,10 @@ const refreshEveryUntilFinal =
       { initialValueTarget: self },
     );
 
+/** Read the last successful query value, including while a refresh is pending. */
+export const selectEnvironmentQueryData = <A, E>(result: AsyncResult.AsyncResult<A, E>): A | null =>
+  Option.getOrNull(AsyncResult.value(result));
+
 export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, ER>,
   options: EnvironmentQueryAtomOptions<Input, A, E, EnvironmentSupervisor | R>,

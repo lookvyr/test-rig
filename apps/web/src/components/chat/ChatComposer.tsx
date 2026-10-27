@@ -1,3 +1,4 @@
+import { useThreadSearch } from "~/state/queries";
 import { BackgroundThreadContext } from "./backgroundThread";
 import { ComposerApprovalFeedback } from "./ComposerApprovalFeedback";
 import type { ApprovalResponder } from "@t3tools/client-runtime/state/thread-requests";
@@ -1184,6 +1185,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
   const isPathTrigger = composerTriggerKind === "path";
   const threadShells = useThreadShells(isPathTrigger);
+  useThreadSearch(isPathTrigger ? [environmentId] : [], pathTriggerQuery, { titlesOnly: true });
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,

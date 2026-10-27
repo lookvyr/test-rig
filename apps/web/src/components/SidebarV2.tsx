@@ -1,3 +1,12 @@
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
+import { ProjectId } from "@t3tools/contracts";
+import {
+  useOlderSettledShelf,
+  useOlderSettledShelfGrowth,
+  readUnloadedThreadCount,
+} from "../state/olderSettledShelf";
+import { useThreadSearch } from "../state/queries";
 import { useLocation } from "@tanstack/react-router";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
 import { THREAD_CONTEXT_DRAG_TYPE } from "./chat/threadContextDrag";
@@ -1655,14 +1664,24 @@ export default function SidebarV2() {
       const projectThreads = threads.filter((thread) =>
         memberKeys.has(`${thread.environmentId}:${thread.projectId}`),
       );
+      const projectThreadCount =
+        projectThreads.length + readUnloadedThreadCount(members, projectThreads);
+      // A compact shell also omits idle child threads, so it cannot give an exhaustive total.
+      const compactThreadList = members.some(
+        (member) =>
+          appAtomRegistry.get(environmentServerConfigsAtom).get(member.environmentId)
+            ?.shellThreadFamilies === true,
+      );
       const isWholeGroup = members.length === projectGroup.memberProjects.length;
       const singleMember = members.length === 1 ? members[0]! : null;
       const targetLabel = singleMember?.title ?? projectGroup.displayName;
       const confirmed = await settlePromise(() =>
         api.dialogs.confirm(
-          projectThreads.length > 0
+          projectThreadCount > 0
             ? [
-                `Remove project "${targetLabel}" and delete its ${projectThreads.length} thread${projectThreads.length === 1 ? "" : "s"}?`,
+                compactThreadList
+                  ? `Remove project "${targetLabel}" and delete its threads?`
+                  : `Remove project "${targetLabel}" and delete its ${projectThreadCount} thread${projectThreadCount === 1 ? "" : "s"}?`,
                 ...(singleMember
                   ? [
                       `Path: ${singleMember.workspaceRoot}`,
@@ -1899,6 +1918,12 @@ export default function SidebarV2() {
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
+  useThreadSearch([...serverConfigs.keys()], threadSearchQuery, {
+    titlesOnly: true,
+    ...(scopedProjectGroup === null
+      ? {}
+      : { projectIds: scopedProjectGroup.memberProjectRefs.map((ref) => ref.projectId) }),
+  });
   const searchableThreads = useMemo(
     () => [
       ...pinnedThreads,
@@ -1957,30 +1982,42 @@ export default function SidebarV2() {
     lastSettledResetKeyRef.current = settledResetKey;
     setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
   }
-  const visibleSettledThreads = useMemo(() => {
-    if (settledThreads.length <= settledVisibleCount) return settledThreads;
-    const visible = settledThreads.slice(0, settledVisibleCount);
-    // The open thread must never hide under "Show more": navigating into a
-    // deep settled thread (search, deep link) pulls its row into the visible
-    // tail so the highlight and the un-settle affordance stay reachable.
-    if (routeThreadKey !== null) {
-      const routeThread = settledThreads
-        .slice(settledVisibleCount)
-        .find(
-          (thread) =>
-            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
-        );
-      if (routeThread !== undefined) visible.push(routeThread);
-    }
-    return visible;
-  }, [routeThreadKey, settledThreads, settledVisibleCount]);
-  const hiddenSettledCount = settledThreads.length - visibleSettledThreads.length;
+  const [settledShelfExpanded, setSettledShelfExpanded] = useState(true);
+  const toggleSettledShelf = useCallback(() => setSettledShelfExpanded((value) => !value), []);
+  const olderSettledShelf = useOlderSettledShelf({
+    scopes: [...serverConfigs.keys()].flatMap<OlderSettledScope>((environmentId) => {
+      if (scopedProjectKeys === null) return [{ environmentId, projectIds: null }];
+      const prefix = `${environmentId}:`;
+      const projectIds = [...scopedProjectKeys].flatMap((key) =>
+        key.startsWith(prefix) ? [ProjectId.make(key.slice(prefix.length))] : [],
+      );
+      return projectIds.length === 0 ? [] : [{ environmentId, projectIds }];
+    }),
+    expanded: settledShelfExpanded,
+    visibleCount: settledVisibleCount,
+  });
+  const listedSettledThreads = settledThreads.filter(olderSettledShelf.isListed);
+  useOlderSettledShelfGrowth(olderSettledShelf, listedSettledThreads);
+  const settledCount = settledThreads.length + olderSettledShelf.unloadedCount(searchableThreads);
+  const visibleSettledThreads = listedSettledThreads.slice(0, settledVisibleCount);
+  if (
+    routeThreadKey !== null &&
+    !visibleSettledThreads.some(
+      (thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+    )
+  ) {
+    const routeThread = settledThreads.find(
+      (thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+    );
+    if (routeThread !== undefined) visibleSettledThreads.push(routeThread);
+  }
+  const hiddenSettledCount = Math.max(0, settledCount - visibleSettledThreads.length);
   const showMoreSettled = useCallback(
     () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
     [],
   );
-  const [settledShelfExpanded, setSettledShelfExpanded] = useState(true);
-  const toggleSettledShelf = useCallback(() => setSettledShelfExpanded((value) => !value), []);
   const renderedSettledThreads = useMemo(() => {
     if (settledShelfExpanded) return visibleSettledThreads;
     if (routeThreadKey === null) return [];
@@ -3473,7 +3510,7 @@ export default function SidebarV2() {
                       items.push(renderThreadRow(thread, "snoozed"));
                     }
                   }
-                  if (settledThreads.length > 0) {
+                  if (settledCount > 0) {
                     items.push(
                       <li
                         key="settled-shelf-header"
@@ -3492,10 +3529,10 @@ export default function SidebarV2() {
                               ? "Settled"
                               : settledShelfExpanded
                                 ? "Settled"
-                                : `Settled (${settledThreads.length})`}
+                                : `Settled (${settledCount})`}
                           </span>
                           <span className="hidden text-xs tabular-nums redesign:inline">
-                            {settledThreads.length}
+                            {settledCount}
                           </span>
                           <span className="h-px flex-1 redesign:hidden bg-sidebar-border/60" />
                           <ChevronDownIcon
@@ -3518,11 +3555,19 @@ export default function SidebarV2() {
                   <li className="list-none">
                     <button
                       type="button"
-                      onClick={showMoreSettled}
+                      disabled={olderSettledShelf.loading}
+                      onClick={() => {
+                        olderSettledShelf.retry();
+                        showMoreSettled();
+                      }}
                       className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
                     >
                       <PlusIcon aria-hidden className="size-4 shrink-0" />
-                      Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                      {olderSettledShelf.loading
+                        ? "Loading"
+                        : olderSettledShelf.failed
+                          ? "Could not load older threads. Retry"
+                          : `Show ${Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more`}
                     </button>
                   </li>
                 ) : null}
@@ -3534,7 +3579,7 @@ export default function SidebarV2() {
             activeThreads.length +
             workingThreads.length +
             snoozedThreads.length +
-            settledThreads.length ===
+            settledCount ===
             0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               {projects.length === 0 ? (

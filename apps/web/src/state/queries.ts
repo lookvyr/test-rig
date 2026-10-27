@@ -7,6 +7,8 @@ import {
   createThreadSearchResultsAtomFamily,
   makeThreadSearchKey,
   type EnvironmentThreadSearchMatch,
+  type ThreadSearchResultsState,
+  type ThreadSearchScope,
 } from "@t3tools/client-runtime/state/thread-search";
 import { type VcsRefTarget } from "@t3tools/client-runtime/state/vcs";
 import type {
@@ -30,7 +32,7 @@ import { orchestrationEnvironment } from "./orchestration";
 import { isPaginatedBranchesNextPagePending } from "./paginatedBranches";
 import { projectContentSearch, projectEnvironment } from "./projects";
 import { useEnvironmentQuery } from "./query";
-import { useEnvironmentThread } from "./threads";
+import { useEnvironmentThread, olderSettledThreads, threadFamilies } from "./threads";
 import { vcsEnvironment } from "./vcs";
 
 const PROJECT_PATH_SEARCH_DEBOUNCE_MS = 120;
@@ -44,17 +46,31 @@ const EMPTY_REFS: ReadonlyArray<VcsRef> = [];
 const EMPTY_CONTENT_MATCHES: ReadonlyArray<ProjectContentMatch> = [];
 const INITIAL_BRANCH_CURSORS = [undefined] as const;
 const EMPTY_THREAD_SEARCH_MATCHES: ReadonlyArray<EnvironmentThreadSearchMatch> = Object.freeze([]);
-const EMPTY_THREAD_SEARCH_ATOM = Atom.make({
+const EMPTY_THREAD_SEARCH_ATOM = Atom.make<ThreadSearchResultsState>({
   matches: EMPTY_THREAD_SEARCH_MATCHES,
   isLoading: false,
+  rows: [],
 }).pipe(Atom.withLabel("web:thread-search:empty"));
 
-const threadSearchResultsAtom = createThreadSearchResultsAtomFamily({
-  getSearchAtom: (environmentId, query) =>
-    orchestrationEnvironment.threadSearch({
-      environmentId,
-      input: { query },
-    }),
+const olderSettledBeforeAtom = Atom.family((environmentId: EnvironmentId) =>
+  Atom.make((get) => get(olderSettledThreads.olderSettledAtom(environmentId))?.before ?? null).pipe(
+    Atom.withLabel(`web:older-settled-before:${environmentId}`),
+  ),
+);
+// Whether any of these environments leaves older settled threads out, so short queries matter.
+const anyOlderSettledAtom = Atom.family((environmentIdsKey: string) =>
+  Atom.make((get) =>
+    (JSON.parse(environmentIdsKey) as ReadonlyArray<EnvironmentId>).some(
+      (environmentId) => get(olderSettledBeforeAtom(environmentId)) !== null,
+    ),
+  ).pipe(Atom.withLabel(`web:any-older-settled:${environmentIdsKey}`)),
+);
+const threadSearch = createThreadSearchResultsAtomFamily({
+  getSearchAtom: (environmentId, input) =>
+    input.olderSettledBefore === undefined
+      ? orchestrationEnvironment.threadSearch({ environmentId, input })
+      : olderSettledThreads.searchAtom(environmentId, input),
+  olderSettledBefore: olderSettledBeforeAtom,
   labelPrefix: "web:thread-search",
 });
 
@@ -80,26 +96,44 @@ function useDebouncedValue<A>(value: A, delayMs: number): A {
   return debounced;
 }
 
+/** Search server history and mount matching rows omitted from the initial shell. */
 export function useThreadSearch(
   environmentIds: ReadonlyArray<EnvironmentId>,
   query: string,
+  scope: ThreadSearchScope = {},
 ): {
   readonly matches: ReadonlyArray<EnvironmentThreadSearchMatch>;
-  /** The settled query `matches` came from; it only changes when results do. */
   readonly query: string;
   readonly isPending: boolean;
 } {
   const normalizedQuery = query.trim();
   const debouncedQuery = useDebouncedValue(normalizedQuery, THREAD_SEARCH_DEBOUNCE_MS);
-  const canSearch = environmentIds.length > 0 && normalizedQuery.length >= 2;
+  const anyOlderSettled = useAtomValue(anyOlderSettledAtom(JSON.stringify(environmentIds)));
+  const canSearch =
+    environmentIds.length > 0 &&
+    normalizedQuery.length >= 2 &&
+    (scope.titlesOnly !== true || anyOlderSettled);
   const settledQuery = canSearch && normalizedQuery === debouncedQuery ? debouncedQuery : null;
-  const searchKey = useMemo(
-    () => (settledQuery === null ? null : makeThreadSearchKey(environmentIds, settledQuery)),
-    [environmentIds, settledQuery],
-  );
+  const searchKey =
+    settledQuery === null ? null : makeThreadSearchKey(environmentIds, settledQuery, scope);
   const result = useAtomValue(
-    searchKey === null ? EMPTY_THREAD_SEARCH_ATOM : threadSearchResultsAtom(searchKey),
+    searchKey === null ? EMPTY_THREAD_SEARCH_ATOM : threadSearch.results(searchKey),
   );
+  useEffect(() => {
+    if (searchKey === null) return;
+    const environments = (JSON.parse(searchKey) as [ReadonlyArray<EnvironmentId>])[0];
+    const releases = environments.map((environmentId) =>
+      threadFamilies.mountRows(
+        appAtomRegistry,
+        environmentId,
+        `search:${searchKey}`,
+        threadSearch.rows(searchKey, environmentId),
+      ),
+    );
+    return () => {
+      for (const release of releases) release();
+    };
+  }, [searchKey]);
   const isDebouncing = canSearch && normalizedQuery !== debouncedQuery;
   return {
     matches: isDebouncing ? EMPTY_THREAD_SEARCH_MATCHES : result.matches,

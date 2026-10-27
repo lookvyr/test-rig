@@ -20,6 +20,9 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
  * runtime failure.
  */
 export const RPC_REQUIRED_SCOPES = {
+  "orchestration.getOlderSettledThreads": AuthOrchestrationReadScope,
+  "orchestration.getThreadFamily": AuthOrchestrationReadScope,
+  "orchestration.getWorktreeThreadIds": AuthOrchestrationReadScope,
   "orchestration.getThreadProjection": AuthOrchestrationReadScope,
   "orchestration.getTurnItem": AuthOrchestrationReadScope,
   "orchestration.launchThread": AuthOrchestrationOperateScope,

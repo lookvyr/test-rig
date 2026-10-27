@@ -6,6 +6,8 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2DomainEvent,
+  type ThreadLinkedPullRequest,
+  type ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -54,7 +56,17 @@ const createProject = (projectId: ProjectId) =>
 const thread = (
   threadId: ThreadId,
   projectId: ProjectId,
-  overrides: { readonly archivedAt?: DateTime.Utc; readonly deletedAt?: DateTime.Utc } = {},
+  overrides: {
+    readonly archivedAt?: DateTime.Utc;
+    readonly deletedAt?: DateTime.Utc;
+    readonly settledAt?: DateTime.Utc;
+    readonly title?: string;
+    readonly branch?: string;
+    readonly subagentOf?: ThreadId;
+    readonly linkedPullRequest?: ThreadLinkedPullRequest;
+    readonly branchPullRequest?: ThreadLinkedPullRequest;
+    readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink>;
+  } = {},
 ): OrchestrationV2DomainEvent => ({
   id: EventId.make(`created:${threadId}`),
   type: "thread.created",
@@ -66,21 +78,31 @@ const thread = (
     creationSource: "web",
     id: threadId,
     projectId,
-    title: threadId,
+    title: overrides.title ?? threadId,
     providerInstanceId,
     modelSelection: { instanceId: providerInstanceId, model: "gpt-5" },
     runtimeMode: "full-access",
     interactionMode: "default",
-    branch: null,
+    branch: overrides.branch ?? null,
+    linkedPullRequest: overrides.linkedPullRequest ?? null,
+    branchPullRequest: overrides.branchPullRequest ?? null,
+    pullRequests: overrides.pullRequests ?? [],
     worktreePath: null,
     activeProviderThreadId: null,
-    lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+    lineage:
+      overrides.subagentOf === undefined
+        ? { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId }
+        : {
+            parentThreadId: overrides.subagentOf,
+            relationshipToParent: "subagent",
+            rootThreadId: overrides.subagentOf,
+          },
     forkedFrom: null,
     createdAt: at(0),
     updatedAt: at(0),
     archivedAt: overrides.archivedAt ?? null,
-    settledOverride: null,
-    settledAt: null,
+    settledOverride: overrides.settledAt === undefined ? null : "settled",
+    settledAt: overrides.settledAt ?? null,
     lastVisitedAt: null,
     deletedAt: overrides.deletedAt ?? null,
   },
@@ -271,6 +293,243 @@ it.layer(TestLayer)("ThreadSearch", (it) => {
 
       const error = yield* Effect.flip(search.search({ query: "0260927" }));
       assert.equal(error.operation, "decode");
+    }),
+  );
+});
+
+it.layer(TestLayer)("ThreadSearch.searchOlderSettled", (it) => {
+  it.effect("returns older settled title matches in scope, then older message hits", () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const search = yield* ThreadSearch.ThreadSearch;
+      const project = ProjectId.make("project:woodland");
+      const other = ProjectId.make("project:marsh");
+      yield* createProject(project);
+      yield* createProject(other);
+      const id = (name: string) => ThreadId.make(`thread:kestrel-${name}`);
+      const old = at(10);
+      yield* Effect.forEach(
+        [
+          thread(id("old"), project, { title: "Kestrel nest", settledAt: old }),
+          thread(id("recent"), project, { title: "Kestrel nest", settledAt: at(50) }),
+          thread(id("open"), project, { title: "Kestrel nest" }),
+          thread(id("child"), project, {
+            title: "Kestrel nest",
+            settledAt: old,
+            subagentOf: id("old"),
+          }),
+          thread(id("archived"), project, {
+            title: "Kestrel nest",
+            settledAt: old,
+            archivedAt: at(20),
+          }),
+          thread(id("deleted"), project, {
+            title: "Kestrel nest",
+            settledAt: old,
+            deletedAt: at(20),
+          }),
+          thread(id("elsewhere"), other, { title: "Kestrel nest", settledAt: old }),
+          thread(id("note"), project, { title: "Unrelated", settledAt: old }),
+          thread(id("new-note"), project, { title: "Unrelated", settledAt: at(50) }),
+        ],
+        projections.apply,
+        { discard: true },
+      );
+      const before = DateTime.formatIso(at(30));
+      const messageThreadIds = [
+        id("new-note"),
+        id("note"),
+        id("old"),
+        id("child"),
+        id("archived"),
+        id("deleted"),
+        id("open"),
+      ];
+      assert.sameMembers(
+        [...(yield* search.searchOlderSettled({ query: "kestrel", before, messageThreadIds }))],
+        [id("old"), id("elsewhere"), id("note")],
+      );
+      // Metadata follows the palette's substring matching, including short interior text.
+      assert.deepEqual(
+        yield* search.searchOlderSettled({
+          query: "est",
+          before,
+          projectIds: [project],
+          messageThreadIds: [],
+        }),
+        [id("old")],
+      );
+      // The scope applies to titles and message hits; message hits follow the titles in order.
+      assert.deepEqual(
+        yield* search.searchOlderSettled({
+          query: "kestrel",
+          before,
+          projectIds: [project],
+          messageThreadIds: [id("elsewhere"), ...messageThreadIds],
+        }),
+        [id("old"), id("note")],
+      );
+      assert.deepEqual(
+        yield* search.searchOlderSettled({
+          query: "kestrel",
+          before,
+          projectIds: [],
+          messageThreadIds,
+        }),
+        [],
+      );
+      assert.sameMembers(
+        [
+          ...(yield* search.searchOlderSettled({
+            query: "woodland",
+            before,
+            messageThreadIds: [],
+          })),
+        ],
+        [id("old"), id("note")],
+      );
+      // A palette also matches the environment's name.
+      assert.include(
+        yield* search.searchOlderSettled({
+          query: "laptop",
+          before,
+          environmentLabel: "Laptop",
+          messageThreadIds: [],
+        }),
+        id("note"),
+      );
+    }),
+  );
+
+  it.effect("matches the branch and linked pull requests, like the palette", () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const search = yield* ThreadSearch.ThreadSearch;
+      const project = ProjectId.make("project:heron");
+      yield* createProject(project);
+      const pullRequest = (number: number): ThreadLinkedPullRequest => ({
+        projectId: project,
+        repository: "acme/heron",
+        number,
+        url: `https://github.com/acme/heron/pull/${number}`,
+      });
+      const branch = ThreadId.make("thread:heron-branch");
+      const linked = ThreadId.make("thread:heron-linked");
+      const modern = ThreadId.make("thread:heron-modern");
+      const branchName = ThreadId.make("thread:heron-branch-name");
+      yield* Effect.forEach(
+        [
+          thread(branch, project, {
+            title: "Heron",
+            settledAt: at(10),
+            branchPullRequest: pullRequest(4101),
+          }),
+          thread(branchName, project, {
+            title: "Unrelated",
+            settledAt: at(10),
+            branch: "codex/kingfisher-fix",
+          }),
+          thread(modern, project, {
+            title: "Unrelated",
+            settledAt: at(10),
+            pullRequests: [
+              {
+                host: "github.com",
+                repository: "acme/heron",
+                number: 4303,
+                url: "https://github.com/acme/heron/pull/4303",
+                source: "agent",
+                linkedAt: DateTime.formatIso(at(1)),
+                snapshot: null,
+                stack: null,
+              },
+            ],
+          }),
+          thread(linked, project, {
+            title: "Heron",
+            settledAt: at(10),
+            linkedPullRequest: pullRequest(4202),
+          }),
+        ],
+        projections.apply,
+        { discard: true },
+      );
+      const find = (query: string) =>
+        search.searchOlderSettled({
+          query,
+          before: DateTime.formatIso(at(30)),
+          messageThreadIds: [],
+        });
+      assert.deepEqual(yield* find("kingfisher-fix"), [branchName]);
+      assert.deepEqual(yield* find("acme/heron#4303"), [modern]);
+      assert.deepEqual(yield* find("#4101"), [branch]);
+      assert.deepEqual(yield* find("acme/heron#4202"), [linked]);
+    }),
+  );
+});
+
+it.layer(TestLayer)("ThreadSearch.searchThreadsWithOlderSettledRows", (it) => {
+  it.effect("adds older settled rows to message hits, or alone for titles only", () =>
+    Effect.gen(function* () {
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const search = yield* ThreadSearch.ThreadSearch;
+      const sql = yield* SqlClient.SqlClient;
+      const project = ProjectId.make("project:seaside");
+      yield* createProject(project);
+      const old = ThreadId.make("thread:plover-old");
+      const recent = ThreadId.make("thread:plover-recent");
+      const messageOnly = ThreadId.make("thread:plover-message-only");
+      yield* Effect.forEach(
+        [
+          thread(old, project, { title: "Plover nest", settledAt: at(10) }),
+          thread(recent, project, { title: "Plover nest", settledAt: at(50) }),
+          thread(messageOnly, project, { title: "Unrelated", settledAt: at(10) }),
+          message(messageOnly, "plover-message-only", "assistant", "plover distant note", {
+            minute: 1,
+          }),
+          message(recent, "plover-note", "user", "a plover note", { minute: 2 }),
+        ],
+        projections.apply,
+        { discard: true },
+      );
+      const run = (request: { readonly titlesOnly?: boolean }) =>
+        ThreadSearch.searchThreadsWithOlderSettledRows({
+          request: { query: "plover", olderSettledBefore: DateTime.formatIso(at(30)), ...request },
+          search: search.search,
+          searchOlderSettled: search.searchOlderSettled,
+          sql,
+          readThreads: (threadIds) =>
+            projections.readShellSnapshot({ location: "active", threadIds }),
+          latestSequence: Effect.succeed(7),
+        });
+      const withMessages = yield* run({});
+      assert.deepEqual(
+        withMessages.matches.map((match) => match.threadId),
+        [recent, messageOnly],
+      );
+      assert.equal(withMessages.snapshotSequence, 7);
+      assert.deepEqual(
+        withMessages.threads?.map((row) => row.id),
+        [old, messageOnly],
+      );
+      const titles = yield* run({ titlesOnly: true });
+      assert.deepEqual(titles.matches, []);
+      assert.deepEqual(
+        titles.threads?.map((row) => row.id),
+        [old],
+      );
+      // Without the cut it is the plain message search.
+      assert.isUndefined(
+        (yield* ThreadSearch.searchThreadsWithOlderSettledRows({
+          request: { query: "plover" },
+          search: search.search,
+          searchOlderSettled: search.searchOlderSettled,
+          sql,
+          readThreads: (threadIds) =>
+            projections.readShellSnapshot({ location: "active", threadIds }),
+          latestSequence: Effect.succeed(7),
+        })).threads,
+      );
     }),
   );
 });

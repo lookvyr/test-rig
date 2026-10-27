@@ -1,3 +1,4 @@
+import * as Option from "effect/Option";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
 import { useContext } from "react";
 import { AttachmentFilePreview } from "./files/AttachmentFilePreview";
@@ -242,7 +243,7 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
-import { threadEnvironment, useEnvironmentThread } from "../state/threads";
+import { threadEnvironment, useEnvironmentThread, useThreadFamily } from "../state/threads";
 
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
@@ -1207,6 +1208,13 @@ function ChatViewContent(props: ChatViewProps) {
   const routeThreadState = useEnvironmentThread(
     routeKind === "server" ? routeThreadRef.environmentId : null,
     routeKind === "server" ? routeThreadRef.threadId : null,
+  );
+  // A direct link may have no shell row; use detail state to discover its family.
+  useThreadFamily(
+    routeKind === "server" ? environmentId : null,
+    routeServerThreadShell?.lineage.rootThreadId ??
+      Option.getOrNull(routeThreadState.data)?.thread.lineage.rootThreadId ??
+      null,
   );
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory);
   const loadEarlierTurns = useMemo(() => {

@@ -1,9 +1,12 @@
+import { loadShellSnapshotParts, loadOlderSettledThreadsPage } from "./ShellStream.ts";
 import * as CommandOutputHub from "./CommandOutputHub.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as ServerConfig from "../config.ts";
 import {
   type EnvironmentAuthorizationError,
   ORCHESTRATION_V2_WS_METHODS,
+  OrchestrationV2GetShellSnapshotError,
+  type ThreadId,
   OrchestrationV2RpcGroup,
   OrchestrationV2DispatchCommandError,
   OrchestrationV2GetThreadProjectionError,
@@ -78,6 +81,27 @@ export const makeHandlers = Effect.fn("orchestrationV2.makeRpcHandlers")(functio
   const workflowStopContext = yield* Effect.context<
     Orchestrator.OrchestratorV2 | ProviderSessionManager.ProviderSessionManagerV2
   >();
+  const sql = yield* SqlClient.SqlClient;
+  const applicationEvents = yield* ApplicationEvents.OrchestrationEventStore;
+  const readOmittableShellRows = Effect.fn("orchestrationV2.readOmittableShellRows")(function* (
+    options: { readonly familyOf: ThreadId } | { readonly worktreePath: string },
+  ) {
+    const result = yield* loadShellSnapshotParts({
+      sql,
+      readThreads: threads.readShellSnapshot({ location: "active", ...options }),
+      listProjects: Effect.succeed([]),
+      latestSequence: applicationEvents.latestApplicationSequence,
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new OrchestrationV2GetShellSnapshotError({
+            message: "Failed to load thread rows",
+            cause,
+          }),
+      ),
+    );
+    return { snapshotSequence: result.snapshotSequence, threads: result.threads.threads };
+  });
   return OrchestrationV2RpcGroup.of({
     [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: (input) =>
       observe.streamEffect(
@@ -159,17 +183,52 @@ export const makeHandlers = Effect.fn("orchestrationV2.makeRpcHandlers")(functio
     [ORCHESTRATION_V2_WS_METHODS.searchThreads]: (input) =>
       observe.effect(
         ORCHESTRATION_V2_WS_METHODS.searchThreads,
-        search
-          .search(input)
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new OrchestrationSearchThreadsError({ message: "Failed to search threads", cause }),
-            ),
+        ThreadSearch.searchThreadsWithOlderSettledRows({
+          request: input,
+          search: search.search,
+          searchOlderSettled: search.searchOlderSettled,
+          sql,
+          readThreads: (threadIds) => threads.readShellSnapshot({ location: "active", threadIds }),
+          latestSequence: applicationEvents.latestApplicationSequence,
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationSearchThreadsError({ message: "Failed to search threads", cause }),
           ),
+        ),
       ),
     [ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot]: () =>
       observe.effect(ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot, archive.snapshot),
+    [ORCHESTRATION_V2_WS_METHODS.getThreadFamily]: (input) =>
+      observe.effect(
+        ORCHESTRATION_V2_WS_METHODS.getThreadFamily,
+        readOmittableShellRows({ familyOf: input.threadId }),
+      ),
+    [ORCHESTRATION_V2_WS_METHODS.getWorktreeThreadIds]: (input) =>
+      observe.effect(
+        ORCHESTRATION_V2_WS_METHODS.getWorktreeThreadIds,
+        readOmittableShellRows({ worktreePath: input.worktreePath }).pipe(
+          Effect.map(({ threads }) => ({ threadIds: threads.map((thread) => thread.id) })),
+        ),
+      ),
+    [ORCHESTRATION_V2_WS_METHODS.getOlderSettledThreads]: (input) =>
+      observe.effect(
+        ORCHESTRATION_V2_WS_METHODS.getOlderSettledThreads,
+        loadOlderSettledThreadsPage({
+          sql,
+          listThreads: threads.listOlderSettledThreads(input),
+          readThreads: (threadIds) => threads.readShellSnapshot({ location: "active", threadIds }),
+          latestSequence: applicationEvents.latestApplicationSequence,
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationV2GetShellSnapshotError({
+                message: "Failed to load older settled threads",
+                cause,
+              }),
+          ),
+        ),
+      ),
     [ORCHESTRATION_V2_WS_METHODS.getThreadProjection]: (input) =>
       observe.effect(
         ORCHESTRATION_V2_WS_METHODS.getThreadProjection,

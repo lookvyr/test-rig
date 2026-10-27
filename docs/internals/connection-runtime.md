@@ -103,6 +103,11 @@ Finite requests, durable subscriptions, and commands are separate APIs:
   no `failed` status. Thread status adds `deleted`.
 - Cached shell and thread projections are never allowed to overwrite newer live
   data during a fast reconnect.
+- Capable clients omit idle subagents and older settled threads from the initial
+  shell. Thread families, settled pages, and search results hydrate those rows on
+  demand behind authoritative shell rows. Reads are scoped to the environment
+  and shell generation; reconnecting invalidates them. Settled counts include
+  unloaded rows, and per-environment page frontiers keep combined lists ordered.
 - Domain atom factories route effects through the environment registry and
   resolve the current scoped service at execution time. Project and thread
   commands are Atom factories under `src/state`

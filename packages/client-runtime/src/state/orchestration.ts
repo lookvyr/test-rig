@@ -75,5 +75,12 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       label: "environment-data:orchestration:archived-shell-snapshot",
       tag: ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot,
     }),
+    // Read immediately before deletion rather than trusting a partial shell or cache.
+    worktreeThreadIds: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:orchestration:worktree-thread-ids",
+      tag: ORCHESTRATION_V2_WS_METHODS.getWorktreeThreadIds,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
+    }),
   };
 }

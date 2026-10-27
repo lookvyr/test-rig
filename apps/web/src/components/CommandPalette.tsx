@@ -1693,6 +1693,7 @@ function OpenCommandPaletteDialog(props: {
       isCloning: isRemoteProjectCloneFlow,
       submenuGroups: currentView === null ? null : activeGroups,
     }),
+    environments.length > 1 ? { environmentLabels: Object.fromEntries(environmentLabelById) } : {},
   );
   const threadMessageItems = useMemo(
     () =>

@@ -928,9 +928,10 @@ describe("sortSettledThreadsForSidebarV2", () => {
     const sorted = sortSettledThreadsForSidebarV2([
       settled({ id: "b", settledAt: "2026-03-09T10:00:00.000Z" }),
       settled({ id: "a", settledAt: "2026-03-09T10:00:00.000Z" }),
+      settled({ id: "B", settledAt: "2026-03-09T10:00:00.000Z" }),
     ]);
 
-    expect(sorted.map((thread) => thread.id)).toEqual(["a", "b"]);
+    expect(sorted.map((thread) => thread.id)).toEqual(["B", "a", "b"]);
   });
 });
 

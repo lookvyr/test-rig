@@ -343,6 +343,11 @@ export class EnvironmentAuthHttpApi extends HttpApiGroup.make("auth")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+const EnvironmentOrchestrationShellSnapshotQuery = Schema.Struct({
+  omitIdleSubagents: Schema.optionalKey(Schema.String),
+  omitOlderSettled: Schema.optionalKey(Schema.String),
+});
+
 const EnvironmentOrchestrationThreadSnapshotParams = Schema.Struct({
   threadId: ThreadId,
 });
@@ -362,6 +367,7 @@ export class EnvironmentOrchestrationHttpApi extends HttpApiGroup.make("orchestr
   .add(
     HttpApiEndpoint.get("shellSnapshot", "/api/orchestration/shell", {
       headers: OrchestrationProtocolHeaders,
+      query: EnvironmentOrchestrationShellSnapshotQuery,
       success: OrchestrationV2ShellSnapshot,
       error: EnvironmentOrchestrationSnapshotErrors,
     }).middleware(EnvironmentAuthenticatedAuth),

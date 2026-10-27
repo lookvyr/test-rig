@@ -29,15 +29,28 @@ const DEFAULT_SHELL_SNAPSHOT_TIMEOUT_MS = 20_000;
  */
 export const fetchEnvironmentShellSnapshot = Effect.fn(
   "clientRuntime.state.fetchEnvironmentShellSnapshot",
-)(function* (input: { readonly prepared: PreparedConnection; readonly timeoutMs?: number }) {
+)(function* (input: {
+  readonly prepared: PreparedConnection;
+  readonly timeoutMs?: number;
+  readonly omitIdleSubagents?: boolean;
+  readonly omitOlderSettled?: boolean;
+}) {
+  const query = {
+    ...(input.omitIdleSubagents === true ? { omitIdleSubagents: "1" } : {}),
+    ...(input.omitOlderSettled === true ? { omitOlderSettled: "1" } : {}),
+  };
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     ...input,
     group: "orchestration",
     method: "GET",
-    url: (httpBaseUrl) => environmentEndpointUrl(httpBaseUrl, "/api/orchestration/shell"),
+    url: (httpBaseUrl) => {
+      const url = new URL(environmentEndpointUrl(httpBaseUrl, "/api/orchestration/shell"));
+      for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+      return url.toString();
+    },
     timeoutMs: input.timeoutMs ?? DEFAULT_SHELL_SNAPSHOT_TIMEOUT_MS,
     request: ({ client, headers }) =>
-      client.shellSnapshot({ headers: withOrchestrationProtocolHeader(headers) }),
+      client.shellSnapshot({ headers: withOrchestrationProtocolHeader(headers), query }),
   });
 });
 
@@ -52,6 +65,7 @@ export class ShellSnapshotLoader extends Context.Service<
   {
     readonly load: (
       prepared: PreparedConnection,
+      options?: { readonly omitIdleSubagents?: boolean; readonly omitOlderSettled?: boolean },
     ) => Effect.Effect<Option.Option<OrchestrationV2ShellSnapshot>>;
   }
 >()("@t3tools/client-runtime/state/shellSnapshotHttp/ShellSnapshotLoader") {}
@@ -64,8 +78,8 @@ export const layer: Layer.Layer<ShellSnapshotLoader, never, HttpClient.HttpClien
     // connections, so the loader must not hard-require it.
 
     return ShellSnapshotLoader.of({
-      load: (prepared: PreparedConnection) =>
-        fetchEnvironmentShellSnapshot({ prepared }).pipe(
+      load: (prepared, options) =>
+        fetchEnvironmentShellSnapshot({ prepared, ...options }).pipe(
           Effect.map(Option.some<OrchestrationV2ShellSnapshot>),
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Effect.catchCause((cause) =>

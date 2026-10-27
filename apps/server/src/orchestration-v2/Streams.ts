@@ -1,6 +1,8 @@
+import * as DateTime from "effect/DateTime";
 import type { ApplicationStoredEvent } from "@t3tools/contracts";
 import {
   buildActiveShellSnapshot,
+  shellSnapshotForSubscriber,
   loadShellSnapshotParts,
   skipUnchangedThreadShells,
   archivedShellStreamItemFromThreadShell,
@@ -311,6 +313,8 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
 export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subscribeShell")(
   function* (input: {
     readonly afterSequence?: number;
+    readonly omitIdleSubagents?: boolean;
+    readonly omitOlderSettled?: boolean;
     readonly requestCompletionMarker?: boolean;
   }) {
     const sql = yield* SqlClient.SqlClient;
@@ -348,14 +352,18 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
           latestSequence: applicationEvents.latestApplicationSequence,
         }),
       );
-      subagentThreadIds = new Set(
-        base.threads
-          .filter((thread) => thread.lineage.relationshipToParent === "subagent")
-          .map((thread) => thread.id),
-      );
+      const forSubscriber = shellSnapshotForSubscriber(base, {
+        omitIdleSubagents: input.omitIdleSubagents === true,
+        omitOlderSettled: input.omitOlderSettled === true,
+        now: yield* DateTime.now,
+      });
+      subagentThreadIds = forSubscriber.subagentThreadIds;
       const enriched = yield* enrichProjectShells(base.projects);
       return {
-        snapshot: { ...base, projects: enriched.projects } as OrchestrationV2ShellSnapshot,
+        snapshot: {
+          ...forSubscriber.snapshot,
+          projects: enriched.projects,
+        } as OrchestrationV2ShellSnapshot,
         resolvedRepositoryIdentityRoots: enriched.resolvedRepositoryIdentityRoots,
       };
     });

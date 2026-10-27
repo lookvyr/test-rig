@@ -5,6 +5,7 @@ import {
   TurnItemId,
   type OrchestrationProjectShell,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
@@ -31,7 +32,11 @@ import {
 } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
-import { buildActiveShellSnapshot, loadShellSnapshotParts } from "./ShellStream.ts";
+import {
+  buildActiveShellSnapshot,
+  loadShellSnapshotParts,
+  shellSnapshotForSubscriber,
+} from "./ShellStream.ts";
 import { projectThreadProjectionForWire } from "./WireProjection.ts";
 
 function isThreadNotFound(error: unknown): boolean {
@@ -93,18 +98,26 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         ),
     );
 
-    const loadShellSnapshot = Effect.fn("http.orchestration.loadShellSnapshot")(function* () {
-      const base = buildActiveShellSnapshot(
-        yield* loadShellSnapshotParts({
-          sql,
-          readThreads: threadManagement.readShellSnapshot({ location: "active" }),
-          listProjects: projectStore.listShells(),
-          latestSequence: applicationEvents.latestApplicationSequence,
-        }),
-      );
-      const projects = yield* enrichProjectShells(base.projects);
-      return { ...base, projects };
-    });
+    const loadShellSnapshot = Effect.fn("http.orchestration.loadShellSnapshot")(
+      function* (options: {
+        readonly omitIdleSubagents: boolean;
+        readonly omitOlderSettled: boolean;
+      }) {
+        const base = buildActiveShellSnapshot(
+          yield* loadShellSnapshotParts({
+            sql,
+            readThreads: threadManagement.readShellSnapshot({ location: "active" }),
+            listProjects: projectStore.listShells(),
+            latestSequence: applicationEvents.latestApplicationSequence,
+          }),
+        );
+        const projects = yield* enrichProjectShells(base.projects);
+        return {
+          ...shellSnapshotForSubscriber(base, { ...options, now: yield* DateTime.now }).snapshot,
+          projects,
+        };
+      },
+    );
 
     const loadThreadSnapshotWindow = Effect.fn("http.orchestration.loadThreadSnapshotWindow")(
       function* (
@@ -149,7 +162,10 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.shellSnapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          return yield* loadShellSnapshot().pipe(
+          return yield* loadShellSnapshot({
+            omitIdleSubagents: args.query.omitIdleSubagents === "1",
+            omitOlderSettled: args.query.omitOlderSettled === "1",
+          }).pipe(
             Effect.catch((cause) =>
               failEnvironmentInternal("orchestration_snapshot_failed", cause),
             ),
