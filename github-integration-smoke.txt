@@ -1,0 +1,2 @@
+Temporary fixture for GitHub-only Test Rig integration verification.
+This pull request will be closed without merging after verification.
