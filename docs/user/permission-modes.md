@@ -4,8 +4,7 @@ A permission mode controls how much the agent does on its own and when it stops 
 
 The mode is set per thread, from the mode control in the message composer. Changing it in one
 thread does not change any other thread. New Claude and Codex threads start in **Auto**, even
-when created from a thread using another mode. OpenCode threads inherit the viewed thread's
-mode, or start in **Full access** when there is no thread to inherit from. You can pick a
+when created from a thread using another mode. You can pick a
 different mode before sending; that choice stays selected if you change providers in the draft.
 Existing threads keep their saved mode.
 
@@ -23,8 +22,7 @@ without prompting; commands and anything else still stop for approval.
 
 **Auto**: routine actions proceed without you; risky ones still ask. How this is enforced depends
 on the provider: Codex delegates routine approvals to an AI reviewer, Claude uses its own auto
-permission mode, and providers without an equivalent (such as OpenCode) fall back to asking, like
-Supervised.
+permission mode.
 
 **Full access**: allow commands and edits without prompts. The agent runs
 unattended until it finishes or asks a question of its own.

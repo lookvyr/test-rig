@@ -65,8 +65,8 @@ export function McpOAuthConnection({
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Sign in once for Codex, Claude, and OpenCode in this environment. Servers that do not
-        require sign-in can be used while signed out.
+        Sign in once for Codex and Claude in this environment. Servers that do not require sign-in
+        can be used while signed out.
       </p>
       {error || actionError || status?.error ? (
         <p role="alert" className="text-xs text-destructive">

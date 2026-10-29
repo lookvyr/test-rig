@@ -10,17 +10,17 @@ import { BUILT_IN_DRIVERS } from "../builtInDrivers.ts";
 import { deriveProviderInstanceConfigMap } from "./ProviderInstanceRegistryHydration.ts";
 
 describe("ProviderInstanceRegistryHydration", () => {
-  it("hydrates exactly the three approved built-in drivers from legacy settings", () => {
+  it("hydrates exactly the two approved built-in drivers from legacy settings", () => {
     expect(BUILT_IN_DRIVERS.map((driver) => driver.driverKind)).toEqual([
       ProviderDriverKind.make("codex"),
       ProviderDriverKind.make("claudeAgent"),
-      ProviderDriverKind.make("opencode"),
     ]);
 
     const configMap = deriveProviderInstanceConfigMap(DEFAULT_SERVER_SETTINGS);
-    expect(Object.keys(configMap)).toEqual(["codex", "claudeAgent", "opencode"]);
+    expect(Object.keys(configMap)).toEqual(["codex", "claudeAgent"]);
     expect(configMap).not.toHaveProperty("cursor");
     expect(configMap).not.toHaveProperty("grok");
+    expect(configMap).not.toHaveProperty("opencode");
   });
 
   it("preserves explicit excluded-provider rows without synthesizing legacy instances", () => {
@@ -61,11 +61,11 @@ describe("ProviderInstanceRegistryHydration", () => {
       "grok_legacy",
       "codex",
       "claudeAgent",
-      "opencode",
     ]);
     expect(configMap[cursorId]?.config).toEqual({ sentinel: "cursor-config-survives" });
     expect(configMap[grokId]?.config).toEqual({ sentinel: "grok-config-survives" });
     expect(configMap).not.toHaveProperty("cursor");
     expect(configMap).not.toHaveProperty("grok");
+    expect(configMap).not.toHaveProperty("opencode");
   });
 });

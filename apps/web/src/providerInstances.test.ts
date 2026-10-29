@@ -600,7 +600,7 @@ describe("resolveComposerProviderInstanceId", () => {
     ).toBe(legacy);
   });
 
-  it.each(["claudeAgent", "opencode"] as const)(
+  it.each(["claudeAgent"] as const)(
     "lets an explicit %s draft selection override an existing Codex conversation",
     (driver) => {
       const instanceId = ProviderInstanceId.make(`${driver}_personal`);

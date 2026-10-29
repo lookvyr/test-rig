@@ -33,7 +33,6 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 const CUSTOM_MODEL_PLACEHOLDER_BY_KIND: Partial<Record<ProviderDriverKind, string>> = {
   [ProviderDriverKind.make("codex")]: "gpt-6.7-codex-ultra-preview",
   [ProviderDriverKind.make("claudeAgent")]: "claude-sonnet-5",
-  [ProviderDriverKind.make("opencode")]: "openai/gpt-5",
 };
 
 interface ProviderModelsSectionProps {
@@ -214,8 +213,7 @@ export function ProviderModelsSection({
                 descriptor.type === "select" &&
                 (descriptor.id === "reasoningEffort" ||
                   descriptor.id === "effort" ||
-                  descriptor.id === "reasoning" ||
-                  descriptor.id === "variant"),
+                  descriptor.id === "reasoning"),
             )
           ) {
             capLabels.push("Reasoning");

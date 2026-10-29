@@ -428,7 +428,7 @@ export const layerWithOptions = (
       /**
        * Reservations protect a credential between prepareMcpSession handing it
        * out and the owning session entry becoming visible in `sessions`.
-       * Adapters like ACP and OpenCode consume the credential eagerly during
+       * Adapters can consume the credential eagerly during
        * openSession, so a racing release must not revoke it in that window
        * (rotating afterwards cannot repair an already-configured process).
        * The holder MUST drop the reservation once the entry is recorded or the

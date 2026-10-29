@@ -88,12 +88,12 @@ describe("applyManifestDefault", () => {
     );
   });
   it("moves the default flag and its aliases to the manifest's chat default", () => {
-    const driver = ProviderDriverKind.make("opencode");
+    const driver = ProviderDriverKind.make("customProvider");
     const manifest: ModelManifest.ModelManifestData = {
       version: 1,
       currentModels: {},
       providers: {
-        opencode: {
+        customProvider: {
           defaults: { chat: "gemini-new" },
           profiles: {},
           models: [{ slug: "gemini-new", name: "New", status: "current" }],
@@ -101,12 +101,12 @@ describe("applyManifestDefault", () => {
       },
     };
     const models = [
-      model({ slug: "gemini-old", isDefault: true, aliases: ["opencode-default"] }),
+      model({ slug: "gemini-old", isDefault: true, aliases: ["customProvider-default"] }),
       model({ slug: "gemini-new" }),
     ];
     assert.deepStrictEqual(ModelManifest.applyManifestDefault(models, manifest, driver), [
       model({ slug: "gemini-old" }),
-      model({ slug: "gemini-new", isDefault: true, aliases: ["opencode-default"] }),
+      model({ slug: "gemini-new", isDefault: true, aliases: ["customProvider-default"] }),
     ]);
     // The account does not offer the manifest default: keep the runtime's choice.
     assert.deepStrictEqual(

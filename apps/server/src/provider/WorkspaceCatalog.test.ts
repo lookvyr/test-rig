@@ -332,7 +332,7 @@ it("filters library metadata by provider, assignment and project exclusion", () 
   assert.strictEqual(mergeLibrarySkills(catalog, [assigned], projectId, "codex").skills.length, 1);
   for (const [target, provider] of [
     [ProjectId.make("different"), "codex"],
-    [projectId, "opencode"],
+    [projectId, "unsupported"],
     [null, "codex"],
   ] as const) {
     assert.deepEqual(mergeLibrarySkills(catalog, [assigned], target, provider), catalog);

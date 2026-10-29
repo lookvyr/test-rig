@@ -45,7 +45,7 @@ const servers: ReadonlyArray<ResolvedMcpServer> = [
   },
 ];
 describe("app-owned provider MCP configuration", () => {
-  it("uses independent stable keys for native same-name servers and scoped OpenCode keys", () => {
+  it("uses independent stable keys for native same-name servers", () => {
     const config = codexAppMcpConfig(servers);
     assert.isUndefined(config.github);
     assert.deepEqual(config["tru-local"], {
@@ -58,11 +58,6 @@ describe("app-owned provider MCP configuration", () => {
       http_headers: { Authorization: "Bearer header-secret" },
     });
     assert.equal(appMcpRuntimeName("github"), appMcpRuntimeName("github"));
-    assert.notEqual(
-      appMcpRuntimeName("github", "thread-a"),
-      appMcpRuntimeName("github", "thread-b"),
-    );
-    assert.isAtMost(appMcpRuntimeName("x".repeat(48), "thread-a").length, 61);
   });
   it("keeps Claude header and environment secrets out of MCP config argv, with collision-free references", () => {
     const result = claudeAppMcpConfig([

@@ -1,4 +1,3 @@
-import * as OpenCodeServerLedger from "../OpenCodeServerLedger.ts";
 import * as ProviderContinuationRequests from "../../orchestration-v2/ProviderContinuationRequests.ts";
 /**
  * Multi-instance validation slices for `ProviderInstanceRegistryLive`.
@@ -12,13 +11,13 @@ import * as ProviderContinuationRequests from "../../orchestration-v2/ProviderCo
  *
  *  2. **Many drivers, one registry** — the "built-in drivers slice" describe
  *     block configures one instance of every executable driver shipped by
- *     Test Rig (`codex`, `claudeAgent`, `opencode`) alongside excluded
+ *     Test Rig (`codex`, `claudeAgent`) alongside excluded
  *     Cursor/Grok rows. It proves the approved drivers boot normally while
  *     excluded rows fail closed as unavailable snapshots.
  *
  * Every instance in these tests is configured with `enabled: false` so the
  * provider-status checks short-circuit to pending/disabled snapshots
- * without trying to spawn real `codex` / `claude` / `opencode` binaries.
+ * without trying to spawn real `codex` / `claude` binaries.
  * That keeps the assertions focused on registry routing
  * behaviour rather than the runtime details of each provider.
  */
@@ -27,7 +26,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   type ClaudeSettings,
   type CodexSettings,
-  type OpenCodeSettings,
   ProviderDriverKind,
   type ProviderInstanceConfigMap,
   ProviderInstanceId,
@@ -49,7 +47,6 @@ import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "../providerMaintenanceRunner.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
 import { BUILT_IN_DRIVERS } from "../builtInDrivers.ts";
-import { OpenCodeRuntimeLayer } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
 import { ProviderRegistryLive } from "./ProviderRegistry.ts";
@@ -102,15 +99,6 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
   homePath: "",
   customModels: [],
   launchArgs: "",
-  ...overrides,
-});
-
-const makeOpenCodeConfig = (overrides: Partial<OpenCodeSettings>): OpenCodeSettings => ({
-  enabled: false,
-  binaryPath: "opencode",
-  serverUrl: "",
-  serverPassword: "",
-  customModels: [],
   ...overrides,
 });
 
@@ -246,26 +234,10 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
 });
 
 describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
-  // All drivers need `NodeServices` (ChildProcessSpawner + FileSystem +
-  // Path). `OpenCodeDriver.create` additionally yields `OpenCodeRuntime`
-  // at construction time, so we wire `OpenCodeRuntimeLive` into the stack.
-  // `OpenCodeRuntimeLive` bundles its own `NetService.layer` via
-  // `Layer.provide`, so the only external requirement it still exposes is
-  // `ChildProcessSpawner` — resolved here by piping it through
-  // `provideMerge(NodeServices.layer)`.
-  //
-  // The nested `provideMerge`s read bottom-up: `NodeServices.layer`
-  // provides `OpenCodeRuntimeLive`'s deps while keeping its own outputs
-  // surfaced; that merged layer then provides `ServerConfig.layerTest`'s
-  // `FileSystem` dep while keeping everything else surfaced to the test.
-  const infraLayer = OpenCodeRuntimeLayer.pipe(
-    Layer.provide(OpenCodeServerLedger.layerTest),
-    Layer.provideMerge(NodeServices.layer),
-  );
   const testLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "provider-instance-registry-built-in-drivers-test",
   }).pipe(
-    Layer.provideMerge(infraLayer),
+    Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
     Layer.provideMerge(ProviderContinuationRequests.layer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
@@ -278,6 +250,10 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
       const spawned: unknown[] = [];
       return Effect.gen(function* () {
         const excluded = [
+          {
+            instanceId: ProviderInstanceId.make("opencode"),
+            driver: ProviderDriverKind.make("opencode"),
+          },
           {
             instanceId: ProviderInstanceId.make("cursor"),
             driver: ProviderDriverKind.make("cursor"),
@@ -452,7 +428,7 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
           driver: openCodeDriverKind,
           displayName: "OpenCode",
           enabled: false,
-          config: makeOpenCodeConfig({}),
+          config: {},
         },
       };
 
@@ -463,16 +439,16 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
 
       const unavailable = yield* registry.listUnavailable;
       expect(unavailable.map((provider) => provider.instanceId).toSorted()).toEqual(
-        [cursorId, grokId].toSorted(),
+        [cursorId, grokId, openCodeId].toSorted(),
       );
       expect(unavailable.every((provider) => provider.availability === "unavailable")).toBe(true);
       expect(unavailable.every((provider) => provider.enabled === false)).toBe(true);
       expect(unavailable.every((provider) => provider.installed === false)).toBe(true);
 
       const instances = yield* registry.listInstances;
-      expect(instances).toHaveLength(3);
+      expect(instances).toHaveLength(2);
       expect(instances.map((instance) => instance.instanceId).toSorted()).toEqual(
-        [codexId, claudeId, openCodeId].toSorted(),
+        [codexId, claudeId].toSorted(),
       );
 
       // Instance lookup by id resolves each instance to its own bundle —
@@ -487,23 +463,18 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
       expect(claude?.driverKind).toBe(claudeDriverKind);
       expect(cursor).toBeUndefined();
       expect(grok).toBeUndefined();
-      expect(openCode?.driverKind).toBe(openCodeDriverKind);
+      expect(openCode).toBeUndefined();
       expect(codex?.displayName).toBe("Codex");
       expect(claude?.displayName).toBe("Claude");
-      expect(openCode?.displayName).toBe("OpenCode");
 
       // Every live instance owns its own set of closures — no sharing across
       // drivers. `adapter` / `textGeneration` / `snapshot` are all distinct
       // references.
-      const adapters = [codex!.adapter, claude!.adapter, openCode!.adapter];
+      const adapters = [codex!.adapter, claude!.adapter];
       expect(new Set(adapters).size).toBe(adapters.length);
-      const textGenerations = [
-        codex!.textGeneration,
-        claude!.textGeneration,
-        openCode!.textGeneration,
-      ];
+      const textGenerations = [codex!.textGeneration, claude!.textGeneration];
       expect(new Set(textGenerations).size).toBe(textGenerations.length);
-      const snapshots = [codex!.snapshot, claude!.snapshot, openCode!.snapshot];
+      const snapshots = [codex!.snapshot, claude!.snapshot];
       expect(new Set(snapshots).size).toBe(snapshots.length);
 
       // Snapshots identify themselves by `instanceId` + `driver` so
@@ -523,14 +494,6 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
       expect(claudeSnapshot.driver).toBe(claudeDriverKind);
       expect(claudeSnapshot.enabled).toBe(false);
       expect(claudeSnapshot.continuation?.groupKey).toBe("claude:home:/home/julius/.claude-work");
-
-      const openCodeSnapshot = yield* openCode!.snapshot.getSnapshot;
-      expect(openCodeSnapshot.instanceId).toBe(openCodeId);
-      expect(openCodeSnapshot.driver).toBe(openCodeDriverKind);
-      expect(openCodeSnapshot.enabled).toBe(false);
-      expect(openCodeSnapshot.continuation?.groupKey).toBe(
-        `${openCodeDriverKind}:instance:${openCodeId}`,
-      );
     }).pipe(Effect.provide(testLayer)),
   );
 });

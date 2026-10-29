@@ -3,7 +3,7 @@
 ## Product definition
 
 Test Rig is a single-user, local-first desktop application that provides a UI
-over approved coding harnesses: Codex, Claude Code, and OpenCode. It removes
+over approved coding harnesses: Codex and Claude Code. It removes
 unneeded cloud services and providers while retaining enough of T3 Code's local
 core to adopt, adapt, or learn from valuable upstream work selectively. Full
 upstream parity is not a goal.
@@ -48,7 +48,6 @@ Test Rig supports these executable providers:
 
 - Codex
 - Claude Code
-- OpenCode
 
 The local product also retains terminals, filesystem operations, Git workflows,
 source-control hosting integrations, worktrees and checkpoints, project scripts,
@@ -102,7 +101,7 @@ The following are outside Test Rig's product boundary:
   owned when Clerk is removed.
 - Managed relay and cloudflared infrastructure, mobile push, and Tailscale
   integration.
-- Cursor and Grok coding-harness providers. Exclusion applies to executable
+- OpenCode, Cursor, and Grok coding-harness providers. Exclusion applies to executable
   server registration and selectable UI, not merely visual hiding; unrelated
   editor integration is a separate concern.
 - PostHog analytics and identity collection, and outbound OTLP export.
@@ -168,15 +167,15 @@ Test Rig's identity is independent of T3 Code:
 Test Rig must ignore ambient `T3CODE_HOME` and must not fall back to T3 legacy
 paths. Its Electron profile, caches, logs, browser partitions, updater state,
 database, worktrees, and runtime directories are Test Rig-specific so both
-applications can run concurrently without collisions. Provider-owned Codex,
-Claude Code, and OpenCode authentication homes remain intentionally shared.
+applications can run concurrently without collisions. Provider-owned Codex
+and Claude Code authentication homes remain intentionally shared.
 
 ## Decision log
 
 | Decision                             | Rationale                                                                                                                                                                                                                |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Desktop-first and local-first        | The desktop workflow is the product; the web code is retained as its renderer and the authenticated loopback server owns the local core.                                                                                 |
-| Three approved providers             | Codex, Claude Code, and OpenCode cover the intended harnesses without retaining unused executable integrations.                                                                                                          |
+| Two approved providers               | Codex and Claude Code cover the intended harnesses without retaining unused executable integrations.                                                                                                                     |
 | Explicit source-control integrations | GitHub is enabled by default; GitLab, Azure DevOps, and Bitbucket are opt-in and fail closed while disabled. Generic Git, including automatic remote refresh, remains independent of hosting-provider integration state. |
 | Remove cloud product edges           | A personally owned tool used with company repositories must not make data egress to unapproved services accidentally enableable.                                                                                         |
 | Build and verify from source         | Local build, test, and desktop artifact commands remain; inherited CI and publication automation do not. Future automation will be purpose-built.                                                                        |
@@ -193,9 +192,9 @@ Use the smallest focused checks appropriate to a changed vertical slice:
 - [ ] A disposable repository can create and resume a thread, run terminal and
       filesystem operations, use Git and worktrees, capture checkpoint diffs,
       and fork from an earlier response.
-- [ ] Codex, Claude Code, and OpenCode can each be selected and complete a
+- [ ] Codex and Claude Code can each be selected and complete a
       representative local turn with their existing provider-owned authentication.
-- [ ] Cursor and Grok cannot be selected or executed through UI, RPC, persisted
+- [ ] OpenCode, Cursor, and Grok cannot be selected or executed through UI, RPC, persisted
       legacy configuration, or direct server requests; legacy data remains
       readable and fails closed.
 - [ ] T3 Connect, Clerk account flows, relay/cloudflared, mobile push, and

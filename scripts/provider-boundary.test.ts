@@ -26,6 +26,11 @@ function productionTypeScriptFiles(root: string): string[] {
 describe("executable provider boundary", () => {
   it("contains no excluded provider or ACP server implementation", () => {
     const removedPaths = [
+      "apps/server/src/provider/Drivers/OpenCodeDriver.ts",
+      "apps/server/src/provider/opencode2",
+      "apps/server/src/provider/opencodeRuntime.ts",
+      "apps/server/src/textGeneration/OpenCodeTextGeneration.ts",
+      "apps/server/src/orchestration-v2/Adapters/OpenCode2AdapterV2.ts",
       "apps/server/src/provider/Drivers/CursorDriver.ts",
       "apps/server/src/provider/Drivers/GrokDriver.ts",
       "apps/server/src/provider/acp/AcpSessionRuntime.ts",
@@ -36,7 +41,14 @@ describe("executable provider boundary", () => {
       [],
     );
 
-    const forbiddenNeedles = ["cursor-agent", '"grok"', "effect-acp", "provider/acp"];
+    const forbiddenNeedles = [
+      "cursor-agent",
+      '"grok"',
+      "effect-acp",
+      "provider/acp",
+      '"opencode"',
+      "@opencode/",
+    ];
     const violations = productionTypeScriptFiles(NodePath.join(repoRoot, "apps/server")).flatMap(
       (file) => {
         const contents = NodeFS.readFileSync(file, "utf8");
@@ -49,10 +61,10 @@ describe("executable provider boundary", () => {
     expect(violations).toEqual([]);
   });
 
-  it("contains no ACP workspace dependency", () => {
+  it("contains no excluded provider dependency", () => {
     const manifests = ["apps/server/package.json", "pnpm-lock.yaml"];
     const violations = manifests.filter((path) =>
-      NodeFS.readFileSync(NodePath.join(repoRoot, path), "utf8").includes("effect-acp"),
+      NodeFS.readFileSync(NodePath.join(repoRoot, path), "utf8").match(/effect-acp|@opencode\//u),
     );
 
     expect(violations).toEqual([]);

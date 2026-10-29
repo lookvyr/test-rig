@@ -508,7 +508,7 @@ for (const mutation of ["edit", "pause", "delete", "replace"] as const) {
   );
 }
 
-for (const instanceId of ["codex", "claude-code", "opencode"]) {
+for (const instanceId of ["codex", "claude-code"]) {
   it.effect(`launches ${instanceId} with the saved model, permissions, and workspace`, () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

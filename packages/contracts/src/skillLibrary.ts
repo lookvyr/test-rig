@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { ToolsScopeId } from "./toolsScope.ts";
@@ -13,7 +14,7 @@ export const SkillLibraryId = Schema.String.check(
 );
 export type SkillLibraryId = typeof SkillLibraryId.Type;
 
-export const SkillLibraryProvider = Schema.Literals(["codex", "claudeAgent", "opencode"]);
+export const SkillLibraryProvider = Schema.Literals(["codex", "claudeAgent"]);
 export type SkillLibraryProvider = typeof SkillLibraryProvider.Type;
 
 export const SkillLibraryAssignment = Schema.Struct({
@@ -28,13 +29,24 @@ export type SkillLibraryAssignment = typeof SkillLibraryAssignment.Type;
 const editableFields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
   description: Schema.String.check(Schema.isMaxLength(2_000)),
-  providers: Schema.Array(SkillLibraryProvider).check(Schema.isMaxLength(3)),
+  providers: Schema.Array(SkillLibraryProvider).check(Schema.isMaxLength(2)),
   assignment: SkillLibraryAssignment,
 };
 
 export const SkillLibrarySummary = Schema.Struct({
   id: SkillLibraryId,
   ...editableFields,
+  // Read the former default assignment without dropping the saved skill.
+  providers: Schema.Array(Schema.Union([SkillLibraryProvider, Schema.Literal("opencode")])).pipe(
+    Schema.decodeTo(
+      Schema.Array(SkillLibraryProvider),
+      SchemaTransformation.transform({
+        decode: (providers): ReadonlyArray<SkillLibraryProvider> =>
+          providers.filter((provider) => provider !== "opencode"),
+        encode: (providers) => providers,
+      }),
+    ),
+  ),
   path: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

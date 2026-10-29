@@ -187,7 +187,7 @@ describe("Markdown toolbar insertion", () => {
 describe("MCP project edits", () => {
   const config = {
     enabled: true,
-    providers: ["codex", "claudeAgent", "opencode"] as const,
+    providers: ["codex", "claudeAgent"] as const,
     transport: { type: "http" as const, url: "https://example.com/mcp", headers: [] },
   };
   it("keeps provider inheritance when changing only project enabled state", () => {

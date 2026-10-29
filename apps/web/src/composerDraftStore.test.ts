@@ -1711,7 +1711,6 @@ describe("composerDraftStore sticky composer settings", () => {
   it.each([
     [CODEX_INSTANCE, "gpt-6-sol", "reasoningEffort", "high", "serviceTier", "fast"],
     [CLAUDE_AGENT_INSTANCE, "claude-opus-5-5", "effort", "max", "fastMode", true],
-    [ProviderInstanceId.make("opencode"), "openai/gpt-5", "variant", "high", "fastMode", true],
     [CODEX_SECONDARY_INSTANCE, "gpt-6-sol", "reasoningEffort", "low", "serviceTier", "priority"],
   ] as const)(
     "reuses %s model and effort at normal speed without changing the launched thread",

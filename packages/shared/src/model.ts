@@ -228,11 +228,9 @@ export function getProviderOptionCurrentValue(
   if (!descriptor) {
     return undefined;
   }
-  const hasExplicitOption = selection?.options?.some((option) => option.id === descriptor.id);
   // Reported values are display-only; callers that build dispatch options omit this context.
   const reportedValue = getReportedOptionValue(descriptor.id, selection, reportedSelection);
   if (reportedValue !== undefined) return reportedValue;
-  if (descriptor.id === "variant" && selection && !hasExplicitOption) return undefined;
   if (descriptor.type === "boolean") {
     return descriptor.currentValue;
   }
@@ -262,9 +260,7 @@ export function getProviderOptionCurrentLabel(
     descriptor.options.find((option) => option.id === currentValue)?.label ??
     (getReportedOptionValue(descriptor.id, selection, reportedSelection) === "default"
       ? "Default"
-      : descriptor.id === "variant"
-        ? "Unknown"
-        : undefined)
+      : undefined)
   );
 }
 

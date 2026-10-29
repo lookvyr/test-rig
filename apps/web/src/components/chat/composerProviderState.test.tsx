@@ -100,24 +100,6 @@ describe("getComposerReasoningStep", () => {
     expect(step({ models: modelWith([selectDescriptor("effort", [LEVELS[0]!])]) })).toBeNull();
   });
 
-  it("steps OpenCode variants and preserves explicit boolean traits", () => {
-    const provider = ProviderDriverKind.make("opencode");
-    const instanceId = ProviderInstanceId.make("opencode");
-    expect(
-      step({
-        provider,
-        instanceId,
-        models: modelWith([selectDescriptor("variant", LEVELS), booleanDescriptor("fastMode")]),
-        modelOptions: selections(["fastMode", true]),
-        reportedModelSelection: {
-          instanceId,
-          model: MODEL,
-          options: selections(["variant", "default"]),
-        },
-      })?.modelOptions,
-    ).toEqual(selections(["variant", "high"], ["fastMode", true]));
-  });
-
   it("walks the catalog order, wrapping at both ends and keeping the other traits", () => {
     const models = modelWith([
       selectDescriptor("contextWindow", [
@@ -229,7 +211,6 @@ describe("getComposerReasoningStep", () => {
         to: "medium",
       },
       {
-        // OpenCode reports "default" when no variant was chosen.
         label: "reported value outside the catalog",
         modelOptions: undefined,
         reportedModelSelection: {

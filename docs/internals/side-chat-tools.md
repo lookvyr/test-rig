@@ -71,4 +71,4 @@ after the fork, and sending a message back with a verified main-thread reply.
 Closing one side removed its child and grandchild, cancelled the still-active
 grandchild, and completed all three provider-session cleanup receipts. The
 surviving side answered a follow-up, and its sibling's draft survived tab
-switches before disposal. OpenCode side chats remain unsupported.
+switches before disposal.

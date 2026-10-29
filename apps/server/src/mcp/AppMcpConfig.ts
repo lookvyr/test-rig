@@ -22,10 +22,7 @@ export function appMcpProviderServers(
   );
 }
 
-export const appMcpRuntimeName = (name: string, threadId?: string) =>
-  threadId === undefined
-    ? `tru-${name}`
-    : `tru-${NodeCrypto.createHash("sha256").update(threadId).digest("hex").slice(0, 8)}-${name}`;
+export const appMcpRuntimeName = (name: string) => `tru-${name}`;
 export function codexAppMcpConfig(servers: ReadonlyArray<ResolvedMcpServer>) {
   return Object.fromEntries(
     servers.map(({ name, transport }) => [

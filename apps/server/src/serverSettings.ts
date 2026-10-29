@@ -196,7 +196,7 @@ function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings
 }
 
 function fallbackTextGenerationProvider(settings: ServerSettings): ServerSettings {
-  const fallbackProvider = (["codex", "claudeAgent", "opencode"] as const).find(
+  const fallbackProvider = (["codex", "claudeAgent"] as const).find(
     (provider) => settings.providers[provider].enabled,
   );
   if (!fallbackProvider) {

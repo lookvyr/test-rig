@@ -34,7 +34,6 @@ import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts";
-import * as OpenCodeRuntime from "./provider/opencodeRuntime.ts";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./checkpointing/CheckpointStore.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -406,12 +405,6 @@ const RuntimeCoreDependenciesLive = Layer.mergeAll(
     // logger instances.
     Layer.provideMerge(ProviderEventLoggers.layer),
     Layer.provideMerge(ProviderContinuationRequests.layer),
-    // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
-    // `ProviderRegistryLive` pulled `OpenCodeRuntimeLive` in for itself, but
-    // the rewritten registry reads snapshots off the instance registry and
-    // no longer transitively provides it. Exposing it at the runtime level
-    // keeps a single Live for all opencode consumers.
-    Layer.provideMerge(OpenCodeRuntime.OpenCodeRuntimeLive),
     Layer.provideMerge(WorkspaceLayerLive),
     Layer.provideMerge(SkillLibrary.layer),
   )

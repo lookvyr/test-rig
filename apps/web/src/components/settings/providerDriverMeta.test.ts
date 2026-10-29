@@ -9,7 +9,6 @@ describe("provider client definitions", () => {
     const expected = [
       ["codex", "Codex"],
       ["claudeAgent", "Claude"],
-      ["opencode", "OpenCode"],
     ];
 
     expect(PROVIDER_CLIENT_DEFINITIONS.map(({ value, label }) => [value, label])).toEqual(expected);

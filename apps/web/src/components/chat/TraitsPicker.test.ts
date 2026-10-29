@@ -135,23 +135,26 @@ describe("buildTraitsTriggerDisplay", () => {
   });
 });
 
-it("shows the native default variant without persisting it as an explicit choice", () => {
-  const selection = { instanceId: ProviderInstanceId.make("opencode"), model: "openai/gpt-6-sol" };
+it("shows the native default effort without persisting it as an explicit choice", () => {
+  const selection = {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    model: "claude-sonnet-5-5",
+  };
   expect(
     buildTraitsTriggerDisplay({
-      provider: ProviderDriverKind.make("opencode"),
+      provider: ProviderDriverKind.make("claudeAgent"),
       descriptors: [
         {
-          id: "variant",
+          id: "effort",
           label: "Reasoning",
           type: "select",
           options: [{ id: "high", label: "High" }],
         },
       ],
-      primarySelectDescriptorId: "variant",
+      primarySelectDescriptorId: "effort",
       ultrathinkPromptControlled: false,
       modelSelection: selection,
-      reportedModelSelection: { ...selection, options: [{ id: "variant", value: "default" }] },
+      reportedModelSelection: { ...selection, options: [{ id: "effort", value: "default" }] },
     }).label,
   ).toBe("Default");
 });

@@ -71,7 +71,7 @@ it("does not request draft history and starts loading after promotion", async ()
 });
 
 it.each(
-  ["codex", "claudeAgent", "opencode2"].flatMap((driver) =>
+  ["codex", "claudeAgent"].flatMap((driver) =>
     (["lineage", "subagents"] as const).map((mode) => ({ driver, mode })),
   ),
 )(

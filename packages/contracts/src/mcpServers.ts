@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -14,7 +15,7 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 /**
  * Lowercase letters, digits, `-` and `_`, starting with a letter: the subset
  * every provider accepts as a server key and tool prefix (Claude names tools
- * `mcp__<server>__<tool>`, OpenCode `<server>_<tool>`).
+ * `mcp__<server>__<tool>`).
  */
 const MCP_SERVER_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/;
 const MCP_SERVER_NAME_MAX_CHARS = 48;
@@ -83,14 +84,25 @@ export type McpHttpTransport = typeof McpHttpTransport.Type;
 export const McpServerTransport = Schema.Union([McpStdioTransport, McpHttpTransport]);
 export type McpServerTransport = typeof McpServerTransport.Type;
 
-export const McpServerProvider = Schema.Literals(["codex", "claudeAgent", "opencode"]);
+export const McpServerProvider = Schema.Literals(["codex", "claudeAgent"]);
 export type McpServerProvider = typeof McpServerProvider.Type;
 export const DEFAULT_MCP_SERVER_PROVIDERS: ReadonlyArray<McpServerProvider> = [
   "codex",
   "claudeAgent",
-  "opencode",
 ];
-const McpServerProviders = Schema.Array(McpServerProvider);
+// Older defaults assigned every MCP server to OpenCode as well.
+const McpServerProviders = Schema.Array(
+  Schema.Union([McpServerProvider, Schema.Literal("opencode")]),
+).pipe(
+  Schema.decodeTo(
+    Schema.Array(McpServerProvider),
+    SchemaTransformation.transform({
+      decode: (providers): ReadonlyArray<McpServerProvider> =>
+        providers.filter((provider) => provider !== "opencode"),
+      encode: (providers) => providers,
+    }),
+  ),
+);
 
 export const McpServerConfig = Schema.Struct({
   providers: McpServerProviders.pipe(

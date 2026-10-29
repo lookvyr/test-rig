@@ -18,8 +18,6 @@ the file is missing, inaccessible, or the command never announces a task, output
 appears when the tool finishes. Background Claude tasks use their existing task
 lifecycle rather than this foreground preview.
 
-The independent OpenCode2 adapter currently supplies final command results only.
-Expanding its row uses the same panel, but does not imply live output is available.
 Older Test Rig servers continue to show final output through the existing detail
 request.
 

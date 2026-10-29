@@ -160,7 +160,7 @@ export function parseMcpServerJson(text: string): { name: string; config: McpSer
     entry = object(first[1]);
   }
   const url = entry.url ?? entry.serverUrl ?? entry.httpUrl;
-  const providers = ["codex", "claudeAgent", "opencode"] as const;
+  const providers = ["codex", "claudeAgent"] as const;
   if (url !== undefined) {
     if (typeof url !== "string") throw new Error("Server URL must be a string.");
     return {

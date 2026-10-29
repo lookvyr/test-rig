@@ -538,7 +538,7 @@ function EnvironmentTools({
                   environmentId,
                   input: {
                     ...nativeSource,
-                    providers: ["codex", "claudeAgent", "opencode"],
+                    providers: ["codex", "claudeAgent"],
                     assignment: EMPTY_SKILL_ASSIGNMENT,
                   },
                 });
@@ -653,7 +653,7 @@ function EnvironmentTools({
                       name: "",
                       config: {
                         enabled: true,
-                        providers: ["codex", "claudeAgent", "opencode"],
+                        providers: ["codex", "claudeAgent"],
                         transport: { type: "http", url: "", headers: [] },
                       },
                       project: scopeId ?? "all",

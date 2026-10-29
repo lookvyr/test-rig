@@ -53,7 +53,6 @@ const REASONING_SELECT_DESCRIPTOR_IDS: ReadonlySet<string> = new Set([
   "reasoningEffort",
   "reasoning",
   "effort",
-  "variant",
   "thinking",
 ]);
 
@@ -266,7 +265,7 @@ export function getReasoningTraitStep(input: {
           input.reportedModelSelection,
         );
   const ordered = input.direction > 0 ? descriptor.options : descriptor.options.toReversed();
-  // A reported value outside the catalog, such as OpenCode's "default", steps
+  // A reported value outside the catalog steps
   // from the catalog default, or from the end when there is none.
   const position =
     [current, getDescriptorStringValue(descriptor)]

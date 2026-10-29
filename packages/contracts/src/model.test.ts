@@ -7,7 +7,7 @@ import {
   PROVIDER_DISPLAY_NAMES,
 } from "./model.ts";
 
-const APPROVED_DRIVERS = ["codex", "claudeAgent", "opencode"];
+const APPROVED_DRIVERS = ["codex", "claudeAgent"];
 
 describe("built-in provider model metadata", () => {
   it("contains defaults and presentation only for approved executable providers", () => {

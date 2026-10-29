@@ -37,8 +37,8 @@ provider's error message.
 
 For HTTP servers that require OAuth, open **Connections → Shared sign-in** and
 choose **Sign in**. Complete authorization in your browser, return to Tools, and
-choose **Refresh** to see **Signed in**. This sign-in is shared by Codex, Claude,
-and OpenCode in the same environment and does not require an active conversation.
+choose **Refresh** to see **Signed in**. This sign-in is shared by Codex and Claude
+in the same environment and does not require an active conversation.
 Servers without authentication work while signed out.
 
 OAuth servers must support discovery and dynamic client registration, as

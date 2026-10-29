@@ -1,8 +1,8 @@
 # Delegated agents
 
 Ask the agent in a conversation to delegate a focused task, such as a code review
-or investigation. Test Rig can run app-owned delegated agents using Codex,
-Claude, or OpenCode, including a different provider or model from the parent.
+or investigation. Test Rig can run app-owned delegated agents using Codex
+or Claude, including a different provider or model from the parent.
 Provider-native subagents are a separate workflow and follow their provider's
 context and workspace behavior.
 

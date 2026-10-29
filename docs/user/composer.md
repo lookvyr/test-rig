@@ -205,8 +205,7 @@ This option is unavailable if the app's data directory is inside a Git repositor
 
 ## Switching providers and models
 
-Use the model picker to continue a conversation with Codex, Claude Code, or
-OpenCode. Choosing a provider or model updates the composer; it takes effect
+Use the model picker to continue a conversation with Codex or Claude Code. Choosing a provider or model updates the composer; it takes effect
 when you send your next message. If a turn is running, sending to a different
 provider interrupts it and continues with the selected provider. Send waits
 until the running turn is ready to accept a follow-up.
@@ -323,6 +322,4 @@ messages, archiving, settlement, a provider change, or canceling recovery preven
 an outdated continuation from starting. A provider failure with a missing or
 already-expired reset time never starts an automatic retry loop.
 
-Codex and Claude can report reset times for this recovery flow. OpenCode currently
-reports generic provider errors without a reliable reset time, so continue those
-chats manually. Test Rig does not infer a reset time from an error message.
+Codex and Claude can report reset times for this recovery flow. Test Rig does not infer a reset time from an error message.

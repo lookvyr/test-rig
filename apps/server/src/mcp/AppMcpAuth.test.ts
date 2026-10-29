@@ -20,7 +20,7 @@ const scopeId = ToolsScopeId.make(`git:${"a".repeat(64)}`);
 const callbackUrl = "https://remote.example.test/oauth/mcp/callback";
 const httpServer = (url: string): McpServerConfig => ({
   enabled: true,
-  providers: ["codex", "claudeAgent", "opencode"],
+  providers: ["codex", "claudeAgent"],
   transport: { type: "http", url, headers: [] },
 });
 const settings: ServerSettings = {

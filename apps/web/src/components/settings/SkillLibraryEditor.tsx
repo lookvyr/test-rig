@@ -86,15 +86,14 @@ export function SkillLibraryEditor({
           description: detail.description,
           instructions: detail.instructions,
           assignment: "assignment" in detail ? detail.assignment : EMPTY_SKILL_ASSIGNMENT,
-          providers:
-            "providers" in detail ? detail.providers : ["codex", "claudeAgent", "opencode"],
+          providers: "providers" in detail ? detail.providers : ["codex", "claudeAgent"],
         }
       : {
           name: "",
           description: "",
           instructions: "",
           assignment: EMPTY_SKILL_ASSIGNMENT,
-          providers: ["codex", "claudeAgent", "opencode"],
+          providers: ["codex", "claudeAgent"],
         },
   );
   const [tab, setTab] = useState(initialTab);

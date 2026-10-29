@@ -39,9 +39,30 @@ describe("MCP settings contracts", () => {
         },
       },
     });
-    expect(settings.mcpServers.docs?.providers).toEqual(["codex", "claudeAgent", "opencode"]);
+    expect(settings.mcpServers.docs?.providers).toEqual(["codex", "claudeAgent"]);
     expect(settings.mcpServers.docs?.transport).toMatchObject({ env: [{ sensitive: true }] });
     expect(decodeServerSettingsPatch({ mcpServers: { docs: null } }).mcpServers?.docs).toBeNull();
+  });
+
+  it("drops the removed default MCP assignment without disabling retained providers", () => {
+    const settings = decodeServerSettings({
+      mcpServers: {
+        docs: {
+          providers: ["codex", "claudeAgent", "opencode"],
+          transport: { type: "http", url: "https://example.test/mcp" },
+        },
+        removed_only: {
+          providers: ["opencode"],
+          transport: { type: "http", url: "https://example.test/mcp" },
+        },
+      },
+    });
+    expect(settings.mcpServers.docs?.providers).toEqual(["codex", "claudeAgent"]);
+    expect(settings.mcpServers.removed_only?.providers).toEqual([]);
+    expect(encodeServerSettings(settings).mcpServers?.docs?.providers).toEqual([
+      "codex",
+      "claudeAgent",
+    ]);
   });
 
   it("rejects reserved server names and excluded providers", () => {
@@ -241,17 +262,17 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
         claudeAgent: { binaryPath: "/approved/claude" },
         cursor: { enabled: true, binaryPath: "/excluded/cursor-agent" },
         grok: { enabled: true, binaryPath: "/excluded/grok" },
-        opencode: { binaryPath: "/approved/opencode" },
+        opencode: { enabled: true, binaryPath: "/excluded/opencode" },
       },
     });
 
     expect(patch.providers).toEqual({
       codex: { enabled: false },
       claudeAgent: { binaryPath: "/approved/claude" },
-      opencode: { binaryPath: "/approved/opencode" },
     });
     expect(patch.providers).not.toHaveProperty("cursor");
     expect(patch.providers).not.toHaveProperty("grok");
+    expect(patch.providers).not.toHaveProperty("opencode");
   });
 
   it("decodes a multi-instance map mixing first-party and fork drivers", () => {

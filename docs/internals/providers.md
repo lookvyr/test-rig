@@ -7,17 +7,16 @@ orchestration layer does not know which one is behind a thread.
 
 ## Built-in drivers
 
-[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with three entries:
+[`builtInDrivers.ts`][drivers] exports `BUILT_IN_DRIVERS` with two entries:
 
-| Driver kind   | Driver source                           |
-| ------------- | --------------------------------------- |
-| `codex`       | [`Drivers/CodexDriver.ts`][codex]       |
-| `claudeAgent` | [`Drivers/ClaudeDriver.ts`][claude]     |
-| `opencode`    | [`Drivers/OpenCodeDriver.ts`][opencode] |
+| Driver kind   | Driver source                       |
+| ------------- | ----------------------------------- |
+| `codex`       | [`Drivers/CodexDriver.ts`][codex]   |
+| `claudeAgent` | [`Drivers/ClaudeDriver.ts`][claude] |
 
 Each driver declares its `driverKind`, a `configSchema`, and a `create` function that builds an
 adapter in a child scope. Codex and Claude adapter implementations live in
-`apps/server/src/provider/Layers/`; OpenCode 2 lives in `provider/opencode2/`. They conform to
+`apps/server/src/provider/Layers/`. They conform to
 [`ProviderAdapter.ts`][adapter]. Read the driver plus its adapter to see how a specific agent's
 transport, config, and event shapes are mapped.
 
@@ -60,8 +59,7 @@ Provider output comes back as internal commands such as `thread.message.assistan
 It inherits the parent's current model, permission mode, and checkout. The provider command
 reactor opens a separate runtime without starting a turn or continuing a goal. Codex uses native
 `thread/fork`; Claude uses the Agent SDK's `forkSession`, then resumes the persisted child.
-Native history supplies context; the child starts with an empty visible timeline. OpenCode forks
-are explicitly unsupported.
+Native history supplies context; the child starts with an empty visible timeline.
 
 Claude's session helpers read `CLAUDE_CONFIG_DIR` from the process environment, so the fork runs
 in a short-lived subprocess with the selected provider instance's environment. The adapter tracks
@@ -134,7 +132,6 @@ when a request opens (approval) or user input is requested, via
 [drivers]: ../../apps/server/src/provider/builtInDrivers.ts
 [codex]: ../../apps/server/src/provider/Drivers/CodexDriver.ts
 [claude]: ../../apps/server/src/provider/Drivers/ClaudeDriver.ts
-[opencode]: ../../apps/server/src/provider/Drivers/OpenCodeDriver.ts
 [adapter]: ../../apps/server/src/provider/Services/ProviderAdapter.ts
 [instances]: ../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts
 [registry]: ../../apps/server/src/provider/Services/ProviderAdapterRegistry.ts

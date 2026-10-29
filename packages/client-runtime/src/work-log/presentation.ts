@@ -309,8 +309,7 @@ function textRepeatsCommand(text: string, commands: ReadonlyArray<string | null>
 
 /**
  * Decides whether a command row's `detail` is a synthetic echo of the command
- * rather than real output. OpenCode stores completed output in `detail` with no
- * other output channel, so plain equality is only treated as synthetic when the
+ * rather than real output. Plain equality is only treated as synthetic when the
  * payload shape shows the detail came from the command: Codex item metadata,
  * an ACP tool call (`data.toolCallId`, `kind: "execute"`), a Claude tool-name
  * prefix, or no structured command at all.

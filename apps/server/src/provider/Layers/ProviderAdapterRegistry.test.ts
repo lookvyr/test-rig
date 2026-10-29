@@ -12,7 +12,6 @@ import * as Stream from "effect/Stream";
 
 import type * as ClaudeAdapter from "../Services/ClaudeAdapter.ts";
 import type * as CodexAdapter from "../Services/CodexAdapter.ts";
-import type * as OpenCodeAdapter from "../Services/OpenCodeAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderInstanceRegistry from "../Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
@@ -61,30 +60,13 @@ const fakeClaudeAdapter: ClaudeAdapter.ClaudeAdapterShape = {
   streamEvents: Stream.empty,
 };
 
-const fakeOpenCodeAdapter: OpenCodeAdapter.OpenCodeAdapterShape = {
-  provider: OPENCODE_DRIVER,
-  capabilities: { sessionModelSwitch: "in-session" },
-  startSession: vi.fn(),
-  sendTurn: vi.fn(),
-  interruptTurn: vi.fn(),
-  respondToRequest: vi.fn(),
-  respondToUserInput: vi.fn(),
-  stopSession: vi.fn(),
-  listSessions: vi.fn(),
-  hasSession: vi.fn(),
-  readThread: vi.fn(),
-  rollbackThread: vi.fn(),
-  stopAll: vi.fn(),
-  streamEvents: Stream.empty,
-};
-
 // ProviderAdapterRegistryLive is now a facade over ProviderInstanceRegistry —
 // it resolves live instances by id and derives the legacy driver list from
-// default-instance ids. To test the facade we supply three fake
+// default-instance ids. To test the facade we supply two fake
 // instances whose `instanceId === defaultInstanceIdForDriver(driverKind)` so
 // they pass the default-instance filter.
 const makeFakeInstance = (
-  driverKindString: "codex" | "claudeAgent" | "opencode",
+  driverKindString: "codex" | "claudeAgent",
   adapter: ProviderInstance["adapter"],
 ): ProviderInstance => {
   const driverKind = ProviderDriverKind.make(driverKindString);
@@ -114,7 +96,6 @@ const makeFakeInstance = (
 const fakeInstances: ReadonlyArray<ProviderInstance> = [
   makeFakeInstance("codex", fakeCodexAdapter),
   makeFakeInstance("claudeAgent", fakeClaudeAdapter),
-  makeFakeInstance("opencode", fakeOpenCodeAdapter),
 ];
 
 const fakeInstanceRegistryLayer = Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
@@ -162,18 +143,17 @@ it.layer(layer)("ProviderAdapterRegistryLive", (it) => {
       assert.deepStrictEqual(instances, [
         defaultInstanceIdForDriver(CODEX_DRIVER),
         claudeInstanceId,
-        defaultInstanceIdForDriver(OPENCODE_DRIVER),
       ]);
 
       const providers = yield* registry.listProviders();
-      assert.deepStrictEqual(providers, [CODEX_DRIVER, CLAUDE_AGENT_DRIVER, OPENCODE_DRIVER]);
+      assert.deepStrictEqual(providers, [CODEX_DRIVER, CLAUDE_AGENT_DRIVER]);
     }));
 
   it("rejects excluded provider ids before an adapter can run", () =>
     Effect.gen(function* () {
       const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
 
-      for (const driver of [CURSOR_DRIVER, GROK_DRIVER]) {
+      for (const driver of [CURSOR_DRIVER, GROK_DRIVER, OPENCODE_DRIVER]) {
         const instanceId = defaultInstanceIdForDriver(driver);
         const adapterError = yield* registry.getByInstance(instanceId).pipe(Effect.flip);
         const infoError = yield* registry.getInstanceInfo(instanceId).pipe(Effect.flip);

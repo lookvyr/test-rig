@@ -840,18 +840,17 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const settings = yield* serverSettings.getSettings;
 
       assert.deepEqual(settings.textGenerationModelSelection, {
-        instanceId: ProviderInstanceId.make("opencode"),
-        model: "openai/gpt-5",
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-5-5",
       });
     }).pipe(
       Effect.provide(
         ServerSettingsModule.layerTest({
           providers: {
             codex: { enabled: false },
-            claudeAgent: { enabled: false },
+            claudeAgent: { enabled: true },
             cursor: { enabled: true },
             grok: { enabled: true },
-            opencode: { enabled: true },
           },
           textGenerationModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
@@ -1157,11 +1156,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           claudeAgent: {
             binaryPath: "  /opt/homebrew/bin/claude  ",
           },
-          opencode: {
-            binaryPath: "  /opt/homebrew/bin/opencode  ",
-            serverUrl: "  http://127.0.0.1:4096  ",
-            serverPassword: "  secret-password  ",
-          },
         },
       });
 
@@ -1180,13 +1174,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         customModels: [],
         autoCompactWindow: "",
         launchArgs: "",
-      });
-      assert.deepEqual(next.providers.opencode, {
-        enabled: true,
-        binaryPath: "/opt/homebrew/bin/opencode",
-        serverUrl: "http://127.0.0.1:4096",
-        serverPassword: "secret-password",
-        customModels: [],
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
@@ -1246,10 +1233,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
           },
-          opencode: {
-            serverUrl: "http://127.0.0.1:4096",
-            serverPassword: "secret-password",
-          },
         },
         automaticGitFetchInterval: Duration.seconds(10),
       });
@@ -1267,10 +1250,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         providers: {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
-          },
-          opencode: {
-            serverUrl: "http://127.0.0.1:4096",
-            serverPassword: "secret-password",
           },
         },
         backgroundActivity: {

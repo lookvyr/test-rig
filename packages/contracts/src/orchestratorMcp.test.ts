@@ -5,6 +5,8 @@ import {
   OrchestratorMcpCreateThreadsInput,
   OrchestratorMcpDelegateTaskInput,
   OrchestratorMcpDelegateTaskResult,
+  OrchestratorMcpScheduleTaskInput,
+  OrchestratorMcpUpdateScheduledTaskInput,
   OrchestratorMcpThreadInterruptInput,
   OrchestratorMcpThreadListInput,
   OrchestratorMcpThreadReadInput,
@@ -20,6 +22,9 @@ const decodeThreadListInput = Schema.decodeUnknownSync(OrchestratorMcpThreadList
 const decodeThreadReadInput = Schema.decodeUnknownSync(OrchestratorMcpThreadReadInput);
 const decodeThreadSendInput = Schema.decodeUnknownSync(OrchestratorMcpThreadSendInput);
 const decodeThreadWaitInput = Schema.decodeUnknownSync(OrchestratorMcpThreadWaitInput);
+
+const decodeScheduleTask = Schema.decodeUnknownSync(OrchestratorMcpScheduleTaskInput);
+const decodeUpdateScheduledTask = Schema.decodeUnknownSync(OrchestratorMcpUpdateScheduledTaskInput);
 
 describe("orchestrator MCP contracts", () => {
   it("accepts optional worktree isolation and setup opt-out", () => {
@@ -178,4 +183,16 @@ describe("orchestrator MCP contracts", () => {
       }).reason,
     ).toBe("Loop converged.");
   });
+});
+
+it("normalizes structured and JSON-text schedules for create and update requests", () => {
+  const schedule = { type: "interval", everyMs: 60_000 };
+  for (const input of [schedule, JSON.stringify(schedule)]) {
+    expect(decodeScheduleTask({ prompt: "Check progress", schedule: input }).schedule).toEqual(
+      schedule,
+    );
+    expect(
+      decodeUpdateScheduledTask({ scheduledTaskId: "task-1", schedule: input }).schedule,
+    ).toEqual(schedule);
+  }
 });

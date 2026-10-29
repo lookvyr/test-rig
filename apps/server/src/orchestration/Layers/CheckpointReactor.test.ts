@@ -563,7 +563,7 @@ describe("CheckpointReactor", () => {
     expect(gitStatusRefreshCalls).toEqual([harness.cwd]);
   });
 
-  it.each(["codex", "claude", "opencode"])(
+  it.each(["codex", "claude"])(
     "refreshes local git status after a %s command without waiting for turn completion",
     async (providerName) => {
       const gitStatusRefreshCalls: string[] = [];

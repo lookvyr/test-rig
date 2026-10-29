@@ -13,12 +13,7 @@ describe("formatProcessType", () => {
     expect(formatProcessType(cursorEditor)).toBe("Process");
   });
 
-  it.each(["codex", "claude", "opencode"])(
-    "classifies retained %s harnesses as agents",
-    (command) => {
-      expect(formatProcessType({ depth: 0, command } as ServerProcessDiagnosticsEntry)).toBe(
-        "Agent",
-      );
-    },
-  );
+  it.each(["codex", "claude"])("classifies retained %s harnesses as agents", (command) => {
+    expect(formatProcessType({ depth: 0, command } as ServerProcessDiagnosticsEntry)).toBe("Agent");
+  });
 });

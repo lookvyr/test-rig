@@ -309,11 +309,6 @@ function normalizeT3McpToolLabel(value: string): string {
  */
 function resolveT3McpToolName(value: string): string | null {
   const label = normalizeT3McpToolLabel(value);
-  // OpenCode uses one server per thread and joins its name to the tool with `_`.
-  if (label.startsWith("test_rig-")) {
-    const name = Object.keys(T3_MCP_TOOLS).find((name) => label.endsWith(`_${name}`));
-    if (name !== undefined) return name;
-  }
   const mcpMatch = /^mcp__(?<server>.+?)__(?<tool>.+)$/i.exec(label);
   if (mcpMatch?.groups) {
     const { server, tool } = mcpMatch.groups;

@@ -141,15 +141,6 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
-      '@opencode/client':
-        specifier: 2.0.18
-        version: 2.0.18(effect@4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40))
-      '@opencode/protocol':
-        specifier: 2.0.18
-        version: 2.0.18
-      '@opencode/schema':
-        specifier: 2.0.18
-        version: 2.0.18
       '@pierre/diffs':
         specifier: 'catalog:'
         version: 1.3.0-beta.10(patch_hash=6874e96f8d8d81d6c8f96cbd79df61010c4839c67def2ee59379df04dc24bf58)(@shikijs/themes@4.3.0)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -1247,23 +1238,6 @@ packages:
 
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
-
-  '@opencode/client@2.0.18':
-    resolution: {integrity: sha512-N74FNdXkTTC1Re5T+PNxH6fsVf1tZiV3kESu3UWL/545oAkBRXoiikMmDszuuHZ4AxGwtr9NiQjKrHiMdnLVYQ==}
-    peerDependencies:
-      effect: 4.0.0-rc.115
-      solid-js: '>=1.9.0'
-    peerDependenciesMeta:
-      effect:
-        optional: true
-      solid-js:
-        optional: true
-
-  '@opencode/protocol@2.0.18':
-    resolution: {integrity: sha512-IhzzlCz/hAlFvBLWQ+kDceX0/CkYOrjVyTPwYJYvWwKze5AHzVxxDYxkhCqLJj0hn/wtdNL10nhjVothuHcaBQ==}
-
-  '@opencode/schema@2.0.18':
-    resolution: {integrity: sha512-f+lp6f+kxhygdeSxjqkiu6vk9t0onH/6OVBghSNyo9ZUUFP9BU/2JKthMgy9kHGyFu2vp0lg01H9umXn76u52A==}
 
   '@oxc-project/runtime@0.151.0':
     resolution: {integrity: sha512-fNuliiqGTseerW2FTbxq6UOQavKL/NvNh9K3peJZZVNi1NbM4Ehscwp3MX9nu+9bfbSfmPUEivF779XQU5exiw==}
@@ -6312,23 +6286,6 @@ snapshots:
       outvariant: 1.4.3
 
   '@open-draft/until@2.1.0': {}
-
-  '@opencode/client@2.0.18(effect@4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40))':
-    dependencies:
-      '@opencode/protocol': 2.0.18
-      '@opencode/schema': 2.0.18
-    optionalDependencies:
-      effect: 4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40)
-
-  '@opencode/protocol@2.0.18':
-    dependencies:
-      '@opencode/schema': 2.0.18
-      effect: 4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40)
-
-  '@opencode/schema@2.0.18':
-    dependencies:
-      '@standard-schema/spec': 1.1.0
-      effect: 4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40)
 
   '@oxc-project/runtime@0.151.0': {}
 

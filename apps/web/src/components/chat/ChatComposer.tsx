@@ -885,27 +885,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedProviderEntry?.driverKind ?? requestedDriverKind;
 
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
-  const [browsedModelInstanceId, setBrowsedModelInstanceId] = useState<ProviderInstanceId | null>(
-    null,
-  );
-  const browsedProvider = providerInstanceEntries.find(
-    (entry) => entry.instanceId === browsedModelInstanceId,
-  );
-  const browsedWorkspaceCatalog = useEnvironmentQuery(
-    environmentId !== null &&
-      gitCwd !== null &&
-      isComposerModelPickerOpen &&
-      browsedProvider?.driverKind === "opencode" &&
-      browsedProvider.enabled &&
-      browsedProvider.isAvailable &&
-      browsedModelInstanceId !== selectedInstanceId
-      ? serverEnvironment.providerWorkspaceCatalog({
-          environmentId,
-          input: { instanceId: browsedProvider.instanceId, cwd: gitCwd },
-        })
-      : null,
-  );
-
   const workspaceCatalog = useEnvironmentQuery(
     environmentId !== null && gitCwd !== null && !noProviderAvailable
       ? serverEnvironment.providerWorkspaceCatalog({
@@ -918,11 +897,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () =>
       providerStatuses.map((provider) => {
         const selected = provider.instanceId === selectedInstanceId;
-        const catalog = selected
-          ? workspaceCatalog.data
-          : provider.instanceId === browsedModelInstanceId
-            ? browsedWorkspaceCatalog.data
-            : null;
+        const catalog = selected ? workspaceCatalog.data : null;
         if (!selected && !catalog) return provider;
         return {
           ...provider,
@@ -931,13 +906,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ...(catalog?.models === undefined ? {} : { models: catalog.models }),
         };
       }),
-    [
-      providerStatuses,
-      selectedInstanceId,
-      workspaceCatalog.data,
-      browsedModelInstanceId,
-      browsedWorkspaceCatalog.data,
-    ],
+    [providerStatuses, selectedInstanceId, workspaceCatalog.data],
   );
   const workspaceProviderEntries = useMemo(
     () =>
@@ -3714,11 +3683,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             composerProviderState.modelPickerIconClassName,
                         }
                       : {})}
-                    onBrowseInstance={setBrowsedModelInstanceId}
-                    onOpenChange={(open) => {
-                      if (!open) setBrowsedModelInstanceId(null);
-                      setIsComposerModelPickerOpen(open);
-                    }}
+                    onOpenChange={setIsComposerModelPickerOpen}
                     getModelDisabledReason={getModelDisabledReason}
                     onInstanceModelChange={(instanceId, model) =>
                       onProviderModelSelect(instanceId, model, workspaceProviderStatuses)

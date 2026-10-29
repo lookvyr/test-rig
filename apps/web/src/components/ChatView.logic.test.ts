@@ -94,7 +94,7 @@ describe("composer permission mode defaults", () => {
   it.each(["approval-required", "auto-accept-edits", "auto", "full-access"] as const)(
     "preserves an explicit %s selection while changing providers in a draft",
     (mode) => {
-      for (const provider of ["codex", "claudeAgent", "opencode"] as const) {
+      for (const provider of ["codex", "claudeAgent"] as const) {
         expect(
           resolveComposerRuntimeMode({
             isLocalDraftThread: true,
@@ -107,7 +107,7 @@ describe("composer permission mode defaults", () => {
     },
   );
 
-  it.each(["codex", "claudeAgent", "opencode"] as const)(
+  it.each(["codex", "claudeAgent"] as const)(
     "keeps the saved mode of an existing %s thread",
     (provider) => {
       expect(
@@ -120,19 +120,6 @@ describe("composer permission mode defaults", () => {
       ).toBe("full-access");
     },
   );
-
-  it("keeps OpenCode's inherited mode or Full access fallback", () => {
-    for (const mode of ["approval-required", undefined] as const) {
-      expect(
-        resolveComposerRuntimeMode({
-          isLocalDraftThread: true,
-          provider: ProviderDriverKind.make("opencode"),
-          composerRuntimeMode: null,
-          threadRuntimeMode: mode,
-        }),
-      ).toBe(mode ?? "full-access");
-    }
-  });
 });
 
 describe("thread completion visits", () => {

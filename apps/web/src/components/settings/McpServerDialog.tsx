@@ -75,11 +75,7 @@ function ConnectionRow({
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
           <span className="font-medium">{MCP_STATUS_LABELS[status.state]}</span>
           <span className="text-xs text-muted-foreground">
-            {status.provider === "claudeAgent"
-              ? "Claude"
-              : status.provider === "codex"
-                ? "Codex"
-                : "OpenCode"}
+            {status.provider === "claudeAgent" ? "Claude" : "Codex"}
             {status.toolCount === null
               ? ""
               : ` · ${status.toolCount} ${status.toolCount === 1 ? "tool" : "tools"}`}

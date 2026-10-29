@@ -14,7 +14,6 @@ Test Rig supports three coding tools:
 | ----------- | ----------------------------------------------------- |
 | Codex       | [Codex CLI](https://developers.openai.com/codex/cli)  |
 | Claude Code | [Claude Code](https://claude.com/product/claude-code) |
-| OpenCode    | [OpenCode](https://opencode.ai)                       |
 
 ## Build from source
 

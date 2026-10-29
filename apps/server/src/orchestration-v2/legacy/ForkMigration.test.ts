@@ -80,7 +80,7 @@ it.layer(NodeServices.layer)("fork V2 migration", (it) => {
         null,
       ],
       ["unavailable", "cursor", "full-access", null, null],
-      ["opencode", "opencode", "auto-accept-edits", null, null],
+      ["unsupported", "unsupported", "auto-accept-edits", null, null],
       ["side", "codex", "full-access", null, "long"],
     ] as const) {
       yield* sql`INSERT INTO projection_threads (thread_id,project_id,title,model_selection_json,runtime_mode,interaction_mode,branch,worktree_path,created_at,updated_at,archived_at,settled_override,settled_at,snoozed_until,snoozed_at,pinned_at,pull_request_association_json,side_of_thread_id)
@@ -414,7 +414,7 @@ it.layer(NodeServices.layer)("fork V2 migration", (it) => {
               const store = yield* ProjectionStore.ProjectionStoreV2;
               const sql = yield* SqlClient.SqlClient;
               yield* importer.reconcileShells;
-              for (const id of ["long", "linked", "unavailable", "opencode"]) {
+              for (const id of ["long", "linked", "unavailable", "unsupported"]) {
                 const { thread } = yield* store.getThreadProjection(ThreadId.make(id));
                 NodeAssert.equal(thread.title, id);
                 NodeAssert.equal(thread.projectId, "project");
@@ -450,9 +450,9 @@ it.layer(NodeServices.layer)("fork V2 migration", (it) => {
                 "cursor",
               );
               NodeAssert.equal(
-                (yield* store.getThreadProjection(ThreadId.make("opencode"))).thread
+                (yield* store.getThreadProjection(ThreadId.make("unsupported"))).thread
                   .providerInstanceId,
-                "opencode",
+                "unsupported",
               );
               NodeAssert.equal(
                 (yield* sql`SELECT count(*) AS count FROM orchestration_v2_projection_threads WHERE thread_id='side'`)[0]!
