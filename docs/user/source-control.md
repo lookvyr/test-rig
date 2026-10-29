@@ -32,20 +32,17 @@ data is available; reduced-motion settings disable the fade. Resizing the right
 panel leaves room to type;
 extra composer controls move into **More composer controls** when space is tight.
 
-Test Rig uses Git for local repository work and can connect to a hosting provider for pull requests, repository lookup, cloning, and publishing.
+Test Rig uses Git for local repository work and connects to GitHub for pull requests, repository lookup, cloning, and publishing.
 
-Git and hosting providers are separate. Disabling a GitHub, GitLab, Azure DevOps, or Bitbucket integration stops Test Rig from checking credentials or making requests to that provider. It does not disable Git commands against remotes already configured in a repository.
+Git and hosting providers are separate. Disabling the GitHub integration stops Test Rig from checking credentials or making requests to that provider. It does not disable Git commands against remotes already configured in a repository.
 
-## Provider switches
+## GitHub integration
 
-Open **Settings** → **Source Control** to enable or disable each hosting integration.
+Open **Settings** → **Source Control** to enable or disable GitHub. GitHub is the only supported hosting integration. Git URLs from other hosts can still be cloned, fetched, and pushed using generic Git.
 
-| Provider     | Default  | Authentication                        |
-| ------------ | -------- | ------------------------------------- |
-| GitHub       | Enabled  | Environment token or GitHub CLI login |
-| GitLab       | Disabled | GitLab CLI                            |
-| Azure DevOps | Disabled | Azure CLI with the DevOps extension   |
-| Bitbucket    | Disabled | Access token, or email plus API token |
+| Provider | Default | Authentication                        |
+| -------- | ------- | ------------------------------------- |
+| GitHub   | Enabled | Environment token or GitHub CLI login |
 
 When an integration is disabled:
 
@@ -253,48 +250,6 @@ Existing CLI credentials are cached for up to five minutes; a changed CLI login 
 
 GitHub is enabled by default. Open **Settings** → **Source Control** to check its status or turn it off.
 
-## Set up GitLab
-
-Install the GitLab CLI and sign in:
-
-```bash
-brew install glab
-glab auth login
-```
-
-Enable GitLab in **Settings** → **Source Control**, then rescan.
-
-## Set up Azure DevOps
-
-Install Azure CLI, add the DevOps extension, and sign in:
-
-```bash
-brew install azure-cli
-az extension add --name azure-devops
-az login
-```
-
-Enable Azure DevOps in **Settings** → **Source Control**, then rescan.
-
-## Set up Bitbucket
-
-Bitbucket reads credentials from environment variables on the machine running the Test Rig environment. These variable names retain their inherited `T3CODE_` prefix.
-
-Use a Bitbucket access token:
-
-```bash
-export T3CODE_BITBUCKET_ACCESS_TOKEN="your-access-token"
-```
-
-Or use an Atlassian account email and API token with repository and pull-request access:
-
-```bash
-export T3CODE_BITBUCKET_EMAIL="you@example.com"
-export T3CODE_BITBUCKET_API_TOKEN="your-token"
-```
-
-The access token takes precedence when both forms are configured. Restart the Test Rig environment after changing these variables, enable Bitbucket in **Settings** → **Source Control**, then rescan.
-
 ## Troubleshooting
 
 - A disabled provider has no authentication status. Enable it before rescanning.
@@ -307,8 +262,6 @@ The access token takes precedence when both forms are configured. Restart the Te
 Provider documentation:
 
 - [GitHub CLI](https://cli.github.com/)
-- [GitLab CLI](https://gitlab.com/gitlab-org/cli)
-- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/)
 
 Browse GitHub pull requests across your projects from **Pull requests** above
 Settings. See [Pull requests](./pull-requests.md) for starting review threads and

@@ -1275,8 +1275,7 @@ export type PullRequestUnavailableReason = typeof PullRequestUnavailableReason.T
 
 /**
  * What each host needs before it can be read, so a failure names the fix rather than the
- * symptom. Bitbucket is credentials on the server rather than a signed-in CLI, which is why
- * these are whole sentences instead of a tool name to interpolate.
+ * symptom.
  */
 const PROVIDER_REQUIREMENT: Partial<
   Record<SourceControlProviderKind, { readonly missing: string; readonly unauthenticated: string }>
@@ -1285,22 +1284,6 @@ const PROVIDER_REQUIREMENT: Partial<
     missing:
       "Set a GitHub token on the server (GH_TOKEN, or GH_ENTERPRISE_TOKEN with GH_HOST), or install GitHub CLI from https://cli.github.com/ and sign in with gh auth login.",
     unauthenticated: "GitHub CLI is not authenticated. Run `gh auth login` and retry.",
-  },
-  gitlab: {
-    missing:
-      "GitLab CLI (`glab`) is required to browse change requests on this host. Install it from https://gitlab.com/gitlab-org/cli and reload.",
-    unauthenticated: "GitLab CLI is not authenticated. Run `glab auth login` and retry.",
-  },
-  "azure-devops": {
-    missing:
-      "Azure CLI (`az`) with the Azure DevOps extension is required. Install `az`, then run `az extension add --name azure-devops`.",
-    unauthenticated: "Azure CLI is not signed in. Run `az login` and retry.",
-  },
-  bitbucket: {
-    missing:
-      "Bitbucket needs API credentials on the server. Add them in Settings → Source Control.",
-    unauthenticated:
-      "Bitbucket rejected the configured credentials. Check them in Settings → Source Control.",
   },
 };
 

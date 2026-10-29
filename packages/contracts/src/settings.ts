@@ -505,9 +505,6 @@ export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyle
 
 export const SourceControlProviderSettings = Schema.Struct({
   github: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  gitlab: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  "azure-devops": Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  bitbucket: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 }).pipe(Schema.withDecodingDefault(Effect.succeed({})));
 export type SourceControlProviderSettings = typeof SourceControlProviderSettings.Type;
 
@@ -974,9 +971,6 @@ export const ServerSettingsPatch = Schema.Struct({
   sourceControlProviders: Schema.optionalKey(
     Schema.Struct({
       github: Schema.optionalKey(Schema.Boolean),
-      gitlab: Schema.optionalKey(Schema.Boolean),
-      "azure-devops": Schema.optionalKey(Schema.Boolean),
-      bitbucket: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   observability: Schema.optionalKey(

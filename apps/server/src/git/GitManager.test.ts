@@ -42,12 +42,10 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import { decodeGitHubPullRequestListJson } from "../sourceControl/gitHubPullRequests.ts";
-import * as GitLabCli from "../sourceControl/GitLabCli.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubSourceControlProvider from "../sourceControl/GitHubSourceControlProvider.ts";
-import * as GitLabSourceControlProvider from "../sourceControl/GitLabSourceControlProvider.ts";
 import type { SourceControlProvider } from "../sourceControl/SourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as ServerConfig from "../config.ts";
@@ -2036,7 +2034,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
   it.effect.each([
     "git@gitlab.com:Group/Subgroup/Fork.git",
     "https://gitlab.com/Group/Subgroup/Fork.git",
-  ])("matches nested GitLab forks through the adapter for %s", (remoteUrl) =>
+  ])("matches full nested fork identities for %s", (remoteUrl) =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
@@ -2055,69 +2053,38 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         originDir,
       );
       yield* configureVisibleRemoteUrlWithLocalRewrite(repoDir, "fork", remoteUrl, forkDir);
-      const output = encodeCliJson([
-        {
-          iid: 2,
-          title: "Another subgroup's fork",
-          web_url: "https://gitlab.com/Group/Upstream/Repository/-/merge_requests/2",
-          target_branch: "main",
-          source_branch: branch,
-          state: "opened",
-          updated_at: "2026-04-08T15:00:00Z",
-          source_project_id: 102,
-          target_project_id: 100,
-          source_project: { path_with_namespace: "Group/Other/Fork" },
-        },
-        {
-          iid: 1,
-          title: "This subgroup's fork",
-          web_url: "https://gitlab.com/Group/Upstream/Repository/-/merge_requests/1",
-          target_branch: "main",
-          source_branch: branch,
-          state: "opened",
-          updated_at: "2026-04-07T15:00:00Z",
-          source_project_id: 101,
-          target_project_id: 100,
-          source_project: { path_with_namespace: "Group/Subgroup/Fork" },
-        },
-      ]);
-      const calls: VcsProcess.VcsProcessInput[] = [];
-      const provider = yield* GitLabSourceControlProvider.make.pipe(
-        Effect.provide(
-          GitLabCli.layer.pipe(
-            Layer.provide(
-              Layer.mock(VcsProcess.VcsProcess)({
-                run: (input) =>
-                  Effect.sync(() => {
-                    calls.push(input);
-                    return fakeGhOutput(output);
-                  }),
-              }),
-            ),
+      const provider: SourceControlProvider["Service"] = {
+        getChangeRequest: () => Effect.die("unexpected getChangeRequest"),
+        createChangeRequest: () => Effect.die("unexpected createChangeRequest"),
+        getRepositoryCloneUrls: () => Effect.die("unexpected getRepositoryCloneUrls"),
+        createRepository: () => Effect.die("unexpected createRepository"),
+        getDefaultBranch: () => Effect.die("unexpected getDefaultBranch"),
+        checkoutChangeRequest: () => Effect.die("unexpected checkoutChangeRequest"),
+        kind: "github" as const,
+        listChangeRequests: () =>
+          Effect.succeed(
+            [2, 1].map((number) => ({
+              provider: "github" as const,
+              number,
+              title: "Fork change",
+              url: `https://gitlab.com/Group/Upstream/Repository/-/merge_requests/${number}`,
+              baseRefName: "main",
+              headRefName: branch,
+              state: "open" as const,
+              updatedAt: Option.none(),
+              isCrossRepository: true,
+              headRepositoryOwnerLogin: "Group",
+              headRepositoryNameWithOwner:
+                number === 1 ? "Group/Subgroup/Fork" : "Group/Other/Fork",
+            })),
           ),
-        ),
-      );
+      };
       const { manager } = yield* makeManager({ sourceControlProvider: provider });
 
       expect(yield* manager.branchPullRequest({ cwd: repoDir, branch })).toMatchObject({
         number: 1,
         repositoryKey: "gitlab.com/group/upstream/repository",
       });
-      expect(calls.length).toBeGreaterThan(0);
-      for (const call of calls) {
-        expect(call.command).toBe("glab");
-        expect(call.args).toEqual([
-          "mr",
-          "list",
-          "--source-branch",
-          branch,
-          "--all",
-          "--per-page",
-          "20",
-          "--output",
-          "json",
-        ]);
-      }
     }),
   );
 

@@ -118,9 +118,6 @@ describe("resolveEnabledThreadPr", () => {
         gitStatus,
         providerSettings: {
           github: true,
-          gitlab: false,
-          "azure-devops": false,
-          bitbucket: false,
         },
       }),
     ).toBeNull();
@@ -178,7 +175,7 @@ it("resolves an explicit link independently of the checkout and never falls back
     resolveEnabledThreadPr({
       ...input,
       linkedPr: status().pr,
-      providerSettings: { github: false, gitlab: false, "azure-devops": false, bitbucket: false },
+      providerSettings: { github: false },
     }),
   ).toBeNull();
 });

@@ -95,7 +95,7 @@ describe("add project shared logic", () => {
     const readiness = buildAddProjectRemoteSourceReadiness(discovery);
     expect(readiness.url.ready).toBe(true);
     expect(readiness.github.ready).toBe(true);
-    expect(readiness.gitlab).toEqual({ ready: false, hint: "Run glab auth login" });
+    expect(Object.keys(readiness)).toEqual(["url", "github"]);
     expect(sortAddProjectProviderSources(readiness)[0]).toBe("github");
   });
 

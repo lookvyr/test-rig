@@ -1,8 +1,4 @@
-import {
-  canonicalRepositoryKey,
-  isSshRemoteUrl,
-  sourceControlRepositorySelector,
-} from "@t3tools/shared/sourceControl";
+import { isSshRemoteUrl, sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Clock from "effect/Clock";
@@ -806,10 +802,7 @@ export const make = Effect.gen(function* () {
             api: withRateLimitBackoff(api, host, rateLimits),
             repository,
             host,
-            remote:
-              kind === "azure-devops"
-                ? identity.canonicalKey
-                : normalizeGitRemoteUrl(`https://${host}/${repository}`),
+            remote: normalizeGitRemoteUrl(`https://${host}/${repository}`),
           });
         }
         return { supported, unimplemented, viewerRoots };
@@ -820,8 +813,7 @@ export const make = Effect.gen(function* () {
    * The project whose checkout and credentials serve a reference. The project's own
    * repository is the default; a reference that names a `host` may instead point at any
    * repository on that host. Prefer its own checkout; providers with explicit repository
-   * targeting can fall back to another checkout on the host. Azure derives its organization
-   * from the checkout, so it requires a matching repository.
+   * targeting can fall back to another checkout on the host.
    */
   const requireProject = (ref: PullRequestRef): Effect.Effect<SupportedProject, PullRequestError> =>
     listWorkspaceProjects({ projectId: ref.projectId }).pipe(
@@ -847,37 +839,19 @@ export const make = Effect.gen(function* () {
             }),
           );
         }
-        const repositoryKey = canonicalRepositoryKey(`${host}/${repository}`.toLowerCase());
-        // Azure SSH and legacy clone hosts differ from the browser URL's host. Compare
-        // the complete repository identity before narrowing those checkouts by host.
-        return listWorkspaceProjects(
-          repositoryKey.startsWith("dev.azure.com/") ? {} : { host },
-        ).pipe(
+        return listWorkspaceProjects({ host }).pipe(
           Effect.flatMap(({ supported }) => {
-            const onHost = supported.filter((candidate) => candidate.host === host);
             const route =
               supported.find(
-                (candidate) =>
-                  candidate.api.kind === "azure-devops" &&
-                  candidate.project.repositoryIdentity != null &&
-                  canonicalRepositoryKey(
-                    candidate.project.repositoryIdentity.canonicalKey.toLowerCase(),
-                  ) === repositoryKey,
-              ) ??
-              onHost.find(
-                (candidate) =>
-                  candidate.api.kind !== "azure-devops" &&
-                  candidate.repository.toLowerCase() === repository.toLowerCase(),
-              ) ??
-              onHost.find((candidate) => candidate.api.kind !== "azure-devops");
+                (candidate) => candidate.repository.toLowerCase() === repository.toLowerCase(),
+              ) ?? supported[0];
             if (route === undefined) {
               return Effect.fail(
                 new PullRequestUnavailableError({ reason: "provider-unsupported" }),
               );
             }
             return Effect.succeed(
-              route.api.kind === "azure-devops" ||
-                route.repository.toLowerCase() === repository.toLowerCase()
+              route.repository.toLowerCase() === repository.toLowerCase()
                 ? route
                 : {
                     ...route,
@@ -1931,7 +1905,7 @@ export const make = Effect.gen(function* () {
           );
         }
         // A strategy the host does not offer must be refused rather than passed on: every
-        // provider maps an unrecognised method to its own default, so asking Azure DevOps to
+        // provider maps an unrecognised method to its own default, so asking a provider to
         // rebase would quietly merge instead of failing.
         if (
           input.mergeMethod !== undefined &&
@@ -2013,11 +1987,7 @@ export const make = Effect.gen(function* () {
                     : refreshAfterTurn(project.project.id),
                 ),
                 Effect.mapError(toPullRequestError("runAction")),
-                Effect.as(
-                  project.api.kind === "azure-devops"
-                    ? input.repository.trim()
-                    : project.repository,
-                ),
+                Effect.as(project.repository),
               );
           }),
         );

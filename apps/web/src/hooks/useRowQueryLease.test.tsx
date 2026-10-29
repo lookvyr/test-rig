@@ -161,9 +161,6 @@ describe("row query leases", () => {
 const environmentId = EnvironmentId.make("local");
 const providerSettings: SourceControlProviderSettings = {
   github: true,
-  gitlab: false,
-  "azure-devops": false,
-  bitbucket: false,
 };
 
 function LinkedPr({

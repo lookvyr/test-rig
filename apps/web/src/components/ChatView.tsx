@@ -4136,9 +4136,6 @@ function ChatViewContent(props: ChatViewProps) {
     gitStatus: gitStatusQuery.data ?? null,
     providerSettings: activeServerConfig?.settings.sourceControlProviders ?? {
       github: false,
-      gitlab: false,
-      "azure-devops": false,
-      bitbucket: false,
     },
   });
   const pullRequestSelection =

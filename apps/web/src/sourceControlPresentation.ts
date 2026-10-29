@@ -31,9 +31,7 @@ export function isSourceControlProviderEnabled(
   settings: SourceControlProviderSettings,
   provider: SourceControlProviderKind | null | undefined,
 ): boolean {
-  return (
-    provider !== undefined && provider !== null && provider !== "unknown" && settings[provider]
-  );
+  return provider === "github" && settings.github;
 }
 
 export function getSourceControlPresentation(

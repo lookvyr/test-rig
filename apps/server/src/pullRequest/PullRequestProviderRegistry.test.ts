@@ -7,7 +7,7 @@ import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as GitHubPullRequestCli from "./GitHubPullRequestCli.ts";
 import * as GitHubPullRequestProvider from "./GitHubPullRequestProvider.ts";
-import { fromProviders, gateProvider } from "./PullRequestProviderRegistry.ts";
+import { fromProviders, gateProvider, make } from "./PullRequestProviderRegistry.ts";
 
 it.effect(
   "retained provider handles recheck hosting settings before reads, mutations and credentials",
@@ -93,4 +93,32 @@ it.effect(
       for (const operation of operations) yield* operation;
       assert.deepEqual(calls, ["read", "fingerprint", "mutation", "credential", "use credential"]);
     }),
+);
+
+it.effect("registers only GitHub even when old settings enable removed hosts", () =>
+  Effect.gen(function* () {
+    const registry = yield* make;
+    assert.deepStrictEqual(registry.kinds, ["github"]);
+    assert.isNotNull(registry.get("github"));
+    for (const kind of ["gitlab", "azure-devops", "bitbucket", "unknown"] as const) {
+      assert.isNull(registry.get(kind));
+    }
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.mock(GitHubPullRequestCli.GitHubPullRequestCli)({}),
+        Layer.mock(ServerSettingsService)({
+          getSettings: Effect.succeed({
+            ...DEFAULT_SERVER_SETTINGS,
+            sourceControlProviders: {
+              github: true,
+              gitlab: true,
+              "azure-devops": true,
+              bitbucket: true,
+            },
+          }),
+        }),
+      ),
+    ),
+  ),
 );

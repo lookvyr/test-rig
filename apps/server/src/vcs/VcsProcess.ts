@@ -69,9 +69,6 @@ const classifyNonZeroExit = (command: string, stderr: string): VcsProcessExitFai
     normalized.includes("authentication failed") ||
     normalized.includes("not logged in") ||
     normalized.includes("gh auth login") ||
-    normalized.includes("glab auth login") ||
-    normalized.includes("az devops login") ||
-    normalized.includes("please run az login") ||
     normalized.includes("no oauth token") ||
     normalized.includes("unauthorized")
   ) {
@@ -89,18 +86,11 @@ const classifyNonZeroExit = (command: string, stderr: string): VcsProcessExitFai
   }
 
   if (
-    (command === "gh" &&
-      (normalized.includes("could not resolve to a pullrequest") ||
-        normalized.includes("repository.pullrequest") ||
-        normalized.includes("no pull requests found for branch") ||
-        normalized.includes("pull request not found"))) ||
-    (command === "glab" &&
-      (normalized.includes("merge request not found") ||
-        normalized.includes("not found") ||
-        normalized.includes("404"))) ||
-    (command === "az" &&
-      normalized.includes("pull request") &&
-      (normalized.includes("not found") || normalized.includes("does not exist")))
+    command === "gh" &&
+    (normalized.includes("could not resolve to a pullrequest") ||
+      normalized.includes("repository.pullrequest") ||
+      normalized.includes("no pull requests found for branch") ||
+      normalized.includes("pull request not found"))
   ) {
     return "not-found";
   }

@@ -1,5 +1,4 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as KeyValueStore from "effect/unstable/persistence/KeyValueStore";
 import { assert, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
@@ -1046,7 +1045,8 @@ it.effect("reports an unusable host over a merely failing one", () =>
     const error = yield* Effect.flip(service.list({ state: "open" }));
 
     assert.strictEqual(error._tag, "PullRequestUnavailableError");
-    assert.strictEqual(error.message.includes("glab"), true);
+    assert.deepInclude(error, { reason: "cli-missing" });
+    assert.strictEqual(error.message.includes("glab"), false);
   }),
 );
 
@@ -2256,147 +2256,6 @@ it.effect("routes a hosted reference to another repository through a project on 
 
     assert.strictEqual(summary.number, 7);
     assert.deepStrictEqual(seen, [{ cwd: "/web", repository: "acme/api", host: "github.com" }]);
-  }),
-);
-
-it.effect("routes Azure reads and writes through the requested organization's checkout", () =>
-  Effect.gen(function* () {
-    const seen: string[] = [];
-    const service = yield* makeService({
-      projects: ["org-a", "org-b"].map((organization) =>
-        project({
-          id: organization,
-          title: organization,
-          workspaceRoot: `/${organization}`,
-          repository: `${organization}/project/_git/web`,
-          provider: "azure-devops",
-          host: "dev.azure.com",
-        }),
-      ),
-      providers: [
-        fakeProvider("azure-devops", {
-          getChangeRequestSummary: (input) =>
-            Effect.sync(() => {
-              seen.push(`read ${input.cwd} ${input.repository}`);
-              return changeRequest(7, "2026-07-02T00:00:00Z");
-            }),
-          runAction: (input) =>
-            Effect.sync(() => {
-              seen.push(`write ${input.cwd} ${input.repository}`);
-            }),
-        }),
-      ],
-    });
-    const reference = {
-      projectId: "org-a" as ProjectId,
-      host: "dev.azure.com",
-      repository: "org-b/project/_git/web",
-      number: 7,
-    };
-    yield* service.summary(reference, { recoverTransientFailure: false });
-    yield* service.runAction({ ...reference, action: "merge" });
-    assert.deepStrictEqual(seen, ["read /org-b web", "write /org-b web", "read /org-b web"]);
-  }),
-);
-
-it.effect.each([
-  {
-    host: "ssh.dev.azure.com",
-    repository: "v3/org-b/project/web",
-    remoteUrl: "git@ssh.dev.azure.com:v3/org-b/project/web",
-  },
-  {
-    host: "vs-ssh.visualstudio.com",
-    repository: "v3/org-b/project/web",
-    remoteUrl: "git@vs-ssh.visualstudio.com:v3/org-b/project/web",
-  },
-  {
-    host: "org-b.visualstudio.com",
-    repository: "DefaultCollection/project/_git/web",
-    remoteUrl: "https://org-b.visualstudio.com/DefaultCollection/project/_git/web",
-  },
-])("routes Azure URL reads and writes through a $host checkout", (checkout) =>
-  Effect.gen(function* () {
-    const seen: string[] = [];
-    const target = project({
-      id: "target",
-      title: "target",
-      workspaceRoot: "/target",
-      provider: "azure-devops",
-      ...checkout,
-    });
-    const service = yield* makeService({
-      projects: [
-        ...["org-a/project/_git/web", "org-b/other-project/_git/web"].map((repository) =>
-          project({
-            id: repository,
-            title: repository,
-            workspaceRoot: `/${repository}`,
-            provider: "azure-devops",
-            host: "dev.azure.com",
-            repository,
-          }),
-        ),
-        target,
-      ],
-      providers: [
-        fakeProvider("azure-devops", {
-          getChangeRequestSummary: (input) =>
-            Effect.sync(() => {
-              seen.push(`read ${input.cwd} ${input.repository}`);
-              return changeRequest(7, "2026-07-02T00:00:00Z");
-            }),
-          runAction: (input) =>
-            Effect.sync(() => {
-              seen.push(`write ${input.cwd} ${input.repository}`);
-            }),
-        }),
-      ],
-    });
-    const reference = {
-      projectId: "org-a/project/_git/web" as ProjectId,
-      host: "dev.azure.com",
-      repository: "org-b/project/_git/web",
-      number: 7,
-    };
-    yield* service.summary(reference, { recoverTransientFailure: false });
-    yield* service.runAction({ ...reference, action: "merge" });
-    assert.deepStrictEqual(seen, ["read /target web", "write /target web", "read /target web"]);
-  }),
-);
-
-it.effect("refuses Azure cross-organization reads and writes without its checkout", () =>
-  Effect.gen(function* () {
-    const service = yield* makeService({
-      projects: [
-        project({
-          id: "org-a",
-          title: "org-a",
-          workspaceRoot: "/org-a",
-          repository: "org-a/project/_git/web",
-          provider: "azure-devops",
-          host: "dev.azure.com",
-        }),
-      ],
-      providers: [
-        fakeProvider("azure-devops", {
-          getChangeRequestSummary: () => Effect.die("must not read the wrong organization"),
-          runAction: () => Effect.die("must not modify the wrong organization"),
-        }),
-      ],
-    });
-    const reference = {
-      projectId: "org-a" as ProjectId,
-      host: "dev.azure.com",
-      repository: "org-b/project/_git/web",
-      number: 7,
-    };
-    const readError = yield* Effect.flip(
-      service.summary(reference, { recoverTransientFailure: false }),
-    );
-    const writeError = yield* Effect.flip(service.runAction({ ...reference, action: "close" }));
-    assert.strictEqual(readError._tag, "PullRequestUnavailableError");
-    assert.strictEqual(writeError._tag, "PullRequestUnavailableError");
   }),
 );
 
@@ -6259,12 +6118,12 @@ it.effect("finishes two presses on one file in the order they were made", () =>
   }),
 );
 
-/** Azure, whose selector is a bare repository name, backed by this environment's own marks. */
-const azureViewedService = (projects: ReadonlyArray<OrchestrationProjectShell>) =>
+/** Environment-local viewed marks stay scoped to the full repository identity. */
+const repositoryViewedService = (projects: ReadonlyArray<OrchestrationProjectShell>) =>
   makeService({
     projects,
     providers: [
-      fakeProvider("azure-devops", {
+      fakeProvider("github", {
         capabilities: {
           diff: true,
           comment: true,
@@ -6284,44 +6143,44 @@ const azureViewedService = (projects: ReadonlyArray<OrchestrationProjectShell>) 
     ],
   });
 
-const AZURE_PAIR = [
+const REPOSITORY_PAIR = [
   project({
     id: "p1",
     title: "platform web",
     workspaceRoot: "/a",
-    repository: "acme/platform/_git/web",
-    provider: "azure-devops",
-    host: "dev.azure.com",
+    repository: "platform/web",
+    provider: "github",
+    host: "github.com",
   }),
   project({
     id: "p2",
     title: "other web",
     workspaceRoot: "/b",
-    repository: "acme/other/_git/web",
-    provider: "azure-devops",
-    host: "dev.azure.com",
+    repository: "other/web",
+    provider: "github",
+    host: "github.com",
   }),
 ];
 
-const AZURE_PLATFORM = { projectId: "p1" as ProjectId, repository: "web", number: 1 };
-const AZURE_OTHER = { projectId: "p2" as ProjectId, repository: "web", number: 1 };
+const PLATFORM_REFERENCE = { projectId: "p1" as ProjectId, repository: "platform/web", number: 1 };
+const OTHER_REFERENCE = { projectId: "p2" as ProjectId, repository: "other/web", number: 1 };
 
-it.effect("keeps the marks of two Azure repositories of the same name apart", () =>
-  Effect.gen(function* () {
-    // Azure addresses a repository by its bare name, which is unique inside one of its projects
-    // and not across an organisation. Two `web` repositories would otherwise share one row.
-    const service = yield* azureViewedService(AZURE_PAIR);
+it.effect(
+  "keeps viewed marks for repositories with the same name under different owners apart",
+  () =>
+    Effect.gen(function* () {
+      const service = yield* repositoryViewedService(REPOSITORY_PAIR);
 
-    yield* service.setFilesViewed({
-      ...AZURE_PLATFORM,
-      files: [{ path: "src/a.ts", viewed: true }],
-    });
+      yield* service.setFilesViewed({
+        ...PLATFORM_REFERENCE,
+        files: [{ path: "src/a.ts", viewed: true }],
+      });
 
-    assert.deepStrictEqual((yield* service.filesViewed(AZURE_PLATFORM)).files, [
-      { path: "src/a.ts", state: "viewed" },
-    ]);
-    assert.deepStrictEqual((yield* service.filesViewed(AZURE_OTHER)).files, []);
-  }),
+      assert.deepStrictEqual((yield* service.filesViewed(PLATFORM_REFERENCE)).files, [
+        { path: "src/a.ts", state: "viewed" },
+      ]);
+      assert.deepStrictEqual((yield* service.filesViewed(OTHER_REFERENCE)).files, []);
+    }),
 );
 
 it.effect("keeps environment marks apart from another change request's", () =>

@@ -410,9 +410,6 @@ describe("ServerSettings.sourceControlProviders", () => {
   it("enables only GitHub for legacy settings", () => {
     expect(decodeServerSettings({}).sourceControlProviders).toEqual({
       github: true,
-      gitlab: false,
-      "azure-devops": false,
-      bitbucket: false,
     });
   });
 
@@ -423,24 +420,21 @@ describe("ServerSettings.sourceControlProviders", () => {
       }).sourceControlProviders,
     ).toEqual({
       github: false,
-      gitlab: false,
-      "azure-devops": false,
-      bitbucket: false,
     });
   });
 
-  it("accepts partial provider enablement patches", () => {
+  it("accepts GitHub patches and discards removed integration settings", () => {
     expect(
-      decodeServerSettingsPatch({
-        sourceControlProviders: {
-          gitlab: true,
-          bitbucket: true,
-        },
-      }).sourceControlProviders,
-    ).toEqual({
-      gitlab: true,
-      bitbucket: true,
-    });
+      decodeServerSettingsPatch({ sourceControlProviders: { github: false } })
+        .sourceControlProviders,
+    ).toEqual({ github: false });
+    const legacy = { github: false, gitlab: true, "azure-devops": true, bitbucket: true };
+    expect(decodeServerSettings({ sourceControlProviders: legacy }).sourceControlProviders).toEqual(
+      { github: false },
+    );
+    expect(
+      decodeServerSettingsPatch({ sourceControlProviders: legacy }).sourceControlProviders,
+    ).toEqual({ github: false });
   });
 });
 

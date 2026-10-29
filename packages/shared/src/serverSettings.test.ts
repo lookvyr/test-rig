@@ -107,13 +107,10 @@ describe("serverSettings helpers", () => {
   it("merges source control provider toggles without changing the other defaults", () => {
     expect(
       applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
-        sourceControlProviders: { gitlab: true },
+        sourceControlProviders: { github: false },
       }).sourceControlProviders,
     ).toEqual({
-      github: true,
-      gitlab: true,
-      "azure-devops": false,
-      bitbucket: false,
+      github: false,
     });
   });
 

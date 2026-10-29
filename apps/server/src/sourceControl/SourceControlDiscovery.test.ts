@@ -12,10 +12,7 @@ import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
-import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
-import * as BitbucketApi from "./BitbucketApi.ts";
 import * as GitHubCli from "./GitHubCli.ts";
-import * as GitLabCli from "./GitLabCli.ts";
 import * as SourceControlDiscovery from "./SourceControlDiscovery.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 
@@ -27,7 +24,6 @@ const ALL_SOURCE_CONTROL_PROVIDERS_ENABLED = {
 } as const;
 
 const sourceControlProviderRegistryTestLayer = (input: {
-  readonly bitbucket: Partial<BitbucketApi.BitbucketApi["Service"]>;
   readonly process: Partial<VcsProcess.VcsProcess["Service"]>;
   readonly sourceControlProviders?: Partial<SourceControlProviderSettings>;
 }) =>
@@ -37,12 +33,9 @@ const sourceControlProviderRegistryTestLayer = (input: {
         ServerConfig.layerTest(process.cwd(), {
           prefix: "t3-source-control-registry-test-",
         }).pipe(Layer.provide(NodeServices.layer)),
-        Layer.mock(AzureDevOpsCli.AzureDevOpsCli)({}),
-        Layer.mock(BitbucketApi.BitbucketApi)(input.bitbucket),
         Layer.mock(GitHubCli.GitHubCli)({}),
         Layer.mock(GitHubApi.GitHubApi)({}),
         Layer.succeed(HostProcessEnvironment, {}),
-        Layer.mock(GitLabCli.GitLabCli)({}),
         ServerSettings.ServerSettingsService.layerTest({
           sourceControlProviders:
             input.sourceControlProviders ?? ALL_SOURCE_CONTROL_PROVIDERS_ENABLED,
@@ -116,16 +109,6 @@ it.effect("reports implemented tools separately from locally available executabl
     Layer.provide(
       sourceControlProviderRegistryTestLayer({
         process: processMock,
-        bitbucket: {
-          probeAuth: Effect.succeed({
-            status: "unauthenticated",
-            account: Option.none(),
-            host: Option.some("bitbucket.org"),
-            detail: Option.some(
-              "Set T3CODE_BITBUCKET_EMAIL and T3CODE_BITBUCKET_API_TOKEN, or T3CODE_BITBUCKET_ACCESS_TOKEN.",
-            ),
-          }),
-        },
       }),
     ),
     Layer.provideMerge(NodeServices.layer),
@@ -160,29 +143,8 @@ it.effect("reports implemented tools separately from locally available executabl
           auth: "authenticated",
           account: Option.some("juliusmarminge"),
         },
-        {
-          kind: "gitlab",
-          status: "missing",
-          auth: "unknown",
-          account: Option.none(),
-        },
-        {
-          kind: "azure-devops",
-          status: "missing",
-          auth: "unknown",
-          account: Option.none(),
-        },
-        {
-          kind: "bitbucket",
-          status: "available",
-          auth: "unauthenticated",
-          account: Option.none(),
-        },
       ],
     );
-    const bitbucket = result.sourceControlProviders.find((item) => item.kind === "bitbucket");
-    assert.ok(bitbucket);
-    assert.strictEqual(bitbucket.executable, undefined);
   }).pipe(Effect.provide(testLayer));
 });
 
@@ -212,19 +174,6 @@ it.effect("probes provider authentication without exposing token details", () =>
           ),
         );
       }
-      if (input.command === "glab" && input.args.join(" ") === "auth status") {
-        return Effect.succeed(
-          processOutput(`gitlab.com
-Logged in to gitlab.com as gitlab-user
-`),
-        );
-      }
-      if (
-        input.command === "az" &&
-        input.args.join(" ") === "account show --query user.name -o tsv"
-      ) {
-        return Effect.succeed(processOutput("azure-user@example.com\n"));
-      }
       return Effect.fail(
         new VcsProcessSpawnError({
           operation: input.operation,
@@ -245,14 +194,6 @@ Logged in to gitlab.com as gitlab-user
     Layer.provide(
       sourceControlProviderRegistryTestLayer({
         process: processMock,
-        bitbucket: {
-          probeAuth: Effect.succeed({
-            status: "authenticated",
-            account: Option.some("bitbucket-user"),
-            host: Option.some("bitbucket.org"),
-            detail: Option.none(),
-          }),
-        },
       }),
     ),
     Layer.provideMerge(NodeServices.layer),
@@ -276,32 +217,13 @@ Logged in to gitlab.com as gitlab-user
           account: Option.some("octocat"),
           detail: Option.none(),
         },
-        {
-          kind: "gitlab",
-          auth: "authenticated",
-          account: Option.some("gitlab-user"),
-          detail: Option.none(),
-        },
-        {
-          kind: "azure-devops",
-          auth: "authenticated",
-          account: Option.some("azure-user@example.com"),
-          detail: Option.none(),
-        },
-        {
-          kind: "bitbucket",
-          auth: "authenticated",
-          account: Option.some("bitbucket-user"),
-          detail: Option.none(),
-        },
       ],
     );
   }).pipe(Effect.provide(testLayer));
 });
 
-it.effect("probes only enabled source control providers", () => {
+it.effect("probes only GitHub despite legacy enabled provider settings", () => {
   const commands: Array<string> = [];
-  let bitbucketProbed = false;
   const processMock = {
     run: (input: VcsProcess.VcsProcessInput) => {
       commands.push(`${input.command} ${input.args.join(" ")}`);
@@ -334,23 +256,7 @@ it.effect("probes only enabled source control providers", () => {
     Layer.provide(
       sourceControlProviderRegistryTestLayer({
         process: processMock,
-        sourceControlProviders: {
-          github: true,
-          gitlab: false,
-          "azure-devops": false,
-          bitbucket: false,
-        },
-        bitbucket: {
-          probeAuth: Effect.sync(() => {
-            bitbucketProbed = true;
-            return {
-              status: "authenticated" as const,
-              account: Option.none(),
-              host: Option.some("bitbucket.org"),
-              detail: Option.none(),
-            };
-          }),
-        },
+        sourceControlProviders: ALL_SOURCE_CONTROL_PROVIDERS_ENABLED,
       }),
     ),
     Layer.provideMerge(NodeServices.layer),
@@ -372,6 +278,5 @@ it.effect("probes only enabled source control providers", () => {
       commands.some((command) => command.startsWith("az ")),
       false,
     );
-    assert.strictEqual(bitbucketProbed, false);
   }).pipe(Effect.provide(testLayer));
 });

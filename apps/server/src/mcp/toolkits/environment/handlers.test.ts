@@ -83,7 +83,7 @@ it.effect("MCP preferences cannot enable disabled hosting or excluded ancillary 
     );
     const raw = {
       newWorktreesStartFromOrigin: false,
-      sourceControlProviders: { gitlab: true, "azure-devops": true, bitbucket: true },
+      sourceControlProviders: { github: false },
       automaticUpdates: true,
       providerEnrichment: true,
       serviceLauncher: { enabled: true },

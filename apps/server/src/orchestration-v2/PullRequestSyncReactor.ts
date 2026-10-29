@@ -40,20 +40,19 @@ import { pullRequestRateLimitFailure } from "./pullRequestRateLimit.ts";
 
 const SLOW_SYNC_INTERVAL_MS = 15 * 60 * 1_000;
 /** Shell commands that can merge or close a pull request without a merge notification. */
-const PULL_REQUEST_CLOSE_COMMAND = /\b(?:gh\s+pr|glab\s+mr)\s+(?:merge|close)\b/u;
+const PULL_REQUEST_CLOSE_COMMAND = /\bgh\s+pr\s+(?:merge|close)\b/u;
 
 // Where a shell starts a command, past `NAME=value` assignments and wrappers like `timeout 60`.
 // A create command anywhere else, as in `echo "gh pr create"`, is text, not a command that runs.
 const COMMAND_START =
   "(?:^|[;&|({`\\n]|\\b(?:do|then|else)\\s)\\s*(?:(?:\\w+=\\S*|env|time|nohup|timeout\\s+\\S+)\\s+)*";
-const CREATE_COMMANDS = [
-  { kind: "github", command: /\bgh\s+pr\s+create\b/u },
-  { kind: "gitlab", command: /\bglab\s+mr\s+create\b/u },
-].map(({ kind, command }) => ({
-  kind,
-  command,
-  run: new RegExp(`${COMMAND_START}${command.source}(?=$|[\\s;&|)])`, "gu"),
-}));
+const CREATE_COMMANDS = [{ kind: "github", command: /\bgh\s+pr\s+create\b/u }].map(
+  ({ kind, command }) => ({
+    kind,
+    command,
+    run: new RegExp(`${COMMAND_START}${command.source}(?=$|[\\s;&|)])`, "gu"),
+  }),
+);
 const createCommandCount = (code: string) =>
   CREATE_COMMANDS.reduce((count, { run }) => count + [...code.matchAll(run)].length, 0);
 
@@ -129,7 +128,7 @@ type CommandExecution = Extract<OrchestrationV2TurnItem, { readonly type: "comma
 function changeRequestsCreatedBy(
   input: string,
   output: string,
-  enabled: { readonly github: boolean; readonly gitlab: boolean },
+  enabled: { readonly github: boolean },
 ) {
   if (!CREATE_COMMANDS.some(({ command }) => command.test(input))) return [];
   const script = shellScript(input);
@@ -150,11 +149,7 @@ function changeRequestsCreatedBy(
   const created = new Map<string, ThreadPullRequestKey & { readonly url: string }>();
   for (const [, url = ""] of output.matchAll(URL_LINE)) {
     const link = parseChangeRequestUrl(url);
-    const kind = /\/-\/merge_requests\//u.test(url)
-      ? "gitlab"
-      : /\/pull\//u.test(url)
-        ? "github"
-        : null;
+    const kind = /\/pull\//u.test(url) ? "github" : null;
     // Only the host whose create command ran can have printed a new change request.
     if (link === null || kind === null || !creators.has(kind) || !enabled[kind]) continue;
     const named = new RegExp(`(?:^|(?<=[\\s#/=("']))${link.number}(?=$|[\\s);&|/"'])`, "u");

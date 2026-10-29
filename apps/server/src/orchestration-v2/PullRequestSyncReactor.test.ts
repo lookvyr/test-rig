@@ -1233,11 +1233,11 @@ describe("PullRequestSyncReactor", () => {
       linked: [1],
     },
     {
-      name: "a GitLab merge request",
+      name: "an unsupported GitLab merge request",
       input: "glab mr create --fill --yes",
       output:
         "!3 Fix the thing (feature)\n https://gitlab.com/owner/repository/-/merge_requests/3\n",
-      linked: [3],
+      linked: [],
     },
     {
       name: "a new pull request whose number appears in the create command",

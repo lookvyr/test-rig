@@ -2,6 +2,8 @@ import * as Schema from "effect/Schema";
 import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { VcsDriverKind } from "./vcs.ts";
 
+/** Legacy kinds remain readable in stored repository identities and thread history.
+ * Only GitHub has an executable hosting integration. */
 export const SourceControlProviderKind = Schema.Literals([
   "github",
   "gitlab",

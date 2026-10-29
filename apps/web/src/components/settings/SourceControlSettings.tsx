@@ -47,15 +47,7 @@ import {
 } from "../ui/number-field";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  AzureDevOpsIcon,
-  BitbucketIcon,
-  GitHubIcon,
-  GitIcon,
-  GitLabIcon,
-  JujutsuIcon,
-  type Icon,
-} from "../Icons";
+import { GitHubIcon, GitIcon, JujutsuIcon, type Icon } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import { SettingResetButton, SettingsPageContainer, SettingsSection } from "./settingsLayout";
@@ -68,18 +60,12 @@ const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
 
 const SOURCE_CONTROL_PROVIDER_ICONS: Partial<Record<SourceControlProviderKind, Icon>> = {
   github: GitHubIcon,
-  gitlab: GitLabIcon,
-  "azure-devops": AzureDevOpsIcon,
-  bitbucket: BitbucketIcon,
 };
 
 type ConfigurableSourceControlProvider = keyof SourceControlProviderSettings;
 
 const SOURCE_CONTROL_PROVIDER_OPTIONS = [
   { kind: "github", label: "GitHub", Icon: GitHubIcon },
-  { kind: "gitlab", label: "GitLab", Icon: GitLabIcon },
-  { kind: "azure-devops", label: "Azure DevOps", Icon: AzureDevOpsIcon },
-  { kind: "bitbucket", label: "Bitbucket", Icon: BitbucketIcon },
 ] as const satisfies ReadonlyArray<{
   readonly kind: ConfigurableSourceControlProvider;
   readonly label: string;

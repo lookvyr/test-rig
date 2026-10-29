@@ -50,12 +50,13 @@ Test Rig supports these executable providers:
 - Claude Code
 
 The local product also retains terminals, filesystem operations, Git workflows,
-source-control hosting integrations, worktrees and checkpoints, project scripts,
+GitHub hosting integration, worktrees and checkpoints, project scripts,
 permission-mode selection, browser and MCP integrations, local secrets, and
-resource diagnostics. GitHub integration is enabled by default. GitLab, Azure
-DevOps, and Bitbucket integrations may be explicitly enabled by the user.
-Disabled source-control hosting integrations must have no reachable discovery,
-authentication, enrichment, or operation path. This integration boundary does
+resource diagnostics. GitHub is the only supported hosting integration and is
+enabled by default. GitLab, Azure DevOps, and Bitbucket integrations are excluded.
+Disabling GitHub must stop its discovery, authentication, enrichment, and operations.
+Passive remote identity normalization and legacy link decoding remain to preserve
+generic Git behavior and readable stored history. This integration boundary does
 not restrict explicit generic Git operations against user-configured remotes.
 Automatic Git remote refresh is retained so local repository status stays
 current; it may contact remotes the user configured in Git independently of a
@@ -172,16 +173,16 @@ and Claude Code authentication homes remain intentionally shared.
 
 ## Decision log
 
-| Decision                             | Rationale                                                                                                                                                                                                                |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Desktop-first and local-first        | The desktop workflow is the product; the web code is retained as its renderer and the authenticated loopback server owns the local core.                                                                                 |
-| Two approved providers               | Codex and Claude Code cover the intended harnesses without retaining unused executable integrations.                                                                                                                     |
-| Explicit source-control integrations | GitHub is enabled by default; GitLab, Azure DevOps, and Bitbucket are opt-in and fail closed while disabled. Generic Git, including automatic remote refresh, remains independent of hosting-provider integration state. |
-| Remove cloud product edges           | A personally owned tool used with company repositories must not make data egress to unapproved services accidentally enableable.                                                                                         |
-| Build and verify from source         | Local build, test, and desktop artifact commands remain; inherited CI and publication automation do not. Future automation will be purpose-built.                                                                        |
-| Preserve architectural seams         | Contracts, orchestration, drivers, checkpoints, client runtime, migrations, and local auth make the local product coherent and keep valuable upstream work portable.                                                     |
-| Selective upstream intake            | Direct, adapted, and independent implementations are all valid; product fit matters more than complete parity.                                                                                                           |
-| Independent state identity           | Test Rig and T3 Code must coexist without sharing application state, while provider-owned authentication remains reusable.                                                                                               |
+| Decision                             | Rationale                                                                                                                                                                                                                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop-first and local-first        | The desktop workflow is the product; the web code is retained as its renderer and the authenticated loopback server owns the local core.                                                                                        |
+| Two approved providers               | Codex and Claude Code cover the intended harnesses without retaining unused executable integrations.                                                                                                                            |
+| Explicit source-control integrations | GitHub is the only supported hosting integration and is enabled by default. Other hosting integrations are removed. Generic Git, including automatic remote refresh, remains independent of hosting-provider integration state. |
+| Remove cloud product edges           | A personally owned tool used with company repositories must not make data egress to unapproved services accidentally enableable.                                                                                                |
+| Build and verify from source         | Local build, test, and desktop artifact commands remain; inherited CI and publication automation do not. Future automation will be purpose-built.                                                                               |
+| Preserve architectural seams         | Contracts, orchestration, drivers, checkpoints, client runtime, migrations, and local auth make the local product coherent and keep valuable upstream work portable.                                                            |
+| Selective upstream intake            | Direct, adapted, and independent implementations are all valid; product fit matters more than complete parity.                                                                                                                  |
+| Independent state identity           | Test Rig and T3 Code must coexist without sharing application state, while provider-owned authentication remains reusable.                                                                                                      |
 
 ## Boundary smoke tests
 
@@ -204,7 +205,7 @@ Use the smallest focused checks appropriate to a changed vertical slice:
       make no request to PostHog, OTLP, update feeds, LiteLLM pricing, Google
       favicons, or npm-registry enrichment.
 - [ ] Local NDJSON observability, resource diagnostics, browser/MCP actions,
-      explicit Git actions, enabled source-control hosting integrations, and approved
+      explicit Git actions, enabled GitHub hosting integration, and approved
       provider networking still work; disabled hosting integrations make no
       discovery, authentication, enrichment, or operation request.
 - [ ] `TEST_RIG_HOME` and `~/.test-rig` contain Test Rig state; ambient

@@ -15,7 +15,6 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import type * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./SourceControlRepositoryService.ts";
-import * as BitbucketApi from "./BitbucketApi.ts";
 
 const CLONE_URLS = {
   nameWithOwner: "octocat/t3code",
@@ -23,19 +22,16 @@ const CLONE_URLS = {
   sshUrl: "git@github.com:octocat/t3code.git",
 };
 
-it.effect("preserves safe explicit Bitbucket target validation detail", () =>
+it.effect("redacts invalid provider target details", () =>
   Effect.gen(function* () {
     const error = yield* (yield* SourceControlRepositoryService.SourceControlRepositoryService)
       .lookupRepository({
-        provider: "bitbucket",
+        provider: "github",
         repository: "private-invalid-target",
         cwd: "/repo",
       })
       .pipe(Effect.flip);
-    assert.strictEqual(
-      error.detail,
-      "Bitbucket repositories must be specified as workspace/repository.",
-    );
+    assert.strictEqual(error.detail, "The source control operation could not be completed.");
     assert.notInclude(error.message, "private-invalid-target");
   }).pipe(
     Effect.provide(
@@ -44,13 +40,11 @@ it.effect("preserves safe explicit Bitbucket target validation detail", () =>
           getRepositoryCloneUrls: () =>
             Effect.fail(
               new SourceControlProviderError({
-                provider: "bitbucket",
+                provider: "github",
                 operation: "getRepositoryCloneUrls",
                 cwd: "/repo",
                 detail: "invalid repository",
-                cause: new BitbucketApi.BitbucketRepositoryLocatorError({
-                  repository: "private-invalid-target",
-                }),
+                cause: new Error("private-invalid-target"),
               }),
             ),
         }),

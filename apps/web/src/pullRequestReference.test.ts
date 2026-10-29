@@ -12,24 +12,6 @@ describe("parsePullRequestReference", () => {
     );
   });
 
-  it("accepts Azure DevOps pull request URLs", () => {
-    expect(
-      parsePullRequestReference("https://dev.azure.com/acme/project/_git/t3code/pullrequest/42"),
-    ).toBe("https://dev.azure.com/acme/project/_git/t3code/pullrequest/42");
-  });
-
-  it("accepts GitLab merge request URLs", () => {
-    expect(parsePullRequestReference("https://gitlab.com/group/project/-/merge_requests/42")).toBe(
-      "https://gitlab.com/group/project/-/merge_requests/42",
-    );
-  });
-
-  it("accepts legacy Azure DevOps pull request URLs", () => {
-    expect(
-      parsePullRequestReference("https://acme.visualstudio.com/project/_git/t3code/pullrequest/42"),
-    ).toBe("https://acme.visualstudio.com/project/_git/t3code/pullrequest/42");
-  });
-
   it("accepts raw numbers", () => {
     expect(parsePullRequestReference("42")).toBe("42");
   });
@@ -52,24 +34,6 @@ describe("parsePullRequestReference", () => {
     ).toBe("https://github.com/pingdotgg/t3code/pull/42");
   });
 
-  it("accepts glab mr checkout commands with raw numbers", () => {
-    expect(parsePullRequestReference("glab mr checkout 42")).toBe("42");
-  });
-
-  it("accepts az repos pr checkout commands with raw numbers", () => {
-    expect(parsePullRequestReference("az repos pr checkout --id 42")).toBe("42");
-  });
-
-  it("accepts az repos pr checkout commands with equals-style ids", () => {
-    expect(parsePullRequestReference("az repos pr checkout --id=42")).toBe("42");
-  });
-
-  it("accepts az repos pr checkout commands with extra flags", () => {
-    expect(parsePullRequestReference("az repos pr checkout --id 42 --remote-name origin")).toBe(
-      "42",
-    );
-  });
-
   it("rejects non-pull-request input", () => {
     expect(parsePullRequestReference("feature/my-branch")).toBeNull();
   });
@@ -80,11 +44,22 @@ describe("pullRequestReferenceProviderKind", () => {
     expect(pullRequestReferenceProviderKind("https://github.com/pingdotgg/t3code/pull/42")).toBe(
       "github",
     );
-    expect(pullRequestReferenceProviderKind("glab mr checkout 42")).toBe("gitlab");
-    expect(pullRequestReferenceProviderKind("az repos pr checkout --id 42")).toBe("azure-devops");
+    expect(pullRequestReferenceProviderKind("glab mr checkout 42")).toBeNull();
+    expect(pullRequestReferenceProviderKind("az repos pr checkout --id 42")).toBeNull();
   });
 
   it("leaves number-only references to the current repository provider", () => {
     expect(pullRequestReferenceProviderKind("#42")).toBeNull();
   });
+});
+
+it.each([
+  "https://gitlab.com/group/project/-/merge_requests/42",
+  "https://bitbucket.org/group/project/pull-requests/42",
+  "https://dev.azure.com/acme/project/_git/repo/pullrequest/42",
+  "glab mr checkout 42",
+  "az repos pr checkout --id 42",
+])("rejects unsupported checkout reference %s", (reference) => {
+  expect(parsePullRequestReference(reference)).toBeNull();
+  expect(pullRequestReferenceProviderKind(reference)).toBeNull();
 });
