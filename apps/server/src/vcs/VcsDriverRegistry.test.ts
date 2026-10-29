@@ -48,6 +48,28 @@ describe("VcsDriverRegistry", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("rejects legacy Jujutsu config before launching any executable", () => {
+    const layer = Layer.effect(VcsDriverRegistry.VcsDriverRegistry, VcsDriverRegistry.make).pipe(
+      Layer.provide(NodeServices.layer),
+      Layer.provide(
+        Layer.mock(VcsProjectConfig.VcsProjectConfig)({
+          resolveKind: () => Effect.succeed("jj"),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(VcsProcess.VcsProcess)({
+          run: () => Effect.die("unsupported VCS must not launch a process"),
+        }),
+      ),
+    );
+    return Effect.gen(function* () {
+      const registry = yield* VcsDriverRegistry.VcsDriverRegistry;
+      const error = yield* registry.resolve({ cwd: "/repo" }).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "VcsUnsupportedOperationError");
+      assert.include(error.message, "No jj VCS driver is registered");
+    }).pipe(Effect.provide(layer));
+  });
+
   // Answers detection like git: the nearest folder at or above the cwd, up to
   // `rootDir`, that holds `.git` is the repository.
   const makeDiskBackedLayer = (rootDir: string, calls: string[]) =>

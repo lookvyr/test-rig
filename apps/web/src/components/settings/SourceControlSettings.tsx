@@ -47,7 +47,7 @@ import {
 } from "../ui/number-field";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { GitHubIcon, GitIcon, JujutsuIcon, type Icon } from "../Icons";
+import { GitHubIcon, GitIcon, type Icon } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
 import { SettingResetButton, SettingsPageContainer, SettingsSection } from "./settingsLayout";
@@ -74,7 +74,6 @@ const SOURCE_CONTROL_PROVIDER_OPTIONS = [
 
 const VCS_ICONS: Partial<Record<VcsDriverKind, Icon>> = {
   git: GitIcon,
-  jj: JujutsuIcon,
 };
 
 const SOURCE_CONTROL_SKELETON_ROWS = ["primary", "secondary"] as const;

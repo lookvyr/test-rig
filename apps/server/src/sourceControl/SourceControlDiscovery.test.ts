@@ -60,9 +60,11 @@ const processOutput = (
   stderrTruncated: false,
 });
 
-it.effect("reports implemented tools separately from locally available executables", () => {
+it.effect("discovers Git without probing removed VCS executables", () => {
+  const commands: string[] = [];
   const processMock = {
     run: (input: VcsProcess.VcsProcessInput) => {
+      commands.push(input.command);
       if (input.command === "git") {
         return Effect.succeed(processOutput("git version 2.51.0\n"));
       }
@@ -117,6 +119,7 @@ it.effect("reports implemented tools separately from locally available executabl
   return Effect.gen(function* () {
     const discovery = yield* SourceControlDiscovery.SourceControlDiscovery;
     const result = yield* discovery.discover;
+    assert.deepStrictEqual([...new Set(commands)].sort(), ["gh", "git"]);
 
     assert.deepStrictEqual(
       result.versionControlSystems.map((item) => ({
@@ -124,10 +127,7 @@ it.effect("reports implemented tools separately from locally available executabl
         implemented: item.implemented,
         status: item.status,
       })),
-      [
-        { kind: "git", implemented: true, status: "available" },
-        { kind: "jj", implemented: false, status: "missing" },
-      ],
+      [{ kind: "git", implemented: true, status: "available" }],
     );
     assert.deepStrictEqual(
       result.sourceControlProviders.map((item) => ({

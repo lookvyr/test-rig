@@ -96,6 +96,8 @@ The following are outside Test Rig's product boundary:
 - Desktop-managed SSH discovery, authentication prompts, remote server launch,
   package bootstrapping, and tunnel management. Direct pairing with a server the
   user starts remains supported, as do Git-over-SSH and the local WSL backend.
+- Jujutsu discovery, executable integration, and selectable UI. Git is the only
+  supported VCS; legacy `jj` configuration remains readable and fails closed.
 - T3 Connect, including its server routes, lifecycle, UI, and packaging.
 - Clerk account flows. Electron responsibilities currently coupled to Clerk,
   such as single-instance and second-instance handling, must remain locally

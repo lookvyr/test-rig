@@ -32,7 +32,7 @@ data is available; reduced-motion settings disable the fade. Resizing the right
 panel leaves room to type;
 extra composer controls move into **More composer controls** when space is tight.
 
-Test Rig uses Git for local repository work and connects to GitHub for pull requests, repository lookup, cloning, and publishing.
+Git is the only supported version control system. Test Rig uses Git for local repository work and connects to GitHub for pull requests, repository lookup, cloning, and publishing.
 
 Git and hosting providers are separate. Disabling the GitHub integration stops Test Rig from checking credentials or making requests to that provider. It does not disable Git commands against remotes already configured in a repository.
 
