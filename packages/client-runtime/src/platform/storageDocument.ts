@@ -1,4 +1,3 @@
-import { EnvironmentId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
 
@@ -11,7 +10,6 @@ import {
   BearerConnectionTarget,
   type ConnectionTarget,
   PersistedConnectionTarget,
-  SshConnectionTarget,
 } from "../connection/model.ts";
 
 export const StoredConnectionCredential = Schema.Struct({
@@ -21,28 +19,32 @@ export const StoredConnectionCredential = Schema.Struct({
 export type StoredConnectionCredential = typeof StoredConnectionCredential.Type;
 
 const CurrentConnectionCatalogDocument = Schema.Struct({
-  schemaVersion: Schema.Literal(2),
+  schemaVersion: Schema.Literal(3),
   targets: Schema.Array(PersistedConnectionTarget),
   profiles: Schema.Array(ConnectionProfile),
   credentials: Schema.Array(StoredConnectionCredential),
 });
 
+// Decode retired records only at the storage boundary; they cannot become live targets.
+const LegacySshConnectionTarget = Schema.Struct({
+  _tag: Schema.Literal("SshConnectionTarget"),
+  connectionId: Schema.String,
+});
+const LegacySshConnectionProfile = Schema.Struct({
+  _tag: Schema.Literal("SshConnectionProfile"),
+  connectionId: Schema.String,
+});
 const LegacyRelayConnectionTarget = Schema.Struct({
   _tag: Schema.Literal("RelayConnectionTarget"),
-  environmentId: EnvironmentId,
-  label: Schema.String,
 });
-
 const LegacyConnectionCatalogDocument = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
+  schemaVersion: Schema.Literals([1, 2]),
   targets: Schema.Array(
-    Schema.Union([BearerConnectionTarget, SshConnectionTarget, LegacyRelayConnectionTarget]),
+    Schema.Union([BearerConnectionTarget, LegacySshConnectionTarget, LegacyRelayConnectionTarget]),
   ),
-  profiles: Schema.Array(ConnectionProfile),
+  profiles: Schema.Array(Schema.Union([ConnectionProfile, LegacySshConnectionProfile])),
   credentials: Schema.Array(StoredConnectionCredential),
-  remoteDpopTokens: Schema.Array(Schema.Unknown),
 });
-
 const ConnectionCatalogDocumentSource = Schema.Union([
   CurrentConnectionCatalogDocument,
   LegacyConnectionCatalogDocument,
@@ -54,19 +56,21 @@ const decodeCurrentConnectionCatalogDocument = Schema.decodeUnknownSync(
 
 export const ConnectionCatalogDocument = ConnectionCatalogDocumentSource.pipe(
   Schema.decodeTo(CurrentConnectionCatalogDocument, {
-    decode: SchemaGetter.transform((document) =>
-      document.schemaVersion === 2
-        ? document
-        : {
-            schemaVersion: 2 as const,
-            targets: document.targets.filter(
-              (target): target is BearerConnectionTarget | SshConnectionTarget =>
-                target._tag !== "RelayConnectionTarget",
-            ),
-            profiles: document.profiles,
-            credentials: document.credentials,
-          },
-    ),
+    decode: SchemaGetter.transform((document) => {
+      if (document.schemaVersion === 3) return document;
+      const targets = document.targets.filter((target) => target._tag === "BearerConnectionTarget");
+      const connectionIds = new Set(targets.map((target) => target.connectionId));
+      return {
+        schemaVersion: 3 as const,
+        targets,
+        profiles: document.profiles
+          .filter((profile) => profile._tag === "BearerConnectionProfile")
+          .filter((profile) => connectionIds.has(profile.connectionId)),
+        credentials: document.credentials.filter((credential) =>
+          connectionIds.has(credential.connectionId),
+        ),
+      };
+    }),
     encode: SchemaGetter.transform((document): ConnectionCatalogDocumentSource =>
       decodeCurrentConnectionCatalogDocument(document),
     ),
@@ -75,7 +79,7 @@ export const ConnectionCatalogDocument = ConnectionCatalogDocumentSource.pipe(
 export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type;
 
 export const EMPTY_CONNECTION_CATALOG_DOCUMENT: ConnectionCatalogDocument = Object.freeze({
-  schemaVersion: 2,
+  schemaVersion: 3,
   targets: [],
   profiles: [],
   credentials: [],
@@ -103,7 +107,6 @@ function connectionIdOf(target: ConnectionTarget): string | null {
     case "PrimaryConnectionTarget":
       return null;
     case "BearerConnectionTarget":
-    case "SshConnectionTarget":
       return target.connectionId;
   }
 }
@@ -145,30 +148,18 @@ export function registerConnectionInCatalog(
     targets: replaceCatalogValue(cleaned.targets, (value) => value.environmentId, target),
   };
 
-  switch (registration._tag) {
-    case "BearerConnectionRegistration":
-      return {
-        ...next,
-        profiles: replaceCatalogValue(
-          next.profiles,
-          (value) => value.connectionId,
-          registration.profile,
-        ),
-        credentials: replaceCatalogValue(next.credentials, (value) => value.connectionId, {
-          connectionId: registration.target.connectionId,
-          credential: registration.credential,
-        }),
-      };
-    case "SshConnectionRegistration":
-      return {
-        ...next,
-        profiles: replaceCatalogValue(
-          next.profiles,
-          (value) => value.connectionId,
-          registration.profile,
-        ),
-      };
-  }
+  return {
+    ...next,
+    profiles: replaceCatalogValue(
+      next.profiles,
+      (value) => value.connectionId,
+      registration.profile,
+    ),
+    credentials: replaceCatalogValue(next.credentials, (value) => value.connectionId, {
+      connectionId: registration.target.connectionId,
+      credential: registration.credential,
+    }),
+  };
 }
 
 export function removeConnectionFromCatalog(

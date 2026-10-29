@@ -93,6 +93,9 @@ deleted merely because a cloud feature also consumes it.
 
 The following are outside Test Rig's product boundary:
 
+- Desktop-managed SSH discovery, authentication prompts, remote server launch,
+  package bootstrapping, and tunnel management. Direct pairing with a server the
+  user starts remains supported, as do Git-over-SSH and the local WSL backend.
 - T3 Connect, including its server routes, lifecycle, UI, and packaging.
 - Clerk account flows. Electron responsibilities currently coupled to Clerk,
   such as single-instance and second-instance handling, must remain locally
@@ -145,8 +148,6 @@ additional approval-decision and merge-readiness notifications.
 
 ## Deferred decisions
 
-- SSH connectivity is acceptable but deferred until a concrete need follows
-  the local baseline.
 - ACP may remain temporarily dormant and unreachable. With Cursor and Grok
   removed it has no independent route or registration path; deletion waits for
   dependency analysis.

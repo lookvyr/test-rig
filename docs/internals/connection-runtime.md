@@ -15,7 +15,7 @@ There is no legacy connection owner or supported mixed mode.
 [`connection/layer.ts`][layer] assembles the runtime:
 
 - `ConnectionResolver` ([resolver.ts][resolver]) resolves a catalog entry into a
-  prepared, authenticated endpoint for primary, bearer, or SSH targets.
+  prepared, authenticated endpoint for primary or bearer targets.
 - `ConnectionDriver` ([driver.ts][driver]) prepares through the resolver, opens
   one RPC session, and reports `preparing`, `opening`, and `synchronizing`.
 - `RpcSessionFactory` ([rpc/session.ts][session]) performs one transport

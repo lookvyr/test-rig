@@ -65,7 +65,6 @@ export class DesktopEnvironment extends Context.Service<
     readonly backendCwd: string;
     readonly preloadPath: string;
     readonly devServerUrl: Option.Option<URL>;
-    readonly devRemoteT3ServerEntryPath: Option.Option<string>;
     readonly configuredBackendPort: Option.Option<number>;
     readonly commitHashOverride: Option.Option<string>;
     readonly branding: DesktopAppBranding;
@@ -209,7 +208,6 @@ const make = Effect.fn("desktop.environment.make")(function* (
     backendCwd: input.isPackaged ? homeDirectory : appRoot,
     preloadPath: path.join(input.dirname, "preload.cjs"),
     devServerUrl,
-    devRemoteT3ServerEntryPath: config.devRemoteT3ServerEntryPath,
     configuredBackendPort: config.configuredBackendPort,
     commitHashOverride: config.commitHashOverride,
     branding,

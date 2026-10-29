@@ -29,7 +29,6 @@ import {
   MonitorIcon,
   PlusIcon,
   RefreshCwIcon,
-  TerminalIcon,
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 
@@ -141,14 +140,12 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
 
 function providerEnvironmentIcon(environment: EnvironmentPresentation) {
   if (environment.entry.target._tag === "PrimaryConnectionTarget") return MonitorIcon;
-  if (environment.entry.target._tag === "SshConnectionTarget") return TerminalIcon;
   if (isDesktopLocalConnectionTarget(environment.entry.target)) return LaptopIcon;
   return CloudIcon;
 }
 
 function providerEnvironmentDetail(environment: EnvironmentPresentation): string {
   if (environment.entry.target._tag === "PrimaryConnectionTarget") return "Primary device";
-  if (environment.entry.target._tag === "SshConnectionTarget") return "SSH";
   if (isDesktopLocalConnectionTarget(environment.entry.target)) return "Local device";
   return environment.displayUrl ?? "Remote device";
 }

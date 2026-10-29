@@ -10,12 +10,13 @@ import { afterEach, vi } from "vite-plus/test";
 import { connectionStorageLayer, makeCatalogBackend, makeCatalogStore } from "./storage";
 
 const emptyCatalog = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   targets: [],
   profiles: [],
   credentials: [],
 } as const;
 const encodeLegacyCatalog = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeRawCatalog = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 const decodeCatalog = Schema.decodeUnknownSync(Schema.fromJsonString(ConnectionCatalogDocument));
 
 afterEach(() => {
@@ -56,7 +57,7 @@ describe("makeCatalogStore", () => {
     }),
   );
 
-  it.effect("persists a sanitized v2 catalog after reading legacy relay data", () =>
+  it.effect("persists a sanitized v3 catalog after reading legacy relay data", () =>
     Effect.gen(function* () {
       const writes: string[] = [];
       const store = yield* makeCatalogStore({
@@ -82,6 +83,35 @@ describe("makeCatalogStore", () => {
       expect(writes).toHaveLength(1);
       expect(decodeCatalog(writes[0]!)).toEqual(emptyCatalog);
       expect(writes[0]).not.toContain("removed-token");
+    }),
+  );
+
+  it.effect("persists the SSH migration before exposing the connection catalog", () =>
+    Effect.gen(function* () {
+      const writes: string[] = [];
+      const store = yield* makeCatalogStore({
+        read: Effect.succeed(
+          encodeLegacyCatalog({
+            schemaVersion: 2,
+            targets: [
+              {
+                _tag: "SshConnectionTarget",
+                connectionId: "ssh:old",
+                environmentId: "old",
+                label: "Old",
+              },
+            ],
+            profiles: [{ _tag: "SshConnectionProfile", connectionId: "ssh:old" }],
+            credentials: [],
+          }),
+        ),
+        write: (raw) => Effect.sync(() => writes.push(raw)),
+      });
+      expect(yield* store.read).toEqual(emptyCatalog);
+      expect(writes).toHaveLength(1);
+      expect(decodeRawCatalog(writes[0]!)).toEqual(emptyCatalog);
+      yield* store.read;
+      expect(writes).toHaveLength(1);
     }),
   );
 

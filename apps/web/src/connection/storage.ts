@@ -462,7 +462,10 @@ export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStor
     if (raw !== null && raw.trim() !== "") {
       const sourceSchemaVersion = catalogSchemaVersion(raw);
       const decoded = yield* decodeCatalog(raw).pipe(
-        Effect.map((value) => ({ catalog: value, persistMigration: sourceSchemaVersion === 1 })),
+        Effect.map((value) => ({
+          catalog: value,
+          persistMigration: sourceSchemaVersion !== value.schemaVersion,
+        })),
         Effect.catch((error) =>
           Effect.gen(function* () {
             yield* Effect.logWarning("Discarding a corrupt web connection catalog.", {

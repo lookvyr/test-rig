@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { buildRemoteNodeEnvScript } from "@t3tools/ssh/tunnel";
+import { buildWslNodeEnvScript } from "./nodeEnvironment.ts";
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -133,12 +133,11 @@ export const formatWslShellTransportFailureReason = (
   }
 };
 
-// Reuse the SSH remote resolver so WSL and SSH discover version-managed Node
-// the same way. Passing the engine range lets the resolver fall through to
+// Passing the engine range lets WSL Node discovery fall through to
 // version managers like nvm when a system node exists but is too old.
 export const buildWslNodeEnvPreamble = (
   nodeEngineRange?: string | null,
-): string => `${buildRemoteNodeEnvScript({ nodeEngineRange: nodeEngineRange ?? null })}
+): string => `${buildWslNodeEnvScript({ nodeEngineRange: nodeEngineRange ?? null })}
 ensure_remote_node_path || true
 `;
 

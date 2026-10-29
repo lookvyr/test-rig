@@ -33,8 +33,7 @@ That gives you:
 ## Enabling Network Access
 
 The two supported source-build paths are exposing the desktop app's backend or
-running a headless server from the CLI. The inherited desktop-managed SSH path
-is documented separately below because it still depends on npm publication.
+running a headless server from the CLI.
 
 ### Option 1: Desktop App
 
@@ -88,15 +87,19 @@ including an optional `cwd` argument.
 Once paired, add projects normally: open the Command Palette and choose **Add Project**, then pick
 the environment the project lives on. Every saved environment is offered, not only the local one.
 
-### Option 3: Desktop-Managed SSH Launch
+### Previously Saved SSH Environments
 
-The inherited SSH launcher installs a versioned Test Rig npm package on the
-remote machine. Test Rig no longer publishes that package, so this flow is not
-part of the supported source-build path. Direct LAN or explicitly configured
-remote connections remain available for a server you build and start yourself.
+Test Rig no longer discovers SSH hosts, launches remote servers, manages SSH
+passwords, or creates tunnels. Old SSH connection entries are removed from this
+client when its saved connections are upgraded. Projects and conversations on
+the remote machine remain there.
 
-The UI and runtime are retained temporarily while the separate SSH/remote
-boundary is audited. Invoking this flow may contact the npm registry.
+To reconnect, start Test Rig on that machine yourself, establish any network
+access or SSH forwarding you need, then open **Settings → Connections → Add
+environment** and enter its pairing URL or host and pairing code.
+
+Git clone, fetch, and push over SSH, GitHub integration, local Claude and Codex
+sessions, and the local WSL backend are unaffected.
 
 On a Linux host, you can keep a source-built server running after logout using
 your own process supervisor. Test Rig does not include inherited

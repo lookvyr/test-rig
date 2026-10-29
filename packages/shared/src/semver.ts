@@ -143,8 +143,8 @@ export function compareSemverVersions(left: string, right: string): number {
 /**
  * Small semver range checker for CLI/runtime gates.
  *
- * Keep the function body valid plain JavaScript: SSH startup stringifies this
- * function and runs it on remote Node versions before TypeScript support is known.
+ * Keep the function body valid plain JavaScript: WSL startup stringifies this
+ * function and runs it on Linux Node versions before TypeScript support is known.
  *
  * @param rawVersion Version string, with or without a leading `v`.
  * @param range Space-separated comparators, with `||` range groups.

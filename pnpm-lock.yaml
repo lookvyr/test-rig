@@ -83,9 +83,6 @@ importers:
       '@t3tools/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@t3tools/ssh':
-        specifier: workspace:*
-        version: link:../../packages/ssh
       effect:
         specifier: 4.0.0-rc.115
         version: 4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40)
@@ -474,31 +471,6 @@ importers:
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
-    devDependencies:
-      '@effect/platform-node':
-        specifier: 4.0.0-rc.115
-        version: 4.0.0-rc.115(bufferutil@4.1.0)(effect@4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40))(redis@6.3.0)(utf-8-validate@6.0.6)
-      '@effect/vitest':
-        specifier: 4.0.0-rc.115
-        version: 4.0.0-rc.115(patch_hash=172bd95ef73a13d322888984415d5d18d9d2aa8e13fa529eac235efac837e902)(effect@4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40))
-      '@types/node':
-        specifier: 24.12.4
-        version: 24.12.4
-      vite-plus:
-        specifier: 'catalog:'
-        version: 1.0.0(@types/node@24.12.4)(@vitest/ui@5.0.1)(bufferutil@4.1.0)(esbuild@0.28.1)(jiti@2.7.0)(msw@2.12.11(@types/node@24.12.4)(typescript@7.0.2))(terser@5.48.0)(typescript@7.0.2)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
-
-  packages/ssh:
-    dependencies:
-      '@t3tools/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@t3tools/shared':
-        specifier: workspace:*
-        version: link:../shared
-      effect:
-        specifier: 4.0.0-rc.115
-        version: 4.0.0-rc.115(patch_hash=857854b8a1069af84123ea9dc9063e110656ac6eb76b947107c3eb92410dac40)
     devDependencies:
       '@effect/platform-node':
         specifier: 4.0.0-rc.115

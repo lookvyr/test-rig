@@ -6,10 +6,8 @@ import {
   BearerConnectionCredential,
   BearerConnectionProfile,
   BearerConnectionRegistration,
-  SshConnectionProfile,
-  SshConnectionRegistration,
 } from "../connection/catalog.ts";
-import { BearerConnectionTarget, SshConnectionTarget } from "../connection/model.ts";
+import { BearerConnectionTarget } from "../connection/model.ts";
 import {
   ConnectionCatalogDocument,
   EMPTY_CONNECTION_CATALOG_DOCUMENT,
@@ -55,33 +53,6 @@ describe("ConnectionCatalogDocument", () => {
     );
   });
 
-  it("persists the normalized SSH profile beside its target", () => {
-    const target = new SshConnectionTarget({
-      environmentId: ENVIRONMENT_ID,
-      label: "SSH",
-      connectionId: "ssh-1",
-    });
-    const profile = new SshConnectionProfile({
-      connectionId: target.connectionId,
-      environmentId: target.environmentId,
-      label: target.label,
-      target: {
-        alias: "devbox",
-        hostname: "devbox.example.test",
-        username: "developer",
-        port: 22,
-      },
-    });
-    const document = registerConnectionInCatalog(
-      EMPTY_CONNECTION_CATALOG_DOCUMENT,
-      new SshConnectionRegistration({ target, profile }),
-    );
-
-    expect(document.targets).toEqual([target]);
-    expect(document.profiles).toEqual([profile]);
-    expect(document.credentials).toEqual([]);
-  });
-
   it("drops legacy relay targets and DPoP tokens while preserving bearer records", () => {
     const decoded = decodeConnectionCatalogDocument({
       schemaVersion: 1,
@@ -95,23 +66,79 @@ describe("ConnectionCatalogDocument", () => {
     });
 
     expect(decoded).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       targets: [BEARER_TARGET],
       profiles: [BEARER_PROFILE],
       credentials: [{ connectionId: BEARER_TARGET.connectionId, credential: BEARER_CREDENTIAL }],
     });
   });
 
+  it.each([1, 2])("migrates v%s SSH records without losing direct connections", (schemaVersion) => {
+    const decoded = decodeConnectionCatalogDocument({
+      schemaVersion,
+      targets: [
+        BEARER_TARGET,
+        {
+          _tag: "SshConnectionTarget",
+          environmentId: "old-ssh",
+          label: "Devbox",
+          connectionId: "ssh:old-ssh",
+        },
+      ],
+      profiles: [
+        BEARER_PROFILE,
+        {
+          _tag: "SshConnectionProfile",
+          connectionId: "ssh:old-ssh",
+          environmentId: "old-ssh",
+          label: "Devbox",
+          target: { alias: "devbox", hostname: "devbox.example.test", username: null, port: null },
+        },
+      ],
+      credentials: [
+        { connectionId: BEARER_TARGET.connectionId, credential: BEARER_CREDENTIAL },
+        {
+          connectionId: "ssh:old-ssh",
+          credential: new BearerConnectionCredential({ token: "old-ssh-token" }),
+        },
+      ],
+      remoteDpopTokens: [],
+    });
+    expect(decoded).toEqual({
+      schemaVersion: 3,
+      targets: [BEARER_TARGET],
+      profiles: [BEARER_PROFILE],
+      credentials: [{ connectionId: BEARER_TARGET.connectionId, credential: BEARER_CREDENTIAL }],
+    });
+    expect(encodeConnectionCatalogDocument(decoded)).not.toHaveProperty("remoteDpopTokens");
+  });
+
+  it("rejects SSH targets in current catalogs", () => {
+    expect(() =>
+      decodeConnectionCatalogDocument({
+        ...EMPTY_CONNECTION_CATALOG_DOCUMENT,
+        targets: [
+          {
+            _tag: "SshConnectionTarget",
+            connectionId: "ssh:old",
+            environmentId: "old",
+            label: "Old",
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it("encodes the current catalog without reintroducing legacy fields", () => {
     const encoded = encodeConnectionCatalogDocument({
-      schemaVersion: 2,
+      schemaVersion: 3,
       targets: [BEARER_TARGET],
       profiles: [BEARER_PROFILE],
       credentials: [{ connectionId: BEARER_TARGET.connectionId, credential: BEARER_CREDENTIAL }],
     });
 
     expect(encoded).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       targets: [
         {
           _tag: "BearerConnectionTarget",

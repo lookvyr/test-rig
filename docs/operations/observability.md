@@ -16,8 +16,8 @@ client bootstrap values cannot enable one.
 
 ## Logs
 
-Normal local launches write pretty logs to stdout. SSH-managed launches also persist the remote
-process output at `~/.test-rig/ssh-launch/<state>/server.log`.
+Normal local launches write pretty logs to stdout. For headless servers, capture stdout/stderr
+with your own process supervisor.
 
 Logs emitted with `Effect.log...` inside an active span are included as events in the persisted span.
 
@@ -114,7 +114,7 @@ collection is handled by the authenticated server HTTP route and `BrowserTraceCo
 
 ## Current constraints
 
-- Logs outside spans are not persisted unless an SSH-managed launcher captures stdout/stderr.
+- Logs outside spans are not persisted unless your process supervisor captures stdout/stderr.
 - Metrics remain in process and have no local snapshot artifact.
 - `serverLogPath` and legacy OTLP-shaped contract fields remain decode-compatible for older clients
   and settings, but they do not enable export.

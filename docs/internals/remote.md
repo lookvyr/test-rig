@@ -14,10 +14,10 @@ the client reaches that server.
 | ------------------------- | ---------------------------------------------------------------------- |
 | `PrimaryConnectionTarget` | The platform-managed local server (desktop backend or CLI-served web). |
 | `BearerConnectionTarget`  | A manually paired direct HTTP/WebSocket endpoint.                      |
-| `SshConnectionTarget`     | A desktop-managed SSH environment.                                     |
 
-Bearer and SSH targets are persisted; primary is platform-managed. Historical relay targets remain
-decodable at the storage boundary only and are discarded during catalog migration.
+Bearer targets are persisted; primary and secondary desktop-local backends are platform-managed.
+Historical SSH and relay records are decoded only at the storage boundary and discarded when
+migrating catalogs to version 3. Direct bearer profiles and credentials are preserved.
 
 ## Pairing and advertised endpoints
 
@@ -34,15 +34,14 @@ Desktop may advertise candidate endpoint pairs with reachability hints. Clients 
 them as hints, not proof. The connection attempt determines whether an endpoint works from the
 current device.
 
-## Direct and SSH access
+## Direct access
 
 Direct access uses `ws://` or `wss://` paired as a bearer target. Transport security and network
 reachability remain the operator's responsibility.
 
-Desktop-managed SSH discovers SSH targets, launches or reuses a remote Test Rig server, forwards a
-local port, and returns ordinary HTTP/WebSocket endpoints. The renderer then connects through the
-same runtime as any other target. Disconnect closes the tunnel and stops only a server the launcher
-started.
+There is no desktop-managed SSH launcher or tunnel. Users may configure their own forwarding
+and pair with the resulting endpoint. WSL remains a separate local backend; its Node discovery
+helper lives in `apps/desktop/src/wsl/nodeEnvironment.ts`.
 
 ## Security model
 

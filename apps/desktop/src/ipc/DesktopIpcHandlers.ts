@@ -13,16 +13,6 @@ import {
   setServerExposureMode,
 } from "./methods/serverExposure.ts";
 import {
-  bootstrapSshBearerSession,
-  disconnectSshEnvironment,
-  discoverSshHosts,
-  ensureSshEnvironment,
-  fetchSshEnvironmentDescriptor,
-  fetchSshSessionState,
-  issueSshWebSocketTicket,
-  resolveSshPasswordPrompt,
-} from "./methods/sshEnvironment.ts";
-import {
   confirm,
   getAppBranding,
   getLocalEnvironmentBootstraps,
@@ -52,15 +42,6 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(getConnectionCatalog);
   yield* ipc.handle(setConnectionCatalog);
   yield* ipc.handle(clearConnectionCatalog);
-
-  yield* ipc.handle(discoverSshHosts);
-  yield* ipc.handle(ensureSshEnvironment);
-  yield* ipc.handle(disconnectSshEnvironment);
-  yield* ipc.handle(fetchSshEnvironmentDescriptor);
-  yield* ipc.handle(bootstrapSshBearerSession);
-  yield* ipc.handle(fetchSshSessionState);
-  yield* ipc.handle(issueSshWebSocketTicket);
-  yield* ipc.handle(resolveSshPasswordPrompt);
 
   yield* ipc.handle(getServerExposureState);
   yield* ipc.handle(setServerExposureMode);

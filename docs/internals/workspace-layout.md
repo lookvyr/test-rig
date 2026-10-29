@@ -13,7 +13,7 @@ the task commands.
 - `apps/web` (`@t3tools/web`): React + Vite UI. Consumes the shared client runtime and adds routing,
   components, and web-specific platform layers.
 - `apps/desktop` (`@t3tools/desktop`): Electron shell. Supervises a desktop-scoped `t3` backend,
-  loads the web bundle over the `t3code://` protocol, and owns SSH-managed remote environments.
+  loads the web bundle over the `t3code://` protocol, and manages the local WSL backend.
 
 ## packages
 
@@ -24,8 +24,6 @@ the task commands.
 - `packages/client-runtime` (`@t3tools/client-runtime`): connection lifecycle, authorization, RPC
   session, environment registry, and Atom-based domain state used by the web and desktop clients. See its
   [README](../../packages/client-runtime/README.md).
-- `packages/ssh` (`@t3tools/ssh`): SSH config parsing, auth prompts, command execution, and the
-  tunnel/environment manager behind desktop-managed SSH environments.
 - `packages/effect-codex-app-server` (`effect-codex-app-server`): Effect client for the
   `codex app-server` JSON-RPC protocol.
 
