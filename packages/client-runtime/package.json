@@ -223,10 +223,6 @@
       "types": "./src/state/threadWorkflows.ts",
       "default": "./src/state/threadWorkflows.ts"
     },
-    "./state/composerDispatch": {
-      "types": "./src/state/composerDispatch.ts",
-      "default": "./src/state/composerDispatch.ts"
-    },
     "./state/subagentDisplay": {
       "types": "./src/state/subagentDisplay.ts",
       "default": "./src/state/subagentDisplay.ts"
@@ -340,10 +336,6 @@
       "types": "./src/mediaSource.ts",
       "default": "./src/mediaSource.ts"
     },
-    "./device/stream": {
-      "types": "./src/device/stream.ts",
-      "default": "./src/device/stream.ts"
-    },
     "./device/hub-access": {
       "types": "./src/device/hubAccess.ts",
       "default": "./src/device/hubAccess.ts"
@@ -360,21 +352,9 @@
       "types": "./src/state/orchestrationV2Projection.ts",
       "default": "./src/state/orchestrationV2Projection.ts"
     },
-    "./state/composer-dispatch": {
-      "types": "./src/state/composerDispatch.ts",
-      "default": "./src/state/composerDispatch.ts"
-    },
     "./state/thread-subagents": {
       "types": "./src/state/threadSubagents.ts",
       "default": "./src/state/threadSubagents.ts"
-    },
-    "./device/frame": {
-      "types": "./src/device/frame.ts",
-      "default": "./src/device/frame.ts"
-    },
-    "./device/duo-control": {
-      "types": "./src/device/duoControl.ts",
-      "default": "./src/device/duoControl.ts"
     },
     "./t3ToolSummary": {
       "types": "./src/t3ToolSummary.ts",
