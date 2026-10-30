@@ -376,11 +376,17 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     return yield* new ExternalLauncherUnsupportedEditorError({ editor: input.editor });
   }
 
+  // Finder can select the item; elsewhere reveal opens its containing folder.
+  const path = yield* Path.Path;
   return {
     editor: editorDef.id,
     target: input.cwd,
     command: fileManagerCommandForPlatform(platform),
-    args: [input.cwd],
+    args: !input.reveal
+      ? [input.cwd]
+      : platform === "darwin"
+        ? ["-R", input.cwd]
+        : [path.dirname(input.cwd)],
   };
 });
 

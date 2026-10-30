@@ -132,6 +132,50 @@ it.effect("launches an installed editor with platform-safe arguments", () =>
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+it.effect("reveals a file in the platform file manager", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+    for (const command of ["open", "xdg-open"]) {
+      yield* fileSystem.writeFileString(path.join(binDir, command), "#!/bin/sh\n");
+      yield* fileSystem.chmod(path.join(binDir, command), 0o755);
+    }
+
+    const reveal = (platform: NodeJS.Platform) => {
+      let spawned: ChildProcess.StandardCommand | undefined;
+      return Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        yield* launcher.launchEditor({
+          editor: "file-manager",
+          cwd: "/workspace/src/index.ts",
+          reveal: true,
+        });
+      }).pipe(
+        Effect.provide(
+          testLayer({
+            platform,
+            env: { PATH: binDir },
+            onSpawn: (command) => {
+              spawned = command;
+            },
+          }),
+        ),
+        Effect.map(() => spawned),
+      );
+    };
+
+    const finder = yield* reveal("darwin");
+    assert.equal(finder?.command, "open");
+    assert.deepEqual(finder?.args, ["-R", "/workspace/src/index.ts"]);
+
+    // Linux has no standard select-in-folder call, so it opens the containing folder.
+    const files = yield* reveal("linux");
+    assert.equal(files?.command, "xdg-open");
+    assert.deepEqual(files?.args, ["/workspace/src"]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("discovers editors through the service API", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
