@@ -13,7 +13,7 @@ import * as ProviderContinuationRequests from "../../orchestration-v2/ProviderCo
  *     block configures one instance of every executable driver shipped by
  *     Test Rig (`codex`, `claudeAgent`) alongside excluded
  *     Cursor/Grok rows. It proves the approved drivers boot normally while
- *     excluded rows fail closed as unavailable snapshots.
+ *     excluded rows are skipped: never built, executed, or surfaced.
  *
  * Every instance in these tests is configured with `enabled: false` so the
  * provider-status checks short-circuit to pending/disabled snapshots
@@ -192,44 +192,37 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.live(
-    "shadows instances whose driver is not registered in this build without failing boot",
-    () =>
-      Effect.gen(function* () {
-        const codexId = ProviderInstanceId.make("codex_main");
-        const ghostId = ProviderInstanceId.make("ghost_main");
+  it.live("skips instances whose driver is not registered in this build without failing boot", () =>
+    Effect.gen(function* () {
+      const codexId = ProviderInstanceId.make("codex_main");
+      const ghostId = ProviderInstanceId.make("ghost_main");
 
-        const configMap: ProviderInstanceConfigMap = {
-          [codexId]: {
-            driver: ProviderDriverKind.make("codex"),
-            enabled: false,
-            config: makeCodexConfig({}),
-          },
-          [ghostId]: {
-            driver: ProviderDriverKind.make("ghostDriver"),
-            displayName: "A fork-only driver we don't ship",
-            enabled: false,
-            config: { arbitrary: "payload", preserved: true },
-          },
-        };
+      const configMap: ProviderInstanceConfigMap = {
+        [codexId]: {
+          driver: ProviderDriverKind.make("codex"),
+          enabled: false,
+          config: makeCodexConfig({}),
+        },
+        [ghostId]: {
+          driver: ProviderDriverKind.make("ghostDriver"),
+          displayName: "A fork-only driver we don't ship",
+          enabled: false,
+          config: { arbitrary: "payload", preserved: true },
+        },
+      };
 
-        const { registry } = yield* makeProviderInstanceRegistry({
-          drivers: [CodexDriver],
-          configMap,
-        });
+      const { registry } = yield* makeProviderInstanceRegistry({
+        drivers: [CodexDriver],
+        configMap,
+      });
 
-        const instances = yield* registry.listInstances;
-        expect(instances).toHaveLength(1);
-        expect(instances[0]!.instanceId).toBe(codexId);
+      const instances = yield* registry.listInstances;
+      expect(instances).toHaveLength(1);
+      expect(instances[0]!.instanceId).toBe(codexId);
 
-        const unavailable = yield* registry.listUnavailable;
-        expect(unavailable).toHaveLength(1);
-        const ghost = unavailable[0]!;
-        expect(ghost.instanceId).toBe(ghostId);
-        expect(ghost.driver).toBe("ghostDriver");
-        expect(ghost.availability).toBe("unavailable");
-        expect(ghost.unavailableReason).toMatch(/ghostDriver/);
-      }).pipe(Effect.provide(testLayer)),
+      expect(yield* registry.listUnavailable).toEqual([]);
+      expect(yield* registry.getInstance(ghostId)).toBeUndefined();
+    }).pipe(Effect.provide(testLayer)),
   );
 });
 
@@ -300,13 +293,7 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
         const textGeneration = makeTextGenerationFromRegistry(registry);
 
         expect(yield* adapters.list()).toEqual([]);
-        const unavailable = yield* providers.getProviders;
-        expect(unavailable).toHaveLength(excluded.length);
-        expect(
-          unavailable.every(
-            (provider) => !provider.enabled && provider.availability === "unavailable",
-          ),
-        ).toBe(true);
+        expect(yield* providers.getProviders).toEqual([]);
 
         for (const { instanceId, driver } of excluded) {
           expect((yield* adapters.get(instanceId).pipe(Effect.flip))._tag).toBe(
@@ -383,7 +370,7 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
     },
   );
 
-  it.live("boots only approved drivers and shadows excluded provider rows", () =>
+  it.live("boots only approved drivers and skips excluded provider rows", () =>
     Effect.gen(function* () {
       const codexId = ProviderInstanceId.make("codex_default");
       const claudeId = ProviderInstanceId.make("claude_default");
@@ -437,13 +424,7 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
         configMap,
       });
 
-      const unavailable = yield* registry.listUnavailable;
-      expect(unavailable.map((provider) => provider.instanceId).toSorted()).toEqual(
-        [cursorId, grokId, openCodeId].toSorted(),
-      );
-      expect(unavailable.every((provider) => provider.availability === "unavailable")).toBe(true);
-      expect(unavailable.every((provider) => provider.enabled === false)).toBe(true);
-      expect(unavailable.every((provider) => provider.installed === false)).toBe(true);
+      expect(yield* registry.listUnavailable).toEqual([]);
 
       const instances = yield* registry.listInstances;
       expect(instances).toHaveLength(2);

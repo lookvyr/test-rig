@@ -9,15 +9,15 @@
  *     and calls `driver.create()` inside a fresh child scope. The
  *     resulting `ProviderInstance` is stored keyed by instance id,
  *     alongside its scope so the entry can be torn down independently.
- *   - When the entry's `driver` is unknown to this build (fork, rollback,
- *     in-flight PR branch), the registry emits an `"unavailable"` shadow
- *     `ServerProvider` snapshot instead of failing. This is what makes
- *     downgrades and fork-hopping safe per the
+ *   - When the entry's `driver` is unknown to this build (a removed
+ *     provider such as OpenCode, a fork, a rollback), the registry skips it.
+ *     Its config stays in settings untouched, per the
  *     `forward/backward compatibility invariant` in
- *     `packages/contracts/src/providerInstance.ts`.
+ *     `packages/contracts/src/providerInstance.ts`, but it is never
+ *     materialized or surfaced to clients.
  *   - When the entry's config fails schema decode, the registry logs and
- *     emits a shadow snapshot with the schema detail — same bucket as an
- *     unknown driver.
+ *     emits an `"unavailable"` shadow `ServerProvider` snapshot with the
+ *     schema detail instead of failing.
  *
  * Unlike the pre-Slice-D layer, the registry now holds mutable state
  * (`Ref`s + `PubSub`) and exposes an internal mutator
@@ -107,7 +107,7 @@ const decodedConfigEnabled = (config: unknown): boolean | undefined => {
  * undefined entry — callers dispatch to the appropriate Ref bucket.
  */
 const buildEntry = <R>(input: {
-  readonly driversById: ReadonlyMap<ProviderDriverKind, AnyProviderDriver<R>>;
+  readonly driver: AnyProviderDriver<R>;
   readonly parentScope: Scope.Scope;
   readonly instanceId: ProviderInstanceId;
   readonly rawInstanceId: string;
@@ -119,21 +119,7 @@ const buildEntry = <R>(input: {
   R
 > =>
   Effect.gen(function* () {
-    const { driversById, parentScope, instanceId, rawInstanceId, entry } = input;
-    const driver = driversById.get(entry.driver);
-    if (!driver) {
-      return {
-        kind: "unavailable" as const,
-        snapshot: yield* buildUnavailableProviderSnapshot({
-          driverKind: entry.driver,
-          instanceId,
-          displayName: entry.displayName,
-          accentColor: entry.accentColor,
-          reason: `Driver '${entry.driver}' is not registered in this build.`,
-        }),
-      };
-    }
-
+    const { driver, parentScope, instanceId, rawInstanceId, entry } = input;
     const decoder = Schema.decodeUnknownEffect(driver.configSchema);
     const decodeResult = yield* decoder(entry.config ?? driver.defaultConfig()).pipe(Effect.result);
     if (decodeResult._tag === "Failure") {
@@ -218,7 +204,11 @@ const makeReconcile = <R>(input: {
     Effect.gen(function* () {
       const previousEntries = yield* Ref.get(state.entries);
       const previousUnavailable = yield* Ref.get(state.unavailable);
-      const nextRaw = Object.entries(configMap);
+      // Drivers this build does not ship are left in settings but never built.
+      const nextRaw = Object.entries(configMap).flatMap(([raw, entry]) => {
+        const driver = driversById.get(entry.driver);
+        return driver ? [[raw, entry, driver] as const] : [];
+      });
       const nextKeys = new Set<ProviderInstanceId>(
         nextRaw.map(([raw]) => ProviderInstanceId.make(raw)),
       );
@@ -253,7 +243,7 @@ const makeReconcile = <R>(input: {
       const previousOrder = [...previousEntries.keys()];
       const nextOrder: Array<ProviderInstanceId> = [];
 
-      for (const [rawInstanceId, entry] of nextRaw) {
+      for (const [rawInstanceId, entry, driver] of nextRaw) {
         const instanceId = ProviderInstanceId.make(rawInstanceId);
         nextOrder.push(instanceId);
 
@@ -265,7 +255,7 @@ const makeReconcile = <R>(input: {
         }
 
         const result = yield* buildEntry({
-          driversById,
+          driver,
           parentScope,
           instanceId,
           rawInstanceId,

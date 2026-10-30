@@ -1349,7 +1349,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
         }),
       );
 
-      it.effect("includes unavailable instance snapshots in getProviders", () =>
+      it.effect("leaves instances of unshipped drivers out of getProviders", () =>
         Effect.gen(function* () {
           const serverSettings = yield* makeMutableServerSettingsService(
             decodeServerSettings(
@@ -1402,129 +1402,109 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest()))(
             const providers = yield* registry.getProviders;
             const ghost = providers.find((provider) => provider.instanceId === "ghost_main");
 
-            assert.notStrictEqual(ghost, undefined);
-            assert.strictEqual(ghost?.driver, "ghostDriver");
-            assert.strictEqual(ghost?.availability, "unavailable");
-            assert.match(ghost?.unavailableReason ?? "", /ghostDriver/);
+            assert.strictEqual(ghost, undefined);
           }).pipe(Effect.provide(runtimeServices));
         }),
       );
 
-      it.effect(
-        "keeps excluded legacy providers unavailable and never probes their executables",
-        () =>
-          Effect.gen(function* () {
-            const serverSettings = yield* makeMutableServerSettingsService(
-              decodeServerSettings(
-                deepMerge(encodedDefaultServerSettings, {
-                  providers: {
-                    codex: {
-                      enabled: false,
-                    },
-                    claudeAgent: {
-                      enabled: false,
-                    },
-                    cursor: {
-                      enabled: true,
-                      binaryPath: "/sentinel/must-not-spawn/cursor-agent",
-                    },
-                    grok: {
-                      enabled: true,
-                      binaryPath: "/sentinel/must-not-spawn/grok",
-                    },
+      it.effect("hides excluded legacy providers and never probes their executables", () =>
+        Effect.gen(function* () {
+          const serverSettings = yield* makeMutableServerSettingsService(
+            decodeServerSettings(
+              deepMerge(encodedDefaultServerSettings, {
+                providers: {
+                  codex: {
+                    enabled: false,
                   },
-                  providerInstances: {
-                    cursor_legacy: {
-                      driver: "cursor",
-                      displayName: "Historical Cursor",
-                      enabled: true,
-                      config: { binaryPath: "/sentinel/must-not-spawn/cursor-agent" },
-                    },
-                    grok_legacy: {
-                      driver: "grok",
-                      displayName: "Historical Grok",
-                      enabled: true,
-                      config: { binaryPath: "/sentinel/must-not-spawn/grok" },
-                    },
-                  } as unknown as ContractServerSettings["providerInstances"],
-                }),
+                  claudeAgent: {
+                    enabled: false,
+                  },
+                  cursor: {
+                    enabled: true,
+                    binaryPath: "/sentinel/must-not-spawn/cursor-agent",
+                  },
+                  grok: {
+                    enabled: true,
+                    binaryPath: "/sentinel/must-not-spawn/grok",
+                  },
+                },
+                providerInstances: {
+                  cursor_legacy: {
+                    driver: "cursor",
+                    displayName: "Historical Cursor",
+                    enabled: true,
+                    config: { binaryPath: "/sentinel/must-not-spawn/cursor-agent" },
+                  },
+                  grok_legacy: {
+                    driver: "grok",
+                    displayName: "Historical Grok",
+                    enabled: true,
+                    config: { binaryPath: "/sentinel/must-not-spawn/grok" },
+                  },
+                } as unknown as ContractServerSettings["providerInstances"],
+              }),
+            ),
+          );
+          const spawnedCommands: Array<string> = [];
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const providerRegistryLayer = ProviderRegistryLive.pipe(
+            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(
+              Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
+            ),
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), {
+                prefix: "t3-provider-registry-",
+              }),
+            ),
+            Layer.provideMerge(
+              Layer.succeed(
+                ProviderEventLoggers.ProviderEventLoggers,
+                ProviderEventLoggers.NoOpProviderEventLoggers,
               ),
-            );
-            const spawnedCommands: Array<string> = [];
-            const scope = yield* Scope.make();
-            yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
-            const providerRegistryLayer = ProviderRegistryLive.pipe(
-              Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
-              Layer.provideMerge(
-                Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
-              ),
-              Layer.provideMerge(
-                ServerConfig.layerTest(process.cwd(), {
-                  prefix: "t3-provider-registry-",
-                }),
-              ),
-              Layer.provideMerge(
-                Layer.succeed(
-                  ProviderEventLoggers.ProviderEventLoggers,
-                  ProviderEventLoggers.NoOpProviderEventLoggers,
-                ),
-              ),
-              Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
-              Layer.provideMerge(ProviderContinuationRequests.layer),
-              Layer.provideMerge(
-                mockCommandSpawnerLayer((command, args) => {
-                  spawnedCommands.push(command);
-                  const joined = args.join(" ");
-                  if (joined === "--version") {
-                    return {
-                      stdout: `${command} 1.0.0\n`,
-                      stderr: "",
-                      code: 0,
-                    };
-                  }
-                  if (joined === "auth status") {
-                    return {
-                      stdout: '{"authenticated":true}\n',
-                      stderr: "",
-                      code: 0,
-                    };
-                  }
-                  throw new Error(`Unexpected args: ${command} ${joined}`);
-                }),
-              ),
-            );
-            const runtimeServices = yield* Layer.build(
-              Layer.mergeAll(
-                Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
-                providerRegistryLayer,
-              ),
-            ).pipe(Scope.provide(scope));
+            ),
+            Layer.provideMerge(BackgroundPolicyAlwaysRunLayer),
+            Layer.provideMerge(ProviderContinuationRequests.layer),
+            Layer.provideMerge(
+              mockCommandSpawnerLayer((command, args) => {
+                spawnedCommands.push(command);
+                const joined = args.join(" ");
+                if (joined === "--version") {
+                  return {
+                    stdout: `${command} 1.0.0\n`,
+                    stderr: "",
+                    code: 0,
+                  };
+                }
+                if (joined === "auth status") {
+                  return {
+                    stdout: '{"authenticated":true}\n',
+                    stderr: "",
+                    code: 0,
+                  };
+                }
+                throw new Error(`Unexpected args: ${command} ${joined}`);
+              }),
+            ),
+          );
+          const runtimeServices = yield* Layer.build(
+            Layer.mergeAll(
+              Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
+              providerRegistryLayer,
+            ),
+          ).pipe(Scope.provide(scope));
 
-            yield* Effect.gen(function* () {
-              const registry = yield* ProviderRegistry.ProviderRegistry;
-              const providers = yield* registry.getProviders;
-              const cursorProvider = providers.find(
-                (provider) => provider.instanceId === ProviderInstanceId.make("cursor_legacy"),
-              );
-              const grokProvider = providers.find(
-                (provider) => provider.instanceId === ProviderInstanceId.make("grok_legacy"),
-              );
-
-              assert.deepStrictEqual(providers.map((provider) => provider.instanceId).toSorted(), [
-                "claudeAgent",
-                "codex",
-                "cursor_legacy",
-                "grok_legacy",
-              ]);
-              assert.strictEqual(cursorProvider?.enabled, false);
-              assert.strictEqual(cursorProvider?.installed, false);
-              assert.strictEqual(cursorProvider?.availability, "unavailable");
-              assert.strictEqual(grokProvider?.enabled, false);
-              assert.strictEqual(grokProvider?.installed, false);
-              assert.strictEqual(grokProvider?.availability, "unavailable");
-              assert.deepStrictEqual(spawnedCommands, []);
-            }).pipe(Effect.provide(runtimeServices));
-          }),
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry.ProviderRegistry;
+            const providers = yield* registry.getProviders;
+            assert.deepStrictEqual(providers.map((provider) => provider.instanceId).toSorted(), [
+              "claudeAgent",
+              "codex",
+            ]);
+            assert.deepStrictEqual(spawnedCommands, []);
+          }).pipe(Effect.provide(runtimeServices));
+        }),
       );
 
       it.effect("skips codex probes entirely when the provider is disabled", () =>
