@@ -12,6 +12,7 @@ import {
 } from "./diffs/reviewFileStageActions";
 import { useAtomValue } from "@effect/atom-react";
 import type { FileDiffContentsLoader } from "@pierre/diffs";
+import type { FileDiffMetadata } from "@pierre/diffs/types";
 import { useParams } from "@tanstack/react-router";
 import {
   isAtomCommandInterrupted,
@@ -818,13 +819,12 @@ export default function DiffPanel({
     if (!renderablePatch || renderablePatch.kind !== "files") {
       return [];
     }
-    return renderablePatch.files.toSorted((left, right) =>
-      resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
-        numeric: true,
-        sensitivity: "base",
-      }),
-    );
-  }, [renderablePatch]);
+    // Follow the changed-files tree, so the diff reads top to bottom in the order it lists.
+    const treeOrder = new Map(reviewFiles.map((file, index) => [file.path, index]));
+    const orderOf = (fileDiff: FileDiffMetadata) =>
+      treeOrder.get(resolveFileDiffPath(fileDiff)) ?? treeOrder.size;
+    return renderablePatch.files.toSorted((left, right) => orderOf(left) - orderOf(right));
+  }, [renderablePatch, reviewFiles]);
   const renderableFileEntries = useMemo(
     () =>
       renderableFiles.map((fileDiff) => ({
