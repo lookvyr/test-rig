@@ -65,6 +65,13 @@ Approved provider harnesses, explicit Git actions, enabled source-control hostin
 integrations, browser/MCP tools, and other explicit user-directed actions may use
 the network.
 
+Steering is the default for interactive follow-up messages. The current composer
+waits until steering is available before enabling Send. Queuing a follow-up for a
+later turn is permitted as an optional behavior, and server support may remain;
+exposing that option in the UI is deferred. As of October 30, 2026, this replaces
+the earlier exclusion of interactive message queuing. Internal deferred work,
+scheduled tasks, notifications, and delegated-result queues remain supported.
+
 ## Architecture to protect
 
 Selective simplification must preserve these seams unless a later explicit
@@ -121,9 +128,6 @@ The following are outside Test Rig's product boundary:
 - Conversation rewind, editing sent messages by truncating history, and restoring
   workspace files through chat checkpoints. Fork from an earlier response to
   explore a different direction; checkpoint capture and diffs remain available.
-- Queuing interactive follow-up messages for later turns. Composer follow-ups
-  steer the active turn; Send waits until steering is available. Internal deferred
-  work, notifications, and queue persistence remain orchestration concerns.
 
 Automatic ancillary requests to PostHog, OTLP collectors, upstream desktop
 update feeds, LiteLLM pricing tables, Google favicon services, and npm-registry
