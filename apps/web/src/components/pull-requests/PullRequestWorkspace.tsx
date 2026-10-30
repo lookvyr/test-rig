@@ -1,3 +1,4 @@
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { GitListPullRequestsResult } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
@@ -12,6 +13,7 @@ import {
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { useResizableWidth } from "../../hooks/useResizableWidth";
 import { useAllEnvironmentShellsBootstrapped, useProjects } from "../../state/entities";
+import { useEnvironments } from "../../state/environments";
 import { gitEnvironment } from "../../state/git";
 import { type EnvironmentQueryView, useEnvironmentQueries } from "../../state/query";
 import { primaryServerKeybindingsAtom } from "../../state/server";
@@ -252,7 +254,21 @@ function ProjectPullRequests({
 }
 
 export function PullRequestWorkspace() {
-  const projects = useProjects();
+  const allProjects = useProjects();
+  const { environments } = useEnvironments();
+  // The scratch ("No project") folder is not a repository, so it has no pull requests.
+  const projects = useMemo(
+    () =>
+      allProjects.filter(
+        (project) =>
+          !isScratchProject(
+            project,
+            environments.find((entry) => entry.environmentId === project.environmentId)
+              ?.serverConfig?.scratchWorkspaceRoot,
+          ),
+      ),
+    [allProjects, environments],
+  );
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
   const { filters, setFilters, selection, panelOpen, panelExpanded, setPanelOpen, toggleExpanded } =
     usePullRequestQueueStore();
