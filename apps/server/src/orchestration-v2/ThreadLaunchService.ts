@@ -23,6 +23,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -137,6 +138,7 @@ export class ThreadLaunchService extends Context.Service<
 >()("t3/orchestration-v2/ThreadLaunchService") {}
 
 const isThreadLaunchError = Schema.is(ThreadLaunchError);
+const ROOT_BRANCH_LOOKUP_TIMEOUT = Duration.seconds(5);
 
 function failureDetail(error: unknown): string {
   if (isThreadLaunchError(error)) {
@@ -283,6 +285,15 @@ const make = Effect.gen(function* () {
         branch = buildTemporaryWorktreeBranchName(
           () => uuid.replaceAll("-", ""),
           DEFAULT_NEW_WORKTREE_BRANCH_PREFIX,
+        );
+      } else if (input.workspaceStrategy.type === "root" && requestedBranch === undefined) {
+        // A root launch that names no branch (agent and scheduled launches, a
+        // reused thread, or a send before the client's status loaded) runs on
+        // whatever the project checkout has checked out, so record that.
+        branch = yield* git.currentBranch(project.workspaceRoot).pipe(
+          Effect.timeoutOption(ROOT_BRANCH_LOOKUP_TIMEOUT),
+          Effect.map(Option.getOrNull),
+          Effect.orElseSucceed(() => null),
         );
       } else {
         branch = requestedBranch ?? null;

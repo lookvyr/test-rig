@@ -115,6 +115,7 @@ interface HarnessOptions {
   readonly hasCommit?: GitWorkflow.GitWorkflowService["Service"]["hasCommit"];
   readonly fetchRemote?: GitWorkflow.GitWorkflowService["Service"]["fetchRemote"];
   readonly renameBranch?: GitWorkflow.GitWorkflowService["Service"]["renameBranch"];
+  readonly currentBranch?: GitWorkflow.GitWorkflowService["Service"]["currentBranch"];
   readonly refreshLocalStatus?: VcsStatusBroadcaster.VcsStatusBroadcaster["Service"]["refreshLocalStatus"];
   readonly runSetup?: ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"];
   readonly generateTitle?: TextGeneration.TextGeneration["Service"]["generateThreadTitle"];
@@ -170,6 +171,7 @@ function makeHarness(options: HarnessOptions = {}) {
     options.generateTitle ?? (() => Effect.succeed({ title: "Generated title" })),
   );
   const removeWorktree = vi.fn(options.removeWorktree ?? (() => Effect.void));
+  const currentBranch = vi.fn(options.currentBranch ?? (() => Effect.succeed(null)));
   const closeTerminal = vi.fn(options.closeTerminal ?? (() => Effect.void));
   const externalServices = Layer.mergeAll(
     WorktreeSetupTracker.layer,
@@ -195,6 +197,7 @@ function makeHarness(options: HarnessOptions = {}) {
     }),
     Layer.mock(GitWorkflow.GitWorkflowService)({
       createWorktree,
+      currentBranch,
       hasCommit: options.hasCommit ?? (() => Effect.succeed(false)),
       renameBranch,
       fetchRemote: options.fetchRemote ?? (() => Effect.void),
@@ -282,6 +285,7 @@ function makeHarness(options: HarnessOptions = {}) {
       Layer.provideMerge(NodeServices.layer),
     ),
     createWorktree,
+    currentBranch,
     removeWorktree,
     closeTerminal,
     renameBranch,
@@ -1254,6 +1258,78 @@ it.effect("runs a Scratch thread launched at the root in its own folder", () =>
       });
       assert.lengthOf(claimed, 1);
       assert.isNull(other.projection.thread.worktreePath);
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("records the checked-out branch for a root launch that names none", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness({ currentBranch: () => Effect.succeed("feature/current") });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const prepared = (input: ReturnType<typeof launchInput>, threadId: ThreadId) =>
+        threads.streamStoredEventsFrom({ threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.commandId === CommandId.make(`${input.commandId}:release`) &&
+              stored.event.type === "run.updated",
+          ),
+          Stream.runHead,
+          Effect.andThen(threads.getThreadProjection(threadId)),
+        );
+
+      const fresh = launchInput({
+        command: "command:launch:root-branch",
+        thread: "thread:launch:root-branch",
+        message: "Work on the checkout",
+      });
+      const launched = yield* launches.launch(fresh);
+      const freshThread = (yield* prepared(fresh, launched.threadId)).thread;
+      assert.equal(freshThread.branch, "feature/current");
+      assert.isNull(freshThread.worktreePath);
+
+      // The first message into an existing empty thread takes the same path.
+      const reusedId = ThreadId.make("thread:launch:root-branch-reused");
+      yield* threads.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("command:launch:root-branch-reused:create"),
+        threadId: reusedId,
+        projectId,
+        title: "New thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const reused = {
+        ...launchInput({
+          command: "command:launch:root-branch-reused",
+          thread: reusedId,
+          message: "Continue here",
+        }),
+        reuseExistingThread: true,
+      };
+      yield* launches.launch(reused);
+      assert.equal((yield* prepared(reused, reusedId)).thread.branch, "feature/current");
+      assert.deepEqual(harness.currentBranch.mock.calls, [
+        [project.workspaceRoot],
+        [project.workspaceRoot],
+      ]);
+
+      // An explicit branch from the client wins without a lookup.
+      const explicit = launchInput({
+        command: "command:launch:root-explicit",
+        thread: "thread:launch:root-explicit",
+        message: "Stay on main",
+        workspace: { type: "root", branch: "main" },
+      });
+      const explicitLaunch = yield* launches.launch(explicit);
+      assert.equal((yield* prepared(explicit, explicitLaunch.threadId)).thread.branch, "main");
+      assert.lengthOf(harness.currentBranch.mock.calls, 2);
     }).pipe(Effect.provide(harness.layer));
   }),
 );
