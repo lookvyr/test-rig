@@ -107,6 +107,8 @@ The following are outside Test Rig's product boundary:
 - OpenCode, Cursor, and Grok coding-harness providers. Exclusion applies to executable
   server registration and selectable UI, not merely visual hiding; unrelated
   editor integration is a separate concern.
+- ACP provider integration and its runtime package. The implementation has been
+  removed; it is not a dormant extension point.
 - PostHog analytics and identity collection, and outbound OTLP export.
 - Hosted/public web deployment and the mobile and marketing surfaces and build
   targets.
@@ -147,15 +149,6 @@ settling or archiving ends them, and restoring the conversation does not restart
 them. Parent conversations own watches; subagents report back instead. Active
 watches keep a conversation in Working between updates. Test Rig retains its
 additional approval-decision and merge-readiness notifications.
-
-## Deferred decisions
-
-- ACP may remain temporarily dormant and unreachable. With Cursor and Grok
-  removed it has no independent route or registration path; deletion waits for
-  dependency analysis.
-
-Deferred does not mean prohibited. Adding one of these capabilities requires a
-new explicit boundary decision before implementation.
 
 ## Independent identity and state
 

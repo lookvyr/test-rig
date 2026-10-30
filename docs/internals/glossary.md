@@ -2,7 +2,10 @@
 
 > For maintainers. Using T3 Code? See [docs/user](../user/).
 
-This is a living glossary for T3 Code. It explains what common terms mean in this codebase.
+This is a living glossary for Test Rig. It explains what common terms mean in this codebase.
+Some source links describe retained V1 internals. The current app uses the
+[V2 orchestrator](../../apps/server/src/orchestration-v2/Orchestrator.ts); legacy
+contracts and events do not imply that excluded operations remain available.
 
 ## Table of contents
 
@@ -59,7 +62,7 @@ The domain object a command or event belongs to. In [the contracts][1], that is 
 #### Command
 
 A typed request to change domain state. In [the contracts][1], commands are validated in [commandInvariants.ts][9] and turned into events by [decider.ts][8].
-Examples include `thread.create`, `thread.turn.start`, and `thread.checkpoint.revert`.
+Examples include `thread.create`, `thread.turn.start`, and `thread.turn.interrupt` in the retained V1 contract.
 
 #### Domain Event
 
@@ -124,7 +127,7 @@ A point-in-time view of state. The word is used in multiple layers, including or
 
 ### Checkpointing
 
-Checkpointing captures workspace state over time so the app can diff turns and restore earlier points. The main pieces are [CheckpointStore.ts][19], [CheckpointDiffQuery.ts][20], and [CheckpointReactor.ts][6].
+Checkpointing captures workspace state over time so the app can diff turns. Conversation rewind and checkpoint-based file restoration are unsupported; fork from an earlier response to explore another direction. The main pieces are [CheckpointStore.ts][19], [CheckpointDiffQuery.ts][20], and [CheckpointReactor.ts][6].
 
 #### Checkpoint
 
@@ -151,7 +154,7 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 - If you see `requested`, think "intent recorded".
 - If you see `completed`, think "result applied".
 - If you see `receipt`, think "async milestone signal, for tests".
-- If you see `checkpoint`, think "workspace snapshot for diff/restore".
+- If you see `checkpoint`, think "workspace snapshot for diffs".
 - If you see `quiesced`, think "all relevant follow-up work has gone idle".
 
 ## Related Docs

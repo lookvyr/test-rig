@@ -2,7 +2,7 @@
 
 > For maintainers. Using T3 Code? See [docs/user](../user/).
 
-A provider is the agent runtime that does the actual work. T3 Code supports several, and the
+A provider is the agent runtime that does the actual work. Test Rig supports Codex and Claude, and the
 orchestration layer does not know which one is behind a thread.
 
 ## Built-in drivers
@@ -20,8 +20,11 @@ adapter in a child scope. Codex and Claude adapter implementations live in
 [`ProviderAdapter.ts`][adapter]. Read the driver plus its adapter to see how a specific agent's
 transport, config, and event shapes are mapped.
 
-The V2 provider boundary is described in [V2 provider adapters](./orchestration-v2-providers.md).
-The current app continues to use the orchestration path documented below.
+The current app uses V2 orchestration, wired through
+[`orchestration-v2/Rpc.ts`](../../apps/server/src/orchestration-v2/Rpc.ts).
+The registry and worker descriptions below include retained V1 code; they do not
+make legacy commands available in the current app. [V2 provider adapters](./orchestration-v2-providers.md)
+records the earlier adapter implementation.
 
 ## Registry and routing
 
@@ -39,14 +42,22 @@ directory to route session and turn operations for a thread, so callers name a t
 Adding a driver means writing the driver plus adapter and adding it to `BUILT_IN_DRIVERS`. No
 orchestration, contract, or client change is required for the common case.
 
-## How provider work is requested
+## Legacy V1 provider requests
 
-Clients never call a provider directly. They dispatch orchestration commands over the RPC method
+In the retained V1 implementation, clients dispatch orchestration commands over the RPC method
 `orchestration.dispatchCommand`, defined with the rest of the orchestration surface in
 [`orchestration.ts`][contracts]. The client-dispatchable provider-facing commands are
 `thread.turn.start`, `thread.turn.interrupt`, `thread.approval.respond`,
-`thread.user-input.respond`, `thread.checkpoint.revert`, and `thread.session.stop`, plus the mode
+`thread.user-input.respond` and `thread.session.stop`, plus the mode
 setters `thread.runtime-mode.set` and `thread.interaction-mode.set`.
+
+The legacy contract also contains `thread.checkpoint.revert`. Test Rig does not
+support conversation rewind or checkpoint-based file restoration: the current
+[V2 orchestrator](../../apps/server/src/orchestration-v2/Orchestrator.ts) rejects
+`checkpoint.rollback`, and
+[`CheckpointRollbackService.ts`](../../apps/server/src/orchestration-v2/CheckpointRollbackService.ts)
+rejects historical rollback effects. Checkpoint capture, diffs, and forks from an
+earlier response remain supported.
 
 The engine persists an event for the command, and a server-side reactor performs the provider call.
 Provider output comes back as internal commands such as `thread.message.assistant.delta` and
@@ -82,8 +93,8 @@ native resume cursor is strict: a missing or rejected cursor must never fall bac
 conversation, including after Keep. Claude confirms native resumption before reporting the child
 ready. Per-turn side-chat instructions stop applying after Keep.
 The checkout is shared, so file changes and diffs are not isolated by conversation. Automatic
-branch naming skips shared worktrees, and checkpoint restore is blocked for a temporary side
-or its parent while the side exists.
+branch naming skips shared worktrees. Checkpoint restore is unsupported for all
+conversations, including side chats and their parents.
 
 Closing the panel preserves the child. `thread.side.keep` clears the relationship on the same
 record; conditional `thread.delete` discards only a still-temporary child. Parent deletion
@@ -107,9 +118,9 @@ T3 Code #15592 and #16598. A `/goal` command never carries inline context: earli
 handoffs wait for the next ordinary turn unless the provider injects them out of
 band, because the adapter parses the command from the message text.
 
-## Server-side workers
+## Legacy V1 server-side workers
 
-Provider work flows through three queue-backed workers. All three are built with
+The retained V1 implementation has three queue-backed workers. All three are built with
 `makeDrainableWorker` from [`DrainableWorker.ts`][worker] and expose `drain` for deterministic test
 synchronization.
 
@@ -118,7 +129,7 @@ synchronization.
 2. [`ProviderCommandReactor`][cmd] reacts to orchestration intent events and dispatches provider
    calls.
 3. [`CheckpointReactor`][checkpoint] captures workspace checkpoints on turn start and completion, and
-   performs reverts.
+   contains legacy revert handling. The current V2 runtime rejects rollback as described above.
 
 ### Buffered assistant delivery
 

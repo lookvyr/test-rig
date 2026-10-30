@@ -18,7 +18,7 @@ there, never in the client.
 ┌──────────────────▼─────────────────────────────┐
 │ apps/server                                    │
 │  orchestration engine (event-sourced)          │
-│  provider driver registry (3 built-in drivers) │
+│  provider driver registry (2 built-in drivers) │
 │  checkpointing, VCS, terminals, filesystem     │
 └──────────────────┬─────────────────────────────┘
                    │ per-driver transport
@@ -26,6 +26,11 @@ there, never in the client.
 │ Agent CLIs: Codex, Claude            │
 └────────────────────────────────────────────────┘
 ```
+
+The current app uses [V2 RPC handlers](../../apps/server/src/orchestration-v2/Rpc.ts)
+and the [V2 orchestrator](../../apps/server/src/orchestration-v2/Orchestrator.ts).
+Descriptions below that reference `apps/server/src/orchestration/` cover retained
+V1 internals, not the active command surface.
 
 ## The RPC boundary
 
@@ -90,7 +95,8 @@ does not define turn end.
 Follow-up work runs asynchronously in queue-backed workers built on [`DrainableWorker`][worker]:
 [`ProviderRuntimeIngestion`][ingest] normalizes provider runtime streams into orchestration commands,
 [`ProviderCommandReactor`][cmd] dispatches provider calls in response to intent events, and
-[`CheckpointReactor`][checkpoint] captures and reverts workspace checkpoints.
+[`CheckpointReactor`][checkpoint] captures workspace checkpoints. These are retained V1
+workers; their legacy revert handling does not enable checkpoint restore in Test Rig.
 
 `DrainableWorker` pairs a transactional queue with a transactional count of outstanding items.
 `enqueue` atomically offers and increments; processing always decrements. `drain` retries until the
@@ -111,12 +117,18 @@ which agent is behind them. See [providers.md](./providers.md).
 
 ## Checkpointing
 
-Each turn is bracketed by workspace checkpoints so diffs and reverts are exact. `CheckpointStore`
+Workspace checkpoints capture turn boundaries for diffs. `CheckpointStore`
 captures state as hidden Git refs through the VCS driver's checkpoint operations;
 `CheckpointDiffQuery` answers turn and full-thread diff requests; `CheckpointReactor` coordinates
-baseline capture, completed-turn capture, diff projection, and reverting both the workspace and the
-provider conversation. The storage contract is `VcsCheckpointOps` in
+baseline capture, completed-turn capture, and diff projection in the retained V1 code. The storage contract is `VcsCheckpointOps` in
 [`VcsDriver.ts`](../../apps/server/src/vcs/VcsDriver.ts), implemented for Git in the same directory.
+
+Conversation rewind and checkpoint-based file restoration are unsupported. The current
+[V2 orchestrator](../../apps/server/src/orchestration-v2/Orchestrator.ts) rejects
+`checkpoint.rollback`, and
+[`CheckpointRollbackService.ts`](../../apps/server/src/orchestration-v2/CheckpointRollbackService.ts)
+rejects historical rollback effects. Fork from an earlier response to explore a
+different direction; checkpoint capture and diffs remain available.
 
 ## Startup
 
