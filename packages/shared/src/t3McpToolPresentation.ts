@@ -292,7 +292,7 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
 
 /**
  * The T3 orchestration tool inventory, used to gate loose name matching on
- * both the server (ACP MCP identity recovery) and the client (logo branding).
+ * tool identity recovery and client rendering, including stored legacy results.
  */
 export const T3_MCP_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(T3_MCP_TOOLS));
 
@@ -301,14 +301,19 @@ function normalizeT3McpToolLabel(value: string): string {
 }
 
 /**
- * ACP agents disagree on how the injected T3 server prefixes its tools:
- * `mcp__t3-code__x` (Claude/Cursor), `t3-code.x` (Codex), plus single
+ * Providers and stored legacy results use different T3 server prefixes:
+ * `mcp__t3-code__x` (Claude), `t3-code.x` (Codex), plus single
  * underscore, colon, slash, dash, and space separators seen from registry
  * agents. The prefix match is deliberately loose because the display-name
  * inventory is the real gate; unknown tools stay on the generic renderer.
  */
 function resolveT3McpToolName(value: string): string | null {
   const label = normalizeT3McpToolLabel(value);
+  // Preserve rendering of stored OpenCode results from its per-thread MCP server.
+  if (label.startsWith("test_rig-")) {
+    const name = Object.keys(T3_MCP_TOOLS).find((name) => label.endsWith(`_${name}`));
+    if (name !== undefined) return name;
+  }
   const mcpMatch = /^mcp__(?<server>.+?)__(?<tool>.+)$/i.exec(label);
   if (mcpMatch?.groups) {
     const { server, tool } = mcpMatch.groups;

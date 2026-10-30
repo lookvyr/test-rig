@@ -5,7 +5,8 @@ const { getSharedHighlighter } = vi.hoisted(() => ({
   getSharedHighlighter: vi.fn(),
 }));
 
-vi.mock("@pierre/diffs", () => ({
+vi.mock(import("@pierre/diffs"), async (importOriginal) => ({
+  ...(await importOriginal()),
   getSharedHighlighter,
 }));
 

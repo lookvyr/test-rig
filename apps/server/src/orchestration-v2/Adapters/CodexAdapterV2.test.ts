@@ -484,14 +484,12 @@ describe("CodexAdapterV2 runtime policy", () => {
       });
 
       assert.equal(params.collaborationMode?.mode, "default");
-      assert.include(
-        params.additionalContext?.test_rig_orchestration_01?.value ?? "",
-        "Use `delegate_task`",
-      );
-      assert.include(
-        params.additionalContext?.test_rig_orchestration_01?.value ?? "",
-        "structured object, never as JSON text",
-      );
+      const instructions = Object.entries(params.additionalContext ?? {})
+        .filter(([key]) => key.startsWith("test_rig_orchestration_"))
+        .map(([, entry]) => entry.value)
+        .join("\n\n");
+      assert.include(instructions, "Use `delegate_task`");
+      assert.include(instructions, "structured object, never as JSON text");
     }),
   );
 

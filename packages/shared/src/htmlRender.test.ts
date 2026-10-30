@@ -190,7 +190,7 @@ describe("readHtmlRenderReference", () => {
 describe("htmlRenderFromToolItem", () => {
   const result = { htmlRender: reference, message: "Rendered above your reply." };
 
-  it("reads the reference from each provider's result envelope", () => {
+  it("reads references from current and legacy provider result envelopes", () => {
     for (const [toolName, output] of [
       ["mcp__t3-code__html_render", [{ type: "text", text: JSON.stringify(result) }]],
       ["t3-code.html_render", { structuredContent: result, content: [] }],
