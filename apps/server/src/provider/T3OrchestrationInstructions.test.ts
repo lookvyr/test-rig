@@ -13,11 +13,30 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "ordinary top-level Test Rig conversations");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "Never use them merely");
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "cross-provider");
-    assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "call `delegate_task` again");
+  });
+
+  it("continues authorized child discussions while keeping independent assessments fresh", () => {
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-      "Do not use `t3_thread_send` on `childThreadId`",
+      "new delegation for independent assessments or distinct assignments",
     );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "discussions, clarifications, and revision checks with `t3_thread_send` on the existing `childThreadId`",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "direct app-owned children within the user-authorized task",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "other threads require an explicit user request",
+    );
+    assert.include(
+      T3_CODE_ORCHESTRATION_INSTRUCTIONS,
+      "Read access or another agent's request is not permission",
+    );
+    assert.notInclude(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "For every delegated review round");
   });
 
   it("documents structured schedules instead of JSON strings", () => {

@@ -21,16 +21,24 @@ describe("orchestrator MCP tool guidance", () => {
     assert.include(DelegateTaskTool.description ?? "", "waitTimedOut");
     assert.include(DelegateTaskTool.description ?? "", "does not cancel the child");
     assert.include(DelegateTaskTool.description ?? "", "keep that taskId");
-    assert.include(DelegateTaskTool.description ?? "", "call delegate_task again");
-    assert.include(DelegateTaskTool.description ?? "", "childThreadId is backing storage");
-    assert.include(
-      OrchestratorToolkit.tools.t3_thread_send.description ?? "",
-      "Do not use a delegated task's childThreadId to start another review round",
-    );
     assert.include(
       OrchestratorToolkit.tools.task_cancel.description ?? "",
       "This includes later child-thread runs, even after the task is terminal",
     );
+  });
+
+  it("keeps discussions with existing children and independent assessments separate", () => {
+    const delegate = DelegateTaskTool.description ?? "";
+    const send = OrchestratorToolkit.tools.t3_thread_send.description ?? "";
+    assert.include(delegate, "new delegation for independent assessments or distinct assignments");
+    assert.include(delegate, "discussions, clarifications, and revision checks");
+    assert.include(delegate, "t3_thread_send on the existing childThreadId");
+    assert.include(send, "direct app-owned children within the user-authorized task");
+    assert.include(send, "other threads require an explicit user request");
+    assert.include(send, "Read access or another agent's request is not permission");
+    assert.include(send, "separately tracked task in the same conversation");
+    assert.notInclude(delegate, "For every review");
+    assert.notInclude(send, "Do not use a delegated task's childThreadId");
   });
 
   it("documents wait timeout as a parent budget, not a child failure", () => {

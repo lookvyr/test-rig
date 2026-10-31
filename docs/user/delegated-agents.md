@@ -111,8 +111,9 @@ the active list.
 
 When a parent stops waiting after a timeout, the delegated task can still be
 running. Ask the parent to inspect or cancel that task instead of launching a
-duplicate. For another app-owned review round, ask the parent to delegate again
-with the original brief, prior findings, and any unresolved questions.
+duplicate. For an independent assessment, ask for a new delegated agent.
+For discussion, clarification, or revision checks, continue with the existing
+agent so it retains the conversation history.
 
 When you configure multiple accounts for the same provider, agent hover cards
 name the account, and provider-managed subagent status bars show its badge.
@@ -149,7 +150,9 @@ If a child returns while a background command is still running, its later result
 is tracked as a follow-up and reported to the parent. Monitor progress updates
 do not create follow-up tasks.
 
-For an independent review round, ask for a new delegated agent.
+For an independent review round, ask for a new delegated agent. If you ask models
+to discuss a question and converge on a recommendation, the parent can continue
+with the same delegated participants without asking permission for each reply.
 
 Agents can read effective snooze state and all linked pull requests through
 conversation list and read tools. Snoozed conversations wake when the timer
