@@ -142,7 +142,8 @@ const ComposerThreadExtension = Node.create({
 });
 
 const TerminalContextsContext = createContext<ReadonlyArray<TerminalContextDraft>>([]);
-const chipWrapperClass = "composer-inline-chip relative inline-flex align-[-0.125em] leading-none";
+const chipWrapperClass =
+  "composer-inline-chip relative inline-flex min-w-0 max-w-full items-baseline";
 
 function ComposerMentionView({ node }: NodeViewProps) {
   const path = String(node.attrs.path);
@@ -151,6 +152,8 @@ function ComposerMentionView({ node }: NodeViewProps) {
       className={FILE_TAG_CHIP_CLASS_NAME}
       contentEditable={false}
       spellCheck={false}
+      data-slot="context-chip"
+      data-context-chip=""
       data-composer-mention-chip="true"
     >
       <FileTagChipContent
@@ -181,6 +184,8 @@ function ComposerSkillView({ node }: NodeViewProps) {
       className={COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME}
       contentEditable={false}
       spellCheck={false}
+      data-slot="context-chip"
+      data-context-chip=""
       data-composer-skill-chip="true"
     >
       <span

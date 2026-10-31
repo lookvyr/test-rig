@@ -1,7 +1,7 @@
+import { ContextChip } from "../ContextChip";
 import { MessageCircle, X } from "lucide-react";
 
 import {
-  COMPOSER_INLINE_CHIP_CLASS_NAME,
   COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME,
   COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
   COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
@@ -31,7 +31,7 @@ export function ComposerPendingReviewComments({
           <Tooltip key={comment.id}>
             <TooltipTrigger
               render={
-                <span className={cn(COMPOSER_INLINE_CHIP_CLASS_NAME, "pr-1")}>
+                <ContextChip kind="review-comment">
                   <MessageCircle className={cn(COMPOSER_INLINE_CHIP_ICON_CLASS_NAME, "size-3.5")} />
                   <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{label}</span>
                   <button
@@ -46,7 +46,7 @@ export function ComposerPendingReviewComments({
                   >
                     <X className="size-3" aria-hidden />
                   </button>
-                </span>
+                </ContextChip>
               }
             />
             <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap leading-tight">

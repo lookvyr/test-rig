@@ -1,7 +1,7 @@
+import { ContextChip } from "../ContextChip";
 import { MousePointerClick, X } from "lucide-react";
 
 import {
-  COMPOSER_INLINE_CHIP_CLASS_NAME,
   COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME,
   COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
   COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
@@ -49,7 +49,7 @@ export function ComposerPendingElementContextChip({
     <Tooltip>
       <TooltipTrigger
         render={
-          <span className={cn(COMPOSER_INLINE_CHIP_CLASS_NAME, "pr-1")}>
+          <ContextChip kind="element">
             <MousePointerClick className={cn(COMPOSER_INLINE_CHIP_ICON_CLASS_NAME, "size-3.5")} />
             <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{label}</span>
             {sourceLabel ? (
@@ -69,7 +69,7 @@ export function ComposerPendingElementContextChip({
             >
               <X className="size-3" aria-hidden />
             </button>
-          </span>
+          </ContextChip>
         }
       />
       <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap leading-tight">

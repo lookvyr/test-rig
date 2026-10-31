@@ -394,8 +394,7 @@ interface MarkdownFileLinkProps {
   className?: string | undefined;
 }
 
-const MARKDOWN_FILE_LINK_CLASS_NAME =
-  "chat-markdown-file-link cursor-pointer transition-colors hover:bg-accent/70";
+const MARKDOWN_FILE_LINK_CLASS_NAME = "chat-markdown-file-link cursor-pointer";
 
 const MARKDOWN_LINK_FAVICON_CLASS_NAME = "block size-full shrink-0 select-none";
 
@@ -738,6 +737,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           <a
             href={href}
             className={cn(CHAT_FILE_TAG_CHIP_CLASS_NAME, MARKDOWN_FILE_LINK_CLASS_NAME, className)}
+            data-slot="context-chip"
+            data-context-chip=""
             data-markdown-copy={copyMarkdown}
             onClick={(event) => {
               event.preventDefault();

@@ -555,17 +555,14 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     (lastVisitedDate === null || lastVisitedDate < wokeAtDate) &&
     prState !== "merged" &&
     prState !== "closed";
-  // In-flight rows (working, or waiting on approval/input) fade as a whole:
-  // there is nothing for the user to do yet, so prominence is reserved for
-  // rows that need a human — done (unread), read-but-unsettled, failed, and
-  // freshly woken. The status label keeps its hue, so waiting rows stay
-  // findable. In-flight rows recede the same as read-ready ones (inbox-zero:
-  // working threads aren't your problem yet) — only the colored status label
-  // stands out.
-  const isInFlight =
-    status === "working" || status === "monitoring" || status === "approval" || status === "input";
+  // Background work recedes; approvals and questions keep their prominence.
+  const isBackgroundWorking = status === "working" || status === "monitoring";
   const shouldRecede =
-    (status === "ready" || isInFlight) && !isUnread && !isWoke && !props.isActive && !isSelected;
+    (status === "ready" || isBackgroundWorking) &&
+    !isUnread &&
+    !isWoke &&
+    !props.isActive &&
+    !isSelected;
   // Status hues follow the system-wide convention set by sidebar v1 and the
   // status surfaces (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
@@ -819,10 +816,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         : shouldRecede
           ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
           : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
-    isInFlight &&
-      !props.isActive &&
-      !isSelected &&
-      "opacity-70 transition-opacity hover:opacity-100 redesign:opacity-100",
+    isBackgroundWorking &&
+      shouldRecede &&
+      "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
   );
 
   const title = isRenaming ? (
@@ -846,7 +842,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         variant === "card"
           ? cn(
               "truncate",
-              isUnread || isWoke
+              isUnread || isWoke || status === "approval" || status === "input"
                 ? "text-foreground"
                 : shouldRecede
                   ? "text-secondary-label redesign:text-foreground/75 redesign:group-hover/v2-row:text-foreground redesign:group-focus-visible/v2-row:text-foreground"
@@ -856,7 +852,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             )
           : cn(
               "truncate group-hover/v2-row:text-foreground",
-              props.isActive || isWoke
+              props.isActive || isWoke || status === "approval" || status === "input"
                 ? "text-foreground"
                 : isUnread
                   ? "text-muted-foreground"

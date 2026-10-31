@@ -7,6 +7,10 @@ The new design is on by default. It uses quieter read titles, clearer status
 colors, and shorter cards for threads without a branch. Turn off **New design**
 in **Settings → Beta** to return to the classic layout.
 
+Background working and monitoring threads are dimmer than ready threads. Hover
+or focus a row to brighten it. The open thread, selected threads, unread results,
+and threads needing an approval or answer stay prominent.
+
 New threads in a repository show their branch even if you never open **Changes**.
 Opening a thread with a missing branch label fills it from that thread's current
 checkout. Existing branch associations stay unchanged.

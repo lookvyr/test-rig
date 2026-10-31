@@ -33,6 +33,11 @@ list item to leave the list; in code, use it after two trailing blank lines to
 continue below the block. **Tab** accepts a file, chat, skill, or command suggestion.
 File and skill references inside code remain literal text.
 
+Context references use colored text and icons in the composer and messages.
+Their colors adjust to the current theme; interactive references underline on
+hover. The conversation stays centered whenever the thread details card has
+enough room beside it.
+
 Use **Shift+Enter** on an empty quoted line to leave a blockquote. Text typed
 after leaving the quote stays outside it when you send or copy the prompt.
 

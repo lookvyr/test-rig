@@ -1900,8 +1900,8 @@ label:has(> select#reasoning-effort) select {
   text-decoration: none;
 }
 
-.chat-markdown a:not(.chat-markdown-file-link):hover,
-.chat-markdown a:not(.chat-markdown-file-link):focus-visible {
+.chat-markdown a:not([data-context-chip]):hover,
+.chat-markdown a:not([data-context-chip]):focus-visible {
   background-image: radial-gradient(circle, currentcolor 0.75px, transparent 1px);
   background-position: left bottom;
   background-repeat: repeat-x;
@@ -1964,13 +1964,8 @@ label:has(> select#reasoning-effort) select {
   font-size: 0.75rem;
 }
 
-.chat-markdown a.chat-markdown-file-link {
-  color: var(--foreground);
-  text-decoration: none;
-}
-
-.chat-markdown a.chat-markdown-file-link:hover {
-  color: var(--foreground);
+.chat-markdown [data-context-chip] {
+  color: var(--context-chip-ink);
   text-decoration: none;
 }
 

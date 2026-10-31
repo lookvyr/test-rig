@@ -1,3 +1,4 @@
+import { CONTEXT_CHIP_ACCENTS } from "./lib/contextChipAccents";
 import {
   THEME_COLOR_ROLES,
   T3_CODE_LIGHT_THEME_COLORS,
@@ -412,6 +413,18 @@ export function getStandardThemeColors(appearance: ThemeAppearance): ThemeColors
   return appearance === "dark" ? T3_CODE_DARK_THEME_COLORS : T3_CODE_LIGHT_THEME_COLORS;
 }
 
+/** The standard surfaces as the web stylesheet paints them, including the design beta. */
+export function getStandardPaintedThemeColors(
+  appearance: ThemeAppearance,
+  redesign = false,
+): ThemeColors {
+  return {
+    ...getStandardThemeColors(appearance),
+    ...(appearance === "light" ? { messageSurface: "#ebebed" } : {}),
+    ...(redesign && appearance === "dark" ? { canvas: "#000000", messageSurface: "#1e1e1e" } : {}),
+  };
+}
+
 type ThemeRgbColor = {
   r: number;
   g: number;
@@ -597,18 +610,22 @@ function themeOklchToRgb(color: ThemeOklch): ThemeRgbColor {
 /** Binary-search the lightness that reaches the contrast target against a background. */
 function solveOklchLightness(
   base: ThemeOklch,
-  against: ThemeRgbColor,
+  against: ReadonlyArray<ThemeRgbColor>,
   minContrast: number,
   direction: "lighter" | "darker",
 ): ThemeOklch {
+  const contrastOf = (color: ThemeOklch) => {
+    const rgb = themeOklchToRgb(color);
+    return Math.min(...against.map((surface) => themeContrastRatio(rgb, surface)));
+  };
   let low = direction === "lighter" ? base.L : 0;
   let high = direction === "lighter" ? 1 : base.L;
   let candidate = { ...base };
-  if (themeContrastRatio(themeOklchToRgb(candidate), against) >= minContrast) return candidate;
+  if (contrastOf(candidate) >= minContrast) return candidate;
   for (let step = 0; step < 18; step += 1) {
     const mid = (low + high) / 2;
     candidate = { ...base, L: mid };
-    const contrast = themeContrastRatio(themeOklchToRgb(candidate), against);
+    const contrast = contrastOf(candidate);
     if (contrast >= minContrast) {
       if (direction === "lighter") high = mid;
       else low = mid;
@@ -618,6 +635,55 @@ function solveOklchLightness(
     }
   }
   return { ...base, L: direction === "lighter" ? high : low };
+}
+
+const CONTEXT_CHIP_MESSAGE_VARIABLE = "--context-chip-message";
+
+/** One readable accent per kind across the canvas, composer, cards, and sent messages. */
+export function contextChipVariables(colors: ThemeColors): Readonly<Record<string, string>> {
+  const canvas = parseThemeRgbColor(colors.canvas, THEME_WHITE_FOREGROUND);
+  const onCanvas = (value: string) => {
+    const hex = value.slice(1);
+    const alpha =
+      hex.length === 4
+        ? Number.parseInt(hex[3]!.repeat(2), 16) / 255
+        : hex.length === 8
+          ? Number.parseInt(hex.slice(6), 16) / 255
+          : 1;
+    return mixThemeRgbColors(canvas, parseThemeRgbColor(value, canvas), alpha);
+  };
+  const isDark = (color: ThemeRgbColor) => themeRelativeLuminance(color) < 0.179;
+  const messageMatchesCanvas = isDark(onCanvas(colors.messageSurface)) === isDark(canvas);
+  const surfaces = [canvas, onCanvas(colors.surface), onCanvas(colors.surfaceRaised)];
+  if (messageMatchesCanvas) surfaces.push(onCanvas(colors.messageSurface));
+  const contrastOnSurfaces = (color: ThemeRgbColor) =>
+    Math.min(...surfaces.map((surface) => themeContrastRatio(color, surface)));
+  const blackContrast = contrastOnSurfaces(THEME_BLACK_FOREGROUND);
+  const whiteContrast = contrastOnSurfaces(THEME_WHITE_FOREGROUND);
+  const direction = blackContrast >= whiteContrast ? "darker" : "lighter";
+  const minContrast = Math.min(5, Math.max(blackContrast, whiteContrast));
+  const accents: Record<string, ThemeOklch> = {
+    ...CONTEXT_CHIP_ACCENTS,
+    invalid: themeRgbToOklch(parseThemeRgbColor(colors.errorForeground, canvas)),
+  };
+  const variables: Record<string, string> = Object.fromEntries(
+    Object.entries(accents).map(([kind, accent]) => [
+      `--context-chip-${kind}`,
+      themeRgbToHexColor(
+        themeOklchToRgb(solveOklchLightness(accent, surfaces, minContrast, direction)),
+      ),
+    ]),
+  );
+  // An inverted message bubble needs its own foreground instead of the canvas accent.
+  if (!messageMatchesCanvas) variables[CONTEXT_CHIP_MESSAGE_VARIABLE] = colors.messageForeground;
+  return variables;
+}
+
+function applyContextChipVariables(root: HTMLElement, colors: ThemeColors): void {
+  root.style.removeProperty(CONTEXT_CHIP_MESSAGE_VARIABLE);
+  for (const [variable, value] of Object.entries(contextChipVariables(colors))) {
+    root.style.setProperty(variable, value);
+  }
 }
 
 /**
@@ -670,7 +736,7 @@ function standardStatusColors(canvas: ThemeRgbColor): {
       themeOklchToRgb(
         solveOklchLightness(
           themeRgbToOklch(parseThemeRgbColor(foreground, canvas)),
-          surface,
+          [surface],
           // A hair above 4.5: the solve happens in OKLCH and the result is
           // quantized to 8-bit hex, which can shave the last hundredth off.
           4.6,
@@ -731,7 +797,7 @@ export function createVividThemeColors(
     C: Math.min(0.035, accent.C * 0.25),
     h: hue,
   };
-  const text = solveOklchLightness(textBase, canvasRgb, 7, dark ? "lighter" : "darker");
+  const text = solveOklchLightness(textBase, [canvasRgb], 7, dark ? "lighter" : "darker");
   const textRgb = themeOklchToRgb(text);
   const textMutedRgb = standardMutedThemeText(canvasRgb, textRgb);
 
@@ -765,7 +831,9 @@ export function createVividThemeColors(
 
   const foregroundOn = (surfaceRgb: ThemeRgbColor): string =>
     themeRgbToHexColor(
-      themeOklchToRgb(solveOklchLightness(textBase, surfaceRgb, 4.6, dark ? "lighter" : "darker")),
+      themeOklchToRgb(
+        solveOklchLightness(textBase, [surfaceRgb], 4.6, dark ? "lighter" : "darker"),
+      ),
     );
 
   const actionHover: ThemeOklch = { ...action, L: action.L + (dark ? 0.06 : -0.06) };
@@ -1467,10 +1535,14 @@ export function applyThemeColorPreview(colors: ThemeColors, appearance: ThemeApp
 
   root.dataset.themeId = THEME_PREVIEW_ID;
   root.classList.toggle("dark", appearance === "dark");
+  const paintedColors = { ...getStandardPaintedThemeColors(appearance, true) };
   for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
-    // A half-typed hex keeps the last good value instead of blanking the role.
+    // A half-typed hex keeps the last good value, including the chip contrast calculation.
     if (isThemeColor(value)) root.style.setProperty(APP_THEME_VARIABLES[role], value);
+    const painted = root.style.getPropertyValue(APP_THEME_VARIABLES[role]);
+    if (isThemeColor(painted)) paintedColors[role] = painted;
   }
+  applyContextChipVariables(root, paintedColors);
 }
 
 export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppearance): void {
@@ -1488,6 +1560,7 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
     for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
       root.style.setProperty(APP_THEME_VARIABLES[role], value);
     }
+    applyContextChipVariables(root, colors);
     return;
   }
 
@@ -1495,6 +1568,11 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
   for (const variable of Object.values(APP_THEME_VARIABLES)) {
     root.style.removeProperty(variable);
   }
+  // The beta's dark bubble is stricter, so these accents also cover the classic design.
+  applyContextChipVariables(
+    root,
+    getStandardPaintedThemeColors(appearance ?? (theme === "dark" ? "dark" : "light"), true),
+  );
 }
 
 export function resolveThemeAppearance(

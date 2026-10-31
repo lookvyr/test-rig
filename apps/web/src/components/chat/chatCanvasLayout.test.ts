@@ -291,28 +291,22 @@ describe("workspace card beside chat", () => {
   });
 });
 
-describe("redesigned chat centering", () => {
-  it("centers within the lane beside a details card while preserving classic placement", () => {
-    const input = {
+describe("chat centering beside details", () => {
+  it("shifts only six pixels when the card needs that much clearance", () => {
+    const { chat } = resolveChatCanvasLayout({
       container: { width: 1500, height: 900 },
       preview: null,
       detailsCard: { left: 1160, right: 1480, bottom: 420 },
-    };
-    const classic = resolveChatCanvasLayout(input);
-    const redesigned = resolveChatCanvasLayout({ ...input, centerBesideDetails: true });
-    expect(classic.chat.left).toBe(360);
-    expect(redesigned.chat.left).toBe(196);
-    expect(redesigned.chat.width).toBe(classic.chat.width);
+    });
+    expect(chat).toEqual({ left: 360, width: 768, insetStart: 0, insetEnd: 12 });
   });
 
   it("keeps the chat centered on very wide windows", () => {
-    const input = {
+    const { chat } = resolveChatCanvasLayout({
       container: { width: 2400, height: 900 },
       preview: null,
       detailsCard: { left: 2060, right: 2380, bottom: 420 },
-    };
-    expect(resolveChatCanvasLayout({ ...input, centerBesideDetails: true }).chat).toEqual(
-      resolveChatCanvasLayout(input).chat,
-    );
+    });
+    expect(chat).toEqual({ left: 816, width: 768, insetStart: 0, insetEnd: 0 });
   });
 });

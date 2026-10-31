@@ -27,7 +27,11 @@ export function AppRouteModal({ label, children }: { label: string; children: Re
       // Portaled layers outside this tree (toasts and confirm dialogs) are not backdrop presses.
       disablePointerDismissal
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) setOpen(false);
+        if (nextOpen) return;
+        // Commit buffered settings before closing unmounts the focused field.
+        const focused = document.activeElement;
+        if (focused instanceof HTMLElement && popupRef.current?.contains(focused)) focused.blur();
+        setOpen(false);
       }}
       onOpenChangeComplete={(nextOpen) => {
         if (!nextOpen) void closeAppModal();

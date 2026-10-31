@@ -1,12 +1,6 @@
 import type { EnvironmentId, PullRequestContextMetadata } from "@t3tools/contracts";
 import { CircleDashedIcon, FilmIcon, ImageIcon } from "lucide-react";
-import {
-  useState,
-  type ComponentProps,
-  type CSSProperties,
-  type MouseEvent,
-  type ReactNode,
-} from "react";
+import { type ComponentProps, type MouseEvent, type ReactNode } from "react";
 
 import { PULL_REQUEST_STATE_PRESENTATION } from "~/components/pullRequest/pullRequestIcons";
 import type { PullRequestContextDisplayState } from "~/lib/composerContextRecords";
@@ -125,40 +119,11 @@ export function PullRequestChip(props: {
   );
 }
 
-/** Sample the loaded thumbnail once; transparent pixels should not darken its accent. */
-function averageImageColor(image: HTMLImageElement): string | undefined {
-  try {
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 16;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    context.drawImage(image, 0, 0, 16, 16);
-    const { data } = context.getImageData(0, 0, 16, 16);
-    let red = 0;
-    let green = 0;
-    let blue = 0;
-    let alpha = 0;
-    for (let index = 0; index < data.length; index += 4) {
-      const weight = data[index + 3]!;
-      red += data[index]! * weight;
-      green += data[index + 1]! * weight;
-      blue += data[index + 2]! * weight;
-      alpha += weight;
-    }
-    if (alpha === 0) return;
-    return `rgb(${Math.round(red / alpha)} ${Math.round(green / alpha)} ${Math.round(blue / alpha)})`;
-  } catch {
-    // Cross-origin or unavailable pixels keep the default image tone and preview action.
-    return;
-  }
-}
-
 export function ImageChipButton({
   name,
   previewUrl,
   size,
   suffix,
-  style,
   ...props
 }: Omit<ComponentProps<typeof ContextChip>, "kind" | "render"> & {
   name: string;
@@ -167,28 +132,19 @@ export function ImageChipButton({
   size: string;
   suffix?: string | null;
 }) {
-  const [sample, setSample] = useState<{ url: string; color: string | undefined }>();
-  const [corsFailedUrl, setCorsFailedUrl] = useState<string>();
-  const accent = sample?.url === previewUrl ? sample?.color : undefined;
   return (
     <ContextChip
       kind="image"
       render={<button type="button" />}
       aria-label={`Image attachment, ${name}, ${size}`}
-      style={{ ...style, ...(accent ? { "--context-chip-accent": accent } : {}) } as CSSProperties}
       {...props}
     >
       {previewUrl ? (
         <img
           key={previewUrl}
-          crossOrigin={corsFailedUrl === previewUrl ? undefined : "anonymous"}
           src={previewUrl}
           alt=""
-          className="size-[1.17em] shrink-0 rounded-sm object-cover"
-          onError={() => setCorsFailedUrl(previewUrl)}
-          onLoad={(event) =>
-            setSample({ url: previewUrl, color: averageImageColor(event.currentTarget) })
-          }
+          className="size-[1em] shrink-0 self-center rounded-sm object-cover"
         />
       ) : (
         <ImageIcon />

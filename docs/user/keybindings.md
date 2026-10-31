@@ -8,6 +8,8 @@ close button, or a click outside the dialog to return to the same conversation
 and unsent draft. If a menu or another dialog is open inside Settings, Escape
 closes that layer first. Thread and composer shortcuts are paused while Settings
 is open; settings search remains available with **/** or **Cmd+F / Ctrl+F**.
+Settings fields that save when you leave them also save when you close Settings
+with Escape.
 
 The same configuration lives in `~/.test-rig/userdata/keybindings.json` on the machine running the
 server, if you prefer editing it directly. Test Rig writes the built-in defaults into that file on
