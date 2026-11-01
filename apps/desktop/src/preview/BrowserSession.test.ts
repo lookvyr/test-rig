@@ -91,12 +91,14 @@ describe("BrowserSession", () => {
         "persist:test-rig-preview-61ddabbff1eb14c79498",
       );
       assert.strictEqual(
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
         yield* browserSessions.getPartition(JSON.stringify(["env-1", "work"]), true, "profile"),
         "persist:test-rig-preview-profile-48c5cc032afae6043eb3",
       );
       // Ids with characters JSON escapes keep their earlier names too.
       assert.strictEqual(
         yield* browserSessions.getPartition(
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
           JSON.stringify(["env-1", 'work"special\\x']),
           true,
           "profile",

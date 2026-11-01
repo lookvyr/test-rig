@@ -218,6 +218,7 @@ it.effect("sends replies ahead of stale frames and only the newest frame after a
     expect(released).toEqual([2, 3]);
 
     next = Promise.withResolvers();
+    // @effect-diagnostics-next-line preferSchemaOverJson:off
     socket.send(JSON.stringify({ type: "ack" }));
     yield* Effect.promise(() => next.promise);
     expect(received).toEqual([1, "probe", 4]);

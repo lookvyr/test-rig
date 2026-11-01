@@ -1768,9 +1768,11 @@ describe("PreviewManager", () => {
         yield* Queue.clear(capturing);
 
         yield* host.handleCommandLine(
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
           JSON.stringify({
             type: "cdp",
             ...serverTab,
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
             message: JSON.stringify({
               id: 1,
               method: "Page.captureScreenshot",

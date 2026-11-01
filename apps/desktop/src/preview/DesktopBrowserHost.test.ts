@@ -1032,6 +1032,7 @@ describe("DesktopBrowserHost", () => {
       expect(send).toHaveBeenCalledWith("Page.stopScreencast");
       expect(tabs[0]!.focusEmulation).toEqual([true, false]);
       expect(next).toMatchObject({ type: "cdp", ...keys[1] });
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
       expect(JSON.parse((next as { message: string }).message)).toMatchObject({
         method: "Page.loadEventFired",
       });
