@@ -277,29 +277,6 @@ describe("buildThreadActionItems", () => {
     expect(groups[0]?.items.map((item) => item.value)).toEqual(["thread:project-context-only"]);
   });
 
-  it("keeps message excerpts searchable without replacing thread metadata", () => {
-    const [item] = buildThreadActionItems({
-      threads: [makeThread({ branch: "feat/search" })],
-      projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
-      sortOrder: "updated_at",
-      icon: null,
-      getContentMatch: () => ({
-        source: "assistant",
-        snippet: "The relay reconnect is now bounded.",
-        query: "reconnect",
-      }),
-      runThread: async (_thread) => undefined,
-    });
-
-    expect(item?.searchTerms).toContain("The relay reconnect is now bounded.");
-    expect(item?.threadContentMatch).toEqual({
-      source: "assistant",
-      snippet: "The relay reconnect is now bounded.",
-      query: "reconnect",
-    });
-    expect(item?.description).toBe("T3 Code · #feat/search");
-  });
-
   it("reveals the same side chat in search only after it is kept", () => {
     const side = makeThread({ id: ThreadId.make("side"), sideOfThreadId: ThreadId.make("parent") });
     const input = {
@@ -340,6 +317,125 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+});
+
+describe("shared palette ranking", () => {
+  const NOW = Date.parse("2026-11-01T12:00:00.000Z");
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const threadItems = (threads: ReadonlyArray<Thread>, activeThreadId?: Thread["id"]) =>
+    buildThreadActionItems({
+      threads,
+      ...(activeThreadId ? { activeThreadId } : {}),
+      projectTitleById: new Map([[PROJECT_ID, "web"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async () => undefined,
+    });
+  const search = (
+    query: string,
+    threadSearchItems: ReadonlyArray<CommandPaletteActionItem>,
+    activeGroups: ReadonlyArray<CommandPaletteGroup> = [],
+  ) =>
+    filterCommandPaletteGroups({
+      activeGroups,
+      query,
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems,
+      now: NOW,
+    });
+  const titles = (groups: ReadonlyArray<CommandPaletteGroup>) =>
+    groups.flatMap((group) => group.items.map((item) => item.title));
+
+  it("matches words in any order, without accents, with one typo", () => {
+    const items = threadItems([
+      makeThread({ id: ThreadId.make("login"), title: "Fix login redirect loop" }),
+      makeThread({ id: ThreadId.make("cafe"), title: "Café menu rendering" }),
+      makeThread({ id: ThreadId.make("other"), title: "Unrelated" }),
+    ]);
+    expect(titles(search("login fix", items))).toEqual(["Fix login redirect loop"]);
+    expect(titles(search("cafe", items))).toEqual(["Café menu rendering"]);
+    expect(titles(search("logn", items))).toEqual(["Fix login redirect loop"]);
+    expect(titles(search("the menu", items))).toEqual(["Café menu rendering"]);
+  });
+
+  it("finds threads by pull request number and explains the match", () => {
+    const items = threadItems([
+      makeThread({
+        id: ThreadId.make("pr"),
+        title: "Tidy redirects",
+        linkedPullRequest: {
+          projectId: PROJECT_ID,
+          repository: "lookvyr/test-rig",
+          number: 2288,
+          url: "https://github.com/lookvyr/test-rig/pull/2288",
+        },
+      }),
+    ]);
+    for (const query of [
+      "2288",
+      "pr 2288",
+      "#2288",
+      "https://github.com/lookvyr/test-rig/pull/2288",
+    ]) {
+      expect(titles(search(query, items))).toEqual(["Tidy redirects"]);
+    }
+    expect(search("2288", items)[0]?.items[0]?.matchHint).toMatchObject({
+      label: "PR",
+      text: "#2288",
+    });
+  });
+
+  it("does not match every thread through the worktree branch prefix", () => {
+    const items = threadItems([
+      makeThread({ id: ThreadId.make("a"), title: "Alpha", branch: "test-rig/alpha" }),
+      makeThread({ id: ThreadId.make("b"), title: "Beta", branch: "test-rig/beta" }),
+    ]);
+    expect(titles(search("test-rig", items))).toEqual([]);
+    expect(titles(search("test-rig/beta", items))).toEqual(["Beta"]);
+  });
+
+  it("puts a thread picked for a query first the next time it is typed", () => {
+    const threads = [
+      makeThread({
+        id: ThreadId.make("recent"),
+        title: "Auth refactor",
+        latestUserMessageAt: new Date(NOW - DAY_MS).toISOString(),
+      }),
+      makeThread({
+        id: ThreadId.make("picked"),
+        title: "Auth tokens",
+        latestUserMessageAt: new Date(NOW - 30 * DAY_MS).toISOString(),
+        opens: { openedAt: NOW - DAY_MS, score: 1, picks: [{ query: "auth", at: NOW - DAY_MS }] },
+      }),
+    ];
+    expect(titles(search("auth", threadItems(threads)))).toEqual(["Auth tokens", "Auth refactor"]);
+    // A pick never lifts a thread that matches only mid-word.
+    expect(titles(search("refactor", threadItems(threads)))).toEqual(["Auth refactor"]);
+  });
+
+  it("orders groups by match quality and lists the open thread last", () => {
+    const settings: CommandPaletteActionItem = {
+      kind: "action",
+      value: "action:settings",
+      searchTerms: ["Open settings", "preferences"],
+      title: "Open settings",
+      icon: null,
+      run: async () => undefined,
+    };
+    const items = threadItems(
+      [
+        makeThread({ id: ThreadId.make("current"), title: "Settings page polish" }),
+        makeThread({ id: ThreadId.make("other"), title: "Settings sync" }),
+      ],
+      ThreadId.make("current"),
+    );
+    const groups = search("settings", items, [
+      { value: "actions", label: "Actions", items: [settings] },
+    ]);
+    expect(groups.map((group) => group.value)).toEqual(["actions", "threads-search"]);
+    expect(groups[1]?.items.map((item) => item.value)).toEqual(["thread:other", "thread:current"]);
   });
 });
 

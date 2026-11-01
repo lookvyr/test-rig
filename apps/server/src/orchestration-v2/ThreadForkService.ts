@@ -111,6 +111,8 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           snoozedUntil: null,
           snoozedAt: null,
           lastVisitedAt: null,
+          // A fork is a new thread; its source's open history is not its own.
+          opens: null,
           deletedAt: null,
         };
         const transfer: OrchestrationV2ContextTransfer = {

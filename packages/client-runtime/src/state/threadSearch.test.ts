@@ -11,9 +11,11 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { expect, it } from "vite-plus/test";
 
 import {
+  claimThreadOpen,
   createThreadSearchResultsAtomFamily,
   makeThreadSearchKey,
   threadSearchMatchKey,
+  threadSearchSubject,
 } from "./threadSearch.ts";
 
 const envA = EnvironmentId.make("env-a");
@@ -129,4 +131,34 @@ it("asks environments that omit older settled threads for their rows, with the c
   expect(inputs).toEqual([[envB, { query: "needle" }]]);
 
   registry.dispose();
+});
+
+it("sends one open per thread per dedupe window and ranks by this client's latest open", () => {
+  const threadId = ThreadId.make("claimed-thread");
+  const at = Date.parse("2026-11-01T12:00:00.000Z");
+  expect(claimThreadOpen(envA, threadId, at)).toBe(true);
+  expect(claimThreadOpen(envA, threadId, at + 60_000)).toBe(false);
+  expect(claimThreadOpen(envB, threadId, at + 60_000)).toBe(true);
+  expect(claimThreadOpen(envA, threadId, at + 11 * 60_000)).toBe(true);
+
+  const subject = threadSearchSubject(
+    {
+      environmentId: envA,
+      id: threadId,
+      title: "Claimed",
+      branch: null,
+      createdAt: "2026-10-01T00:00:00.000Z",
+      updatedAt: "2026-10-02T00:00:00.000Z",
+      latestUserMessageAt: null,
+      pullRequests: [],
+      opens: { openedAt: at - 60_000, score: 3, picks: [{ query: "cla", at: at - 60_000 }] },
+    },
+    "Project",
+  );
+  expect(subject.opens).toEqual({
+    openedAt: at + 11 * 60_000,
+    score: 3,
+    picks: [{ query: "cla", at: at - 60_000 }],
+  });
+  expect(subject.activityAt).toBe(Date.parse("2026-10-02T00:00:00.000Z"));
 });

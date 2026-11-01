@@ -44,6 +44,13 @@ A temporary provider-native fork shown in the parent's right panel. It has its o
 and runtime but shares the checkout. Keeping it reveals the same record as an ordinary thread;
 discarding it removes the conversation without reverting file edits. See [providers.md][16].
 
+#### Thread opens
+
+Per-thread open history that ranks command palette search: a decaying open count and up to
+three recent palette queries that picked the thread ("picks"). Clients send it on
+`thread.visit` with `opened` (and `searchQuery` for a pick); the server records it with
+`recordThreadOpen` in `packages/shared/src/paletteSearch.ts`, timed by its own clock.
+
 #### Turn
 
 A single user-to-assistant work cycle inside a thread. It starts with user input and ends when the session leaves `running` status, which [projector.ts][4] treats as the authoritative completion signal (`settledTurnStateForSessionStatus`). Checkpoint and diff work may settle afterward without changing when the turn ended. See [the contracts][1] and [ProviderRuntimeIngestion.ts][5].

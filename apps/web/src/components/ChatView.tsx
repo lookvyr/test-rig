@@ -241,6 +241,7 @@ import {
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
 import { threadEnvironment, useEnvironmentThread, useThreadFamily } from "../state/threads";
+import { claimThreadOpen } from "@t3tools/client-runtime/state/thread-search";
 
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
@@ -1157,6 +1158,7 @@ function ChatViewContent(props: ChatViewProps) {
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const forkThreadFromRun = useAtomCommand(threadEnvironment.forkFromRun, { reportFailure: false });
   const openSide = useAtomCommand(threadEnvironment.openSide, { reportFailure: false });
+  const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const discardSide = useAtomCommand(threadEnvironment.discardSide, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -1693,6 +1695,29 @@ function ChatViewContent(props: ChatViewProps) {
       threadVisitTimestamp,
     );
   }, [markThreadVisited, serverThread?.environmentId, serverThread?.id, threadVisitTimestamp]);
+  // Showing a thread is an open, which feeds palette ranking. The server hears
+  // it once the shell arrives; a palette pick already sent it with its query.
+  // Only the open matters here: this view keeps its own read watermark, so the
+  // creation time stands in and never moves the server's forward.
+  const openedThreadEnvironmentId = routeServerThreadShell?.environmentId ?? null;
+  const openedThreadId = routeServerThreadShell?.id ?? null;
+  const openedThreadCreatedAt = routeServerThreadShell?.createdAt ?? null;
+  const openedThreadTracksVisits = routeServerThreadShell?.lastVisitedAt !== undefined;
+  useEffect(() => {
+    if (!openedThreadEnvironmentId || !openedThreadId || !openedThreadCreatedAt) return;
+    if (!claimThreadOpen(openedThreadEnvironmentId, openedThreadId, Date.now())) return;
+    if (!openedThreadTracksVisits) return;
+    void visitThread({
+      environmentId: openedThreadEnvironmentId,
+      input: { threadId: openedThreadId, visitedAt: openedThreadCreatedAt, opened: true },
+    });
+  }, [
+    openedThreadCreatedAt,
+    openedThreadEnvironmentId,
+    openedThreadId,
+    openedThreadTracksVisits,
+    visitThread,
+  ]);
   useEffect(() => {
     setMountedTerminalThreadKeys((currentThreadIds) => {
       const nextThreadIds = reconcileMountedTerminalThreadIds({

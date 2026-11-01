@@ -10,6 +10,71 @@ import {
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { THREAD_OPEN_DEDUPE_MS, type ThreadSearchSubject } from "@t3tools/shared/paletteSearch";
+import { threadSearchPullRequests } from "@t3tools/shared/threadPullRequests";
+
+import type { EnvironmentThreadShell } from "./models.ts";
+import { getThreadSortTimestamp } from "./threadSort.ts";
+
+// When this client last sent an open per thread, by its own clock: a server
+// timestamp would be off by any clock skew. The server merges opens closer
+// together than THREAD_OPEN_DEDUPE_MS anyway, so skipping them saves a command
+// and a broadcast while flipping between threads.
+const sentThreadOpens = new Map<string, number>();
+// When this client last opened each thread, sent or not, so ranking follows
+// quick switches the server merges.
+const localThreadOpens = new Map<string, number>();
+/**
+ * Records that this client opened a thread, and says whether to send the open
+ * to the server now.
+ */
+export function claimThreadOpen(environmentId: EnvironmentId, threadId: string, now: number) {
+  const key = `${environmentId}:${threadId}`;
+  localThreadOpens.set(key, now);
+  if (now - (sentThreadOpens.get(key) ?? Number.NEGATIVE_INFINITY) < THREAD_OPEN_DEDUPE_MS) {
+    return false;
+  }
+  sentThreadOpens.set(key, now);
+  return true;
+}
+
+export type ThreadSearchShell = Pick<
+  EnvironmentThreadShell,
+  | "environmentId"
+  | "id"
+  | "title"
+  | "branch"
+  | "createdAt"
+  | "updatedAt"
+  | "latestUserMessageAt"
+  | "opens"
+> &
+  Partial<Pick<EnvironmentThreadShell, "pullRequests" | "linkedPullRequest" | "branchPullRequest">>;
+
+/** What palette ranking reads from a thread, with this client's own latest open. */
+export function threadSearchSubject(
+  thread: ThreadSearchShell,
+  projectTitle: string | null | undefined,
+  environmentLabel?: string | null,
+): ThreadSearchSubject {
+  const activityAt = getThreadSortTimestamp(thread, "updated_at");
+  const localOpenedAt = localThreadOpens.get(`${thread.environmentId}:${thread.id}`) ?? 0;
+  return {
+    id: thread.id,
+    title: thread.title,
+    branch: thread.branch,
+    projectTitle: projectTitle ?? null,
+    environmentLabel: environmentLabel ?? null,
+    pullRequests: threadSearchPullRequests(thread),
+    activityAt: Number.isFinite(activityAt) ? activityAt : null,
+    // This client's own latest open counts too: the server merged it, or has
+    // no record yet (an older server ignores opens).
+    opens:
+      localOpenedAt > (thread.opens?.openedAt ?? 0)
+        ? { score: 1, picks: [], ...thread.opens, openedAt: localOpenedAt }
+        : (thread.opens ?? null),
+  };
+}
 
 export interface EnvironmentThreadSearchMatch extends OrchestrationThreadSearchMatch {
   readonly environmentId: EnvironmentId;

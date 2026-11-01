@@ -80,8 +80,22 @@ Message search matches all entered words and favors words close together. It ign
 case and Latin accents, and accepts straight or curly apostrophes. At least one word needs three
 characters; two-character CJK words are also supported. Agent-generated notices, archived
 threads, and subagents stay out of message results. Independent forks remain available.
-Title search favors matches at the start of words over matches inside words. Exact titles rank
-first; otherwise, equally strong title matches favor recent conversations.
+Thread search matches each word separately, in any order, at the start of a word. It ignores
+letter case and accents, skips filler words such as "the" and "for", and tolerates one typo
+when nothing matches exactly. Titles count most, then pull request numbers, then pull request
+titles and branches, then project names. Type a pull request number (`2288`, `#2288`, or
+`pr 2288`) or paste its link to find its thread. When a thread matched by something other than
+its title, its second line names the field, such as **PR**, **Branch**, or **Project**. The
+default worktree branch prefix (`test-rig/`) is ignored, so it does not match every thread.
+
+Among equally strong matches, threads you used recently or open often come first; whole-word
+matches still outrank partial ones. The palette also remembers which thread you chose for a
+search for three weeks: typing that search again, or a longer one that starts with it, lists
+that thread first. Opening the same thread repeatedly within ten minutes counts once. This
+history is kept by the environment, so every client connected to it shares it. Groups are
+ordered by their best match, so typing a command's name lists it above threads that only
+mention it. While threads match, other groups show their best three results, and the thread
+you have open is listed last.
 
 Press **Cmd+F** on macOS or **Ctrl+F** elsewhere to find a word or phrase in the open
 thread. This shortcut is configurable as `thread.find`. The compact find bar only

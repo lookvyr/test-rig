@@ -1,6 +1,7 @@
 import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronRightIcon } from "lucide-react";
+import { type SearchMatchHint, splitSearchText } from "@t3tools/shared/paletteSearch";
 import { type RefObject, useCallback, useState } from "react";
 import { cn } from "~/lib/utils";
 import { shortcutLabelForCommand } from "../keybindings";
@@ -38,6 +39,43 @@ function HighlightedSearchText(props: { text: string; query: string }) {
       text
     );
   });
+}
+
+/** Why a row matched when its title does not show it: the field and its match. */
+function SearchMatchHintLine(props: { hint: SearchMatchHint }) {
+  const { hint } = props;
+  return (
+    <span className="truncate text-xs text-muted-foreground/85">
+      <span className="text-muted-foreground/70">{hint.label}:</span>{" "}
+      {splitSearchText(hint.text, hint.ranges).map((part) =>
+        part.highlighted ? (
+          <mark className="bg-transparent font-semibold text-foreground" key={part.start}>
+            {part.text}
+          </mark>
+        ) : (
+          part.text
+        ),
+      )}
+    </span>
+  );
+}
+
+/**
+ * Project and environment for a thread row whose second line shows a match
+ * hint instead of its description, so similar rows can still be told apart.
+ */
+function ThreadRowContext(props: { item: CommandPaletteActionItem | CommandPaletteSubmenuItem }) {
+  const { item } = props;
+  if (!item.threadSearch || !item.matchHint) return null;
+  // A "Project: …" hint already names the project.
+  const context = [item.threadSearch.projectTitle, item.threadSearch.environmentLabel]
+    .filter((part) => part && part !== item.matchHint?.text)
+    .join(" · ");
+  return context ? (
+    <span className="max-w-[45%] shrink-0 truncate text-muted-foreground/70 text-xs">
+      {context}
+    </span>
+  ) : null;
 }
 
 function ThreadContentMatch(props: {
@@ -198,16 +236,19 @@ function DisabledCommandPaletteResultRow(props: {
   return (
     <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
       {props.item.icon}
-      {props.item.description || props.item.threadContentMatch ? (
+      {props.item.description || props.item.threadContentMatch || props.item.matchHint ? (
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
             <span className="truncate">{props.item.title}</span>
+            <ThreadRowContext item={props.item} />
           </span>
           {props.item.threadContentMatch ? (
             <ThreadContentMatch match={props.item.threadContentMatch} />
           ) : null}
-          {props.item.description ? (
+          {props.item.matchHint ? (
+            <SearchMatchHintLine hint={props.item.matchHint} />
+          ) : props.item.description ? (
             <span className="truncate text-muted-foreground/70 text-xs">
               {props.item.description}
             </span>
@@ -258,16 +299,19 @@ function CommandPaletteResultRow(props: {
       }}
     >
       {props.item.icon}
-      {props.item.description || props.item.threadContentMatch ? (
+      {props.item.description || props.item.threadContentMatch || props.item.matchHint ? (
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
             <span className="truncate">{props.item.title}</span>
+            <ThreadRowContext item={props.item} />
           </span>
           {props.item.threadContentMatch ? (
             <ThreadContentMatch match={props.item.threadContentMatch} />
           ) : null}
-          {props.item.description ? (
+          {props.item.matchHint ? (
+            <SearchMatchHintLine hint={props.item.matchHint} />
+          ) : props.item.description ? (
             <span className="truncate text-muted-foreground/70 text-xs">
               {props.item.description}
             </span>

@@ -12,6 +12,8 @@ import {
 } from "@t3tools/client-runtime/environment";
 import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
+import { claimThreadOpen } from "@t3tools/client-runtime/state/thread-search";
+import { pickedQuery } from "@t3tools/shared/paletteSearch";
 import { findForMessageMatch, requestThreadFindQuery } from "./chat/threadFindActionBus";
 import {
   canPreloadBrowsePath,
@@ -80,6 +82,7 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
+import { threadEnvironment } from "../state/threads";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useThreadShells } from "../state/entities";
@@ -586,6 +589,14 @@ function OpenCommandPaletteDialog(props: {
   const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
+  // Thread rows read the query that picked them without rebuilding per keystroke.
+  const pickQueryRef = useRef("");
+  useEffect(() => {
+    pickQueryRef.current = deferredQuery;
+  }, [deferredQuery]);
+  // Ranking is relative to when the palette opened, so rows do not reorder as time passes.
+  const [searchNow] = useState(() => Date.now());
+  const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const resultListRef = useRef<LegendListRef | null>(null);
@@ -1056,14 +1067,49 @@ function OpenCommandPaletteDialog(props: {
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
         renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
         renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
+        ...(environments.length > 1
+          ? {
+              environmentLabelOf: (thread: (typeof threads)[number]) =>
+                environmentLabelById.get(thread.environmentId) ?? null,
+            }
+          : {}),
         runThread: async (thread) => {
+          // A pick sends its open with the query so the server remembers it;
+          // the thread view then skips its own open. The open thread is no pick.
+          // As in the thread view, creation time stands in for the read watermark.
+          const searchQuery = pickQueryRef.current;
+          const isPick =
+            searchQuery.trim().length > 0 &&
+            !searchQuery.startsWith(">") &&
+            thread.id !== activeThreadId;
+          if (isPick) claimThreadOpen(thread.environmentId, thread.id, Date.now());
+          if (isPick && thread.lastVisitedAt !== undefined) {
+            void visitThread({
+              environmentId: thread.environmentId,
+              input: {
+                threadId: thread.id,
+                visitedAt: thread.createdAt,
+                opened: true,
+                searchQuery: pickedQuery(searchQuery),
+              },
+            });
+          }
           await navigate({
             to: "/$environmentId/$threadId",
             params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
           });
         },
       }),
-    [activeThreadId, clientSettings.sidebarThreadSortOrder, navigate, projectTitleById, threads],
+    [
+      activeThreadId,
+      clientSettings.sidebarThreadSortOrder,
+      environmentLabelById,
+      environments.length,
+      navigate,
+      projectTitleById,
+      threads,
+      visitThread,
+    ],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 
@@ -1686,6 +1732,7 @@ function OpenCommandPaletteDialog(props: {
     projectSearchItems: projectSearchItems,
     threadSearchItems: allThreadItems,
     messageSearchItems: threadMessageItems,
+    now: searchNow,
   });
 
   const handleAddProjectForEnvironment = useCallback(

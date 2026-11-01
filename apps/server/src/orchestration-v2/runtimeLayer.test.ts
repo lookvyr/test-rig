@@ -4855,6 +4855,84 @@ it.layer(SharedApplicationDataPlaneTestLayer)("visited projection", (it) => {
   );
 });
 
+it.layer(Layer.fresh(SharedApplicationDataPlaneTestLayer))("thread opens", (it) => {
+  it.effect(
+    "counts opens on the server clock, merges quick reopens, and keeps picked queries",
+    () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const projectId = ProjectId.make("runtime-layer-opened-project");
+        const threadId = ThreadId.make("runtime-layer-opened-thread");
+        yield* (yield* ProjectService.ProjectService).create({
+          commandId: CommandId.make("runtime-layer-opened-project-create"),
+          projectId,
+          title: "Opened project",
+          workspaceRoot: "/tmp/runtime-layer-opened-project",
+        });
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("runtime-layer-opened-thread-create"),
+          threadId,
+          projectId,
+          title: "Opened thread",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+        let visits = 0;
+        const visit = (input: { readonly opened?: boolean; readonly searchQuery?: string }) =>
+          orchestrator.dispatch({
+            type: "thread.visit",
+            commandId: CommandId.make(`runtime-layer-opened-visit-${++visits}`),
+            threadId,
+            // A client clock far in the past must not move the open time.
+            visitedAt: "2000-01-01T00:00:00.000Z",
+            ...input,
+          });
+        const opens = Effect.map(
+          orchestrator.getShellSnapshot(),
+          (shell) => shell.threads.find((thread) => thread.id === threadId)?.opens ?? null,
+        );
+        assert.isNull(yield* opens);
+        const start = DateTime.toEpochMillis(yield* DateTime.now);
+
+        yield* visit({ opened: true, searchQuery: "  Upl " });
+        assert.deepEqual(yield* opens, {
+          openedAt: start,
+          score: 1,
+          picks: [{ query: "upl", at: start }],
+        });
+
+        yield* TestClock.adjust("1 minute");
+        yield* visit({ opened: true, searchQuery: "Uploadthing docs" });
+        assert.deepEqual(yield* opens, {
+          openedAt: start,
+          score: 1,
+          picks: [
+            { query: "uploadthing docs", at: start + 60_000 },
+            { query: "upl", at: start },
+          ],
+        });
+
+        yield* TestClock.adjust("14 days");
+        yield* visit({});
+        yield* visit({ opened: true });
+        const later = yield* opens;
+        assert.closeTo(later!.score, 1 + 2 ** (-(14 * 24 * 60 + 1) / (14 * 24 * 60)), 1e-9);
+        assert.equal(later!.openedAt, DateTime.toEpochMillis(yield* DateTime.now));
+        // Opening without a query keeps each pick and its time.
+        assert.deepEqual(later!.picks, [
+          { query: "uploadthing docs", at: start + 60_000 },
+          { query: "upl", at: start },
+        ]);
+      }),
+  );
+});
+
 it.layer(SharedApplicationDataPlaneTestLayer)("shared application data plane", (it) => {
   it.effect("orders retained project transactions and V2 thread transactions in one source", () =>
     Effect.gen(function* () {
