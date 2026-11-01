@@ -1549,6 +1549,8 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         yield* git(remote, ["init", "--bare"]);
         yield* git(cwd, ["remote", "add", "origin", remote]);
         yield* git(cwd, ["push", "-u", "origin", initialBranch]);
+        // Older git (before 2.48) never records origin/HEAD on push or fetch.
+        yield* git(cwd, ["remote", "set-head", "origin", initialBranch]);
         yield* git(cwd, ["checkout", "-b", "feature/remote-status"]);
         yield* writeTextFile(cwd, "feature.txt", "feature\n");
         yield* git(cwd, ["add", "feature.txt"]);
@@ -1560,7 +1562,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
         assert.equal(status.isRepo, true);
         assert.equal(status.branch, "feature/remote-status");
-        assert.equal(status.defaultBranch, "main");
+        assert.equal(status.defaultBranch, initialBranch);
         assert.equal(status.hasUpstream, true);
         assert.equal(status.aheadCount, 0);
         assert.equal(status.behindCount, 0);
