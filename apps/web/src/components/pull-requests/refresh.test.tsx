@@ -96,6 +96,9 @@ vi.mock("../../state/entities", () => ({
     { environmentId: "env", id: "project", workspaceRoot: "/repo", title: "Repo" },
   ],
 }));
+vi.mock("../../state/environments", () => ({
+  useEnvironments: () => ({ environments: [] }),
+}));
 vi.mock("../../hooks/usePullRequestHandoff", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../hooks/usePullRequestHandoff")>()),
   usePullRequestHandoff: () => ({}),
