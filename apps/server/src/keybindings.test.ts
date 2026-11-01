@@ -513,7 +513,8 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
-  it.effect("fails when config directory is not writable", () =>
+  // Root ignores directory permissions, so the write can't be made to fail.
+  it.effect.skipIf(process.getuid?.() === 0)("fails when config directory is not writable", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;

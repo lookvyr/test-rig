@@ -477,7 +477,8 @@ it.layer(
     }),
   );
 
-  it.effect("preserves non-notFound cwd stat failures", () =>
+  // Root ignores directory permissions, so the stat can't be made to fail.
+  it.effect.skipIf(process.getuid?.() === 0)("preserves non-notFound cwd stat failures", () =>
     Effect.gen(function* () {
       if ((yield* HostProcessPlatform) === "win32") return;
 
