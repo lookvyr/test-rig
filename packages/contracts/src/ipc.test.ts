@@ -38,12 +38,13 @@ describe("DesktopEnvironmentBootstrapSchema", () => {
   });
 });
 
-it("preserves scoped preview data-clear payloads instead of coercing them to void", () => {
+it("requires an environment for preview data-clear payloads and keeps the optional profile", () => {
   const decode = Schema.decodeUnknownSync(DesktopPreviewClearDataInputSchema);
   expect(decode({ environmentId: "local", profileId: "work" })).toEqual({
     environmentId: "local",
     profileId: "work",
   });
-  expect(decode(undefined)).toBeUndefined();
+  expect(decode({ environmentId: "local" })).toEqual({ environmentId: "local" });
+  expect(() => decode(undefined)).toThrow();
   expect(() => decode({ profileId: "work" })).toThrow();
 });

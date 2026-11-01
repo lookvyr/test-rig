@@ -41,6 +41,8 @@ type BrowserMenuActions = Pick<
 >;
 interface Props {
   serverActions?: BrowserMenuActions | undefined;
+  /** A webview in this desktop renders the tab, so DevTools and the separate window apply. */
+  nativeTools?: boolean | undefined;
   onClearProfile?: (() => void) | undefined;
   environmentId: EnvironmentId;
   profileId?: string | undefined;
@@ -74,6 +76,7 @@ interface Props {
 export function PreviewMoreMenu({
   environmentId,
   serverActions,
+  nativeTools = !serverActions,
   onClearProfile,
   profileId,
   tabId,
@@ -114,7 +117,7 @@ export function PreviewMoreMenu({
         <MenuItem onClick={callTab(bridge.hardReload)} disabled={tabDisabled}>
           Hard reload
         </MenuItem>
-        {!serverActions && previewBridge ? (
+        {nativeTools && previewBridge ? (
           <>
             <MenuItem onClick={callTab(previewBridge!.openDevTools)} disabled={tabDisabled}>
               Open DevTools

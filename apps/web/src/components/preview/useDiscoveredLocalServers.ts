@@ -79,6 +79,7 @@ export function mergeServers(input: {
         processName: server.processName ?? existing.processName,
         pid: server.pid ?? existing.pid,
         terminal: server.terminal ?? existing.terminal,
+        ...(server.agent === undefined ? {} : { agent: server.agent }),
         listening: true,
       });
       continue;

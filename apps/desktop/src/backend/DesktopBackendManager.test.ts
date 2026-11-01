@@ -26,6 +26,7 @@ import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopApp from "../app/DesktopApp.ts";
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
+import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
@@ -166,6 +167,7 @@ function makeTestInstance(input: MakeInstanceInput) {
       removeControlSource: () => Effect.void,
       ...input.desktopTelemetryPublisher,
     }),
+    DesktopBrowserHost.layer,
   );
 
   const instance = DesktopBackendManager.makeBackendInstance({

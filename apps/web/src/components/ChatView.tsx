@@ -1,3 +1,4 @@
+import { isPreviewAvailableFor } from "~/browser/previewRuntime";
 import * as Option from "effect/Option";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
 import { useContext } from "react";
@@ -149,11 +150,7 @@ import {
   type RightPanelSurface,
   useRightPanelStore,
 } from "../rightPanelStore";
-import {
-  isPreviewSupportedInRuntime,
-  setActivePreviewTab,
-  useThreadPreviewState,
-} from "../previewStateStore";
+import { setActivePreviewTab, useThreadPreviewState } from "../previewStateStore";
 import { addBrowserSurface } from "./preview/addBrowserSurface";
 import { closePreviewSession } from "./preview/closePreviewSession";
 import { ThreadPreviewMiniPlayer } from "./preview/ThreadPreviewMiniPlayer";
@@ -1638,8 +1635,7 @@ function ChatViewContent(props: ChatViewProps) {
     [activeKnownTerminalIds, panelTerminalIds],
   );
   const previewPanelOpen =
-    activeRightPanelKind === "preview" &&
-    isPreviewSupportedInRuntime(activeThreadRef?.environmentId);
+    activeRightPanelKind === "preview" && isPreviewAvailableFor(activeThreadRef?.environmentId);
   const rightPanelOpen = rightPanelState.isOpen;
   const canMaximizeRightPanel = rightPanelOpen && !shouldUseRightPanelSheet;
   const rightPanelMaximized =
@@ -1647,11 +1643,19 @@ function ChatViewContent(props: ChatViewProps) {
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUseRightPanelSheet;
 
   useEffect(() => {
-    if (!activeThreadRef || !activePreviewState.hasLoadedSessions) return;
-    useRightPanelStore
-      .getState()
-      .reconcileBrowserSurfaces(activeThreadRef, Object.keys(activePreviewState.sessions));
-  }, [activePreviewState.sessions, activePreviewState.hasLoadedSessions, activeThreadRef]);
+    if (!activeThreadRef || !activePreviewState.listLoaded) return;
+    const sessions = Object.values(activePreviewState.sessions);
+    useRightPanelStore.getState().reconcileBrowserSurfaces(
+      activeThreadRef,
+      sessions.map((session) => session.tabId),
+      // Agent tabs join the panel only once revealed, so a reveal can float them instead.
+      new Set(
+        sessions
+          .filter((session) => session.runtime === "server" && session.reveal === false)
+          .map((session) => session.tabId),
+      ),
+    );
+  }, [activePreviewState.sessions, activePreviewState.listLoaded, activeThreadRef]);
 
   useEffect(() => {
     if (!activeThreadRef || !activePreviewMiniPlayer) return;
@@ -3421,7 +3425,7 @@ function ChatViewContent(props: ChatViewProps) {
   const createBrowserSurface = useCallback(
     (profileId?: string) => {
       if (!activeThreadRef) return;
-      if (!isPreviewSupportedInRuntime(activeThreadRef?.environmentId)) {
+      if (!isPreviewAvailableFor(activeThreadRef?.environmentId)) {
         toastManager.add({
           type: "info",
           title: "Browser unavailable",
@@ -3578,7 +3582,7 @@ function ChatViewContent(props: ChatViewProps) {
     [activeProject, activeThreadRef],
   );
   const togglePreviewPanel = useCallback(() => {
-    if (!activeThreadRef || !isPreviewSupportedInRuntime(activeThreadRef?.environmentId)) return;
+    if (!activeThreadRef || !isPreviewAvailableFor(activeThreadRef?.environmentId)) return;
     if (previewPanelOpen) {
       useRightPanelStore.getState().close(activeThreadRef);
       return;
@@ -7014,7 +7018,7 @@ function ChatViewContent(props: ChatViewProps) {
           }
           onAddSideChat={sideChatAvailable ? () => void addSideChatSurface() : undefined}
           sideChatAvailable={sideChatAvailable}
-          browserAvailable={isPreviewSupportedInRuntime(activeThreadRef?.environmentId)}
+          browserAvailable={isPreviewAvailableFor(activeThreadRef?.environmentId)}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
         >
@@ -7031,7 +7035,7 @@ function ChatViewContent(props: ChatViewProps) {
             !background &&
             !(
               activeRightPanelKind === "preview" &&
-              isPreviewSupportedInRuntime(activeThreadRef?.environmentId)
+              isPreviewAvailableFor(activeThreadRef?.environmentId)
             )
           }
         >
@@ -7066,7 +7070,7 @@ function ChatViewContent(props: ChatViewProps) {
             }
             onAddSideChat={sideChatAvailable ? () => void addSideChatSurface() : undefined}
             sideChatAvailable={sideChatAvailable}
-            browserAvailable={isPreviewSupportedInRuntime(activeThreadRef?.environmentId)}
+            browserAvailable={isPreviewAvailableFor(activeThreadRef?.environmentId)}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
           >

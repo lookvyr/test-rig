@@ -133,6 +133,7 @@ import {
   type EventNdjsonLogger,
   shouldPersistProviderEvent,
 } from "../../provider/Layers/EventNdjsonLogger.ts";
+import * as PortScanner from "../../preview/PortScanner.ts";
 import * as ProviderEventLoggers from "../../provider/Layers/ProviderEventLoggers.ts";
 import {
   claudeRateLimitEventToUpdate,
@@ -672,11 +673,12 @@ export function makeClaudeAgentSdkProtocolLogger(input: {
 export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
   ClaudeAgentSdkQueryRunner,
   never,
-  Crypto.Crypto | ProviderEventLoggers.ProviderEventLoggers
+  Crypto.Crypto | ProviderEventLoggers.ProviderEventLoggers | PortScanner.PortDiscovery
 > = Layer.effect(
   ClaudeAgentSdkQueryRunner,
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto;
+    const portDiscovery = yield* PortScanner.PortDiscovery;
     const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
 
     return ClaudeAgentSdkQueryRunner.of({
@@ -700,14 +702,26 @@ export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
           ),
           Stream.toAsyncIterable,
         );
-        const queryRuntime = yield* Effect.try({
-          try: () =>
-            query({
-              prompt,
-              options: input.options,
-            }),
-          catch: (cause) => queryRunnerError(cause, "query"),
+        // Jobs the agent starts inherit the thread, so port discovery can attribute their servers.
+        const options = {
+          ...input.options,
+          env: {
+            ...(input.options.env ?? process.env),
+            ...portDiscovery.agentEnvironment(input.threadId),
+          },
+        };
+        // While an agent runs, any new listener may be a server it started.
+        const releaseAgent = portDiscovery.trackAgent();
+        let agentReleased = false;
+        const endAgent = Effect.sync(() => {
+          if (agentReleased) return;
+          agentReleased = true;
+          releaseAgent();
         });
+        const queryRuntime = yield* Effect.try({
+          try: () => query({ prompt, options }),
+          catch: (cause) => queryRunnerError(cause, "query"),
+        }).pipe(Effect.tapError(() => endAgent));
         yield* logProtocolEvent({
           direction: "outgoing",
           stage: "decoded",
@@ -810,6 +824,7 @@ export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
           ),
           close: Queue.shutdown(promptQueue).pipe(
             Effect.andThen(closeClaudeQuery(queryRuntime)),
+            Effect.ensuring(endAgent),
             Effect.tap(() =>
               logProtocolEvent({
                 direction: "outgoing",

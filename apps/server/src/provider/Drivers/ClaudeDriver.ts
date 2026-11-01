@@ -1,3 +1,4 @@
+import type * as PortScanner from "../../preview/PortScanner.ts";
 import {
   createClaudeAdapterV2,
   claudeAgentSdkQueryRunnerLiveLayer,
@@ -94,7 +95,9 @@ export type ClaudeDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | ServerConfig
-  | ServerSettingsService;
+  | ServerSettingsService
+  // The Claude runner counts its CLIs as running agents for port discovery.
+  | PortScanner.PortDiscovery;
 
 const withInstanceIdentity =
   (input: {

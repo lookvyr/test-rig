@@ -205,8 +205,8 @@ export function PreviewChromeRow({
                       inputRef.current?.blur();
                     }
                   }}
-                  aria-label="Search Google or enter URL"
-                  placeholder="Search Google or enter URL"
+                  aria-label="Search or enter URL"
+                  placeholder="Search or enter URL"
                   spellCheck={false}
                   disabled={inputDisabled}
                   data-preview-url-input

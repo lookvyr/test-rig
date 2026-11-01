@@ -1,4 +1,10 @@
-import { normalizePreviewUrl } from "@t3tools/shared/preview";
+import {
+  fillSearchUrlTemplate,
+  normalizePreviewUrl,
+  resolveSearchUrlTemplate,
+} from "@t3tools/shared/preview";
+
+import { getClientSettings } from "~/hooks/useSettings";
 
 /** Resolve human address-bar input without changing URL-only agent or server APIs. */
 export function resolvePreviewAddress(input: string): string {
@@ -23,5 +29,6 @@ export function resolvePreviewAddress(input: string): string {
   if (value.length === 0 || hasScheme || looksLikeHost) {
     return normalizePreviewUrl(value);
   }
-  return `https://www.google.com/search?${new URLSearchParams({ q: value })}`;
+  // Search terms go to the engine chosen in Settings, DuckDuckGo by default.
+  return fillSearchUrlTemplate(resolveSearchUrlTemplate(getClientSettings()), value);
 }

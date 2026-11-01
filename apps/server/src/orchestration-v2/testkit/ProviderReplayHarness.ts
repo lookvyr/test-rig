@@ -44,6 +44,7 @@ import * as ProviderSwitchService from "../ProviderSwitchService.ts";
 import * as ProviderTurnControlService from "../ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
 import { worktreeRepairDependenciesTestLayer } from "../ProviderTurnStartService.testkit.ts";
+import * as PreviewAgentActivity from "../../preview/PreviewAgentActivity.ts";
 import * as RunExecutionService from "../RunExecutionService.ts";
 import * as RunFinalizationService from "../RunFinalizationService.ts";
 import * as ThreadTitleRegenerationService from "../ThreadTitleRegenerationService.ts";
@@ -351,6 +352,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
         IdAllocator.layer,
         providerEventIngestorProvided,
         serverSettingsLayer,
+        PreviewAgentActivity.layer,
       ),
     ),
   );

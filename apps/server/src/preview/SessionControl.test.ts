@@ -16,7 +16,7 @@ describe("SessionControl", () => {
       calls.push("agent finished");
     });
     await entered.promise;
-    const human = control.human(async () => {
+    const human = control.human("viewer", async () => {
       calls.push("human");
     });
     const next = control.agent("agent", async () => {
@@ -36,7 +36,7 @@ describe("SessionControl", () => {
       control.track(navigation.promise);
     });
     const input = vi.fn(async () => {});
-    const queued = control.human(input);
+    const queued = control.human("viewer", input);
     expect(input).not.toHaveBeenCalled();
     navigation.resolve();
     await queued;
@@ -50,7 +50,7 @@ describe("SessionControl", () => {
       reason: "agentMismatch",
     });
     expect(wrongAgent).not.toHaveBeenCalled();
-    await expect(control.human(async () => "human")).resolves.toBe("human");
+    await expect(control.human("viewer", async () => "human")).resolves.toBe("human");
     await expect(control.agent("owner", async () => "owner")).resolves.toBe("owner");
   });
 
@@ -64,11 +64,60 @@ describe("SessionControl", () => {
     });
     await entered.promise;
     const input = vi.fn(async () => {});
-    const rejected = expect(control.human(input)).rejects.toMatchObject({ reason: "closed" });
+    const rejected = expect(control.human("viewer", input)).rejects.toMatchObject({
+      reason: "closed",
+    });
     const closed = control.close();
     release.resolve();
     await Promise.all([active, closed, rejected]);
     await expect(control.agent("agent", input)).rejects.toMatchObject({ reason: "closed" });
     expect(input).not.toHaveBeenCalled();
+  });
+
+  it("coalesces waiting hovers without expiring the agent's refs", async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const invalidate = vi.fn();
+    const control = new SessionControl("agent", invalidate);
+    const active = control.agent("agent", async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const hovers: number[] = [];
+    const first = control.humanLatest("viewer", "hover", async () => {
+      hovers.push(1);
+    });
+    const second = control.humanLatest("viewer", "hover", async () => {
+      hovers.push(2);
+    });
+    release.resolve();
+    await Promise.all([active, first, second]);
+    expect(hovers).toEqual([2]);
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("starts the agent's next action after a viewer navigation settles", async () => {
+    const navigation = Promise.withResolvers<void>();
+    const control = new SessionControl("agent", () => {});
+    await control.human("viewer", async () => {
+      control.trackUntilHandoff(navigation.promise);
+    });
+    const action = vi.fn(async () => {});
+    const queued = control.agent("agent", action);
+    await Promise.resolve();
+    expect(action).not.toHaveBeenCalled();
+    navigation.resolve();
+    await queued;
+    expect(action).toHaveBeenCalledOnce();
+  });
+
+  it("does not start an agent action after its deadline", async () => {
+    const control = new SessionControl("agent", () => {});
+    const action = vi.fn(async () => {});
+    await expect(control.agent("agent", action, performance.now() - 1)).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
+    expect(action).not.toHaveBeenCalled();
   });
 });

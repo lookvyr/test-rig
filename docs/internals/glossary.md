@@ -14,6 +14,7 @@ contracts and events do not imply that excluded operations remain available.
 - [Orchestration](#orchestration)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
+- [Browser](#browser)
 
 ## Concepts
 
@@ -148,6 +149,20 @@ The patch difference between two checkpoints. Query logic lives in [CheckpointDi
 #### Turn diff
 
 The file patch and changed-file summary for one turn. It is usually computed in [CheckpointDiffQuery.ts][20], represented in [the contracts][1], and recorded into thread state by [projector.ts][4].
+
+### Browser
+
+#### Server browser
+
+The server-side owner of every browser tab and the only engine for agent browser automation, in `apps/server/src/preview/ServerBrowser.ts`. It drives pages with Playwright: either a tab in its own headless Chromium, or a desktop-rendered tab reached through the desktop browser host.
+
+#### Desktop browser host
+
+The desktop side of a server-owned tab, in `apps/desktop/src/preview/DesktopBrowserHost.ts`. The desktop renders the page in a `<webview>` and shares that webview's debugger with the server over bootstrap fds 6 and 7. `CdpRelay.ts` presents the relay to Playwright as one browser page. The server end is `apps/server/src/preview/DesktopBrowserChannel.ts`.
+
+#### Headless tab
+
+A server-owned tab that no desktop renders, marked `headless` on its preview snapshot. Every client streams it from the server.
 
 ## Practical Shortcuts
 

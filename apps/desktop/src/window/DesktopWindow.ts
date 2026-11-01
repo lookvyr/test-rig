@@ -346,6 +346,8 @@ export const make = Effect.gen(function* () {
         nodeIntegration: false,
         sandbox: true,
         webviewTag: true,
+        // Guest fullscreen propagates to the embedder; both must opt out to keep it inside the webview.
+        disableHtmlFullscreenWindowResize: true,
       },
     });
 
@@ -452,6 +454,7 @@ export const make = Effect.gen(function* () {
       webPreferences.nodeIntegration = false;
       webPreferences.nodeIntegrationInSubFrames = false;
       webPreferences.contextIsolation = false;
+      webPreferences.disableHtmlFullscreenWindowResize = true;
     });
 
     const contextMenuContents = new WeakSet<Electron.WebContents>();

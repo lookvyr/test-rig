@@ -37,12 +37,8 @@ import {
 import { PreviewToolkit } from "./tools.ts";
 
 describe("normalizePreviewOpenInput", () => {
-  it("opens the inline preview and reuses the current tab by default", () => {
-    expect(normalizePreviewOpenInput({})).toEqual({
-      open: true,
-      reuseExistingTab: true,
-      show: true,
-    });
+  it("leaves showing to the client's preference and reuses the current tab by default", () => {
+    expect(normalizePreviewOpenInput({})).toEqual({ reuseExistingTab: true });
   });
 
   it("preserves an explicit background-only opt-out", () => {

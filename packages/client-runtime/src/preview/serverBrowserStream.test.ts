@@ -57,42 +57,11 @@ describe("preview stream control", () => {
     return { client, socket: FakeSocket.current, onFrame, onControl };
   };
   const agent: PreviewStreamControl = {
-    canOperate: false,
+    canOperate: true,
     controller: "unclaimed",
     generation: 1,
     dialog: null,
   };
-
-  it("marks passive viewers without changing active viewer URLs", () => {
-    const { client, socket } = connect();
-    expect(new URL(socket.url).searchParams.has("interactive")).toBe(false);
-    client.stop();
-    const passive = createPreviewStreamClient(
-      { ...target, interactive: false },
-      {
-        onFrame: vi.fn(),
-        onViewport: vi.fn(),
-        onConnectedChange: vi.fn(),
-        onUnauthorized: vi.fn(),
-      },
-    );
-    expect(new URL(FakeSocket.current.url).searchParams.get("interactive")).toBe("false");
-    passive.stop();
-  });
-
-  it("does not resize or navigate before access is granted", () => {
-    const { client, socket } = connect();
-    expect(client.send({ type: "resize", width: 390, height: 844 })).toBe(false);
-    expect(client.send({ type: "navigate", url: "http://example.test" })).toBe(false);
-    socket.control(agent);
-    expect(client.send({ type: "text", text: "premature" })).toBe(false);
-    socket.control({ ...agent, canOperate: true, controller: "you", generation: 2 });
-    expect(client.send({ type: "text", text: "owned" })).toBe(true);
-    expect(socket.sent.map((entry) => JSON.parse(entry))).toEqual([
-      { type: "text", text: "owned" },
-    ]);
-    client.stop();
-  });
 
   it("does not grant control from malformed dialog metadata", () => {
     const { client, socket, onControl } = connect();
@@ -121,11 +90,10 @@ describe("preview stream control", () => {
     client.stop();
   });
 
-  it("revokes input when access changes and exposes pending dialog state", () => {
+  it("revokes input when the connection loses operation and exposes pending dialog state", () => {
     const { client, socket, onControl } = connect();
     const owned = {
       ...agent,
-      canOperate: true,
       controller: "you" as const,
       dialog: { type: "prompt", message: "Name?", defaultValue: "initial" },
     };

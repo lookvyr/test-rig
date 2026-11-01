@@ -1,5 +1,5 @@
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
-import { BrowserProfilesSettings } from "./BrowserProfilesSettings";
+import { BrowserProfilesSettings, BrowserSearchSettings } from "./BrowserProfilesSettings";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import { ArchiveIcon, ArchiveX, LoaderIcon, SettingsIcon } from "lucide-react";
 import { Link } from "@tanstack/react-router";
@@ -1948,6 +1948,7 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
       <BrowserProfilesSettings />
+      <BrowserSearchSettings />
     </SettingsPageContainer>
   );
 }

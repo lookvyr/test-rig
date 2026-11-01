@@ -13,17 +13,29 @@ export interface HostedBrowserWebviewWrapperStyle {
   readonly zIndex: number;
   readonly pointerEvents: "auto" | "none";
   readonly borderRadius?: number;
-  readonly visibility?: "visible";
+  readonly visibility?: "hidden" | "visible";
 }
+
+const HIDDEN_BROWSER_WEBVIEW_OFFSET = -100_000;
 
 export function resolveHostedBrowserWebviewWrapperStyle(input: {
   readonly active: boolean;
+  readonly renderingActive: boolean;
+  readonly keepPaintableWhenInactive?: boolean;
   readonly cornerRadius?: number;
   readonly zIndex?: number;
   readonly rect: BrowserSurfaceRect | null;
   readonly hiddenSize: HostedBrowserWebviewSize;
 }): HostedBrowserWebviewWrapperStyle {
-  const { active, cornerRadius = 0, hiddenSize, rect, zIndex = 30 } = input;
+  const {
+    active,
+    cornerRadius = 0,
+    hiddenSize,
+    keepPaintableWhenInactive = false,
+    rect,
+    renderingActive,
+    zIndex = 30,
+  } = input;
   if (active && rect) {
     return {
       left: rect.x,
@@ -36,16 +48,26 @@ export function resolveHostedBrowserWebviewWrapperStyle(input: {
     };
   }
 
+  if (renderingActive) {
+    // Electron stops compositing offscreen guests; keep capture-active guests inside the viewport behind the app.
+    return {
+      left: 0,
+      top: 0,
+      width: hiddenSize.width,
+      height: hiddenSize.height,
+      zIndex: -1,
+      pointerEvents: "none",
+      visibility: "visible",
+    };
+  }
+
   return {
-    left: 0,
-    top: 0,
+    left: HIDDEN_BROWSER_WEBVIEW_OFFSET,
+    top: HIDDEN_BROWSER_WEBVIEW_OFFSET,
     width: hiddenSize.width,
     height: hiddenSize.height,
     zIndex: -1,
     pointerEvents: "none",
-    // Keep background guests inside the viewport, behind the app. Offscreen
-    // guests can stall screenshot capture; visibility:hidden can also stall
-    // CDP Runtime/Input commands.
-    visibility: "visible",
+    visibility: keepPaintableWhenInactive ? "visible" : "hidden",
   };
 }

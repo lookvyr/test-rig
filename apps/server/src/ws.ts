@@ -91,7 +91,7 @@ import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
-import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
+import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import { issueAttachmentUploadUrl } from "./assets/AttachmentUpload.ts";
@@ -308,7 +308,9 @@ function toAuthAccessStreamEvent(
 
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
-  previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
+  serverBrowser: ServerBrowser.ServerBrowser["Service"],
+  reportProfiles: ServerBrowser.ProfileReporter,
+  reportShownTabs: ServerBrowser.ShownTabsReporter,
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -1364,16 +1366,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.previewOpen, previewManager.open(input), {
             "rpc.aggregate": "preview",
           }),
-        [WS_METHODS.previewNavigate]: (input) =>
-          observeRpcEffect(WS_METHODS.previewNavigate, previewManager.navigate(input), {
-            "rpc.aggregate": "preview",
-          }),
         [WS_METHODS.previewResize]: (input) =>
           observeRpcEffect(WS_METHODS.previewResize, previewManager.resize(input), {
             "rpc.aggregate": "preview",
           }),
-        [WS_METHODS.previewRefresh]: (input) =>
-          observeRpcEffect(WS_METHODS.previewRefresh, previewManager.refresh(input), {
+        [WS_METHODS.previewAdjust]: (input) =>
+          observeRpcEffect(WS_METHODS.previewAdjust, previewManager.adjust(input), {
             "rpc.aggregate": "preview",
           }),
         [WS_METHODS.previewClose]: (input) =>
@@ -1388,45 +1386,49 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.previewReportStatus, previewManager.reportStatus(input), {
             "rpc.aggregate": "preview",
           }),
-        [WS_METHODS.previewAutomationConnect]: (input) =>
-          observeRpcStreamEffect(
-            WS_METHODS.previewAutomationConnect,
-            previewAutomationBroker.connect(input),
-            { "rpc.aggregate": "preview-automation" },
-          ),
-        [WS_METHODS.previewAutomationRespond]: (input) =>
+        [WS_METHODS.previewClearProfile]: (input) =>
           observeRpcEffect(
-            WS_METHODS.previewAutomationRespond,
-            previewAutomationBroker.respond(input),
-            { "rpc.aggregate": "preview-automation" },
+            WS_METHODS.previewClearProfile,
+            serverBrowser.clearProfile(input.profileId),
+            { "rpc.aggregate": "preview" },
           ),
-        [WS_METHODS.previewAutomationFocusHost]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.previewAutomationFocusHost,
-            previewAutomationBroker.focusHost(input),
-            { "rpc.aggregate": "preview-automation" },
-          ),
+        [WS_METHODS.previewReportProfiles]: (input) =>
+          observeRpcEffect(WS_METHODS.previewReportProfiles, reportProfiles(input), {
+            "rpc.aggregate": "preview",
+          }),
+        [WS_METHODS.previewReportShownTabs]: (input) =>
+          observeRpcEffect(WS_METHODS.previewReportShownTabs, reportShownTabs(input), {
+            "rpc.aggregate": "preview",
+          }),
         [WS_METHODS.subscribePreviewEvents]: (_input) =>
           observeRpcStream(WS_METHODS.subscribePreviewEvents, previewManager.events, {
             "rpc.aggregate": "preview",
           }),
-        [WS_METHODS.subscribeDiscoveredLocalServers]: (_input) =>
+        [WS_METHODS.previewStopLocalServer]: (input) =>
+          observeRpcEffect(WS_METHODS.previewStopLocalServer, portDiscovery.stopServer(input), {
+            "rpc.aggregate": "preview",
+          }),
+        [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeDiscoveredLocalServers,
             Stream.callback<DiscoveredLocalServerList>((queue) =>
               Effect.gen(function* () {
+                const configuredUrls = input.configuredUrls ?? [];
                 yield* portDiscovery.retain;
-                const initial = yield* portDiscovery.scan();
+                const initial = yield* portDiscovery.scan(configuredUrls);
                 const initialScannedAt = DateTime.formatIso(yield* DateTime.now);
                 yield* Queue.offer(queue, {
                   servers: initial,
                   scannedAt: initialScannedAt,
+                  configuredUrlProbing: true,
                 });
-                yield* portDiscovery.subscribe((servers) =>
-                  Effect.gen(function* () {
-                    const scannedAt = DateTime.formatIso(yield* DateTime.now);
-                    yield* Queue.offer(queue, { servers, scannedAt });
-                  }),
+                yield* portDiscovery.subscribe(
+                  { configuredUrls, initialSnapshot: initial },
+                  (servers) =>
+                    Effect.gen(function* () {
+                      const scannedAt = DateTime.formatIso(yield* DateTime.now);
+                      yield* Queue.offer(queue, { servers, scannedAt, configuredUrlProbing: true });
+                    }),
                 );
               }),
             ),
@@ -1562,7 +1564,7 @@ export const WS_RPC_SERVER_OPTIONS = {
 
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
-    const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    const serverBrowser = yield* ServerBrowser.ServerBrowser;
     const appMcpOAuth = yield* AppMcpOAuth;
     return HttpRouter.add(
       "GET",
@@ -1594,6 +1596,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
             failEnvironmentInternal("internal_error", error),
           ),
         );
+        const reportProfiles = yield* serverBrowser.profileReporter;
+        const reportShownTabs = yield* serverBrowser.shownTabsReporter;
         const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(
           WsRpcGroup,
           WS_RPC_SERVER_OPTIONS,
@@ -1601,7 +1605,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           Effect.provide(
             Layer.mergeAll(
               DefectReporter.layer,
-              makeWsRpcLayer(session, previewAutomationBroker).pipe(
+              makeWsRpcLayer(session, serverBrowser, reportProfiles, reportShownTabs).pipe(
                 Layer.provideMerge(RpcSerialization.layerJson),
                 Layer.provide(ProviderMaintenanceRunner.layer),
                 Layer.provide(

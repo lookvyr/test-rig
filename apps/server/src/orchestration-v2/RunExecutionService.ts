@@ -36,6 +36,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
+import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
@@ -584,6 +585,7 @@ export const layer: Layer.Layer<
   | IdAllocator.IdAllocatorV2
   | ProviderEventIngestor.ProviderEventIngestorV2
   | ServerSettings.ServerSettingsService
+  | PreviewAgentActivity.PreviewAgentActivity
 > = Layer.effect(
   RunExecutionServiceV2,
   Effect.gen(function* () {
@@ -592,6 +594,7 @@ export const layer: Layer.Layer<
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
+    const previewAgentActivity = yield* PreviewAgentActivity.PreviewAgentActivity;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
 
     const writeFinalRunEvents = (input: {
@@ -1232,6 +1235,16 @@ export const layer: Layer.Layer<
           });
           const filterAssistantEvent = makeAssistantStreamingFilter(responseStreamingMode);
           const refreshedToolItems = new Set<TurnItemId>();
+          // Preview tabs stay focused while the root turn and its children run. Background
+          // commands such as a dev server keep ingestion alive afterwards and do not count.
+          const agentTurnsSettled = Effect.gen(function* () {
+            if (!(yield* Ref.get(rootTerminalSeen))) return false;
+            const terminal = yield* Ref.get(terminalEvent);
+            if (terminal !== null && terminal.status !== "completed") return true;
+            if ((yield* Ref.get(activeChildProviderTurns)).size > 0) return false;
+            return (yield* Ref.get(activeChildSubagents)).size === 0;
+          });
+          const endPreviewActivity = yield* previewAgentActivity.begin(input.run.threadId);
           const providerEventFiber = yield* eventSubscription.events.pipe(
             Stream.filterEffect((event) =>
               Ref.modify(eventRouting, (state) => routeProviderEvent(event, routeIdentity, state)),
@@ -1347,6 +1360,11 @@ export const layer: Layer.Layer<
                 yield* trackChildLifecycle(event, deliveredEvent !== null);
               }),
             ),
+            Stream.tap(() =>
+              Effect.gen(function* () {
+                if (yield* agentTurnsSettled) yield* endPreviewActivity;
+              }),
+            ),
             Stream.takeUntilEffect(() => shouldStopProviderEventIngestion),
             Stream.runDrain,
             Effect.mapError((cause) => new RunExecutionIngestError({ runId: input.run.id, cause })),
@@ -1429,6 +1447,7 @@ export const layer: Layer.Layer<
                   ),
                 ),
             ),
+            Effect.ensuring(endPreviewActivity),
             Effect.ensuring(eventSubscription.close),
             Effect.forkDetach,
           );

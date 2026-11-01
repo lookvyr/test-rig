@@ -1,5 +1,71 @@
 # Selected upstream ports
 
+## October 31 server-owned browser
+
+Brings Test Rig's browser to nightly `v0.1.6-nightly.20261031.3977`. The October 7
+port took only the server-side half of
+[#15328](https://github.com/pingdotgg/t3code/pull/15328): headless Chromium as a
+fallback automation host behind desktop renderer hosts. This port completes it.
+The server owns every tab and is the only automation engine. The desktop shares
+each `<webview>`'s debugger with the server through `DesktopBrowserHost` and
+`CdpRelay` over bootstrap fds 6 and 7, and the server's Playwright drives it.
+Renderer automation hosts, the desktop's injected Playwright runtime, and
+`PreviewKeyboard` are removed, along with the `previewAutomation.*`,
+`preview.navigate`, and `preview.refresh` RPCs. About 180 upstream browser PRs
+since the October 3 baseline arrive with the taken files. These include
+reattaching a dropped debugger, bounding oversized CDP events, isolating tabs for
+threads that share a provider session, queued-action deadlines, sign-in and
+captcha fixes, file pickers, downloads, and owned-listener port discovery with
+**Stop** ([#16687](https://github.com/pingdotgg/t3code/pull/16687),
+[#27893](https://github.com/pingdotgg/t3code/pull/27893),
+[#22542](https://github.com/pingdotgg/t3code/pull/22542)).
+
+Kept or adapted for Test Rig:
+
+- **Shared control.** Upstream's take/release control is not ported.
+  `SessionControl` orders human and agent work without an exclusive owner. Human
+  input (except hovers) expires the agent's refs. Agents wait for viewer
+  navigations outside the queue. File pickers, downloads, and popups go to the
+  operating viewer whose input ran most recently.
+- **Agent tools.** Click, type, press, scroll, hover, select, drag, and upload
+  merge into `preview_act`
+  ([#25423](https://github.com/pingdotgg/t3code/pull/25423)). `preview_close` is
+  dropped for `t3_preview_close`. `preview_type_secret` stays separate for
+  private secret cards. Upstream's tool-icon status probe is not ported.
+- **Partitions.** Browser partition names keep the Test Rig prefixes and the
+  original UTF-8 digest, so saved profile logins survive. A regression test pins
+  them.
+- **Shortcuts.** The renderer publishes the user's keybindings for forwarded
+  commands (`setForwardedShortcuts`). The desktop replays a matching chord in the
+  app window instead of upstream's per-command menu action, so existing handlers
+  and `when` clauses apply. Settings (`mod+,`) is forwarded as its menu action.
+- **Search.** Upstream's search engine choice is ported with Google, Test Rig's
+  earlier engine, as the default. Test Rig keeps its own address-bar parser.
+- **Reveals.** `ServerBrowserSessions` presents reveals unless the open panel
+  already shows the tab: the floating player only for tabs this desktop renders
+  itself, since it cannot show a streamed tab; otherwise the panel. Upstream
+  skips any tab with a panel tab, even when the panel is closed. `preview_open` without `open` leaves the choice to
+  the client, as upstream now does, and unrevealed agent tabs stay out of the
+  panel until revealed.
+- **Visibility.** Desktop-rendered tabs have no stream viewers, so the desktop
+  reports the server tabs it shows (`preview.reportShownTabs`, per connection)
+  and the server counts them as visible. `preview_open` waits briefly (1.5 s at
+  most) after a reveal for a client to show the tab, so its `visible` describes
+  the shown tab. Upstream reports these tabs as hidden.
+- **Scopes and identity.** `preview:operate` maps to `orchestration:operate`.
+  Environment variables, the AppArmor profile, and setup commands use `TEST_RIG`
+  and `test-rig`.
+- **Toolchain.** The desktop stays on Electron 41. `ClipboardItem` and
+  `colorSpace` capture options are replaced. Two upstream components were
+  rewritten slightly so the Babel React Compiler 1.0 compiles them; uncompiled,
+  the server-browser stream reconnected on every render.
+
+Excluded: macOS passkeys, browser cookie import, renderer-history telemetry, the
+agent-scope launcher for `t3 service protect`, device/simulator surfaces,
+upstream's recent-URL and favicon stores, and the side-chat right-panel refactors
+that taken upstream web files assume. Desktop favicon capture still runs and
+reaches tab state.
+
 ## October 16 browser media
 
 The browser recording transfer and retention flow is adapted from nightly

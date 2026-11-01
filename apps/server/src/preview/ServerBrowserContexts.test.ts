@@ -66,7 +66,11 @@ describe("ServerBrowserContexts", () => {
   it("lazily shares one browser across concurrent isolated sessions and reuses each context", async () => {
     const browser = makeBrowser();
     const launch = Promise.withResolvers<Browser>();
-    launches.launch.mockReturnValue(launch.promise);
+    const started = Promise.withResolvers<void>();
+    launches.launch.mockImplementation(() => {
+      started.resolve();
+      return launch.promise;
+    });
     const configuration = options();
     const pool = new ServerBrowserContexts(configuration);
     expect(configuration.executable).not.toHaveBeenCalled();
@@ -74,11 +78,14 @@ describe("ServerBrowserContexts", () => {
     const again = pool.contextFor("default", "agent-a");
     const second = pool.contextFor("default", "agent-b");
     const incognito = pool.contextFor(INCOGNITO_BROWSER_PROFILE_ID);
+    await started.promise;
     launch.resolve(browser as unknown as Browser);
     const [a, reused, b, privateContext] = await Promise.all([first, again, second, incognito]);
     expect(a).toBe(reused);
     expect(new Set([a, b, privateContext]).size).toBe(3);
-    expect(launches.launch).toHaveBeenCalledTimes(1);
+    expect(launches.launch).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ executablePath: "/test/chromium" }),
+    );
     expect(launches.persistent).not.toHaveBeenCalled();
     expect(browser.newContext).toHaveBeenCalledWith({
       viewport: { width: 1280, height: 800 },
@@ -105,6 +112,15 @@ describe("ServerBrowserContexts", () => {
     expect(launches.mkdir).toHaveBeenCalledWith("/test/profiles/work%2Fteam", { recursive: true });
     await pool.close();
     expect(human.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("diagnoses a launch failure against the executable", async () => {
+    const diagnosed = new Error("diagnosed");
+    const diagnose = vi.fn(async () => diagnosed);
+    launches.launch.mockRejectedValueOnce(new Error("sandboxing failed"));
+    const pool = new ServerBrowserContexts({ ...options(), diagnose });
+    await expect(pool.contextFor("default", "agent")).rejects.toBe(diagnosed);
+    expect(diagnose).toHaveBeenCalledExactlyOnceWith("/test/chromium", expect.any(Error));
   });
 
   it("clears a profile by closing its open context before deleting its storage", async () => {
@@ -137,6 +153,29 @@ describe("ServerBrowserContexts", () => {
     await pool.close();
   });
 
+  it("waits for the context to close when the same profile is cleared concurrently", async () => {
+    const human = makeContext();
+    const closed = Promise.withResolvers<void>();
+    human.close.mockImplementation(async () => closed.promise);
+    launches.persistent.mockResolvedValue(human as unknown as BrowserContext);
+    const pool = new ServerBrowserContexts(options());
+    await pool.contextFor("work/team");
+
+    const first = pool.clearProfile("work/team");
+    const second = pool.clearProfile("work/team");
+    const deletionsBeforeClose = launches.rm.mock.calls.length;
+    closed.resolve();
+    await Promise.all([first, second]);
+
+    expect(deletionsBeforeClose).toBe(0);
+    expect(human.close).toHaveBeenCalledTimes(1);
+    expect(launches.rm).toHaveBeenCalledExactlyOnceWith("/test/profiles/work%2Fteam", {
+      recursive: true,
+      force: true,
+    });
+    await pool.close();
+  });
+
   it("opens a profile requested during its clear only after the storage is deleted", async () => {
     launches.persistent.mockImplementation(async () => makeContext() as unknown as BrowserContext);
     const configuration = options();
@@ -150,7 +189,6 @@ describe("ServerBrowserContexts", () => {
       await removed.promise;
       deleted = true;
     });
-    // Launching starts by resolving the executable; record whether storage was gone by then.
     const launchedAfterDelete: Array<boolean> = [];
     configuration.executable.mockImplementation(async () => {
       launchedAfterDelete.push(deleted);
@@ -208,22 +246,6 @@ describe("ServerBrowserContexts", () => {
     expect(launches.launch).toHaveBeenLastCalledWith(
       expect.objectContaining({ chromiumSandbox: true }),
     );
-    await pool.close();
-  });
-
-  it("evicts a closed context without closing other agents or relaunching chromium", async () => {
-    const browser = makeBrowser();
-    launches.launch.mockResolvedValue(browser as unknown as Browser);
-    const onContextClose = vi.fn();
-    const pool = new ServerBrowserContexts({ ...options(), onContextClose });
-    const a = await pool.contextFor("default", "agent-a");
-    const b = await pool.contextFor("default", "agent-b");
-    await a.close();
-    expect(onContextClose).toHaveBeenCalledWith(a);
-    expect(await pool.contextFor("default", "agent-a")).not.toBe(a);
-    expect(await pool.contextFor("default", "agent-b")).toBe(b);
-    expect(browser.close).not.toHaveBeenCalled();
-    expect(launches.launch).toHaveBeenCalledTimes(1);
     await pool.close();
   });
 

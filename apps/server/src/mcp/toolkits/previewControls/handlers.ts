@@ -3,6 +3,7 @@ import * as Preview from "../../../preview/Manager.ts";
 import { requireMcpCapability } from "../../McpInvocationContext.ts";
 import { unavailable } from "../../threadAccess.ts";
 import { PreviewControlsToolkit } from "./tools.ts";
+import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 
 const access = Effect.gen(function* () {
   // The preview capability already reflects the calling project's access setting.
@@ -25,6 +26,15 @@ export const PreviewControlsHandlersLive = PreviewControlsToolkit.toLayer({
   t3_preview_close: (input) =>
     Effect.gen(function* () {
       const { scope, manager } = yield* access;
+      const { sessions } = yield* manager.list({ threadId: scope.threadId });
+      // The server browser closes its own tabs, and reports when this agent may not.
+      if (
+        sessions.some((session) => session.tabId === input.tabId && session.runtime === "server")
+      ) {
+        const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+        yield* broker.invoke({ scope, operation: "close", input: {}, tabId: input.tabId });
+        return {};
+      }
       yield* manager
         .close({ threadId: scope.threadId, tabId: input.tabId })
         .pipe(Effect.mapError(unavailable));

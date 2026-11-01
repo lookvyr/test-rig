@@ -1,7 +1,7 @@
 import {
   NonNegativeInt,
   OrchestratorMcpFailure,
-  PreviewAutomationUnavailableError,
+  PreviewAutomationError,
   PreviewListResult,
   PreviewTabId,
 } from "@t3tools/contracts";
@@ -9,11 +9,16 @@ import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/unstable/ai";
 import * as PreviewManager from "../../../preview/Manager.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 
 const shared = {
-  failure: Schema.Union([OrchestratorMcpFailure, PreviewAutomationUnavailableError]),
+  failure: Schema.Union([PreviewAutomationError, OrchestratorMcpFailure]),
   failureMode: "return" as const,
-  dependencies: [McpInvocationContext.McpInvocationContext, PreviewManager.PreviewManager],
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    PreviewManager.PreviewManager,
+    PreviewAutomationBroker.PreviewAutomationBroker,
+  ],
 };
 const PreviewListTool = Tool.make("t3_preview_list", {
   ...shared,
@@ -31,7 +36,8 @@ const PreviewListTool = Tool.make("t3_preview_list", {
   .annotate(Tool.Destructive, false);
 const PreviewCloseTool = Tool.make("t3_preview_close", {
   ...shared,
-  description: "Close one preview tab this thread owns. Does not wait for renderer cleanup.",
+  description:
+    "Close one preview tab this thread owns. Use it on a tab you opened for your own check when you finish.",
   parameters: Schema.Struct({ tabId: PreviewTabId }),
   success: Schema.Struct({}),
 }).annotate(Tool.Destructive, true);

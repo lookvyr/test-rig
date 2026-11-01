@@ -1,4 +1,3 @@
-import { DEFAULT_BROWSER_PROFILE_ID } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   DesktopPreviewBridge,
@@ -6,7 +5,6 @@ import type {
   EnvironmentId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
@@ -44,10 +42,10 @@ export type PreviewWebviewConfigError = typeof PreviewWebviewConfigError.Type;
 
 type PreviewConfigBridge = Pick<DesktopPreviewBridge, "getPreviewConfig">;
 
-export const loadPreviewWebviewConfig = (
+const loadPreviewWebviewConfig = (
   environmentId: EnvironmentId,
+  profileId?: string,
   bridge: PreviewConfigBridge | null = previewBridge,
-  profileId = DEFAULT_BROWSER_PROFILE_ID,
 ): Effect.Effect<DesktopPreviewWebviewConfig, PreviewWebviewConfigError> => {
   if (bridge === null) {
     return Effect.fail(new PreviewWebviewBridgeUnavailableError({ environmentId }));
@@ -59,23 +57,38 @@ export const loadPreviewWebviewConfig = (
   });
 };
 
-const previewWebviewConfigAtom = Atom.family((environmentId: EnvironmentId) =>
-  Atom.family((profileId: string) =>
-    Atom.make(loadPreviewWebviewConfig(environmentId, previewBridge, profileId)).pipe(
-      Atom.swr({
-        staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
-        revalidateOnMount: true,
-      }),
-      Atom.setIdleTTL(PREVIEW_CONFIG_IDLE_TTL_MS),
-      Atom.withLabel(`preview:webview-config:${environmentId}:${profileId}`),
-    ),
-  ),
-);
+// Atom.family needs a primitive key; keep profile last so delimiter-containing ids round-trip.
+const CONFIG_KEY_DELIMITER = "\u0000";
+
+const configKey = (environmentId: EnvironmentId, profileId: string | undefined): string =>
+  `${environmentId}${CONFIG_KEY_DELIMITER}${profileId ?? ""}`;
+
+const parseConfigKey = (key: string): { environmentId: EnvironmentId; profileId?: string } => {
+  const delimiter = key.indexOf(CONFIG_KEY_DELIMITER);
+  const environmentId = (delimiter === -1 ? key : key.slice(0, delimiter)) as EnvironmentId;
+  const profileId = delimiter === -1 ? "" : key.slice(delimiter + CONFIG_KEY_DELIMITER.length);
+  return {
+    environmentId,
+    ...(profileId === "" ? {} : { profileId }),
+  };
+};
+
+const previewWebviewConfigAtom = Atom.family((key: string) => {
+  const { environmentId, profileId } = parseConfigKey(key);
+  return Atom.make(loadPreviewWebviewConfig(environmentId, profileId)).pipe(
+    Atom.swr({
+      staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
+      revalidateOnMount: true,
+    }),
+    Atom.setIdleTTL(PREVIEW_CONFIG_IDLE_TTL_MS),
+    Atom.withLabel(`preview:webview-config:${key}`),
+  );
+});
 
 export function usePreviewWebviewConfig(
   environmentId: EnvironmentId,
-  profileId = DEFAULT_BROWSER_PROFILE_ID,
+  profileId?: string,
 ): DesktopPreviewWebviewConfig | null {
-  const result = useAtomValue(previewWebviewConfigAtom(environmentId)(profileId));
-  return Option.getOrNull(AsyncResult.value(result));
+  const result = useAtomValue(previewWebviewConfigAtom(configKey(environmentId, profileId)));
+  return AsyncResult.getOrElse(result, () => null);
 }

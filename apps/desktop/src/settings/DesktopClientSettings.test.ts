@@ -13,6 +13,16 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopClientSettings from "./DesktopClientSettings.ts";
 
 const clientSettings: ClientSettings = {
+  browserDefaultViewport: { _tag: "fill" },
+  browserDefaultZoomFactor: 1,
+  browserDefaultAppearance: "system",
+  browserRecordingFrameRate: 30,
+  browserRecordingShowKeyPresses: false,
+  browserRecordingShowMousePresses: false,
+  browserLinkTarget: "system",
+  browserSearchEngine: "duckduckgo",
+  browserCustomSearchUrl: "",
+  browserAutoShowFloatingPreview: true,
   browserProfiles: [],
   browserDefaultProfileId: "default",
   confirmThreadArchive: true,

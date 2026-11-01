@@ -1,7 +1,12 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Globe, RadioTower } from "lucide-react";
 
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+
 import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
+import { toastManager } from "~/components/ui/toast";
+import { previewEnvironment } from "~/state/preview";
+import { useAtomCommand } from "~/state/use-atom-command";
 
 import { PreviewLocalServerCard } from "./PreviewLocalServerCard";
 import { useDiscoveredLocalServers } from "./useDiscoveredLocalServers";
@@ -24,6 +29,17 @@ export function PreviewEmptyState({
     configuredUrls,
     recentlySeenUrls,
   });
+  const stopServer = useAtomCommand(previewEnvironment.stopLocalServer, "local server stop");
+  const stop = async (pid: number, port: number) => {
+    const result = await stopServer({ environmentId, input: { pid, port } });
+    if (result._tag !== "Failure") return;
+    const error = squashAtomCommandFailure(result);
+    toastManager.add({
+      type: "error",
+      title: "Could not stop the server",
+      description: error instanceof Error ? error.message : String(error),
+    });
+  };
 
   if (servers.length === 0) {
     return (
@@ -53,6 +69,10 @@ export function PreviewEmptyState({
               key={`${server.host}:${server.port}`}
               server={server}
               onOpen={() => onOpenUrl(server.url)}
+              // Only servers a thread's terminal or agent started can be stopped from here.
+              {...(server.pid !== null && (server.terminal !== null || server.agent)
+                ? { onStop: () => void stop(server.pid!, server.port) }
+                : {})}
             />
           ))}
         </div>

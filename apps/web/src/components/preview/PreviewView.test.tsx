@@ -40,7 +40,8 @@ const mocks = vi.hoisted(() => ({
   activeRecordingTabIds: new Set<string>(),
 }));
 
-vi.mock("~/state/session", () => ({
+vi.mock("~/state/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/state/session")>()),
   readPreparedConnection: mocks.readPreparedConnection,
 }));
 
@@ -383,7 +384,7 @@ describe("PreviewView navigation", () => {
     expect(mocks.submittedUrl?.("responsive design examples")).toBe(true);
     expect(mocks.navigate).toHaveBeenCalledWith(
       TEST_RUNTIME_TAB_ID,
-      "https://www.google.com/search?q=responsive+design+examples",
+      "https://www.google.com/search?q=responsive%20design%20examples",
     );
   });
 

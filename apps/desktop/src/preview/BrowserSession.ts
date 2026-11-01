@@ -1,5 +1,5 @@
-import type { Session } from "electron";
-import { session } from "electron";
+import type { Session, WebContents } from "electron";
+import { BrowserWindow, session } from "electron";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -9,33 +9,66 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
-import { DEFAULT_BROWSER_PROFILE_ID, INCOGNITO_BROWSER_PROFILE_ID } from "@t3tools/contracts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
 
-const encodeProfileScope = Schema.encodeSync(
-  Schema.fromJsonString(Schema.Tuple([Schema.String, Schema.String])),
-);
-
-const INCOGNITO_PARTITION_PREFIX = "test-rig-preview-incognito-";
+// Test Rig names; existing profiles keep their logins because the digest matches earlier releases.
 const PREVIEW_PARTITION_PREFIX = "persist:test-rig-preview-";
-const PROFILE_PARTITION_PREFIX = "persist:test-rig-preview-profile-";
+/** Ephemeral partitions omit persist: but retain a product prefix so the webview gate recognizes them. */
+const PREVIEW_EPHEMERAL_PARTITION_PREFIX = "test-rig-preview-ephemeral-";
+const PROFILE_PARTITION_MARKER = "profile-";
 
-// Permissions granted to preview web content. `clipboard-sanitized-write` is the
-// Electron permission behind `navigator.clipboard.writeText()` — note it is NOT
-// `clipboard-write`, which is not a valid Electron permission name. Async
-// clipboard writes are gated by the permission *check* handler (not only the
-// request handler), so both handlers must allow it; otherwise built-in "Copy"
-// buttons — e.g. the Next.js / Vercel error overlay — fail with
-// `Failed to execute 'writeText' on 'Clipboard': Write permission denied`.
+export type BrowserSessionPartitionNamespace = "profile";
+
+// Electron's clipboard API uses clipboard-sanitized-write and checks both permission handlers.
 const ALLOWED_PREVIEW_PERMISSIONS: ReadonlySet<string> = new Set([
-  "clipboard-read",
   "clipboard-sanitized-write",
-  "notifications",
   "geolocation",
-  // Deliberately NOT local-fonts: preview sessions run untrusted web content,
-  // and silently granting it would hand every page the user's installed-font
-  // fingerprint (and font file bytes via FontData.blob()). The app's own font
-  // picker runs in the main window session, which is unaffected by this list.
+  // DesktopWindow confines HTML fullscreen to the guest's webview.
+  "fullscreen",
+  // Loopback requests already succeed in Electron 44; permission-aware sign-in widgets query first.
+  "loopback-network",
+  // Deny local-fonts to untrusted previews: it exposes installed-font fingerprints and file bytes.
+  // Deny notifications: pages could impersonate Test Rig; app notifications use the default session.
 ]);
+
+const NEVER_EXTERNAL_PROTOCOLS: ReadonlySet<string> = new Set([
+  "about:",
+  "blob:",
+  "chrome:",
+  "data:",
+  "devtools:",
+  "file:",
+  "filesystem:",
+  "http:",
+  "https:",
+  "javascript:",
+  "view-source:",
+]);
+
+const externalProtocolPromptUrl = (rawUrl: string | undefined): string | null => {
+  if (!rawUrl) return null;
+  try {
+    const url = new URL(rawUrl);
+    return NEVER_EXTERNAL_PROTOCOLS.has(url.protocol) ? null : url.href;
+  } catch {
+    return null;
+  }
+};
+
+const MAX_PROMPT_URL_LENGTH = 300;
+
+const truncateForPrompt = (text: string): string =>
+  text.length > MAX_PROMPT_URL_LENGTH ? `${text.slice(0, MAX_PROMPT_URL_LENGTH)}…` : text;
+
+const permissionOrigin = (rawUrl: string | undefined): string | null => {
+  if (!rawUrl) return null;
+  try {
+    const { origin } = new URL(rawUrl);
+    return origin === "null" ? null : origin;
+  } catch {
+    return null;
+  }
+};
 
 export class BrowserSessionPartitionDerivationError extends Schema.TaggedError<BrowserSessionPartitionDerivationError>()(
   "BrowserSessionPartitionDerivationError",
@@ -91,7 +124,6 @@ export const BrowserSessionGetSessionError = Schema.Union([
   BrowserSessionCreationError,
 ]);
 export type BrowserSessionGetSessionError = typeof BrowserSessionGetSessionError.Type;
-export const isBrowserSessionGetSessionError = Schema.is(BrowserSessionGetSessionError);
 
 export const BrowserSessionError = Schema.Union([
   BrowserSessionPartitionDerivationError,
@@ -100,48 +132,132 @@ export const BrowserSessionError = Schema.Union([
   BrowserSessionCacheClearError,
 ]);
 export type BrowserSessionError = typeof BrowserSessionError.Type;
-export const isBrowserSessionError = Schema.is(BrowserSessionError);
 
 export class BrowserSession extends Context.Service<
   BrowserSession,
   {
     readonly getPartition: (
       scope?: string,
-      profileId?: string,
+      persistent?: boolean,
+      namespace?: BrowserSessionPartitionNamespace,
     ) => Effect.Effect<string, BrowserSessionPartitionDerivationError>;
     readonly isPartition: (partition: string) => boolean;
     readonly getSession: (
       scope?: string,
-      profileId?: string,
+      persistent?: boolean,
+      namespace?: BrowserSessionPartitionNamespace,
     ) => Effect.Effect<Session, BrowserSessionGetSessionError>;
+    /** Omit `partitions` to clear every known partition. */
     readonly clearCookies: (
-      scope?: string,
-      profileId?: string,
-    ) => Effect.Effect<
-      void,
-      BrowserSessionStorageClearError | BrowserSessionPartitionDerivationError
-    >;
+      partitions?: ReadonlyArray<string>,
+    ) => Effect.Effect<void, BrowserSessionStorageClearError>;
     readonly clearCache: (
-      scope?: string,
-      profileId?: string,
-    ) => Effect.Effect<
-      void,
-      BrowserSessionCacheClearError | BrowserSessionPartitionDerivationError
-    >;
+      partitions?: ReadonlyArray<string>,
+    ) => Effect.Effect<void, BrowserSessionCacheClearError>;
   }
 >()("@t3tools/desktop/preview/BrowserSession") {}
 
+const selectSessions = (
+  sessions: ReadonlyMap<string, Session>,
+  partitions: ReadonlyArray<string> | undefined,
+): ReadonlyArray<readonly [string, Session]> =>
+  [...sessions.entries()].filter(
+    ([partition]) => partitions === undefined || partitions.includes(partition),
+  );
+
+/**
+ * UTF-8 bytes of the scope. Earlier Test Rig releases hashed exactly these bytes, so changing
+ * the encoding would strand every saved profile's logins. Scopes are environment and profile
+ * ids, which never contain lone surrogates.
+ */
+const encodeScopeForDigest = (scope: string): Uint8Array => new TextEncoder().encode(scope);
+
+// Webview guests have no window; use their embedding page.
+const previewHostWindow = (guest: WebContents | null): BrowserWindow | undefined => {
+  if (guest === null || guest.isDestroyed()) return undefined;
+  const host = guest.hostWebContents ?? guest;
+  if (host.isDestroyed()) return undefined;
+  return BrowserWindow.fromWebContents(host) ?? undefined;
+};
+
+/** @public */
 export const make = Effect.gen(function* BrowserSessionMake() {
   const crypto = yield* Crypto.Crypto;
+  const electronDialog = yield* ElectronDialog.ElectronDialog;
+  const runFork = Effect.runForkWith(yield* Effect.context<never>());
+  // One prompt at a time, so a page cannot stack dialogs by looping a deep link.
+  let permissionPromptOpen = false;
+  /** Settles with `undefined` when the user gave no answer: another prompt was open or the dialog failed. */
+  const promptPermission = (
+    requester: WebContents | null,
+    prompt: {
+      readonly buttons: readonly [allow: string, deny: string];
+      readonly message: string;
+      readonly detail?: string;
+    },
+    callback: (answer: boolean | undefined) => void,
+  ): void => {
+    if (permissionPromptOpen) {
+      callback(undefined);
+      return;
+    }
+    permissionPromptOpen = true;
+    const settle = (answer: boolean | undefined) =>
+      Effect.sync(() => {
+        permissionPromptOpen = false;
+        callback(answer);
+      });
+    runFork(
+      electronDialog
+        .showMessageBox(
+          {
+            type: "question",
+            buttons: [...prompt.buttons],
+            // Default to deny so an Enter typed into the page cannot accept a prompt it raised.
+            defaultId: 1,
+            cancelId: 1,
+            message: prompt.message,
+            ...(prompt.detail === undefined ? {} : { detail: prompt.detail }),
+          },
+          previewHostWindow(requester),
+        )
+        .pipe(
+          Effect.map(({ response }): boolean | undefined => response === 0),
+          Effect.orElseSucceed(() => undefined),
+          Effect.flatMap(settle),
+          Effect.onInterrupt(() => settle(undefined)),
+        ),
+    );
+  };
+  /** Electron launches external protocols after granting openExternal; untrusted pages require confirmation. */
+  const confirmOpenExternal = (
+    requester: WebContents | null,
+    rawUrl: string | undefined,
+    callback: (granted: boolean) => void,
+  ): void => {
+    const url = externalProtocolPromptUrl(rawUrl);
+    if (url === null) {
+      callback(false);
+      return;
+    }
+    promptPermission(
+      requester,
+      {
+        buttons: ["Open", "Cancel"],
+        message: `Open this ${new URL(url).protocol.slice(0, -1)} link?`,
+        detail: `A page in the browser wants to open another application:\n\n${truncateForPrompt(url)}`,
+      },
+      (answer) => callback(answer === true),
+    );
+  };
   const sessionsRef = yield* SynchronizedRef.make<ReadonlyMap<string, Session>>(new Map());
 
   const getPartition = Effect.fn("BrowserSession.getPartition")(function* (
     scope = "shared",
-    profileId = DEFAULT_BROWSER_PROFILE_ID,
+    persistent = true,
+    namespace?: BrowserSessionPartitionNamespace,
   ) {
-    const profileScope =
-      profileId === DEFAULT_BROWSER_PROFILE_ID ? scope : encodeProfileScope([scope, profileId]);
-    const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode(profileScope)).pipe(
+    const digest = yield* crypto.digest("SHA-256", encodeScopeForDigest(scope)).pipe(
       Effect.mapError(
         (cause) =>
           new BrowserSessionPartitionDerivationError({
@@ -150,36 +266,77 @@ export const make = Effect.gen(function* BrowserSessionMake() {
           }),
       ),
     );
-    const prefix =
-      profileId === INCOGNITO_BROWSER_PROFILE_ID
-        ? INCOGNITO_PARTITION_PREFIX
-        : profileId === DEFAULT_BROWSER_PROFILE_ID
-          ? PREVIEW_PARTITION_PREFIX
-          : PROFILE_PARTITION_PREFIX;
-    return `${prefix}${Encoding.encodeHex(digest).slice(0, 20)}`;
+    const prefix = persistent ? PREVIEW_PARTITION_PREFIX : PREVIEW_EPHEMERAL_PARTITION_PREFIX;
+    return `${prefix}${namespace === "profile" ? PROFILE_PARTITION_MARKER : ""}${Encoding.encodeHex(digest).slice(0, 20)}`;
   });
 
   const getSession = Effect.fn("BrowserSession.getSession")(function* (
     scope = "shared",
-    profileId = DEFAULT_BROWSER_PROFILE_ID,
+    persistent = true,
+    namespace?: BrowserSessionPartitionNamespace,
   ) {
-    const partition = yield* getPartition(scope, profileId);
+    const partition = yield* getPartition(scope, persistent, namespace);
     return yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) => {
       const existing = sessions.get(partition);
       if (existing) return Effect.succeed([existing, sessions] as const);
       return Effect.try({
         try: () => {
           const browserSession = session.fromPartition(partition);
-          const userAgent = browserSession
-            .getUserAgent()
-            .replace(/Electron\/[\d.]+ /, "")
-            .replace(/\s*test-rig\/[\d.]+/, "");
-          browserSession.setUserAgent(userAgent);
-          browserSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-            callback(ALLOWED_PREVIEW_PERMISSIONS.has(permission));
-          });
-          browserSession.setPermissionCheckHandler((_webContents, permission) =>
-            ALLOWED_PREVIEW_PERMISSIONS.has(permission),
+          // Like Chrome, clipboard reads ask once per origin; both answers last for the session.
+          const clipboardReadDecisions = new Map<string, boolean>();
+          const confirmClipboardRead = (
+            requester: WebContents,
+            rawUrl: string | undefined,
+            callback: (granted: boolean) => void,
+          ): void => {
+            const origin = permissionOrigin(rawUrl);
+            if (origin === null) {
+              callback(false);
+              return;
+            }
+            const remembered = clipboardReadDecisions.get(origin);
+            if (remembered !== undefined) {
+              callback(remembered);
+              return;
+            }
+            promptPermission(
+              requester,
+              {
+                buttons: ["Allow", "Block"],
+                message: `${truncateForPrompt(origin)} wants to see text and images copied to the clipboard`,
+              },
+              (answer) => {
+                if (answer !== undefined) clipboardReadDecisions.set(origin, answer);
+                callback(answer === true);
+              },
+            );
+          };
+          // Rewriting Electron's native User-Agent makes Turnstile fail integrity checks with error 600010.
+          browserSession.setPermissionRequestHandler(
+            (webContents, permission, callback, details) => {
+              if (permission === "openExternal") {
+                confirmOpenExternal(
+                  webContents,
+                  "externalURL" in details ? details.externalURL : undefined,
+                  callback,
+                );
+                return;
+              }
+              if (permission === "clipboard-read") {
+                confirmClipboardRead(
+                  webContents,
+                  "requestingUrl" in details ? details.requestingUrl : undefined,
+                  callback,
+                );
+                return;
+              }
+              callback(ALLOWED_PREVIEW_PERMISSIONS.has(permission));
+            },
+          );
+          browserSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) =>
+            permission === "clipboard-read"
+              ? clipboardReadDecisions.get(permissionOrigin(requestingOrigin) ?? "") === true
+              : ALLOWED_PREVIEW_PERMISSIONS.has(permission),
           );
           const next = new Map(sessions);
           next.set(partition, browserSession);
@@ -199,54 +356,40 @@ export const make = Effect.gen(function* BrowserSessionMake() {
     getPartition,
     isPartition: (partition) =>
       partition.startsWith(PREVIEW_PARTITION_PREFIX) ||
-      partition.startsWith(INCOGNITO_PARTITION_PREFIX),
+      partition.startsWith(PREVIEW_EPHEMERAL_PARTITION_PREFIX),
     getSession,
-    clearCookies: Effect.fn("BrowserSession.clearCookies")(function* (
-      scope?: string,
-      profileId?: string,
-    ) {
+    clearCookies: Effect.fn("BrowserSession.clearCookies")(function* (partitions?) {
       const sessions = yield* SynchronizedRef.get(sessionsRef);
-      const targetPartition =
-        scope === undefined ? undefined : yield* getPartition(scope, profileId);
-      yield* Effect.all(
-        [...sessions.entries()]
-          .filter(([partition]) => targetPartition === undefined || partition === targetPartition)
-          .map(([partition, browserSession]) =>
-            Effect.tryPromise({
-              try: () =>
-                browserSession.clearStorageData({
-                  storages: ["cookies", "localstorage", "indexdb", "websql", "serviceworkers"],
-                }),
-              catch: (cause) =>
-                new BrowserSessionStorageClearError({
-                  partition,
-                  cause,
-                }),
-            }),
-          ),
+      yield* Effect.forEach(
+        selectSessions(sessions, partitions),
+        ([partition, browserSession]) =>
+          Effect.tryPromise({
+            try: () =>
+              browserSession.clearStorageData({
+                storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
+              }),
+            catch: (cause) =>
+              new BrowserSessionStorageClearError({
+                partition,
+                cause,
+              }),
+          }),
         { concurrency: "unbounded", discard: true },
       );
     }),
-    clearCache: Effect.fn("BrowserSession.clearCache")(function* (
-      scope?: string,
-      profileId?: string,
-    ) {
+    clearCache: Effect.fn("BrowserSession.clearCache")(function* (partitions?) {
       const sessions = yield* SynchronizedRef.get(sessionsRef);
-      const targetPartition =
-        scope === undefined ? undefined : yield* getPartition(scope, profileId);
-      yield* Effect.all(
-        [...sessions.entries()]
-          .filter(([partition]) => targetPartition === undefined || partition === targetPartition)
-          .map(([partition, browserSession]) =>
-            Effect.tryPromise({
-              try: () => browserSession.clearCache(),
-              catch: (cause) =>
-                new BrowserSessionCacheClearError({
-                  partition,
-                  cause,
-                }),
-            }),
-          ),
+      yield* Effect.forEach(
+        selectSessions(sessions, partitions),
+        ([partition, browserSession]) =>
+          Effect.tryPromise({
+            try: () => browserSession.clearCache(),
+            catch: (cause) =>
+              new BrowserSessionCacheClearError({
+                partition,
+                cause,
+              }),
+          }),
         { concurrency: "unbounded", discard: true },
       );
     }),

@@ -51,6 +51,7 @@ import {
 import { waitForHttpReady as waitForHttpReadyShared } from "@t3tools/shared/httpReadiness";
 
 import * as DesktopObservability from "../app/DesktopObservability.ts";
+import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 
 const INITIAL_RESTART_DELAY = Duration.millis(500);
@@ -220,6 +221,9 @@ interface RunBackendProcessOptions extends DesktopBackendStartConfig {
   readonly onDesktopTelemetryControl?: (
     message: DesktopTelemetryControlMessageValue,
   ) => Effect.Effect<void>;
+  /** Desktop browser host events the server reads on `desktopBrowserFd`. */
+  readonly desktopBrowserStream?: Stream.Stream<Uint8Array>;
+  readonly onDesktopBrowserCommand?: (line: string) => Effect.Effect<void>;
   readonly readinessTimeout?: Duration.Duration;
   readonly outputDrainTimeout?: Duration.Duration;
   readonly onStarted?: (pid: number) => Effect.Effect<void>;
@@ -467,6 +471,18 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
         type: "output",
       };
     }
+    if (
+      options.bootstrap.desktopBrowserFd !== undefined &&
+      options.desktopBrowserStream !== undefined
+    ) {
+      additionalFds[`fd${options.bootstrap.desktopBrowserFd}`] = {
+        type: "input",
+        stream: options.desktopBrowserStream,
+      };
+    }
+    if (options.bootstrap.desktopBrowserControlFd !== undefined) {
+      additionalFds[`fd${options.bootstrap.desktopBrowserControlFd}`] = { type: "output" };
+    }
   }
   const command = ChildProcess.make(options.executablePath, options.args, {
     cwd: options.cwd,
@@ -532,6 +548,26 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
           version: 1,
           type: "setDiagnosticsDemand",
           enabled: false,
+        }),
+      ),
+      Effect.forkScoped,
+    );
+  }
+  if (
+    options.bootstrap.desktopBrowserControlFd !== undefined &&
+    options.onDesktopBrowserCommand !== undefined
+  ) {
+    const browserFd = options.bootstrap.desktopBrowserControlFd;
+    const handleCommand = options.onDesktopBrowserCommand;
+    yield* handle.getOutputFd(browserFd).pipe(
+      Stream.decodeText(),
+      Stream.splitLines,
+      Stream.filter((line) => line.length > 0),
+      Stream.runForEach(handleCommand),
+      Effect.catchCause((cause) =>
+        logBackendProcessWarning("desktop browser command stream stopped", {
+          fd: browserFd,
+          cause: Cause.pretty(cause),
         }),
       ),
       Effect.forkScoped,
@@ -624,6 +660,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
   | HttpClient.HttpClient
   | DesktopObservability.DesktopBackendOutputLogFactory
   | DesktopTelemetryPublisher.DesktopTelemetryPublisher
+  | DesktopBrowserHost.DesktopBrowserHost
   | Scope.Scope
 > {
   const parentScope = yield* Scope.Scope;
@@ -631,6 +668,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
   const backendOutputLogFactory = yield* DesktopObservability.DesktopBackendOutputLogFactory;
   const backendOutputLog = yield* backendOutputLogFactory.forInstance(spec.id);
   const desktopTelemetryPublisher = yield* DesktopTelemetryPublisher.DesktopTelemetryPublisher;
+  const desktopBrowserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const state = yield* Ref.make(initialState);
@@ -887,6 +925,8 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
         const program = runBackendProcess({
           ...config.value,
           desktopTelemetryStream: desktopTelemetryPublisher.encoded,
+          desktopBrowserStream: desktopBrowserHost.events,
+          onDesktopBrowserCommand: desktopBrowserHost.handleCommandLine,
           onDesktopTelemetryControl: (message) =>
             desktopTelemetryPublisher.handleControlForSource(spec.id, message),
           onStarted: Effect.fn("desktop.backendInstance.onStarted")(function* (pid) {

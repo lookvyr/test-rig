@@ -1,11 +1,15 @@
 import { randomUUID } from "~/lib/utils";
 import { useState } from "react";
 import {
+  BROWSER_CUSTOM_SEARCH_URL_MAX_LENGTH,
+  BrowserSearchEngine,
   BROWSER_PROFILE_MAX_COUNT,
   BROWSER_PROFILE_NAME_MAX_LENGTH,
   DEFAULT_BROWSER_PROFILE_ID,
   resolveBrowserProfiles,
 } from "@t3tools/contracts";
+import { isValidSearchUrlTemplate } from "@t3tools/shared/preview";
+import * as Schema from "effect/Schema";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -115,6 +119,66 @@ export function BrowserProfilesSettings() {
           Add profile
         </Button>
       </form>
+    </SettingsSection>
+  );
+}
+
+const SEARCH_ENGINE_LABELS: Record<BrowserSearchEngine, string> = {
+  duckduckgo: "DuckDuckGo",
+  google: "Google",
+  bing: "Bing",
+  brave: "Brave Search",
+  kagi: "Kagi",
+  ecosia: "Ecosia",
+  custom: "Custom",
+};
+const isSearchEngine = Schema.is(BrowserSearchEngine);
+
+/** Where address-bar search terms go; a query is sent only when submitted. */
+export function BrowserSearchSettings() {
+  const settings = useClientSettings();
+  const update = useUpdateClientSettings();
+  const custom = settings.browserCustomSearchUrl;
+  const customInvalid =
+    settings.browserSearchEngine === "custom" && !isValidSearchUrlTemplate(custom.trim());
+  return (
+    <SettingsSection id="browser-search" title="Browser search">
+      <div className="flex items-center gap-3">
+        <label htmlFor="browser-search-engine" className="text-sm">
+          Search with
+        </label>
+        <select
+          id="browser-search-engine"
+          className="rounded border bg-background px-2 py-1 text-sm"
+          value={settings.browserSearchEngine}
+          onChange={(event) => {
+            if (isSearchEngine(event.target.value))
+              update({ browserSearchEngine: event.target.value });
+          }}
+        >
+          {Object.entries(SEARCH_ENGINE_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+      {settings.browserSearchEngine === "custom" ? (
+        <div className="flex flex-col gap-1">
+          <Input
+            aria-label="Custom search URL"
+            placeholder="https://search.example/?q=%s"
+            maxLength={BROWSER_CUSTOM_SEARCH_URL_MAX_LENGTH}
+            value={custom}
+            onChange={(event) => update({ browserCustomSearchUrl: event.target.value })}
+          />
+          <p className="text-xs text-muted-foreground">
+            {customInvalid
+              ? "Enter an http or https address with %s where the search terms go. Until then, searches use DuckDuckGo."
+              : "%s is replaced with the search terms."}
+          </p>
+        </div>
+      ) : null}
     </SettingsSection>
   );
 }

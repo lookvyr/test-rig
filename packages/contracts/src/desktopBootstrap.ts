@@ -16,6 +16,8 @@ export const DesktopBackendBootstrap = Schema.Struct({
   otlpMetricsUrl: Schema.optional(Schema.String),
   desktopTelemetryFd: Schema.optionalKey(PositiveInt),
   desktopTelemetryControlFd: Schema.optionalKey(PositiveInt),
+  desktopBrowserFd: Schema.optionalKey(PositiveInt),
+  desktopBrowserControlFd: Schema.optionalKey(PositiveInt),
   resourceMonitorPath: Schema.optionalKey(TrimmedNonEmptyString),
 });
 

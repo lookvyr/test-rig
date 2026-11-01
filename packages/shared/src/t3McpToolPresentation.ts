@@ -164,6 +164,27 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     "browser",
     "Snapshot the preview page",
   ),
+  preview_act: tool(["Use", "Using", "Used", "the preview browser"], "browser", "browser"),
+  preview_hover: tool(
+    ["Hover", "Hovering", "Hovered", "in the preview browser"],
+    "browser",
+    "browser",
+  ),
+  preview_select: tool(
+    ["Choose", "Choosing", "Chose", "an option in the preview browser"],
+    "browser",
+    "browser",
+  ),
+  preview_drag: tool(
+    ["Drag", "Dragging", "Dragged", "in the preview browser"],
+    "browser",
+    "browser",
+  ),
+  preview_upload: tool(
+    ["Upload", "Uploading", "Uploaded", "files to the preview browser"],
+    "browser",
+    "browser",
+  ),
   preview_click: tool(
     ["Click", "Clicking", "Clicked", "in the preview browser"],
     "browser",
@@ -343,11 +364,24 @@ export function resolveT3McpToolId(toolName: string | null | undefined): string 
   return name !== null && Object.hasOwn(T3_MCP_TOOLS, name) ? name : null;
 }
 
+/** `preview_act` calls present as the single-purpose tool their action replaced. */
+const actionToolName = (name: string, input: unknown): string | undefined => {
+  if (name !== "preview_act" || typeof input !== "object" || input === null) return undefined;
+  const action = (input as { readonly action?: unknown }).action;
+  return typeof action === "string" ? `preview_${action}` : undefined;
+};
+
+/** Pass the call's input so an action tool resolves to the labels of its action. */
 export function resolveT3McpToolDefinition(
   toolName: string | null | undefined,
+  input?: unknown,
 ): T3McpToolDefinition | null {
   const name = toolName == null ? null : resolveT3McpToolName(toolName);
-  return name !== null && Object.hasOwn(T3_MCP_TOOLS, name) ? T3_MCP_TOOLS[name]! : null;
+  if (name === null || !Object.hasOwn(T3_MCP_TOOLS, name)) return null;
+  const actionTool = actionToolName(name, input);
+  return actionTool !== undefined && Object.hasOwn(T3_MCP_TOOLS, actionTool)
+    ? T3_MCP_TOOLS[actionTool]!
+    : T3_MCP_TOOLS[name]!;
 }
 
 export function resolveT3McpToolPresentation(

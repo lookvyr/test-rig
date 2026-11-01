@@ -18,8 +18,11 @@ left sidebar visible. Press it again to restore the panel width. On Windows and
 Linux, use Ctrl instead of Command.
 
 Enter a website address or search terms in the browser's address bar, then press
-Enter. Search terms open Google results in the current tab. Searches are sent
-only when you submit them; typing does not request search suggestions.
+Enter. Search terms open results from Google in the current tab. To use
+DuckDuckGo, Bing, Brave Search, Kagi, Ecosia, or your own search address, choose it in
+**Settings → General → Browser search**. A custom address must contain `%s`
+where the search terms go. Searches are sent only when you submit them; typing
+does not request search suggestions.
 
 Addresses such as `example.com` and `localhost:3000` open directly. For a
 single-word internal hostname, include `http://` or `https://` to distinguish it
@@ -43,12 +46,17 @@ restores normal PDF interaction. Attach sends the annotated screenshot and your
 comment to the composer; it does not edit the original PDF. Streamed browser
 tabs do not offer annotation.
 
-## Browsing from the web app
+## Where browser tabs run
 
-Browser tabs in the web app run on the connected environment. A `localhost`
-address reaches a service on that environment, and the page keeps running when
-you reload or disconnect the web app. Reconnecting resumes the same page.
-Closing its browser tab ends the page.
+Browser tabs belong to the environment, so you and your agents see the same tabs
+from every window and device. The desktop app shows its own environment's tabs
+directly, with their sound, context menus, DevTools, and separate preview
+windows. The web app, and the desktop app for any other environment, streams
+them from that environment. A `localhost` address reaches a service on the
+environment, and a page keeps running when you reload or disconnect. Reconnecting
+resumes the same page. Closing its browser tab ends the page.
+
+## Browsing from the web app
 
 Click, type, scroll, navigate, and answer page dialogs from the right panel.
 The browser menu includes zoom, appearance, device sizes, and storage controls.
@@ -90,11 +98,28 @@ to see its action. Videos use the available message width while keeping their
 original proportions and a bounded height. Use the player's built-in controls
 for playback, seeking, downloads, and fullscreen.
 
-When no desktop browser is available, agents can use the environment's server
-browser without an open web client. Agent sessions use isolated browser storage;
-they do not inherit your named profile's logins. A session stays on its assigned
-browser when another client connects. You can interact with an agent's revealed
-page while its actions run in order with yours.
+Agents drive the same browser tabs you see. In the desktop app, a tab an agent
+opens appears in the browser panel and the agent acts on that page directly,
+using the tab's profile. When the desktop app is not running, agents keep working
+in the environment's own headless browser. There, agent tabs use your default
+browser profile's saved logins, or the profile the agent picks; choose the
+Incognito profile for a tab with no saved data. Agents need no open window either
+way.
+
+You can click and type in a page while an agent works on it; nobody takes
+exclusive control. In a streamed tab, your input and the agent's actions run in
+order, and the agent takes a fresh snapshot of the page after you interact. Use
+the chat's Stop control when you want the agent to stop.
+
+## Local servers
+
+The browser's empty state lists servers that your terminals and agents started,
+by the port they listen on. Test Rig reads which process holds each port and
+does not connect to it, so a listed port might not be a web page. Servers started
+anywhere else are not listed, except preview URLs from the project's scripts,
+which appear while they answer. Choose a server to open it, or **Stop** to end a
+server that a terminal or agent in this environment started. Set `TEST_RIG_PORT_DISCOVERY=0` in the environment that
+starts Test Rig to stop listing ports.
 
 ## Capture from the desktop browser
 

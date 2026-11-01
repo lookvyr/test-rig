@@ -52,12 +52,14 @@ import {
 } from "./ProviderAdapter.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
+import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
 
 const driver = ProviderDriverKind.make("codex");
 
 const RunExecutionTestLayer = RunExecutionService.layer.pipe(
+  Layer.provide(PreviewAgentActivity.layer),
   Layer.provide(
     Layer.mergeAll(
       Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
@@ -601,6 +603,7 @@ it.effect("fails the run when its ownership check cannot be read before calling 
     const attemptId = RunAttemptId.make("attempt:run-execution-start-guard-read");
     const providerInstanceId = ProviderInstanceId.make("codex");
     const testLayer = RunExecutionService.layer.pipe(
+      Layer.provide(PreviewAgentActivity.layer),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
@@ -874,6 +877,7 @@ it.effect("starts the provider when checkpoint baseline capture fails", () =>
       }>
     >([]);
     const testLayer = RunExecutionService.layer.pipe(
+      Layer.provide(PreviewAgentActivity.layer),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(CheckpointService.CheckpointServiceV2)({
@@ -991,6 +995,7 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
       const guardedWrites = yield* Ref.make(0);
       const writes = yield* Ref.make<ReadonlyArray<ReadonlyArray<OrchestrationV2DomainEvent>>>([]);
       const testLayer = RunExecutionService.layer.pipe(
+        Layer.provide(PreviewAgentActivity.layer),
         Layer.provide(
           Layer.mergeAll(
             Layer.mock(CheckpointService.CheckpointServiceV2)({
@@ -1162,6 +1167,7 @@ it.effect("keeps ingesting owned child events after the root turn terminalizes",
     const childMessageIngested = yield* Deferred.make<void>();
     const order = yield* Ref.make<ReadonlyArray<string>>([]);
     const testLayer = RunExecutionService.layer.pipe(
+      Layer.provide(PreviewAgentActivity.layer),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
@@ -1587,6 +1593,7 @@ it.effect(
       >([]);
       const ingestionDone = yield* Deferred.make<void>();
       const testLayer = RunExecutionService.layer.pipe(
+        Layer.provide(PreviewAgentActivity.layer),
         Layer.provide(
           Layer.mergeAll(
             Layer.mock(CheckpointService.CheckpointServiceV2)({
@@ -1804,6 +1811,7 @@ it.effect("drops late root provider-thread writes from a superseded attempt", ()
       }>
     >([]);
     const testLayer = RunExecutionService.layer.pipe(
+      Layer.provide(PreviewAgentActivity.layer),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
@@ -2008,6 +2016,7 @@ it.effect(
       // past ownership-loss so late turn_item completions still land.
       const ingestionDone = yield* Deferred.make<void>();
       const testLayer = RunExecutionService.layer.pipe(
+        Layer.provide(PreviewAgentActivity.layer),
         Layer.provide(
           Layer.mergeAll(
             Layer.mock(CheckpointService.CheckpointServiceV2)({
@@ -2179,6 +2188,7 @@ it.effect(
       const ingestionDone = yield* Deferred.make<void>();
       const scopedProbeArgs = yield* Ref.make<ReadonlyArray<ProviderThreadId>>([]);
       const testLayer = RunExecutionService.layer.pipe(
+        Layer.provide(PreviewAgentActivity.layer),
         Layer.provide(
           Layer.mergeAll(
             Layer.mock(CheckpointService.CheckpointServiceV2)({
@@ -2348,6 +2358,7 @@ it.effect(
       const ingested = yield* Ref.make<ReadonlyArray<ProviderAdapterV2Event>>([]);
       const ingestionDone = yield* Deferred.make<void>();
       const testLayer = RunExecutionService.layer.pipe(
+        Layer.provide(PreviewAgentActivity.layer),
         Layer.provide(
           Layer.mergeAll(
             Layer.mock(CheckpointService.CheckpointServiceV2)({
@@ -2721,6 +2732,7 @@ it.effect(
       const written = yield* Ref.make<ReadonlyArray<OrchestrationV2DomainEvent>>([]);
       const ingestionDone = yield* Deferred.make<void>();
       const testLayer = RunExecutionService.layer.pipe(
+        Layer.provide(PreviewAgentActivity.layer),
         Layer.provide(
           Layer.mergeAll(
             Layer.mock(CheckpointService.CheckpointServiceV2)({
@@ -3569,6 +3581,7 @@ function captureRootRunTermination(input: {
         }
       });
     const testLayer = RunExecutionService.layer.pipe(
+      Layer.provide(PreviewAgentActivity.layer),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),
@@ -4037,6 +4050,7 @@ function runBackgroundItemScenario(
     const observed = yield* Ref.make<ReadonlyArray<string>>([]);
     const ingestionDone = yield* Deferred.make<void>();
     const testLayer = RunExecutionService.layer.pipe(
+      Layer.provide(PreviewAgentActivity.layer),
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(CheckpointService.CheckpointServiceV2)({ captureBaseline: () => Effect.void }),

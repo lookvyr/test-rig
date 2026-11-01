@@ -1,29 +1,23 @@
 import * as SecretRequests from "../../../secrets/SecretRequests.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import {
+  OrchestratorMcpFailure,
+  PreviewAutomationActInput,
   PreviewAutomationDialogInput,
-  PreviewAutomationHoverInput,
-  PreviewAutomationSelectInput,
-  PreviewAutomationDragInput,
-  PreviewAutomationUploadInput,
   PreviewAutomationSelectResult,
-  PreviewAutomationClickInput,
   PreviewAutomationError,
   PreviewAutomationEvaluateInput,
   PreviewAutomationNavigateInput,
   PreviewAutomationOpenInput,
-  PreviewAutomationPressInput,
   PreviewAutomationRecordingArtifact,
   PreviewAutomationRecordingStatus,
   PreviewAutomationResizeInput,
   PreviewAutomationResizeResult,
-  PreviewAutomationScrollInput,
   PreviewAutomationSetColorSchemeInput,
   PreviewAutomationSetColorSchemeResult,
   PreviewAutomationSnapshot,
   PreviewAutomationStatus,
   PreviewAutomationTabTargetInput,
-  PreviewAutomationTypeInput,
   PreviewAutomationTypeSecretInput,
   SecretRequestError,
   PreviewAutomationWaitForInput,
@@ -133,25 +127,15 @@ export const PreviewSnapshotTool = readonlyBrowserTool(
   }).annotate(Tool.Title, "Inspect browser page"),
 );
 
-export const PreviewClickTool = browserTool(
-  Tool.make("preview_click", {
+export const PreviewActTool = browserTool(
+  Tool.make("preview_act", {
     description:
-      "Click exactly one target. Prefer a Playwright locator; selector is CSS. Coordinates x/y go together. Select tabId or omit for the current tab.",
-    parameters: PreviewAutomationClickInput,
-    success: Schema.Null,
-    failure: PreviewAutomationError,
+      "Act on the chosen tab. Target with `locator='aria-ref=<ref>'` from `preview_snapshot`; `x` and `y` go together. `timeoutMs` defaults to 15000. click: `button`, `clickCount` 1 to 3. type: literal `text`, `clear=true` replaces it. hover: shows menus or tooltips. select: `values` in one native <select>, by value or label; for a custom dropdown, click it open, then click the option. drag: `source` onto `target`. upload: absolute `paths` answer the file picker `preview_status` reports, [] cancels it, or a `locator` sets an <input type=file>. press: one `key`, such as 'Enter', with `modifiers`, to the focused element; click a field first to focus it. scroll: the tab, or one container with a locator; positive `deltaY` scrolls down, positive `deltaX` right. For passwords and other private values, use `preview_type_secret` instead of `type`.",
+    parameters: PreviewAutomationActInput,
+    success: Schema.Union([PreviewAutomationSelectResult, Schema.Null]),
+    failure: Schema.Union([PreviewAutomationError, OrchestratorMcpFailure]),
     dependencies,
-  }).annotate(Tool.Title, "Click preview page"),
-);
-
-export const PreviewTypeTool = browserTool(
-  Tool.make("preview_type", {
-    description: "Type literal text into one input. `clear=true` replaces the current text.",
-    parameters: PreviewAutomationTypeInput,
-    success: Schema.Null,
-    failure: PreviewAutomationError,
-    dependencies,
-  }).annotate(Tool.Title, "Type into preview page"),
+  }).annotate(Tool.Title, "Act in preview page"),
 );
 
 export const PreviewTypeSecretTool = browserTool(
@@ -167,27 +151,6 @@ export const PreviewTypeSecretTool = browserTool(
       ThreadManagementService.ThreadManagementService,
     ],
   }).annotate(Tool.Title, "Enter a private value"),
-);
-
-export const PreviewPressTool = browserTool(
-  Tool.make("preview_press", {
-    description: "Press one key, such as {key:'Enter'} or {key:'a',modifiers:['Meta']}.",
-    parameters: PreviewAutomationPressInput,
-    success: Schema.Null,
-    failure: PreviewAutomationError,
-    dependencies,
-  }).annotate(Tool.Title, "Press key in preview page"),
-);
-
-export const PreviewScrollTool = safeBrowserTool(
-  Tool.make("preview_scroll", {
-    description:
-      "Scroll the chosen tab, or one container with a locator or selector. Positive `deltaY` scrolls down. Positive `deltaX` scrolls right.",
-    parameters: PreviewAutomationScrollInput,
-    success: Schema.Null,
-    failure: PreviewAutomationError,
-    dependencies,
-  }).annotate(Tool.Title, "Scroll preview page"),
 );
 
 export const PreviewEvaluateTool = browserTool(
@@ -248,77 +211,16 @@ const PreviewDialogTool = browserTool(
   }).annotate(Tool.Title, "Resolve browser dialog"),
 );
 
-const PreviewHoverTool = safeBrowserTool(
-  Tool.make("preview_hover", {
-    description: "Hover one target to show menus or tooltips.",
-    parameters: PreviewAutomationHoverInput,
-    success: Schema.Null,
-    failure: PreviewAutomationError,
-    dependencies,
-  }).annotate(Tool.Title, "Hover preview page"),
-);
-
-const PreviewSelectTool = browserTool(
-  Tool.make("preview_select", {
-    description:
-      "Pick options in one native <select>, by value or label. For a custom dropdown, click it open, then click the option.",
-    parameters: PreviewAutomationSelectInput,
-    success: PreviewAutomationSelectResult,
-    failure: PreviewAutomationError,
-    dependencies,
-  }).annotate(Tool.Title, "Select preview option"),
-);
-
-const PreviewDragTool = browserTool(
-  Tool.make("preview_drag", {
-    description: "Drag one element onto another.",
-    parameters: PreviewAutomationDragInput,
-    success: Schema.Null,
-    failure: PreviewAutomationError,
-    dependencies,
-  }).annotate(Tool.Title, "Drag in preview page"),
-);
-
-const PreviewUploadTool = browserTool(
-  Tool.make("preview_upload", {
-    description:
-      "Give files from this environment to the page. After a click opens a file picker, `preview_status` reports it. Pass absolute paths to answer it, or an empty list to cancel. Or pass a locator for an <input type=file>.",
-    parameters: PreviewAutomationUploadInput,
-    success: Schema.Null,
-    failure: PreviewAutomationError,
-    dependencies,
-  }).annotate(Tool.Title, "Upload files to preview page"),
-);
-
-const PreviewCloseTool = browserTool(
-  Tool.make("preview_close", {
-    description:
-      "Close a server browser tab owned by this agent session. Pass tabId when multiple tabs are open.",
-    parameters: PreviewAutomationTabTargetInput,
-    success: Schema.Null,
-    failure: PreviewAutomationError,
-    dependencies,
-  }),
-);
-
 export const PreviewToolkit = Toolkit.make(
   PreviewDialogTool,
-  PreviewHoverTool,
-  PreviewSelectTool,
-  PreviewDragTool,
-  PreviewUploadTool,
-  PreviewCloseTool,
   PreviewStatusTool,
   PreviewOpenTool,
   PreviewNavigateTool,
   PreviewResizeTool,
   PreviewSetAppearanceTool,
   PreviewSnapshotTool,
-  PreviewClickTool,
-  PreviewTypeTool,
+  PreviewActTool,
   PreviewTypeSecretTool,
-  PreviewPressTool,
-  PreviewScrollTool,
   PreviewEvaluateTool,
   PreviewWaitForTool,
   PreviewRecordingStartTool,
@@ -327,21 +229,13 @@ export const PreviewToolkit = Toolkit.make(
 
 export const PreviewStandardToolkit = Toolkit.make(
   PreviewDialogTool,
-  PreviewHoverTool,
-  PreviewSelectTool,
-  PreviewDragTool,
-  PreviewUploadTool,
-  PreviewCloseTool,
   PreviewStatusTool,
   PreviewOpenTool,
   PreviewNavigateTool,
   PreviewResizeTool,
   PreviewSetAppearanceTool,
-  PreviewClickTool,
-  PreviewTypeTool,
+  PreviewActTool,
   PreviewTypeSecretTool,
-  PreviewPressTool,
-  PreviewScrollTool,
   PreviewEvaluateTool,
   PreviewWaitForTool,
   PreviewRecordingStartTool,

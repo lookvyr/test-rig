@@ -4,10 +4,13 @@ import {
   PreviewAutomationRecordingTransferError,
   PreviewAutomationRecordingDesktopUpdateRequiredError,
   PreviewAutomationRecordingArtifact,
+  PreviewAutomationActInputs,
+  OrchestratorMcpFailure,
   SecretRequestError,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
+import * as Record from "effect/Record";
 import * as Schema from "effect/Schema";
 import {
   parseAttachmentUuid,
@@ -36,14 +39,18 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
 
+/**
+ * Leaves `open` unset when the agent says nothing: whether that preview floats is the
+ * client's `browserAutoShowFloatingPreview` setting, and filling in `true` would force
+ * every reveal past it.
+ */
 export function normalizePreviewOpenInput(
   input: PreviewAutomationOpenInput,
 ): PreviewAutomationOpenInput {
-  const open = input.open ?? input.show ?? true;
+  const open = input.open ?? input.show;
   return {
     ...input,
-    open,
-    show: open,
+    ...(open === undefined ? {} : { open, show: open }),
     reuseExistingTab: input.reuseExistingTab ?? true,
   };
 }
@@ -80,6 +87,10 @@ const invokeTargeted = <A>(
   const { tabId, ...operationInput } = input;
   return invoke<A>(operation, operationInput, timeoutMs, tabId);
 };
+
+const decodeActInput = Record.map(PreviewAutomationActInputs, (schema) =>
+  Schema.decodeUnknownEffect(schema),
+);
 
 const UploadedRecordingArtifact = Schema.Struct({
   ...PreviewAutomationRecordingArtifact.fields,
@@ -185,16 +196,7 @@ const handlers = {
       return null;
     }),
 
-  preview_close: (input) => invokeTargeted<void>("close", input ?? {}).pipe(Effect.as(null)),
   preview_dialog: (input) => invokeTargeted<PreviewAutomationStatus>("dialog", input),
-  preview_hover: (input) =>
-    invokeTargeted<void>("hover", input, input.timeoutMs).pipe(Effect.as(null)),
-  preview_select: (input) =>
-    invokeTargeted<PreviewAutomationSelectResult>("select", input, input.timeoutMs),
-  preview_drag: (input) =>
-    invokeTargeted<void>("drag", input, input.timeoutMs).pipe(Effect.as(null)),
-  preview_upload: (input) =>
-    invokeTargeted<void>("upload", input, input.timeoutMs).pipe(Effect.as(null)),
   preview_status: (input) => invokeTargeted<PreviewAutomationStatus>("status", input ?? {}),
   preview_open: (input) =>
     invokeTargeted<PreviewAutomationStatus>("open", normalizePreviewOpenInput(input)),
@@ -209,12 +211,21 @@ const handlers = {
     const { includeImage: _includeImage, save: _save, ...target } = input ?? {};
     return invokeTargeted<PreviewAutomationSnapshot>("snapshot", target);
   },
-  preview_click: (input) =>
-    invokeTargeted<void>("click", input, input.timeoutMs).pipe(Effect.as(null)),
-  preview_type: (input) =>
-    invokeTargeted<void>("type", input, input.timeoutMs).pipe(Effect.as(null)),
-  preview_press: (input) => invokeTargeted<void>("press", input).pipe(Effect.as(null)),
-  preview_scroll: (input) => invokeTargeted<void>("scroll", input).pipe(Effect.as(null)),
+  preview_act: ({ action, ...input }) =>
+    decodeActInput[action](input).pipe(
+      Effect.mapError(
+        (cause) => new OrchestratorMcpFailure({ code: "invalid_request", message: cause.message }),
+      ),
+      Effect.flatMap((decoded) =>
+        invokeTargeted<PreviewAutomationSelectResult | undefined>(
+          action,
+          decoded,
+          "timeoutMs" in decoded ? decoded.timeoutMs : undefined,
+        ),
+      ),
+      // Only select reports a result; other actions answer null.
+      Effect.map((result) => result ?? null),
+    ),
   preview_evaluate: (input) =>
     invokeTargeted<unknown>("evaluate", input).pipe(
       Effect.map((value) => ({ value: value ?? null })),

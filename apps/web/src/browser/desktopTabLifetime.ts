@@ -1,5 +1,6 @@
 import { previewBridge } from "~/components/preview/previewBridge";
 
+import { browserDefaultTabState, resolveBrowserDefaults } from "./browserDefaults";
 import { stopBrowserRecording } from "./browserRecording";
 
 interface DesktopTabLease {
@@ -30,18 +31,32 @@ const enqueueDesktopTabOperation = (
   return pending;
 };
 
+/** Runs after tab creation and earlier calls. */
+export function withDesktopTab(tabId: string, operation: () => Promise<void>): void {
+  void enqueueDesktopTabOperation(tabId, operation).catch(() => undefined);
+}
+
 export interface AcquiredDesktopTab {
   readonly ready: Promise<void>;
   readonly release: () => void;
 }
 
-export function acquireDesktopTab(tabId: string): AcquiredDesktopTab {
+export function acquireDesktopTab(
+  tabId: string,
+  serverTab?: { readonly threadId: string; readonly tabId: string },
+): AcquiredDesktopTab {
   const current =
     leases.get(tabId) ??
     ({
       references: 0,
       closeTimer: null,
-      ready: enqueueDesktopTabOperation(tabId, () => previewBridge?.createTab(tabId)),
+      // Include defaults at creation to avoid painting a frame at 100%/system.
+      ready: enqueueDesktopTabOperation(tabId, async () =>
+        previewBridge?.createTab(tabId, {
+          ...browserDefaultTabState(await resolveBrowserDefaults()),
+          ...(serverTab === undefined ? {} : { serverTab }),
+        }),
+      ),
     } satisfies DesktopTabLease);
   if (current.closeTimer !== null) window.clearTimeout(current.closeTimer);
   current.references += 1;

@@ -1,95 +1,106 @@
-"use client";
-
 import type {
   DesktopPreviewTabState,
   PreviewReportStatusInput,
   ScopedThreadRef,
   ThreadId,
 } from "@t3tools/contracts";
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 
 import { useBrowserPointerStore } from "~/browser/browserPointerStore";
-import {
-  applyPreviewDesktopState,
-  readThreadPreviewState,
-  type DesktopPreviewOverlay,
-} from "~/previewStateStore";
-import { useRightPanelStore } from "~/rightPanelStore";
+import { acquireBrowserSurfaceActivity } from "~/browser/browserSurfaceStore";
+import { applyPreviewDesktopState, type DesktopPreviewOverlay } from "~/previewStateStore";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { previewBridge } from "./previewBridge";
-import { openPreviewSession } from "./openPreviewSession";
+
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
 
 /**
- * Mirrors low-latency desktop state into the store and reflects navigation
- * events back to the server. Webview lifetime is owned by ElectronBrowserHost.
+ * Keeps a hidden guest painting behind the app while the desktop host captures it; Electron
+ * composites no offscreen guest, so its screenshot or stream would otherwise never finish.
  */
+export function createCaptureActivity(tabId: string) {
+  let release: (() => void) | null = null;
+  const update = (capturing: boolean) => {
+    if (capturing && !release) release = acquireBrowserSurfaceActivity(tabId);
+    else if (!capturing && release) {
+      release();
+      release = null;
+    }
+  };
+  return { update, release: () => update(false) };
+}
+
+/** ElectronBrowserHost owns webview lifetime. */
 export function usePreviewBridge(input: {
   threadRef: ScopedThreadRef;
   tabId: string;
   runtimeTabId: string;
+  serverDriven?: boolean;
 }): void {
-  const { threadRef, tabId, runtimeTabId } = input;
+  const { threadRef, tabId, runtimeTabId, serverDriven = false } = input;
   const clearBrowserPointer = useBrowserPointerStore((state) => state.clear);
   const reportStatus = useAtomCommand(previewEnvironment.reportStatus, "preview status report");
-  const open = useAtomCommand(previewEnvironment.open, "open browser tab");
-  const bridge = previewBridge;
+  const { environmentId, threadId } = threadRef;
+  const stableThreadRef: ScopedThreadRef = { environmentId, threadId };
 
-  useEffect(() => {
-    if (!bridge) return;
-    return bridge.onWindowOpen((sourceTabId, url) => {
-      if (sourceTabId !== runtimeTabId) return;
-      const source = readThreadPreviewState(threadRef).sessions[tabId];
-      if (!source) return;
-      return openPreviewSession({
-        openPreview: open,
-        threadRef,
-        url,
-        profileId: source.profileId ?? "default",
-        ...(source.viewport ? { viewport: source.viewport } : {}),
-      }).then((result) => {
-        if (result._tag === "Success") {
-          useRightPanelStore.getState().openBrowser(threadRef, result.value.tabId);
-        }
-      });
-    });
-  }, [open, runtimeTabId, tabId, threadRef]);
-
-  // One bridge subscription does both jobs (mirror state + forward to
-  // server) so the desktop bridge keeps a single listener entry per tab.
   const lastReportedUrl = useRef<string | null>(null);
   const lastReportedKind = useRef<DesktopPreviewTabState["navStatus"]["kind"] | null>(null);
   const lastDesktopNavStatus = useRef<DesktopPreviewTabState["navStatus"] | null>(null);
-  useEffect(() => {
-    if (!bridge || typeof window === "undefined") return;
-    lastReportedUrl.current = null;
-    lastReportedKind.current = null;
-    lastDesktopNavStatus.current = null;
-    const unsubscribe = bridge.onStateChange((changedTabId, state) => {
+  const captureActivity = useRef<ReturnType<typeof createCaptureActivity> | null>(null);
+  const handleStateChange = useEffectEvent(
+    (changedTabId: string, state: DesktopPreviewTabState): void => {
       if (changedTabId !== runtimeTabId) return;
       if (shouldClearBrowserPointer(lastDesktopNavStatus.current, state.navStatus)) {
         clearBrowserPointer(runtimeTabId);
       }
       lastDesktopNavStatus.current = state.navStatus;
-      applyPreviewDesktopState(threadRef, tabId, projectDesktopState(state));
+      captureActivity.current?.update(state.capturing);
+      applyPreviewDesktopState(stableThreadRef, tabId, projectDesktopState(state));
       const reported = buildReportInput({
-        threadId: threadRef.threadId,
+        threadId: stableThreadRef.threadId,
         tabId,
         state,
         lastReportedUrl: lastReportedUrl.current,
         lastReportedKind: lastReportedKind.current,
       });
-      if (!reported) return;
+      if (!reported || serverDriven) return;
       lastReportedUrl.current = reported.lastReportedUrl;
       lastReportedKind.current = reported.lastReportedKind;
       void reportStatus({
-        environmentId: threadRef.environmentId,
+        environmentId: stableThreadRef.environmentId,
         input: reported.input,
       });
-    });
-    return unsubscribe;
-  }, [bridge, clearBrowserPointer, reportStatus, runtimeTabId, tabId, threadRef]);
+    },
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to preview bridge state changes and capture activity for the current tab
+  useEffect(() => {
+    if (!previewBridge || typeof window === "undefined") return;
+    lastReportedUrl.current = null;
+    lastReportedKind.current = null;
+    lastDesktopNavStatus.current = null;
+    const activity = createCaptureActivity(runtimeTabId);
+    captureActivity.current = activity;
+    const unsubscribe = previewBridge.onStateChange(handleStateChange);
+    return () => {
+      unsubscribe();
+      activity.release();
+      if (captureActivity.current === activity) captureActivity.current = null;
+    };
+  }, [
+    runtimeTabId,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A different tab or thread starts its status reports and pointer tracking from scratch.
+    environmentId,
+    threadId,
+    tabId,
+  ]);
 }
 
 function shouldClearBrowserPointer(
@@ -102,7 +113,8 @@ function shouldClearBrowserPointer(
   return current.url !== previous.url;
 }
 
-function projectDesktopState(state: DesktopPreviewTabState): DesktopPreviewOverlay {
+export function projectDesktopState(state: DesktopPreviewTabState): DesktopPreviewOverlay {
+  const navOrigin = state.navStatus.kind === "Idle" ? null : originOf(state.navStatus.url);
   return {
     hasWebContents: state.webContentsId !== null,
     canGoBack: state.canGoBack,
@@ -110,23 +122,14 @@ function projectDesktopState(state: DesktopPreviewTabState): DesktopPreviewOverl
     loading: state.navStatus.kind === "Loading",
     zoomFactor: state.zoomFactor,
     pictureInPicture: state.pictureInPicture,
-    audioMuted: state.audioMuted ?? false,
-    audible: state.audible ?? false,
     colorScheme: state.colorScheme,
+    audioMuted: state.audioMuted,
+    audible: state.audible,
     controller: state.controller,
+    favicon: state.favicon && originOf(state.favicon.pageUrl) === navOrigin ? state.favicon : null,
   };
 }
 
-/**
- * Decide whether a state change warrants an RPC to the server, and shape
- * the report payload.
- *
- * - Idle never reports — the tab is post-close or pre-load and the server
- *   already knows the canonical state from `open` / `closed`.
- * - We dedupe on (kind, url): consecutive Loading→Loading→Loading for the
- *   same URL collapses to a single RPC, ditto Success.
- * - LoadFailed always reports (the server uses it to emit `failed`).
- */
 function buildReportInput(args: {
   readonly threadId: ThreadId;
   readonly tabId: string;
@@ -142,8 +145,6 @@ function buildReportInput(args: {
   const status = state.navStatus;
   if (status.kind === "Idle") return null;
 
-  // Skip if we've already reported the same kind+url. LoadFailed always
-  // reports (rapid duplicate failures are unusual and worth surfacing).
   const sameAsLast =
     status.kind !== "LoadFailed" &&
     status.kind === lastReportedKind &&

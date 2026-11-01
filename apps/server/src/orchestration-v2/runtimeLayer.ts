@@ -43,6 +43,7 @@ import { layer as providerSwitchServiceLayer } from "./ProviderSwitchService.ts"
 import { layer as providerTurnControlServiceLayer } from "./ProviderTurnControlService.ts";
 import { layer as providerTurnStartServiceLayer } from "./ProviderTurnStartService.ts";
 import { layer as runExecutionServiceLayer } from "./RunExecutionService.ts";
+import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import {
   layer as runFinalizationServiceLayer,
   observerLive as runFinalizationObserverLive,
@@ -147,6 +148,8 @@ const runFinalizationObserverProvided = runFinalizationObserverLive.pipe(
 export const RunExecutionServiceLayerLive = runExecutionServiceLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
+      // Memoized: the same instance the server browser reads agent turns from.
+      PreviewAgentActivity.layer,
       checkpointServiceProvided,
       eventSinkProvided,
       idAllocatorLayer,

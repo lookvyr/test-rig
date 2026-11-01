@@ -1,9 +1,9 @@
 "use client";
 
+import { isPreviewAvailableFor } from "~/browser/previewRuntime";
 import type { PreviewAnnotationPayload, ScopedThreadRef } from "@t3tools/contracts";
 
 import type { ComposerImageAttachment } from "~/composerDraftStore";
-import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 
 import { PreviewPanelShell, type PreviewPanelMode } from "./PreviewPanelShell";
 import { PreviewView } from "./PreviewView";
@@ -30,7 +30,7 @@ export function PreviewPanel({
   browserZIndex = 30,
   onSendAnnotation,
 }: Props) {
-  if (!isPreviewSupportedInRuntime(threadRef.environmentId)) {
+  if (!isPreviewAvailableFor(threadRef.environmentId)) {
     return (
       <PreviewPanelShell mode={mode}>
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">

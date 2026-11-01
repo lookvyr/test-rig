@@ -655,6 +655,19 @@ describe("rightPanelStore", () => {
       ),
     ).toEqual(["terminal:term-1", "browser:tab-b", "browser:tab-c"]);
   });
+
+  it("keeps hidden tabs' existing surfaces without adding new ones", () => {
+    useRightPanelStore.getState().openBrowser(refA, "tab-a");
+    useRightPanelStore
+      .getState()
+      .reconcileBrowserSurfaces(refA, ["tab-a", "tab-b"], new Set(["tab-a", "tab-b"]));
+
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces.map(
+        (surface) => surface.id,
+      ),
+    ).toEqual(["browser:tab-a"]);
+  });
 });
 
 it("keeps attachment tab order on reopen and preserves attachments without a workspace", () => {

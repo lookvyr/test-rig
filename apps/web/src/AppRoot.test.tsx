@@ -9,7 +9,8 @@ vi.mock("react", async (importOriginal) => ({
 }));
 
 import { ElectronBrowserHost } from "./browser/ElectronBrowserHost";
-import { PreviewAutomationHosts } from "./components/preview/PreviewAutomationHosts";
+import { BrowserProfileReporter } from "./browser/BrowserProfileReporter";
+import { PreviewShortcutForwarder } from "./browser/PreviewShortcutForwarder";
 import { AppAtomRegistryProvider } from "./rpc/atomRegistry";
 import type { AppRouter } from "./router";
 import { AppRoot } from "./AppRoot";
@@ -22,10 +23,11 @@ describe("AppRoot", () => {
     const children = Children.toArray(
       (root as ReactElement<{ readonly children: ReactNode }>).props.children,
     );
-    expect(children).toHaveLength(4);
+    expect(children).toHaveLength(5);
     expect(isValidElement(children[0]) && children[0].type).toBe(RouterProvider);
-    expect(isValidElement(children[1]) && children[1].type).toBe(PreviewAutomationHosts);
-    expect(isValidElement(children[2]) && children[2].type).toBe(ElectronBrowserHost);
-    expect(isValidElement(children[3]) && children[3].type).toBe(ServerBrowserSessions);
+    expect(isValidElement(children[1]) && children[1].type).toBe(ElectronBrowserHost);
+    expect(isValidElement(children[2]) && children[2].type).toBe(ServerBrowserSessions);
+    expect(isValidElement(children[3]) && children[3].type).toBe(BrowserProfileReporter);
+    expect(isValidElement(children[4]) && children[4].type).toBe(PreviewShortcutForwarder);
   });
 });

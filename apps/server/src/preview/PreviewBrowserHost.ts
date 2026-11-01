@@ -1,26 +1,14 @@
-/**
- * Host setup the shared headless browser needs, and the one command that does
- * it. Every failure here names that command, so the server log, an agent's tool
- * error, and the viewer all offer the same fix: `sudo test-rig browser setup`.
- *
- * Test Rig never turns Chrome's sandbox off by itself. A host that cannot give it one
- * gets the command instead, and only the operator's explicit
- * `TEST_RIG_SERVER_BROWSER_SANDBOX=0` launches without it.
- */
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform, HostProcessUserId } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Schema from "effect/Schema";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
-/** The subcommand that sets the host up; callers render it, with `sudo`, for how Test Rig was launched. */
 export const SETUP_SUBCOMMAND = "browser setup";
 
-/** What Chrome prints before aborting when it cannot sandbox itself. */
 export const NO_SANDBOX_SIGNATURE = "No usable sandbox";
 
-/** Whether an operator explicitly allowed Chrome to run without its sandbox. */
 export const sandboxDisabled = (env: Readonly<Record<string, string | undefined>>) =>
   env.TEST_RIG_SERVER_BROWSER_SANDBOX === "0";
 
@@ -28,11 +16,7 @@ export const sandboxDisabled = (env: Readonly<Record<string, string | undefined>
 const USERNS_RESTRICTION = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns";
 export const APPARMOR_PROFILE_PATH = "/etc/apparmor.d/test-rig-chrome-headless-shell";
 
-/**
- * Lets Test Rig's headless browser, in any Test Rig home and at any pinned version, create
- * the user namespace Chrome's sandbox runs in. Modelled on the profile Ubuntu
- * ships for Google Chrome; `unconfined` adds nothing beyond `userns`.
- */
+/** Match Ubuntu's Chrome profile; unconfined adds nothing beyond userns. */
 export const APPARMOR_PROFILE = `# Written by \`test-rig browser setup\`: lets Test Rig's headless browser use Chrome's sandbox.
 abi <abi/4.0>,
 include <tunables/global>
@@ -44,11 +28,7 @@ profile test-rig-chrome-headless-shell /**/tools/chrome-headless-shell/*/*/chrom
 }
 `;
 
-/**
- * Chrome's Debian dependencies that minimal images leave out, from the headless
- * shell's deb.deps. Ubuntu 24.04 and Debian 13 renamed some with a `t64`
- * suffix; setup installs whichever name the host's apt offers.
- */
+/** Ubuntu 24.04 and Debian 13 use some t64 library names; choose names available through apt. */
 export const DEBIAN_PACKAGES: ReadonlyArray<ReadonlyArray<string>> = [
   ["libnss3"],
   ["libglib2.0-0t64", "libglib2.0-0"],
@@ -87,15 +67,24 @@ export class PreviewBrowserLibrariesError extends Schema.TaggedError<PreviewBrow
   }
 }
 
-export type PreviewBrowserHostError = PreviewBrowserSandboxError | PreviewBrowserLibrariesError;
+/** Chrome will not start its sandbox as root (crbug.com/638180), which no host setup fixes. */
+export class PreviewBrowserRootError extends Schema.TaggedError<PreviewBrowserRootError>()(
+  "PreviewBrowserRootError",
+  {},
+) {
+  override get message(): string {
+    return "The Test Rig server is running as root; Chrome's sandbox cannot start. Run Test Rig as a nonroot user. Otherwise set `TEST_RIG_SERVER_BROWSER_SANDBOX=0` in the Test Rig server's environment and restart the server; this disables Chrome's sandbox. `test-rig browser setup` cannot fix root sandboxing.";
+  }
+}
+
+export type PreviewBrowserHostError =
+  | PreviewBrowserSandboxError
+  | PreviewBrowserLibrariesError
+  | PreviewBrowserRootError;
 
 const MISSING_LIBRARY = /^\s*(\S+) => not found$/gm;
+const LOADER_ERROR = /error while loading shared libraries: ([^:\s]+)/;
 
-/**
- * After a launch fails, names the host setup it is missing: the sandbox, from
- * Chrome's own abort message, or shared libraries, from `ldd`. Undefined when
- * neither explains it. Linux only; other hosts never need either.
- */
 export const diagnoseLaunchFailure = Effect.fn("PreviewBrowserHost.diagnoseLaunchFailure")(
   function* (input: {
     readonly executable: string;
@@ -104,7 +93,10 @@ export const diagnoseLaunchFailure = Effect.fn("PreviewBrowserHost.diagnoseLaunc
   }) {
     const { setupCommand } = input;
     if (input.output.includes(NO_SANDBOX_SIGNATURE)) {
-      return new PreviewBrowserSandboxError({ setupCommand });
+      // Playwright reports Chrome's refusal to sandbox as root as a sandbox failure too.
+      return (yield* HostProcessUserId) === 0
+        ? new PreviewBrowserRootError()
+        : new PreviewBrowserSandboxError({ setupCommand });
     }
     if ((yield* HostProcessPlatform) !== "linux") return undefined;
     const libraries = yield* missingLibraries(input.executable);
@@ -114,25 +106,26 @@ export const diagnoseLaunchFailure = Effect.fn("PreviewBrowserHost.diagnoseLaunc
   },
 );
 
-/** Shared libraries the loader cannot find for `executable`, by `ldd`. */
+/** Detect missing libraries with --version; ldd can report misses that NixOS nix-ld provides. */
 export const missingLibraries = Effect.fn("PreviewBrowserHost.missingLibraries")(function* (
   executable: string,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const report = yield* spawner
-    .string(ChildProcess.make("ldd", [executable], { stdin: "ignore", stderr: "ignore" }))
-    .pipe(
-      Effect.timeout("5 seconds"),
-      Effect.orElseSucceed(() => ""),
-    );
-  return [...report.matchAll(MISSING_LIBRARY)].map((match) => match[1]!);
+  const run = (command: string, args: ReadonlyArray<string>) =>
+    spawner
+      .string(ChildProcess.make(command, args, { stdin: "ignore" }), { includeStderr: true })
+      .pipe(
+        Effect.timeout("5 seconds"),
+        Effect.orElseSucceed(() => ""),
+      );
+  const loaderError = LOADER_ERROR.exec(yield* run(executable, ["--version"]))?.[1];
+  if (loaderError === undefined) return [];
+  const listed = [...(yield* run("ldd", [executable])).matchAll(MISSING_LIBRARY)].map(
+    (match) => match[1]!,
+  );
+  return listed.length > 0 ? listed : [loaderError];
 });
 
-/**
- * Whether Chrome's sandbox will be blocked here: the host restricts user
- * namespaces and Test Rig's AppArmor profile is not installed. Readable without
- * root, so the server checks it at startup.
- */
 export const sandboxBlocked = Effect.gen(function* () {
   if ((yield* HostProcessPlatform) !== "linux") return false;
   const fs = yield* FileSystem.FileSystem;

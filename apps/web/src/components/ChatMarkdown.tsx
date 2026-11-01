@@ -1,3 +1,4 @@
+import { isPreviewAvailableFor } from "~/browser/previewRuntime";
 import { ChatMarkdownAssetImage, ChatMarkdownDirectMedia } from "./ChatMarkdownAssetImage";
 export { ChatMarkdownAssetImage };
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
@@ -98,7 +99,6 @@ import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
-import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import {
   isBrowserPreviewFile,
   openFileInPreview,
@@ -926,7 +926,7 @@ function useMarkdownFileLinkChip() {
         onOpen={openInPreferredEditor}
         onOpenInBrowser={
           threadRef &&
-          isPreviewSupportedInRuntime(threadRef?.environmentId) &&
+          isPreviewAvailableFor(threadRef?.environmentId) &&
           isBrowserPreviewFile(fileLinkMeta.filePath)
             ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
             : undefined
@@ -1086,7 +1086,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       const isSameDocumentLink = href?.startsWith("#") ?? false;
       const onClick = props.onClick;
       const canOpenInPreview =
-        Boolean(threadRef) && isPreviewSupportedInRuntime(threadRef?.environmentId);
+        Boolean(threadRef) && isPreviewAvailableFor(threadRef?.environmentId);
       const link = (
         <a
           {...props}

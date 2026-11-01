@@ -1,11 +1,12 @@
 import { previewRuntimeFor } from "~/browser/previewRuntime";
 import type { LocalApi, ScopedThreadRef } from "@t3tools/contracts";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import { isPreviewableUrl } from "@t3tools/shared/preview";
+import { isLoopbackHost } from "@t3tools/shared/preview";
 import * as Schema from "effect/Schema";
 
 import type { OpenPreviewMutation } from "~/browser/openFileInPreview";
-import { applyPreviewServerSnapshot, isPreviewSupportedInRuntime } from "~/previewStateStore";
+import { applyPreviewServerSnapshot } from "~/previewStateStore";
+import { isPreviewAvailableFor } from "~/browser/previewRuntime";
 import { useRightPanelStore } from "~/rightPanelStore";
 
 const terminalLinkErrorContext = {
@@ -14,6 +15,19 @@ const terminalLinkErrorContext = {
   targetOrigin: Schema.String,
   cause: Schema.Defect(),
 };
+
+/** Local dev-server links open in the preview; everything else opens in the system browser. */
+function isPreviewableUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      isLoopbackHost(parsed.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
 
 export class TerminalLinkContextMenuShowError extends Schema.TaggedError<TerminalLinkContextMenuShowError>()(
   "TerminalLinkContextMenuShowError",
@@ -47,7 +61,7 @@ export async function openTerminalLinkInPreview<E>(
 ): Promise<void> {
   const supportsPreview =
     isPreviewableUrl(input.url) &&
-    isPreviewSupportedInRuntime(input.threadRef.environmentId) &&
+    isPreviewAvailableFor(input.threadRef.environmentId) &&
     input.threadRef.threadId.length > 0;
 
   if (!supportsPreview) {

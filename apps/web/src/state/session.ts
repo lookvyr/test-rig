@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import { createEnvironmentSessionAtoms } from "@t3tools/client-runtime/state/session";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { AuthEnvironmentScope, AuthSessionState, EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
@@ -39,4 +39,39 @@ export function useEnvironmentSessionState(environmentId: EnvironmentId) {
     hasError: result._tag === "Failure",
     isPending: result.waiting,
   };
+}
+
+const EMPTY_SESSION_STATE_ATOM = Atom.make(
+  AsyncResult.initial() as AsyncResult.AsyncResult<AuthSessionState, unknown>,
+).pipe(Atom.withLabel("web-session-state:empty"));
+
+/** Whether this client's session on an environment grants `scope`; false until it resolves. */
+export function sessionHasScope(
+  result: AsyncResult.AsyncResult<AuthSessionState, unknown>,
+  scope: AuthEnvironmentScope,
+): boolean {
+  const session = AsyncResult.getOrElse(result, () => null);
+  return result._tag !== "Failure" && session !== null && (session.scopes ?? []).includes(scope);
+}
+
+export function useEnvironmentScope(
+  environmentId: EnvironmentId | null,
+  scope: AuthEnvironmentScope,
+): boolean {
+  const result = useAtomValue(
+    environmentId === null
+      ? EMPTY_SESSION_STATE_ATOM
+      : environmentSession.sessionStateAtom(environmentId),
+  );
+  return sessionHasScope(result, scope);
+}
+
+export function readEnvironmentScope(
+  environmentId: EnvironmentId,
+  scope: AuthEnvironmentScope,
+): boolean {
+  return sessionHasScope(
+    appAtomRegistry.get(environmentSession.sessionStateAtom(environmentId)),
+    scope,
+  );
 }

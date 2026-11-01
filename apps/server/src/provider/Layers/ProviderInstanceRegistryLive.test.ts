@@ -46,6 +46,7 @@ import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.t
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "../providerMaintenanceRunner.ts";
 import { CodexDriver } from "../Drivers/CodexDriver.ts";
+import * as PortScanner from "../../preview/PortScanner.ts";
 import { BUILT_IN_DRIVERS } from "../builtInDrivers.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistryLive.ts";
@@ -235,6 +236,7 @@ describe("ProviderInstanceRegistryLive — built-in drivers slice", () => {
     Layer.provideMerge(ProviderContinuationRequests.layer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
+    Layer.provideMerge(PortScanner.layerTest),
   );
 
   it.live(

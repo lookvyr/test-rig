@@ -1,3 +1,4 @@
+import { isPreviewAvailableFor } from "~/browser/previewRuntime";
 import { useDiffTheme } from "~/hooks/useDiffTheme";
 import type {
   EditorId,
@@ -31,7 +32,6 @@ import { useTheme } from "~/hooks/useTheme";
 import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
 import { DIFF_SURFACE_THEME_UNSAFE_CSS } from "~/lib/diffRendering";
 import { cn } from "~/lib/utils";
-import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Toggle } from "~/components/ui/toggle";
@@ -810,7 +810,7 @@ export default function FilePreviewPanel({
   const rendered = tableDelimiter !== null ? renderTable : renderMarkdown;
   const canOpenInBrowser =
     relativePath !== null &&
-    isPreviewSupportedInRuntime(threadRef.environmentId) &&
+    isPreviewAvailableFor(threadRef.environmentId) &&
     isBrowserPreviewFile(relativePath);
   const absolutePath = relativePath ? resolvePathLinkTarget(relativePath, cwd) : null;
   const breadcrumbs = useMemo(

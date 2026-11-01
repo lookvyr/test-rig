@@ -1,3 +1,4 @@
+import { isPreviewAvailableFor } from "~/browser/previewRuntime";
 import { ChatThreadRouteView } from "./_chat.$environmentId.$threadId";
 import { DraftChatThreadRouteView } from "./_chat.draft.$draftId";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
@@ -22,7 +23,6 @@ import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -129,7 +129,7 @@ function ChatRouteGlobalShortcuts() {
         event.preventDefault();
         event.stopPropagation();
         if (!routeThreadRef) return;
-        if (!isPreviewSupportedInRuntime(routeThreadRef?.environmentId)) {
+        if (!isPreviewAvailableFor(routeThreadRef?.environmentId)) {
           toastManager.add(
             stackedThreadToast({
               type: "info",

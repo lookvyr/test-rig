@@ -10,11 +10,11 @@ export interface BrowserSurfaceRect {
 export interface BrowserSurfacePresentation {
   readonly rect: BrowserSurfaceRect | null;
   readonly visible: boolean;
+  readonly zIndex: number;
   readonly content: BrowserSurfaceContentPresentation | null;
   readonly fittedSourceContent: BrowserSurfaceContentPresentation | null;
   readonly fitSourceContent: boolean;
   readonly cornerRadius: number;
-  readonly zIndex: number;
   readonly updatedAt: number;
   readonly owner: symbol | null;
 }
@@ -30,7 +30,9 @@ export interface BrowserSurfaceContentPresentation {
 }
 
 interface BrowserSurfaceStoreState {
+  readonly activityByTabId: Record<string, number>;
   readonly byTabId: Record<string, BrowserSurfacePresentation>;
+  readonly acquireActivity: (tabId: string) => () => void;
   readonly claim: (tabId: string, owner: symbol, fitSourceContent: boolean) => void;
   readonly present: (
     tabId: string,
@@ -38,7 +40,7 @@ interface BrowserSurfaceStoreState {
     rect: BrowserSurfaceRect,
     visible: boolean,
     cornerRadius: number,
-    zIndex?: number,
+    zIndex: number,
   ) => void;
   readonly presentContent: (tabId: string, content: BrowserSurfaceContentPresentation) => void;
   readonly release: (tabId: string, owner: symbol) => void;
@@ -70,7 +72,28 @@ const rectEquals = (left: BrowserSurfaceRect | null, right: BrowserSurfaceRect):
   left.height === right.height;
 
 export const useBrowserSurfaceStore = create<BrowserSurfaceStoreState>()((set) => ({
+  activityByTabId: {},
   byTabId: {},
+  acquireActivity: (tabId) => {
+    let released = false;
+    set((state) => ({
+      activityByTabId: {
+        ...state.activityByTabId,
+        [tabId]: (state.activityByTabId[tabId] ?? 0) + 1,
+      },
+    }));
+    return () => {
+      if (released) return;
+      released = true;
+      set((state) => {
+        const count = state.activityByTabId[tabId] ?? 0;
+        const activityByTabId = { ...state.activityByTabId };
+        if (count <= 1) delete activityByTabId[tabId];
+        else activityByTabId[tabId] = count - 1;
+        return { activityByTabId };
+      });
+    };
+  },
   claim: (tabId, owner, fitSourceContent) =>
     set((state) => {
       const current = state.byTabId[tabId];
@@ -81,18 +104,18 @@ export const useBrowserSurfaceStore = create<BrowserSurfaceStoreState>()((set) =
           [tabId]: {
             rect: current?.rect ?? null,
             visible: false,
+            zIndex: current?.zIndex ?? 30,
             content: current?.content ?? null,
             fittedSourceContent: fitSourceContent ? (current?.content ?? null) : null,
             fitSourceContent,
             cornerRadius: current?.cornerRadius ?? 0,
-            zIndex: current?.zIndex ?? 30,
             updatedAt: Date.now(),
             owner,
           },
         },
       };
     }),
-  present: (tabId, owner, rect, visible, cornerRadius, zIndex = 30) =>
+  present: (tabId, owner, rect, visible, cornerRadius, zIndex) =>
     set((state) => {
       const current = state.byTabId[tabId];
       if (current?.owner !== owner) return state;
@@ -122,11 +145,11 @@ export const useBrowserSurfaceStore = create<BrowserSurfaceStoreState>()((set) =
             [tabId]: {
               rect: null,
               visible: false,
+              zIndex: 30,
               content,
               fittedSourceContent: null,
               fitSourceContent: false,
               cornerRadius: 0,
-              zIndex: 30,
               updatedAt: Date.now(),
               owner: null,
             },
@@ -180,6 +203,9 @@ export const useBrowserSurfaceStore = create<BrowserSurfaceStoreState>()((set) =
       };
     }),
 }));
+
+export const acquireBrowserSurfaceActivity = (tabId: string): (() => void) =>
+  useBrowserSurfaceStore.getState().acquireActivity(tabId);
 
 export function acquireBrowserSurface(
   tabId: string,

@@ -48,6 +48,8 @@ import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as ServerBrowser from "./preview/ServerBrowser.ts";
+import * as PreviewAgentActivity from "./preview/PreviewAgentActivity.ts";
+import * as DesktopBrowserChannel from "./preview/DesktopBrowserChannel.ts";
 import * as ServerBrowserStream from "./preview/ServerBrowserStream.ts";
 import * as PreviewBrowser from "./preview/PreviewBrowser.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -392,7 +394,10 @@ const RuntimeCoreDependenciesLive = Layer.mergeAll(
     // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
     // `providerInstances` hydration merges `settings.providers.<kind>`
     // with explicit `providerInstances` entries on boot.
-    Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+    Layer.provideMerge(
+      // Memoized: the same scanner terminals and the preview panel read.
+      ProviderInstanceRegistryHydrationLive.pipe(Layer.provide(PortScannerLayerLive)),
+    ),
     // Shared native/canonical NDJSON writers used by both the per-instance
     // drivers (native stream, written from inside each `<X>Adapter`) and
     // `ProviderService` (canonical stream, written after event normalization).
@@ -452,7 +457,13 @@ export const makeRoutesLayer = Layer.mergeAll(
   AppMcpProxy.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
   AppMcpAuth.callbackLayer,
 ).pipe(
-  Layer.provide(ServerBrowser.layer.pipe(Layer.provide(PreviewBrowser.layer))),
+  Layer.provide(
+    ServerBrowser.layer.pipe(
+      Layer.provide(PreviewBrowser.layer),
+      // PreviewAgentActivity is memoized with the instance run execution reports to.
+      Layer.provide(Layer.merge(DesktopBrowserChannel.layer, PreviewAgentActivity.layer)),
+    ),
+  ),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(AppMcpOAuth.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provide(commandReadinessLayer),

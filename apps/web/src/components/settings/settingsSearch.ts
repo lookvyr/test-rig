@@ -47,6 +47,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     targetId: "browser-profiles",
   },
+  {
+    id: "browser-search",
+    title: "Browser search engine",
+    to: "/settings/general",
+    targetId: "browser-search",
+  },
   { id: "scheduled-tasks", title: "Scheduled tasks", to: "/settings/scheduled-tasks" },
   {
     id: "color-scheme",

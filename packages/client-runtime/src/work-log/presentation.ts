@@ -207,7 +207,11 @@ export function resolveWorkEntryToolPresentation(
   >,
   fallbackStatus?: "inProgress" | "completed",
 ) {
-  const definition = resolveT3McpToolDefinition(workEntryToolName(entry));
+  // Action tools such as preview_act label each call by the action it ran.
+  const payload = asRecord(entry.toolData);
+  const toolInput =
+    asRecord(payload?.arguments) ?? asRecord(payload?.input) ?? asRecord(payload?.rawInput);
+  const definition = resolveT3McpToolDefinition(workEntryToolName(entry), toolInput);
   const status = entry.toolLifecycleStatus ?? fallbackStatus;
   return resolveT3McpToolPresentation(
     definition,
