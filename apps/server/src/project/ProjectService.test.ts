@@ -824,10 +824,10 @@ for (const withThread of [false, true]) {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const root = yield* fileSystem.makeTempDirectoryScoped({
-          directory: "/private/tmp",
-          prefix: "project-delete-preservation-",
-        });
+        // Resolve symlinked temp roots (macOS /var -> /private/var) so paths match.
+        const root = yield* fileSystem.realPath(
+          yield* fileSystem.makeTempDirectoryScoped({ prefix: "project-delete-preservation-" }),
+        );
         assert.equal(
           Number(
             yield* spawner.exitCode(
