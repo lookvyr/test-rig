@@ -335,6 +335,8 @@ it.layer(layer.pipe(Layer.provideMerge(services)))("repository tools scopes", (i
             healthyScope,
           );
           assert.strictEqual((yield* scopes.resolve(missing)).scopeId, `project:${missing}`);
+          // Root ignores directory permissions, so chmod can't make the workspace unreadable.
+          if (process.getuid?.() === 0) return;
           yield* fs.chmod(missingPath, 0);
           yield* Effect.gen(function* () {
             const unreadable = yield* scopes.list([healthy, missing]);

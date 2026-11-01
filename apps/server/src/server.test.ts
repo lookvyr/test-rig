@@ -3452,37 +3452,40 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("reports workspace root stat failures without relabeling them as missing", () =>
-    Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) === "win32") return;
+  // Root ignores directory permissions, so the stat can't be made to fail.
+  it.effect.skipIf(process.getuid?.() === 0)(
+    "reports workspace root stat failures without relabeling them as missing",
+    () =>
+      Effect.gen(function* () {
+        if ((yield* HostProcessPlatform) === "win32") return;
 
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const blockedRoot = yield* fs.makeTempDirectoryScoped({
-        prefix: "t3-ws-workspace-stat-error-",
-      });
-      const workspaceRoot = path.join(blockedRoot, "workspace");
-      yield* fs.makeDirectory(workspaceRoot);
-      yield* fs.chmod(blockedRoot, 0o000);
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const blockedRoot = yield* fs.makeTempDirectoryScoped({
+          prefix: "t3-ws-workspace-stat-error-",
+        });
+        const workspaceRoot = path.join(blockedRoot, "workspace");
+        yield* fs.makeDirectory(workspaceRoot);
+        yield* fs.chmod(blockedRoot, 0o000);
 
-      const result = yield* Effect.gen(function* () {
-        yield* buildAppUnderTest();
-        const wsUrl = yield* getWsServerUrl("/ws");
-        return yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[WS_METHODS.projectsListEntries]({ cwd: workspaceRoot }).pipe(Effect.result),
-          ),
-        );
-      }).pipe(Effect.ensuring(fs.chmod(blockedRoot, 0o700).pipe(Effect.ignore)));
+        const result = yield* Effect.gen(function* () {
+          yield* buildAppUnderTest();
+          const wsUrl = yield* getWsServerUrl("/ws");
+          return yield* Effect.scoped(
+            withWsRpcClient(wsUrl, (client) =>
+              client[WS_METHODS.projectsListEntries]({ cwd: workspaceRoot }).pipe(Effect.result),
+            ),
+          );
+        }).pipe(Effect.ensuring(fs.chmod(blockedRoot, 0o700).pipe(Effect.ignore)));
 
-      if (result._tag !== "Failure" || result.failure._tag !== "ProjectListEntriesError") {
-        assert.fail("Expected a ProjectListEntriesError");
-      }
-      const error = result.failure;
-      assert.equal(error.failure, "workspace_root_stat_failed");
-      assert.equal(error.normalizedCwd, workspaceRoot);
-      assert.equal(error.detail, "validate-existing");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+        if (result._tag !== "Failure" || result.failure._tag !== "ProjectListEntriesError") {
+          assert.fail("Expected a ProjectListEntriesError");
+        }
+        const error = result.failure;
+        assert.equal(error.failure, "workspace_root_stat_failed");
+        assert.equal(error.normalizedCwd, workspaceRoot);
+        assert.equal(error.detail, "validate-existing");
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc projects.writeFile", () =>
