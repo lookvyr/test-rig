@@ -56,6 +56,13 @@ beforeEach(() => {
     removeEventListener: target.removeEventListener.bind(target),
     dispatchEvent: target.dispatchEvent.bind(target),
   });
+  // Match indexing yields to the next frame on slow passes (a cold markdown
+  // parse can take longer than its 8ms budget), and Node has no frames.
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    queueMicrotask(() => callback(performance.now()));
+    return 0;
+  });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
 });
 afterEach(() => {
   act(() => renderer?.unmount());
