@@ -22,7 +22,9 @@ describe("ComposerPendingTerminalContextChip", () => {
     );
 
     expect(markup).toContain('data-terminal-context-expired="true"');
-    expect(markup).toContain("border-destructive/35");
+    // Expired chips use the invalid state, which switches the chip to the destructive accent.
+    expect(markup).toContain('data-state="invalid"');
+    expect(markup).toContain("data-[state=invalid]:[--context-chip-accent:");
     expect(markup).toContain("Terminal 1 lines 2-4");
   });
 });
