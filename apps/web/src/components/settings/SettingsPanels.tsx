@@ -128,6 +128,7 @@ import {
   useSettingsSearchTargetId,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { SnoozePresetsRow } from "./SnoozePresetsSettings";
 import { ProjectFavicon } from "../ProjectFavicon";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
@@ -288,6 +289,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
         ? ["Snooze limited threads"]
         : []),
+      ...(!Equal.equals(settings.snoozePresets, DEFAULT_UNIFIED_SETTINGS.snoozePresets)
+        ? ["Snooze options"]
+        : []),
       ...(settings.compactIdleThreads !== DEFAULT_UNIFIED_SETTINGS.compactIdleThreads
         ? ["Compact idle Claude threads"]
         : []),
@@ -318,6 +322,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.autoRemoveSettledWorktrees,
       settings.autoResumeLimitedThreads,
       settings.snoozeLimitedThreads,
+      settings.snoozePresets,
       settings.compactIdleThreads,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
@@ -420,6 +425,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       autoRemoveSettledWorktrees: DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
+      snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
       compactIdleThreads: DEFAULT_UNIFIED_SETTINGS.compactIdleThreads,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
@@ -1632,6 +1638,8 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        <SnoozePresetsRow />
 
         <SettingsRow
           {...searchableSetting("compact-idle-threads")}

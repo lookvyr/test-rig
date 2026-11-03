@@ -1,4 +1,6 @@
 import { useEffect, useId, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { Settings2Icon } from "lucide-react";
 import { create } from "zustand";
 import {
   localSnoozeDate,
@@ -51,6 +53,7 @@ export function CustomSnoozeDialogHost() {
 
 function CustomSnoozeDialog() {
   const id = useId();
+  const navigate = useNavigate();
   const [initial] = useState(() => new Date(Date.now() + 3_600_000));
   const [mode, setMode] = useState<CustomSnoozeInput["mode"]>("date");
   const [date, setDate] = useState(localSnoozeDate(initial));
@@ -186,6 +189,18 @@ function CustomSnoozeDialog() {
             ) : null}
           </DialogPanel>
           <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost-muted"
+              className="sm:mr-auto"
+              onClick={() => {
+                finish(null);
+                void navigate({ to: "/settings/general", hash: "snooze-options" });
+              }}
+            >
+              <Settings2Icon />
+              Edit snooze options
+            </Button>
             <Button type="button" variant="outline" onClick={() => finish(null)}>
               Cancel
             </Button>

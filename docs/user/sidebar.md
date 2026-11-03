@@ -94,6 +94,13 @@ and time or a duration. **Wake thread** brings it back early. Snoozing alone
 does not send a message. Custom snooze is also available for selected sidebar
 threads.
 
+To change the choices in the snooze menu, open **Settings → General → Snooze
+options**, or choose **Edit snooze options** in the Custom snooze dialog. Each
+option is a duration, such as 3 hours, or a time on a day, such as 9:00 PM
+tomorrow. A weekday means the next one after today. Menus list the options
+soonest first and hide a today option after its time passes. You can keep up to
+eight options; with none, the menu offers only **Custom…**.
+
 Snoozing keeps PR watches and automatic updates active. Pending automatic
 notifications and subagent completion reports do not prevent snoozing; a queued
 message from you still does. Snoozing and waking preserve those deliveries.

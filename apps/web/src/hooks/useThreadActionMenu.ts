@@ -16,7 +16,11 @@ import {
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useCallback } from "react";
 
-import { resolveSnoozePresets, snoozeWakeDescription } from "../components/Sidebar.snooze";
+import {
+  pickSnoozePreset,
+  resolveSnoozePresets,
+  snoozeWakeDescription,
+} from "../components/Sidebar.snooze";
 import {
   buildThreadActionMenuItems,
   type ThreadActionMenuId,
@@ -140,7 +144,7 @@ export function useThreadActionMenu(input: {
           const preset =
             action === "snooze:custom"
               ? await requestCustomSnooze()
-              : snoozePresets.find((candidate) => `snooze:${candidate.id}` === action);
+              : pickSnoozePreset(snoozePresets, action.slice("snooze:".length));
           if (!preset) return;
           const result = await snoozeThread(threadRef, preset.snoozedUntil);
           if (result._tag === "Failure") {

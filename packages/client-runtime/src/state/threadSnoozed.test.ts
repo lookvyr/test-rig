@@ -268,36 +268,59 @@ describe("snoozeWakeLabel", () => {
 });
 
 describe("resolveSnoozePresets", () => {
-  it("offers the shared client choices", () => {
+  it("offers the default choices", () => {
     const presets = resolveSnoozePresets(localDate(2026, 4, 8, 10));
-    expect(presets.map((preset) => preset.id)).toEqual([
-      "hour",
-      "three-hours",
-      "evening",
-      "tomorrow",
-      "next-week",
+    expect(presets.map((preset) => [preset.id, preset.label])).toEqual([
+      ["after:60", "In 1 hour"],
+      ["after:180", "In 3 hours"],
+      ["at:today:18:00", "This evening"],
+      ["at:tomorrow:09:00", "Tomorrow"],
+      ["at:monday:09:00", "Next week"],
     ]);
-    expect(presets.find((preset) => preset.id === "evening")?.label).toBe("This evening");
     expect(
-      new Date(presets.find((preset) => preset.id === "tomorrow")!.snoozedUntil).getHours(),
+      new Date(
+        presets.find((preset) => preset.id === "at:tomorrow:09:00")!.snoozedUntil,
+      ).getHours(),
     ).toBe(9);
   });
 
-  it("drops the evening choice once evening is near or past", () => {
-    expect(resolveSnoozePresets(localDate(2026, 4, 8, 17, 30)).map((preset) => preset.id)).toEqual([
-      "hour",
-      "three-hours",
-      "tomorrow",
-      "next-week",
+  it("drops a today choice once its time has passed", () => {
+    expect(resolveSnoozePresets(localDate(2026, 4, 8, 18)).map((preset) => preset.id)).toEqual([
+      "after:60",
+      "after:180",
+      "at:tomorrow:09:00",
+      "at:monday:09:00",
     ]);
   });
 
   it("puts next week on the following Monday", () => {
     const nextWeek = new Date(
-      resolveSnoozePresets(localDate(2026, 4, 6, 10)).find((preset) => preset.id === "next-week")!
-        .snoozedUntil,
+      resolveSnoozePresets(localDate(2026, 4, 6, 10)).find(
+        (preset) => preset.id === "at:monday:09:00",
+      )!.snoozedUntil,
     );
     expect(nextWeek.getDay()).toBe(1);
     expect(nextWeek.getDate()).toBe(13);
+  });
+
+  it("sorts custom options soonest first and collapses ones that wake together", () => {
+    // Sunday 2026-04-05 20:00: Monday 09:00 is tomorrow.
+    const presets = resolveSnoozePresets(localDate(2026, 4, 5, 20), {
+      presets: [
+        { kind: "at", day: "monday", time: "09:00" },
+        { kind: "at", day: "friday", time: "16:30" },
+        { kind: "after", minutes: 90 },
+        { kind: "at", day: "tomorrow", time: "09:00" },
+        { kind: "after", minutes: 2 * 24 * 60 },
+      ],
+    });
+    expect(presets.map((preset) => [preset.label, preset.whenLabel.length > 0])).toEqual([
+      ["In 90 minutes", true],
+      ["Tomorrow", true],
+      ["In 2 days", true],
+      ["Friday", true],
+    ]);
+    // A duration that wakes on another day names it.
+    expect(presets[2]!.whenLabel).toMatch(/^Tue /);
   });
 });

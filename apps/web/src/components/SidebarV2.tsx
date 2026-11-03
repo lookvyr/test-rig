@@ -164,7 +164,12 @@ import {
   ThreadWorktreeIndicator,
   type TerminalStatusIndicator,
 } from "./ThreadStatusIndicators";
-import { resolveSnoozePresets, snoozeWakeDescription, snoozeWakeLabel } from "./Sidebar.snooze";
+import {
+  pickSnoozePreset,
+  resolveSnoozePresets,
+  snoozeWakeDescription,
+  snoozeWakeLabel,
+} from "./Sidebar.snooze";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ThreadDraftIndicator } from "./ThreadDraftIndicator";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
@@ -398,7 +403,8 @@ function SnoozePopoverButton(props: {
             onClick={(event) => {
               event.stopPropagation();
               onOpenChange(false);
-              onSnooze(preset);
+              const picked = pickSnoozePreset(presets, preset.id);
+              if (picked) onSnooze(picked);
             }}
             className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent hover:text-foreground"
           >
@@ -2565,7 +2571,7 @@ export default function SidebarV2() {
         const preset =
           clicked.value === "snooze:custom"
             ? await requestCustomSnooze()
-            : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
+            : pickSnoozePreset(snoozePresets, clicked.value.slice("snooze:".length));
         if (preset) {
           // Post-snooze navigation must skip threads snoozing in this same
           // batch — they are all leaving the card block together.
@@ -2791,7 +2797,7 @@ export default function SidebarV2() {
           const preset =
             clicked.value === "snooze:custom"
               ? await requestCustomSnooze()
-              : snoozePresets.find((candidate) => `snooze:${candidate.id}` === clicked.value);
+              : pickSnoozePreset(snoozePresets, clicked.value.slice("snooze:".length));
           if (preset) attemptSnooze(threadRef, preset);
           return;
         }

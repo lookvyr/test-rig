@@ -5,7 +5,10 @@ import {
   type SnoozePreset,
 } from "@t3tools/client-runtime/state/thread-settled";
 
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { primaryServerSettingsAtom } from "../state/server";
 import { formatShortTimestamp, parseTimestampDate } from "../timestampFormat";
+import { toastManager } from "./ui/toast";
 
 export { snoozeWakeLabel, type SnoozePreset };
 
@@ -15,22 +18,35 @@ function timeOfDayLabel(date: Date, timestampFormat: TimestampFormat): string {
   return formatShortTimestamp(date.toISOString(), timestampFormat);
 }
 
+/** The snooze menu from the user's snooze options, read when the menu opens. */
 export function resolveSnoozePresets(
   now: Date,
   timestampFormat: TimestampFormat,
 ): ReadonlyArray<SnoozePreset> {
-  return resolveSharedSnoozePresets(now).map((preset) => {
-    const wake = parseTimestampDate(preset.snoozedUntil);
-    if (wake === null) return preset;
-    const time = timeOfDayLabel(wake, timestampFormat);
-    return {
-      ...preset,
-      whenLabel:
-        preset.id === "next-week"
-          ? `${wake.toLocaleDateString(undefined, { weekday: "short" })} ${time}`
-          : time,
-    };
+  return resolveSharedSnoozePresets(now, {
+    presets: appAtomRegistry.get(primaryServerSettingsAtom).snoozePresets,
+    formatTime: (date) => timeOfDayLabel(date, timestampFormat),
   });
+}
+
+/**
+ * A shown menu choice as picked. A today option can pass while its menu is open,
+ * and the server rejects a wake time in the past, so that pick warns instead.
+ */
+export function pickSnoozePreset(
+  shown: ReadonlyArray<SnoozePreset>,
+  id: string,
+): SnoozePreset | undefined {
+  const preset = shown.find((candidate) => candidate.id === id);
+  if (preset && Date.parse(preset.snoozedUntil) <= Date.now()) {
+    toastManager.add({
+      type: "warning",
+      title: "Could not snooze thread",
+      description: "That snooze time has passed. Choose another time.",
+    });
+    return undefined;
+  }
+  return preset;
 }
 
 /**
