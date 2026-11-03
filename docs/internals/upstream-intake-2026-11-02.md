@@ -49,6 +49,6 @@ which already stays on "Stopping..." until the work clears.
 
 ## Not ported
 
-The thread details **Servers** list and per-server Stop from
-[#22542](https://github.com/pingdotgg/t3code/pull/22542) conflict heavily with Test Rig's port
-scanner and add a process-termination RPC, so they are left for a separate change.
+The thread details **Servers** list from
+[#22542](https://github.com/pingdotgg/t3code/pull/22542) landed separately; see the November 2
+entry in [upstream-ports.md](./upstream-ports.md).

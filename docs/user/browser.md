@@ -121,6 +121,13 @@ which appear while they answer. Choose a server to open it, or **Stop** to end a
 server that a terminal or agent in this environment started. Set `TEST_RIG_PORT_DISCOVERY=0` in the environment that
 starts Test Rig to stop listing ports.
 
+A thread's details card also has a **Servers** section while that thread's terminals or agent
+have a server listening, including a dev server the agent left running after its turn. Select a
+server to open it in the browser panel, or Command-click (Ctrl-click on Windows and Linux) to open
+it in your own browser. Hover a server and choose **Stop** to end it; the agent, the terminal, and
+Test Rig keep running. Stopping needs terminal access to the environment and is not available on
+Windows.
+
 ## Capture from the desktop browser
 
 Open the browser's capture menu and choose **Screenshot** or **Record video**.

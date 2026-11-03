@@ -1,5 +1,17 @@
 # Selected upstream ports
 
+## November 2 thread Servers list
+
+Completes [#22542](https://github.com/pingdotgg/t3code/pull/22542). The October 31 browser
+port already brought its server half: agent attribution through `TEST_RIG_THREAD_ID`,
+`trackAgent`, `preview.stopLocalServer`, and Stop in the browser's empty state. This adds
+upstream's `ThreadServersPanel` to the thread details card and makes `useThreadDiscoveredPorts`
+include servers the thread's agent started. Adapted: opening uses `orchestration:operate` and
+Stop uses `terminal:operate` through `useEnvironmentScope`, since Test Rig has no client RPC
+permission atoms. Upstream's `localServerStop` capability is not added; a Windows host answers
+Stop with the existing `unsupported` error, as the browser's list already does. The card's
+measurement key includes the server count, so the section appearing resizes it.
+
 ## October 31 server-owned browser
 
 Brings Test Rig's browser to nightly `v0.1.6-nightly.20261031.3977`. The October 7

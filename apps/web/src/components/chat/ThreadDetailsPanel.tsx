@@ -12,6 +12,7 @@ import type {
 import { FileDiffIcon, FolderIcon, GitPullRequestIcon } from "lucide-react";
 import { fileBasename } from "@t3tools/client-runtime/markdown-links";
 import { usePrimaryEnvironmentId } from "../../state/environments";
+import { useThreadDiscoveredPorts } from "../../portDiscoveryState";
 import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
 import ProjectScriptsControl, {
   type NewProjectScriptInput,
@@ -25,6 +26,7 @@ import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadPullRequestWatches } from "./ThreadPullRequestWatches";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
+import { ThreadServersPanel } from "./ThreadServersPanel";
 
 export function ThreadDetailsPanel(props: {
   threadRef: ScopedThreadRef;
@@ -61,6 +63,7 @@ export function ThreadDetailsPanel(props: {
     props.threadRef.environmentId,
     props.scripts ? props.openInCwd : null,
   );
+  const serverCount = useThreadDiscoveredPorts(props.threadRef).length;
   const shortcutLabel = shortcutLabelForCommand(props.keybindings, "threadPanel.toggle");
   const workspaceTitle =
     (props.openInCwd ? fileBasename(props.openInCwd) : null) || props.projectName || "Workspace";
@@ -69,7 +72,7 @@ export function ThreadDetailsPanel(props: {
       threadRef={props.threadRef}
       toggleContainer={props.toggleContainer}
       {...(shortcutLabel ? { shortcutLabel } : {})}
-      contentKey={`${Boolean(props.gitCwd)}:${props.scripts?.map((script) => script.id).join(",")}:${fileScripts.map((script) => script.name).join(",")}:${props.availableEditors.length}`}
+      contentKey={`${Boolean(props.gitCwd)}:${props.scripts?.map((script) => script.id).join(",")}:${fileScripts.map((script) => script.name).join(",")}:${props.availableEditors.length}:${props.isDraft ? 0 : serverCount}`}
     >
       <h2
         className="flex min-w-0 items-center gap-2 px-4.5 pt-3 pb-1 text-xs font-medium text-muted-foreground"
@@ -146,6 +149,12 @@ export function ThreadDetailsPanel(props: {
           ) : null}
           <ThreadPullRequestWatches threadRef={props.threadRef} />
         </ThreadDetailsSection>
+      ) : null}
+      {!props.isDraft ? (
+        <ThreadServersPanel
+          environmentId={props.threadRef.environmentId}
+          threadId={props.threadRef.threadId}
+        />
       ) : null}
       <ThreadAutomationsPanel
         environmentId={props.threadRef.environmentId}
