@@ -128,6 +128,8 @@ export {
   OrchestratorMcpDelegateTaskInput,
   OrchestratorMcpDelegateTaskResult,
   OrchestratorMcpTaskStatusInput,
+  OrchestratorMcpBackgroundWaitInput,
+  OrchestratorMcpBackgroundWaitResult,
   OrchestratorMcpTaskCancelInput,
   OrchestratorMcpTaskCancelResult,
   OrchestratorMcpCreateThreadRequest,

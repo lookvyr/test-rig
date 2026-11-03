@@ -419,7 +419,14 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
     ),
   );
   const threadManagementProvided = ThreadManagementService.layer.pipe(
-    Layer.provide(Layer.mergeAll(orchestratorProvided, storesLayer, serverConfigLayer)),
+    Layer.provide(
+      Layer.mergeAll(
+        orchestratorProvided,
+        providerSessionManagerProvided,
+        storesLayer,
+        serverConfigLayer,
+      ),
+    ),
     Layer.provide(NodeServices.layer),
   );
   const continuationWorkerProvided =

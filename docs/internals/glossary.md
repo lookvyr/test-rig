@@ -129,6 +129,10 @@ The agent interaction style for a thread. In [the contracts][1], the values are 
 
 Controls how assistant text reaches the thread timeline. In [the contracts][1], `streaming` updates incrementally and `buffered` accumulates text. Buffered delivery is not held until the turn completes: it spills once accumulated text would exceed 24,000 characters, and flushes at approval and user-input boundaries. See [ProviderRuntimeIngestion.ts][5].
 
+#### Background work and awaited work
+
+Work a provider keeps running after a turn ends, listed in a provider thread's `pendingBackgroundTasks`: subagents, background commands, monitors, and pull request watches. Work is _awaited_ when the agent will resume from it. Subagents, pull request watches, and background tasks the provider cannot name always are; a command or monitor is only when the agent marks it with `t3_background_wait`. Only awaited work holds a thread in Working, delays its completion alert, and blocks automatic settlement. A dev server left running is unawaited. See `backgroundWorkHoldsCompletion` in `packages/shared/src/orchestrationV2PendingBackgroundWork.ts`.
+
 #### Snapshot
 
 A point-in-time view of state. The word is used in multiple layers, including orchestration, provider, and checkpointing. See [ProjectionSnapshotQuery.ts][10], [ProviderAdapter.ts][15], and [CheckpointStore.ts][19].

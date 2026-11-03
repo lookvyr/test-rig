@@ -38,6 +38,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import * as Orchestrator from "./Orchestrator.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 
@@ -261,6 +262,26 @@ export class ThreadManagementDurableRunProjectionError extends Schema.TaggedErro
   }
 }
 
+export class ThreadManagementBackgroundWaitError extends Schema.TaggedError<ThreadManagementBackgroundWaitError>()(
+  "ThreadManagementBackgroundWaitError",
+  {
+    threadId: ThreadId,
+    reason: Schema.Literals(["unsupported", "unavailable", "failed"]),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "unsupported":
+        return "This provider cannot mark background work as awaited.";
+      case "unavailable":
+        return "This thread has no live provider session.";
+      case "failed":
+        return "Failed to update the awaited background work.";
+    }
+  }
+}
+
 export const ThreadManagementError = Schema.Union([
   ThreadManagementThreadNotFoundError,
   ThreadManagementRunNotFoundError,
@@ -361,6 +382,14 @@ export interface ThreadManagementServiceShape {
   readonly interruptThread: (
     input: ThreadManagementInterruptInput,
   ) => Effect.Effect<ThreadManagementInterruptResult, ThreadManagementFailure>;
+  readonly awaitBackgroundTasks: (input: {
+    readonly threadId: ThreadId;
+    readonly taskIds: ReadonlyArray<string>;
+    readonly awaited: boolean;
+  }) => Effect.Effect<
+    { readonly matched: ReadonlyArray<string>; readonly unmatched: ReadonlyArray<string> },
+    ThreadManagementBackgroundWaitError
+  >;
   /**
    * Sends `thread.stop` to every delegated task under a thread, depth first. Their command IDs
    * derive from `commandId`, so a retry repeats nothing that already stopped. A task that
@@ -438,6 +467,7 @@ const SETTLE_AFTER_RUN_WAIT_MS = 24 * 60 * 60 * 1_000;
 
 const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
+  const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
   const layerScope = yield* Effect.scope;
   const projects = yield* ProjectStore.ProjectStoreV2;
   const prepareWorkspace = yield* makePrepareScratchWorkspace;
@@ -906,6 +936,55 @@ const make = Effect.gen(function* () {
       if (failures[0] !== undefined) return yield* Effect.fail(failures[0]);
     });
 
+  const awaitBackgroundTasks: ThreadManagementServiceShape["awaitBackgroundTasks"] = Effect.fn(
+    "ThreadManagementService.awaitBackgroundTasks",
+  )(function* (input) {
+    const unavailable = (cause?: unknown) =>
+      new ThreadManagementBackgroundWaitError({
+        threadId: input.threadId,
+        reason: "unavailable",
+        ...(cause === undefined ? {} : { cause }),
+      });
+    const records = yield* orchestrator
+      .getThreadRecords(input.threadId, ["providerThreads"])
+      .pipe(Effect.mapError(unavailable));
+    const providerThread = records.providerThreads.find(
+      (candidate) =>
+        candidate.id === records.thread.activeProviderThreadId &&
+        candidate.appThreadId === input.threadId,
+    );
+    if (records.thread.deletedAt !== null || providerThread?.providerSessionId == null) {
+      return yield* unavailable();
+    }
+    const runtime = yield* sessions
+      .get(providerThread.providerSessionId)
+      .pipe(Effect.mapError(unavailable));
+    if (Option.isNone(runtime)) {
+      return yield* unavailable();
+    }
+    if (runtime.value.awaitBackgroundTasks === undefined) {
+      return yield* new ThreadManagementBackgroundWaitError({
+        threadId: input.threadId,
+        reason: "unsupported",
+      });
+    }
+    const { matched } = yield* runtime.value
+      .awaitBackgroundTasks({ providerThread, taskIds: input.taskIds, awaited: input.awaited })
+      .pipe(
+        Effect.timeout("15 seconds"),
+        Effect.mapError(
+          (cause) =>
+            new ThreadManagementBackgroundWaitError({
+              threadId: input.threadId,
+              reason: "failed",
+              cause,
+            }),
+        ),
+      );
+    const matchedIds = new Set(matched);
+    return { matched, unmatched: input.taskIds.filter((taskId) => !matchedIds.has(taskId)) };
+  });
+
   return ThreadManagementService.of({
     ensureLegacyTranscript,
     dispatch,
@@ -945,6 +1024,7 @@ const make = Effect.gen(function* () {
     settleThread,
     interruptThread,
     stopDelegatedTasks,
+    awaitBackgroundTasks,
     getThreadEventSequence: orchestrator.getThreadEventSequence,
     recoverDelegatedTask: orchestrator.recoverDelegatedTask,
     delegatedTaskResultPending: orchestrator.delegatedTaskResultPending,

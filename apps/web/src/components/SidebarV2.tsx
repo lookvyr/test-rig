@@ -562,7 +562,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     prState !== "merged" &&
     prState !== "closed";
   // Background work recedes; approvals and questions keep their prominence.
-  const isBackgroundWorking = status === "working" || status === "monitoring";
+  const isBackgroundWorking = status === "working" || status === "waiting";
   const shouldRecede =
     (status === "ready" || isBackgroundWorking) &&
     !isUnread &&
@@ -585,13 +585,13 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
           // the label at full strength.
           className: cn("text-sky-600 dark:text-sky-400", !props.isActive && "opacity-75"),
         }
-      : status === "monitoring"
+      : status === "waiting"
         ? {
-            // Monitoring is calm background presence, not active progress
-            // (monitoring-pill D6), so it keeps the label at full strength.
-            label: "Monitoring",
+            // Waiting on work the agent will resume from is calm background
+            // presence, not active progress.
+            label: "Waiting",
             icon: null,
-            className: "text-sky-600 dark:text-sky-400",
+            className: "text-sidebar-muted-foreground",
           }
         : status === "approval"
           ? {

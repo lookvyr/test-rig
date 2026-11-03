@@ -564,6 +564,8 @@ export const OrchestrationV2RestartCancelledBackgroundWork = Schema.Struct({
   label: TrimmedNonEmptyString,
   /** Stable identity (turn item or provider task id) so same-named work is not merged. */
   id: Schema.optional(TrimmedNonEmptyString),
+  /** The agent was waiting on this work, so its restart note wakes the agent even for a shell. */
+  awaited: Schema.optional(Schema.Literal(true)),
 });
 export type OrchestrationV2RestartCancelledBackgroundWork =
   typeof OrchestrationV2RestartCancelledBackgroundWork.Type;
@@ -945,6 +947,11 @@ const PendingBackgroundTaskFields = {
   parentTaskId: Schema.optional(TrimmedNonEmptyString),
   /** The work's name: a subagent's title, a command's description, a monitor's. */
   description: Schema.optional(TrimmedNonEmptyString),
+  /**
+   * The agent declared it resumes when this work ends, so the thread holds like it does for a
+   * subagent. Only the agent knows whether a command is a wait or a dev server it left running.
+   */
+  awaited: Schema.optional(Schema.Literal(true)),
 };
 
 /**

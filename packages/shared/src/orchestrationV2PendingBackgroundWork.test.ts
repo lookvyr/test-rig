@@ -5,6 +5,17 @@ import {
   derivePendingBackgroundWork,
 } from "./orchestrationV2PendingBackgroundWork.ts";
 
+describe("backgroundWorkHoldsCompletion", () => {
+  it.each([
+    ["a dev server", false, [{ taskId: "dev", kind: "command" }]],
+    ["a dev server's watchdog monitor", false, [{ taskId: "watch", kind: "monitor" }]],
+    ["a command the agent waits on", true, [{ taskId: "tests", kind: "command", awaited: true }]],
+    ["a subagent", true, [{ taskId: "review", kind: "subagent" }]],
+  ] as const)("with %s pending, holds completion: %s", (_case, holds, tasks) => {
+    expect(backgroundWorkHoldsCompletion(tasks)).toBe(holds);
+  });
+});
+
 describe("pull request watches", () => {
   const watch = {
     startedAt: "2026-10-05T00:00:00.000Z",
@@ -34,7 +45,7 @@ describe("pull request watches", () => {
     link(3, { source: "stack-dismissed" }),
   ];
 
-  it("keeps a settled run waiting on each visible watch, as a monitor", () => {
+  it("keeps a settled run waiting on each visible watch, as an awaited monitor", () => {
     const tasks = derivePendingBackgroundWork({
       latestRun: { id: "run-1" as never, ordinal: 1, status: "completed" },
       providerThreads: [],
@@ -46,6 +57,7 @@ describe("pull request watches", () => {
         taskId: "pull-request-watch:github.com/acme/app#1",
         description: "Watching pull request #1",
         kind: "monitor",
+        awaited: true,
       },
     ]);
     expect(backgroundWorkHoldsCompletion(tasks)).toBe(true);

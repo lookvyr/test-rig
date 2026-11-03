@@ -112,6 +112,7 @@ export function cancelledRosterTaskWork(task: OrchestrationV2PendingBackgroundTa
         description === undefined ? task.taskId : `${description} (id ${task.taskId})`,
       ) ?? "background task",
     id: task.taskId,
+    ...(task.awaited === true ? { awaited: true as const } : {}),
   };
 }
 
@@ -272,7 +273,11 @@ export function cancelledBeforeStart(
   return run.status === "cancelled" && neverStarted(run);
 }
 
-/** Shells do not wake their settled parent unless a subagent awaits them. */
+/**
+ * Matches the Working-section hold: a shell or monitor wakes its settled parent only when the
+ * agent said it waits on it. Most are dev servers and their watchdogs, so their note waits for
+ * the next user message.
+ */
 export function isAwaitedWork(work: Work): boolean {
-  return work.kind !== "shell";
+  return work.awaited === true || (work.kind !== "shell" && work.kind !== "monitor");
 }

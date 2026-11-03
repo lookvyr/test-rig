@@ -1,4 +1,6 @@
 import {
+  OrchestratorMcpBackgroundWaitInput,
+  OrchestratorMcpBackgroundWaitResult,
   OrchestratorMcpCapabilitiesResult,
   OrchestratorMcpRequestSecretInput,
   OrchestratorMcpRequestSecretResult,
@@ -28,6 +30,7 @@ import {
   OrchestratorMcpThreadWaitResult,
   ThreadMetadataMcpUpdateInput,
   ThreadMetadataMcpUpdateResult,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
@@ -95,6 +98,16 @@ const TaskCancelTool = Tool.make("task_cancel", {
 })
   .annotate(Tool.Title, "Cancel delegated task")
   .annotate(Tool.Destructive, true);
+
+export const BackgroundWaitTool = Tool.make("t3_background_wait", {
+  description:
+    "Keep this thread in the user's Working list and out of their inbox while you wait for background work. Start a background command or Monitor first. Call this before you end your turn if you will act on its result when it wakes you. In taskIds, give the ID shown when the task started. The thread stays in Working until the task ends. The user is not told the work is done. Do not mark work you leave running, such as a dev server or watcher. Unmarked commands and monitors never keep the thread in Working. Pass waiting=false to remove the mark. This does not stop the task. IDs that are not running return in unmatched and change nothing. Only Claude threads support this tool. Other providers return an error.",
+  parameters: OrchestratorMcpBackgroundWaitInput,
+  success: OrchestratorMcpBackgroundWaitResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+}).annotate(Tool.Title, "Wait on background work");
 
 export const ScheduleTaskTool = Tool.make("schedule_task", {
   description:
@@ -257,6 +270,7 @@ export const OrchestratorToolkit = Toolkit.make(
   DelegateTaskTool,
   TaskStatusTool,
   TaskCancelTool,
+  BackgroundWaitTool,
   ScheduleTaskTool,
   ListScheduledTasksTool,
   UpdateScheduledTaskTool,

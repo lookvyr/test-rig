@@ -36,6 +36,12 @@ const handlers = {
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
       return yield* service.cancelTask(scope, input);
     }),
+  t3_background_wait: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      return yield* service.backgroundWait(scope, input);
+    }),
   schedule_task: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;

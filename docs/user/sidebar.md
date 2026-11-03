@@ -7,7 +7,7 @@ The new design is on by default. It uses quieter read titles, clearer status
 colors, and shorter cards for threads without a branch. Turn off **New design**
 in **Settings → Beta** to return to the classic layout.
 
-Background working and monitoring threads are dimmer than ready threads. Hover
+Working threads and threads waiting on background work are dimmer than ready threads. Hover
 or focus a row to brighten it. The open thread, selected threads, unread results,
 and threads needing an approval or answer stay prominent.
 
@@ -47,8 +47,11 @@ every thread in it.
 
 Threads return to the top of the main list when they finish, fail, or need an
 approval, answer, or plan review, including requests from delegated children.
-Background agents and PR watches stay in
-Working while they need no attention. Pinned threads stay pinned; snoozed and
+Background agents, PR watches, and background commands or monitors the agent
+says it is waiting on stay in Working while they need no attention. They show
+**Waiting** instead of **Working**. A dev server or other process an agent
+leaves running does not keep a thread there; the thread finishes as usual, and
+the open thread shows the process as **Running** with a **Stop** button. Pinned threads stay pinned; snoozed and
 settled threads keep their own sections. This changes only sidebar presentation
 and does not stop, snooze, or settle any work.
 
@@ -85,7 +88,9 @@ as does a queued message waiting for a response. The pending request expires aft
 In **Settings → Beta**, automatic settlement defaults to three days of inactivity,
 with settlement after a pull request merges enabled. These server preferences
 apply to both web and desktop clients. Closed pull requests can also settle
-threads. Disabling auto-settle on a thread prevents automatic settlement.
+threads. Work in progress, pending questions or approvals, and background work the
+agent is waiting on prevent automatic settlement; a dev server it left running does
+not. Disabling auto-settle on a thread prevents automatic settlement.
 Worktree cleanup never settles a thread; it only considers threads already
 settled or archived.
 

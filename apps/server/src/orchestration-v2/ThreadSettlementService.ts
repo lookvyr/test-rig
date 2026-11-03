@@ -8,6 +8,7 @@ import {
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -139,9 +140,10 @@ export function isAutoSettlementCandidate(
   if (thread.pinnedAt != null || thread.autoSettleDisabledAt != null) return false;
   // Blocked-on-you work must never park behind a settled override.
   if (thread.pendingRuntimeRequest !== null) return false;
-  // A live run — or post-settlement background work — is not staleness.
+  // A live run, or background work the agent waits on, is not staleness. A dev
+  // server it left running is.
   if (thread.activityRunStatus != null) return false;
-  if ((thread.pendingBackgroundTasks?.length ?? 0) > 0) return false;
+  if (backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])) return false;
   if (threadHasQueuedTurnStart(thread, nowMs)) return false;
   return !isSnoozed(thread, nowMs);
 }

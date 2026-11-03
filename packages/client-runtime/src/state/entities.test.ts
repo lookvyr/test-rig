@@ -154,7 +154,11 @@ describe("V2 client presentation", () => {
   });
 
   it("parks a thread that never ran at idle while a pull request watch holds it", () => {
-    const watch = { taskId: "pull-request-watch:github.com/acme/app#1", kind: "monitor" as const };
+    const watch = {
+      taskId: "pull-request-watch:github.com/acme/app#1",
+      kind: "monitor" as const,
+      awaited: true as const,
+    };
     const watched = presentThreadShell(environmentId, {
       ...v2ThreadShell,
       latestRunId: null,

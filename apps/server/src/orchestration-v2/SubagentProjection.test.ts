@@ -209,15 +209,25 @@ it("waits for nested work and retains the report across monitor acknowledgements
       "result_available",
     );
   }
-  assert.equal(
-    delegatedTaskProgress({
-      ...projection,
-      providerThreads: [
-        { pendingBackgroundTasks: [{ taskId: "background-audit", kind: "command" }] },
-      ],
-    }).state,
-    "waiting_for_children",
-  );
+  for (const [awaited, state] of [
+    [true, "waiting_for_children"],
+    [false, "result_available"],
+  ] as const) {
+    assert.equal(
+      delegatedTaskProgress({
+        ...projection,
+        providerThreads: [
+          {
+            pendingBackgroundTasks: [
+              { taskId: "background-audit", kind: "command", ...(awaited ? { awaited } : {}) },
+              { taskId: "log-watcher", kind: "monitor" },
+            ],
+          },
+        ],
+      }).state,
+      state,
+    );
+  }
   const pending = {
     ...run,
     id: RunId.make("followup"),
@@ -320,7 +330,7 @@ it("scopes follow-up descendants while retaining native work across later provid
   } as OrchestrationV2ThreadProjection["subagents"][number];
   const provider = {
     lastRunOrdinal: run.ordinal,
-    pendingBackgroundTasks: [{ kind: "command", taskId: "native" }],
+    pendingBackgroundTasks: [{ kind: "command", taskId: "native", awaited: true }],
   } as unknown as OrchestrationV2ThreadProjection["providerThreads"][number];
   const input = { ...projection, runs: [scoped, later], subagents: [child], providerThreads: [] };
   assert.equal(delegatedTaskProgressForTask(input, taskId).state, "waiting_for_children");

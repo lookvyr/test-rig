@@ -29,6 +29,7 @@ import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import * as ThreadTitleRegeneration from "./ThreadTitleRegenerationService.ts";
 import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 
 const projectId = ProjectId.make("project:title-regeneration");
 const modelSelection = {
@@ -56,7 +57,10 @@ function makeHarness(
     registry,
     { databaseLayer: database, runEffectWorker: false },
   );
-  const threadManagement = ThreadManagement.layer.pipe(Layer.provide(orchestrator));
+  const threadManagement = ThreadManagement.layer.pipe(
+    Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+    Layer.provide(orchestrator),
+  );
   const outbox = EffectOutbox.layer.pipe(Layer.provide(database));
   const generateThreadTitle = vi.fn(
     options.generateTitle ?? (() => Effect.succeed({ title: "Generated title" })),

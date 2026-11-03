@@ -67,6 +67,7 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import * as ThreadTitleRegeneration from "./ThreadTitleRegenerationService.ts";
 import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 
 const projectId = ProjectId.make("project:launch-test");
 const otherProjectId = ProjectId.make("project:launch-other");
@@ -136,7 +137,10 @@ function makeHarness(options: HarnessOptions = {}) {
     registry,
     { databaseLayer: database, runEffectWorker: false },
   );
-  const threadManagement = ThreadManagement.layer.pipe(Layer.provide(orchestrator));
+  const threadManagement = ThreadManagement.layer.pipe(
+    Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
+    Layer.provide(orchestrator),
+  );
   const receipts = CommandReceiptStore.layer.pipe(Layer.provide(database));
   const outbox = EffectOutbox.layer.pipe(Layer.provide(database));
   const createWorktree = vi.fn(

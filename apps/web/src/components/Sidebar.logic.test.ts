@@ -690,6 +690,23 @@ describe("resolveSidebarV2Status", () => {
   it("defaults to ready with no runtime", () => {
     expect(resolveSidebarV2Status({ ...idle, runtime: null })).toBe("ready");
   });
+
+  it("waits on held background work but not on a dev server left running", () => {
+    expect(
+      resolveSidebarV2Status({
+        ...idle,
+        runtime: null,
+        pendingBackgroundTasks: [{ taskId: "review", kind: "subagent" }],
+      }),
+    ).toBe("waiting");
+    expect(
+      resolveSidebarV2Status({
+        ...idle,
+        runtime: null,
+        pendingBackgroundTasks: [{ taskId: "dev", kind: "command" }],
+      }),
+    ).toBe("ready");
+  });
 });
 
 describe("searchSidebarThreadsByTitle", () => {
@@ -758,9 +775,17 @@ describe("Working shelf", () => {
     expect(isSidebarThreadWorking({ ...busy, hasPendingApprovals: true })).toBe(false);
     expect(isSidebarThreadWorking({ ...busy, hasPendingUserInput: true })).toBe(false);
     const monitoring = makeTestThread({
-      pendingBackgroundTasks: [{ taskId: "watch", kind: "monitor" }],
+      pendingBackgroundTasks: [{ taskId: "watch", kind: "monitor", awaited: true }],
     });
     expect(isSidebarThreadWorking(monitoring)).toBe(true);
+    // A dev server or its watchdog left running does not keep the thread busy.
+    for (const kind of ["command", "monitor"] as const) {
+      expect(
+        isSidebarThreadWorking(
+          makeTestThread({ pendingBackgroundTasks: [{ taskId: "dev", kind }] }),
+        ),
+      ).toBe(false);
+    }
     expect(
       isSidebarThreadWorking({ ...monitoring, runtime: { ...busy.runtime!, status: "failed" } }),
     ).toBe(false);
@@ -1033,6 +1058,23 @@ describe("resolveThreadStatusPill", () => {
         },
       }),
     ).toMatchObject({ label: "Pending Approval", pulse: false });
+  });
+
+  it("shows Waiting only for background work the agent waits on", () => {
+    const settled = { ...baseThread, runtime: { ...baseThread.runtime, status: "idle" as const } };
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...settled,
+          pendingBackgroundTasks: [{ taskId: "tests", kind: "command", awaited: true }],
+        },
+      }),
+    ).toMatchObject({ label: "Waiting", pulse: false });
+    expect(
+      resolveThreadStatusPill({
+        thread: { ...settled, pendingBackgroundTasks: [{ taskId: "dev", kind: "command" }] },
+      }),
+    ).toBeNull();
   });
 
   it("shows awaiting input when plan mode is blocked on user answers", () => {

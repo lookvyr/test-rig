@@ -1,4 +1,5 @@
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
+import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as React from "react";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
@@ -121,7 +122,7 @@ export function buildBulkTitleRegenerationContextMenuItem(input: {
 export interface ThreadStatusPill {
   label:
     | "Working"
-    | "Monitoring"
+    | "Waiting"
     | "Connecting"
     | "Completed"
     | "Pending Approval"
@@ -134,14 +135,14 @@ export interface ThreadStatusPill {
 
 // Rollup order mirrors the per-thread resolver exactly: attention states,
 // then active work, then the actionable plan prompt, then passive
-// monitoring. A Monitoring sibling must never hide a Plan Ready thread.
+// waiting. A Waiting sibling must never hide a Plan Ready thread.
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 6,
   "Awaiting Input": 5,
   Working: 4,
   Connecting: 4,
   "Plan Ready": 3,
-  Monitoring: 2,
+  Waiting: 2,
   Completed: 1,
 };
 
@@ -431,7 +432,7 @@ export function resolveThreadRowClassName(input: {
 // whether it finished, asked a question, or proposed a plan.
 // Unread completion is tracked separately: it describes whether a ready
 // thread needs attention, not what the thread is currently doing.
-export type SidebarV2Status = "approval" | "input" | "working" | "monitoring" | "failed" | "ready";
+export type SidebarV2Status = "approval" | "input" | "working" | "waiting" | "failed" | "ready";
 
 type SidebarV2StatusInput = Pick<
   SidebarThreadSummary,
@@ -453,13 +454,10 @@ export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2S
   if (thread.runtime?.status === "failed") {
     return "failed";
   }
-  // Background work outlives the turn: fleets read as working; monitoring
-  // only when watch loops are the sole live work.
-  if (backgroundLiveness(thread.pendingBackgroundTasks) === "working") {
-    return "working";
-  }
-  if (backgroundLiveness(thread.pendingBackgroundTasks) === "monitoring") {
-    return "monitoring";
+  // Background work outlives the turn. Only work the agent waits on holds the
+  // thread; a dev server it left running does not.
+  if (backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks)) {
+    return "waiting";
   }
   return "ready";
 }
@@ -480,7 +478,7 @@ function needsThreadAttention(thread: WorkingThreadInput): boolean {
 /** Busy threads can fold away only while they need no human attention. */
 export function isSidebarThreadWorking(thread: WorkingThreadInput): boolean {
   const status = resolveSidebarV2Status(thread);
-  return (status === "working" || status === "monitoring") && !needsThreadAttention(thread);
+  return (status === "working" || status === "waiting") && !needsThreadAttention(thread);
 }
 
 type InboxThreadInput = Pick<
@@ -757,24 +755,14 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  // The turn can settle while native background work runs on. Subagent and
-  // workflow fleets read as plain Working; Monitoring is reserved for watch
-  // loops (a parent agent babysitting a PR, tailing checks) with no other
-  // live work. Same recede treatment as Working per inbox-zero.
-  if (backgroundLiveness(thread.pendingBackgroundTasks) === "working") {
+  // The turn can settle while background work runs on. Work the agent waits on
+  // (subagents, PR watches, marked commands) reads as a quiet Waiting; a dev
+  // server it left running shows nothing here.
+  if (backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks)) {
     return {
-      label: "Working",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
-      pulse: true,
-    };
-  }
-
-  if (backgroundLiveness(thread.pendingBackgroundTasks) === "monitoring") {
-    return {
-      label: "Monitoring",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      label: "Waiting",
+      colorClass: "text-sidebar-muted-foreground",
+      dotClass: "bg-sidebar-muted-foreground",
       pulse: false,
     };
   }
@@ -1018,11 +1006,4 @@ export function sortScopedProjectsForSidebar<
       left.environmentId.localeCompare(right.environmentId) ||
       left.id.localeCompare(right.id),
   );
-}
-
-function backgroundLiveness(
-  tasks: SidebarThreadSummary["pendingBackgroundTasks"],
-): "working" | "monitoring" | null {
-  if (tasks.length === 0) return null;
-  return tasks.every((task) => task.kind === "monitor") ? "monitoring" : "working";
 }

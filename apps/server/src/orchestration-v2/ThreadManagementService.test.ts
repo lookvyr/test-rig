@@ -13,6 +13,10 @@ import {
   type OrchestrationV2Command,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2Run,
+  type OrchestrationV2ProviderThread,
+  ProviderThreadId,
+  ProviderDriverKind,
+  ProviderSessionId,
   type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
   ProjectId,
@@ -22,6 +26,8 @@ import {
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
+import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -31,7 +37,10 @@ import * as TestClock from "effect/testing/TestClock";
 
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as Orchestrator from "./Orchestrator.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as ProviderAdapter from "./ProviderAdapter.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 
 it("stamps authoritative provenance on commands that create threads or messages", () => {
   const command: OrchestrationV2Command = {
@@ -277,6 +286,7 @@ it.effect("classifies projection infrastructure failures separately from a missi
     cause: infrastructureCause,
   });
   const testLayer = ThreadManagementService.layer.pipe(
+    Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
     Layer.provide(workspaceTestLayer),
     Layer.provide(
       Layer.mock(Orchestrator.OrchestratorV2)({
@@ -311,6 +321,7 @@ it.effect("uses thread-not-found only after a projection loads outside the proje
     },
   } as OrchestrationV2ThreadProjection;
   const testLayer = ThreadManagementService.layer.pipe(
+    Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
     Layer.provide(workspaceTestLayer),
     Layer.provide(
       Layer.mock(Orchestrator.OrchestratorV2)({
@@ -337,6 +348,7 @@ it.effect("preserves failed legacy materialization when reading checkpoint conte
     cause: new Error("checkpoint import failed"),
   });
   const testLayer = ThreadManagementService.layerWithLegacyImporter.pipe(
+    Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
     Layer.provide(workspaceTestLayer),
     Layer.provide(
       Layer.mergeAll(
@@ -379,6 +391,7 @@ it.effect.each([
         runs: status === "missing" ? [] : [{ id: runId, status }],
       }) as unknown as OrchestrationV2ThreadProjection;
     const testLayer = ThreadManagementService.layer.pipe(
+      Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
       Layer.provide(workspaceTestLayer),
       Layer.provide(
         Layer.mock(Orchestrator.OrchestratorV2)({
@@ -446,6 +459,7 @@ it.effect("waitForThread reads the run again only when the run updates", () =>
     const stored = (sequence: number, event: object) =>
       ({ sequence, event: { threadId, ...event } }) as unknown as OrchestrationV2StoredEvent;
     const testLayer = ThreadManagementService.layer.pipe(
+      Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
       Layer.provide(workspaceTestLayer),
       Layer.provide(
         Layer.mock(Orchestrator.OrchestratorV2)({
@@ -507,6 +521,7 @@ it.effect.each(["idle", "completed-target", "missing-target", "wrong-project"] a
       const service = yield* ThreadManagementService.ThreadManagementService.pipe(
         Effect.provide(
           ThreadManagementService.layer.pipe(
+            Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
             Layer.provide(workspaceTestLayer),
             Layer.provide(
               Layer.mock(Orchestrator.OrchestratorV2)({
@@ -554,6 +569,102 @@ it.effect.each(["idle", "completed-target", "missing-target", "wrong-project"] a
     }),
 );
 
+it.effect.each(["live", "no-session", "unsupported-runtime"] as const)(
+  "marks background work awaited on the thread's active provider thread with state %s",
+  (state) =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread:background-wait");
+      const providerThreadId = ProviderThreadId.make("provider-thread:background-wait");
+      const providerSessionId = ProviderSessionId.make("provider-session:background-wait");
+      const driver = ProviderDriverKind.make("claudeAgent");
+      const now = yield* DateTime.now;
+      const providerThread: OrchestrationV2ProviderThread = {
+        id: providerThreadId,
+        driver,
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        providerSessionId,
+        appThreadId: threadId,
+        ownerNodeId: null,
+        nativeThreadRef: { driver, nativeId: "native-thread", strength: "strong" },
+        nativeConversationHeadRef: null,
+        status: "idle",
+        firstRunOrdinal: 1,
+        lastRunOrdinal: 1,
+        handoffIds: [],
+        forkedFrom: null,
+        pendingBackgroundTasks: [{ taskId: "tests", kind: "command" }],
+        contextUsage: null,
+        nativeMetadata: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const calls: Array<{ providerThreadId: ProviderThreadId; awaited: boolean }> = [];
+      const runtime = {
+        driver,
+        providerSessionId,
+        ...(state === "unsupported-runtime"
+          ? {}
+          : {
+              awaitBackgroundTasks: (input: {
+                readonly providerThread: OrchestrationV2ProviderThread;
+                readonly taskIds: ReadonlyArray<string>;
+                readonly awaited: boolean;
+              }) =>
+                Effect.sync(() => {
+                  calls.push({
+                    providerThreadId: input.providerThread.id,
+                    awaited: input.awaited,
+                  });
+                  return { matched: input.taskIds.filter((taskId) => taskId === "tests") };
+                }),
+            }),
+      } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime;
+      const layerTest = ThreadManagementService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(Orchestrator.OrchestratorV2)({
+              getThreadRecords: () =>
+                Effect.succeed({
+                  thread: {
+                    id: threadId,
+                    deletedAt: null,
+                    activeProviderThreadId: providerThreadId,
+                  },
+                  providerThreads: [providerThread],
+                } as unknown as OrchestrationV2ThreadProjection),
+            }),
+            Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+              get: () =>
+                Effect.succeed(state === "no-session" ? Option.none() : Option.some(runtime)),
+            }),
+          ),
+        ),
+        Layer.provide(workspaceTestLayer),
+      );
+      const result = yield* Effect.gen(function* () {
+        const service = yield* ThreadManagementService.ThreadManagementService;
+        return yield* service
+          .awaitBackgroundTasks({ threadId, taskIds: ["tests", "finished"], awaited: true })
+          .pipe(Effect.result);
+      }).pipe(Effect.provide(Layer.merge(layerTest, ThreadCommandExecutor.layer)));
+
+      if (state === "live") {
+        expect(result).toMatchObject({
+          success: { matched: ["tests"], unmatched: ["finished"] },
+        });
+        expect(calls).toEqual([{ providerThreadId, awaited: true }]);
+      } else {
+        expect(result).toMatchObject({
+          failure: {
+            _tag: "ThreadManagementBackgroundWaitError",
+            reason: state === "no-session" ? "unavailable" : "unsupported",
+          },
+        });
+        expect(calls).toEqual([]);
+      }
+    }),
+);
+
 it.effect.each([
   { status: "completed" as const, settles: true },
   { status: "failed" as const, settles: false },
@@ -565,6 +676,7 @@ it.effect.each([
     const runId = RunId.make("run:thread-management:settle-after-run");
     const dispatched: OrchestrationV2ServerCommand[] = [];
     const layerTest = ThreadManagementService.layer.pipe(
+      Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
       Layer.provide(workspaceTestLayer),
       Layer.provide(
         Layer.mock(Orchestrator.OrchestratorV2)({
@@ -618,6 +730,7 @@ it.effect.each([false, true])(
       }).pipe(
         Effect.provide(
           ThreadManagementService.layer.pipe(
+            Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
             Layer.provide(workspaceTestLayer),
             Layer.provide(
               Layer.mock(Orchestrator.OrchestratorV2)({

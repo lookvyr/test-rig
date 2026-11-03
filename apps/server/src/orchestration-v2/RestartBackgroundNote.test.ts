@@ -10,6 +10,7 @@ import {
 import {
   cancelledRosterTaskWork,
   cancelledTurnItemWork,
+  isAwaitedWork,
   pendingRestartCancelledBackgroundWork,
   restartCancelledBackgroundWorkNote,
   mergeRestartCancelledBackgroundWork,
@@ -117,6 +118,14 @@ it("names a lost subagent by the id the agent resumes it with", () => {
     parentTaskId: "a".repeat(400),
   }).label;
   assert.lengthOf(longId, 160);
+  assert.isFalse(isAwaitedWork(cancelledRosterTaskWork({ kind: "command", taskId: "shell-2" })));
+  assert.isTrue(
+    isAwaitedWork(cancelledRosterTaskWork({ kind: "command", taskId: "tests", awaited: true })),
+  );
+  assert.isFalse(isAwaitedWork(cancelledRosterTaskWork({ kind: "monitor", taskId: "watchdog" })));
+  assert.isTrue(
+    isAwaitedWork(cancelledRosterTaskWork({ kind: "monitor", taskId: "ci", awaited: true })),
+  );
   assert.equal(
     cancelledTurnItemWork({
       id: "item-1",

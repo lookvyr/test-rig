@@ -19,6 +19,8 @@ import {
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
   OrchestratorMcpFailure,
+  type OrchestratorMcpBackgroundWaitInput,
+  type OrchestratorMcpBackgroundWaitResult,
   type OrchestratorMcpCapabilitiesResult,
   type OrchestratorMcpCreateThreadsInput,
   type OrchestratorMcpCreateThreadsResult,
@@ -176,6 +178,10 @@ export interface OrchestratorMcpServiceShape {
     scope: McpInvocationScope,
     input: OrchestratorMcpThreadInterruptInput,
   ) => Effect.Effect<OrchestratorMcpThreadInterruptResult, OrchestratorMcpFailure>;
+  readonly backgroundWait: (
+    scope: McpInvocationScope,
+    input: OrchestratorMcpBackgroundWaitInput,
+  ) => Effect.Effect<OrchestratorMcpBackgroundWaitResult, OrchestratorMcpFailure>;
 }
 
 export class OrchestratorMcpService extends Context.Service<
@@ -2446,6 +2452,21 @@ const make = Effect.gen(function* () {
           status: result.type === "already_terminal" ? result.run.status : "interrupt_requested",
         } satisfies OrchestratorMcpThreadInterruptResult;
       }),
+    backgroundWait: (scope, input) =>
+      threadManagement
+        .awaitBackgroundTasks({
+          threadId: scope.threadId,
+          taskIds: input.taskIds,
+          awaited: input.waiting ?? true,
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            failure(
+              cause.reason === "unsupported" ? "invalid_request" : "orchestration_error",
+              cause.message,
+            ),
+          ),
+        ),
   });
 });
 

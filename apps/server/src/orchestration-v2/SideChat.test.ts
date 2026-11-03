@@ -61,6 +61,7 @@ import type { ProviderAdapterV2SessionRuntime } from "./ProviderAdapter.ts";
 
 import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 const layerOrchestratorMcp = OrchestratorMcp.layer.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
@@ -571,6 +572,7 @@ it.effect("archive cancels held and not-yet-started runs before late release", (
 );
 
 const coordinationLayer = ThreadManagement.layer.pipe(
+  Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
   Layer.provideMerge(testLayer),
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "side-coordination-" })),
   Layer.provide(NodeServices.layer),

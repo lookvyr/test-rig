@@ -40,6 +40,7 @@ import * as ThreadLaunchService from "./ThreadLaunchService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "./testkit/ReplayFixtureWorkspace.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 
 const sessionId = "automatic-delivery-session";
 const settings = Schema.decodeSync(ClaudeSettings)({});
@@ -312,6 +313,9 @@ it.effect.each(["child completion", "scheduled message", "user steering"] as con
                 ScheduledTaskService.layer.pipe(
                   Layer.provide(
                     ThreadManagementService.layerWithLegacyImporter.pipe(
+                      Layer.provide(
+                        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
+                      ),
                       Layer.provide(
                         ServerConfig.layerTest(cwd, { prefix: "claude-schedule-delivery-" }),
                       ),

@@ -175,6 +175,7 @@ import {
   deriveProviderSubagentStatus,
   deriveReportedModelSelection,
   formatModelSelectionEffort,
+  presentPendingBackgroundWork,
 } from "@t3tools/client-runtime/state/threadExecution";
 
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
@@ -185,9 +186,13 @@ import {
   AlarmClockIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
+  CircleDashedIcon,
   GitBranchIcon,
+  TerminalIcon,
   WifiOffIcon,
 } from "lucide-react";
+import * as DateTime from "effect/DateTime";
+import { AgentElapsed } from "./chat/AgentElapsed";
 import { cn } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -4411,27 +4416,26 @@ function ChatViewContent(props: ChatViewProps) {
     switchGitRef,
     updateThreadMetadata,
   ]);
-  // Background work (subagent fleets, workflow runs, watch loops) can outlive
-  // the turn; once it settles, the composer stop button is gone, so this
-  // banner is the only visible stop affordance. Stop routes through the
-  // stop-everything interrupt: it kills every live background task before
-  // interrupting, and works by session, so no active turn is needed.
-  const activeBackgroundLiveness =
-    !isWorking && activeThread
-      ? activeThreadShell?.pendingBackgroundTasks.length
-        ? activeThreadShell.pendingBackgroundTasks.every((task) => task.kind === "monitor")
-          ? "monitoring"
-          : "working"
-        : null
-      : null;
+  // Background work (dev servers, subagents, watched PRs) can outlive the turn;
+  // once it settles, the composer stop button is gone, so this banner is the
+  // only visible stop affordance. Stop routes through the stop-everything
+  // interrupt: it kills every live background task before interrupting, and
+  // works by session, so no active turn is needed.
+  const activeBackgroundWork = useMemo(
+    () =>
+      !isWorking && activeThread
+        ? presentPendingBackgroundWork(activeThreadShell?.pendingBackgroundTasks ?? [])
+        : null,
+    [activeThread, activeThreadShell?.pendingBackgroundTasks, isWorking],
+  );
   const [isStoppingBackgroundWork, setIsStoppingBackgroundWork] = useState(false);
   useEffect(() => {
-    // "Stopping..." holds until the liveness clears; the interrupt command
-    // returning only means the request was accepted.
-    if (activeBackgroundLiveness === null) {
+    // "Stopping..." holds until the background work clears; the interrupt
+    // command returning only means the request was accepted.
+    if (activeBackgroundWork === null) {
       setIsStoppingBackgroundWork(false);
     }
-  }, [activeBackgroundLiveness]);
+  }, [activeBackgroundWork]);
   useEffect(() => {
     // Per-thread state: switching threads while A's stop is pending must not
     // disable B's Stop button (review finding).
@@ -4458,42 +4462,64 @@ function ChatViewContent(props: ChatViewProps) {
       }
     }
   }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
+  // Codex commands are turn items keyed by their native id, so a lone one can show its uptime.
+  // Kept apart from the banner so streamed command output does not rebuild it.
+  const backgroundWorkStartedAt = useMemo(() => {
+    const [only] = activeBackgroundWork?.items.length === 1 ? activeBackgroundWork.items : [];
+    if (only === undefined) return null;
+    const item = threadProjection?.turnItems.findLast(
+      (candidate) => (candidate.nativeItemRef?.nativeId || candidate.id) === only.taskId,
+    );
+    return item?.startedAt ? DateTime.formatIso(item.startedAt) : null;
+  }, [activeBackgroundWork, threadProjection?.turnItems]);
   const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    if (activeBackgroundLiveness === null || !activeThread) {
+    if (activeBackgroundWork === null || !activeThread) {
       return null;
     }
-    const working = activeBackgroundLiveness === "working";
-    const liveCount =
-      threadProjection?.subagents.filter((agent) => agent.status === "running").length ?? 0;
+    const { items } = activeBackgroundWork;
     return {
       id: `background-liveness:${activeThread.id}`,
       variant: "default",
-      icon: (
-        <span
-          className={cn("size-1.5 rounded-full bg-foreground", working && "animate-status-pulse")}
-          aria-hidden="true"
-        />
+      icon: items.every((item) => item.kind !== "subagent") ? (
+        <TerminalIcon aria-hidden="true" />
+      ) : (
+        <CircleDashedIcon aria-hidden="true" />
       ),
-      title: working
-        ? liveCount > 0
-          ? `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working in the background`
-          : "Background work running"
-        : "Monitoring in the background",
+      // Labels are raw command lines, which can be whole scripts.
+      title: <span className="line-clamp-1 break-all">{activeBackgroundWork.title}</span>,
+      ...(items.length > 1
+        ? {
+            description: (
+              <span className="line-clamp-2 break-all">
+                {items.map((item) => item.label).join(", ")}
+              </span>
+            ),
+          }
+        : {}),
       actions: (
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={isStoppingBackgroundWork}
-          onClick={() => void handleStopBackgroundWork()}
-        >
-          {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
-        </Button>
+        <>
+          {backgroundWorkStartedAt === null ? null : (
+            <span className="text-muted-foreground text-xs">
+              <AgentElapsed
+                agent={{ status: "running", startedAt: backgroundWorkStartedAt, completedAt: null }}
+              />
+            </span>
+          )}
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={isStoppingBackgroundWork}
+            onClick={() => void handleStopBackgroundWork()}
+          >
+            {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
+          </Button>
+        </>
       ),
     };
   }, [
-    activeBackgroundLiveness,
+    activeBackgroundWork,
     activeThread,
-    threadProjection?.subagents,
+    backgroundWorkStartedAt,
     handleStopBackgroundWork,
     isStoppingBackgroundWork,
   ]);

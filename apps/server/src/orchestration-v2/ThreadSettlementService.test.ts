@@ -138,10 +138,25 @@ describe("isAutoSettlementCandidate", () => {
     ).toBe(false);
     expect(
       ThreadSettlementService.isAutoSettlementCandidate(
-        shell({ pendingBackgroundTasks: [{ label: "task" }] as never }),
+        shell({ pendingBackgroundTasks: [{ taskId: "review", kind: "subagent" }] }),
         NOW_MS,
       ),
     ).toBe(false);
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ pendingBackgroundTasks: [{ taskId: "tests", kind: "command", awaited: true }] }),
+        NOW_MS,
+      ),
+    ).toBe(false);
+  });
+
+  it("settles a stale thread that only left a dev server running", () => {
+    expect(
+      ThreadSettlementService.isAutoSettlementCandidate(
+        shell({ pendingBackgroundTasks: [{ taskId: "dev", kind: "command" }] }),
+        NOW_MS,
+      ),
+    ).toBe(true);
   });
 
   it("keeps snoozed threads parked until they wake early on error or completion", () => {

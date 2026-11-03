@@ -233,6 +233,18 @@ export const OrchestratorMcpTaskCancelResult = Schema.Struct({
 });
 export type OrchestratorMcpTaskCancelResult = typeof OrchestratorMcpTaskCancelResult.Type;
 
+export const OrchestratorMcpBackgroundWaitInput = Schema.Struct({
+  taskIds: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
+  waiting: Schema.optional(Schema.Boolean),
+});
+export type OrchestratorMcpBackgroundWaitInput = typeof OrchestratorMcpBackgroundWaitInput.Type;
+
+export const OrchestratorMcpBackgroundWaitResult = Schema.Struct({
+  matched: Schema.Array(Schema.String),
+  unmatched: Schema.Array(Schema.String),
+});
+export type OrchestratorMcpBackgroundWaitResult = typeof OrchestratorMcpBackgroundWaitResult.Type;
+
 export const OrchestratorMcpCreateThreadRequest = Schema.Struct({
   prompt: Schema.optional(OrchestratorMcpPrompt),
   title: Schema.optional(OrchestratorMcpTitle),

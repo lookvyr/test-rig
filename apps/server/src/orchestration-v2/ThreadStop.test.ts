@@ -32,6 +32,7 @@ import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import { makeOrchestratorV2ReplayLayerWithRegistry } from "./testkit/ProviderReplayHarness.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
 const modelSelection = { instanceId, model: "gpt-5.1-codex" };
@@ -45,6 +46,7 @@ const adapter = {
 const database = SqlitePersistenceMemory;
 // No effect worker: runs stay unstarted, so Stop ends them without a provider.
 const testLayer = ThreadManagementService.layer.pipe(
+  Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
   Layer.provideMerge(
     Layer.mergeAll(
       database,
