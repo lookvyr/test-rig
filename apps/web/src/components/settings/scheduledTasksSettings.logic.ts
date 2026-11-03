@@ -3,6 +3,7 @@ import {
   type ProjectId,
   ScheduledTaskId,
   type ScheduledTask,
+  type ScheduledTaskSchedule,
   type ModelSelection,
   type RuntimeMode,
   type ProviderInteractionMode,
@@ -27,7 +28,7 @@ export function validateScheduledTasksSearch(raw: Record<string, unknown>) {
   };
 }
 
-type ScheduleMode = "fixed" | "interval";
+type ScheduleMode = "fixed" | "once" | "interval";
 export type WorkspaceMode = "root" | "worktree" | "existing_worktree";
 
 export interface DraftState {
@@ -38,6 +39,10 @@ export interface DraftState {
   readonly scheduleMode: ScheduleMode;
   readonly intervalMinutes: string;
   readonly timeOfDay: string;
+  /** Local date and time as a `datetime-local` input value, such as 2026-11-02T15:00. */
+  readonly runAt: string;
+  /** The stored ISO run time, sent back unchanged when the field was not edited. */
+  readonly savedRunAt: string;
   readonly weekdays: ReadonlySet<number>;
   readonly projectId: string;
   readonly threadId: string;
@@ -58,6 +63,35 @@ export interface DraftState {
   readonly baseModelSelection: ModelSelection | null;
 }
 
+/** Formats a date as a `datetime-local` input value in the browser's time zone. */
+export function toDateTimeLocalValue(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** The draft's schedule, or null when its one-time run is not a real local date and time. */
+export function scheduleFromDraft(draft: DraftState): ScheduledTaskSchedule | null {
+  if (draft.scheduleMode === "once") {
+    if (draft.savedRunAt && toDateTimeLocalValue(new Date(draft.savedRunAt)) === draft.runAt)
+      return { type: "once", runAt: draft.savedRunAt };
+    const runAt = new Date(draft.runAt);
+    // An invalid or empty value, or a time skipped by a daylight saving change,
+    // reads back as a different value.
+    if (Number.isNaN(runAt.getTime()) || toDateTimeLocalValue(runAt) !== draft.runAt) return null;
+    return { type: "once", runAt: runAt.toISOString() };
+  }
+  if (draft.scheduleMode === "interval") {
+    const everyMs = Math.round(Number(draft.intervalMinutes) * 60_000);
+    return { type: "interval", everyMs };
+  }
+  const selectedEveryDay = draft.weekdays.size === 0 || draft.weekdays.size === 7;
+  return {
+    type: "fixed_time",
+    timeOfDay: draft.timeOfDay,
+    ...(selectedEveryDay ? {} : { weekdays: [...draft.weekdays].toSorted() }),
+  };
+}
+
 export function taskToDraft(task: ScheduledTask): DraftState {
   const schedule = task.schedule;
   const weekdays =
@@ -69,10 +103,12 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     title: task.title,
     prompt: task.prompt,
     enabled: task.enabled,
-    scheduleMode: schedule.type === "interval" ? "interval" : "fixed",
+    scheduleMode: schedule.type === "fixed_time" ? "fixed" : schedule.type,
     intervalMinutes:
       schedule.type === "interval" ? String(Math.max(1, schedule.everyMs / 60_000)) : "15",
     timeOfDay: schedule.type === "fixed_time" ? schedule.timeOfDay.padStart(5, "0") : "09:00",
+    runAt: schedule.type === "once" ? toDateTimeLocalValue(new Date(schedule.runAt)) : "",
+    savedRunAt: schedule.type === "once" ? schedule.runAt : "",
     weekdays,
     projectId: task.projectId,
     threadId: task.threadId ?? "",

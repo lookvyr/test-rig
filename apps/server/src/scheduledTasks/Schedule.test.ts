@@ -68,7 +68,28 @@ describe("scheduled task schedule calculation", () => {
     );
   });
 
+  it("runs a one-time schedule only while its time is ahead", () => {
+    const once = { type: "once", runAt: "2026-11-01T03:00:00-05:00" } as const;
+    const next = nextScheduledRunAt(once, DateTime.makeUnsafe("2026-11-01T07:59:00.000Z"));
+    expect(next ? DateTime.formatIso(DateTime.toUtc(next)) : null).toBe("2026-11-01T08:00:00.000Z");
+    expect(nextScheduledRunAt(once, DateTime.makeUnsafe("2026-11-01T08:00:00.000Z"))).toBeNull();
+    // A late one-time run still fires; it has no next occurrence to skip to.
+    expect(
+      isMissedFixedTimeRun(
+        once,
+        DateTime.makeUnsafe("2026-11-01T08:00:00.000Z"),
+        DateTime.makeUnsafe("2026-11-02T08:00:00.000Z"),
+      ),
+    ).toBe(false);
+  });
+
   it("compares schedules structurally", () => {
+    expect(
+      isSameSchedule(
+        { type: "once", runAt: "2026-11-01T03:00:00-05:00" },
+        { type: "once", runAt: "2026-11-01T08:00:00.000Z" },
+      ),
+    ).toBe(true);
     expect(
       isSameSchedule({ type: "interval", everyMs: 60_000 }, { type: "interval", everyMs: 60_000 }),
     ).toBe(true);

@@ -119,6 +119,29 @@ function nextRunAt(
   }
 }
 
+/**
+ * Next run once a run ends. A one-time task counts from the run's start, so a
+ * manual run that began before its time does not use it up.
+ */
+function nextRunAfterRun(
+  task: Pick<ScheduledTask, "enabled" | "schedule">,
+  startedAt: DateTime.DateTime,
+  now: DateTime.DateTime,
+): string | null {
+  return nextRunAt(task, task.schedule.type === "once" ? startedAt : now);
+}
+
+/** An enabled one-time task with a past time would never run, so saving it is an error. */
+function requireFutureOnce(
+  task: Pick<ScheduledTask, "enabled" | "schedule">,
+  now: DateTime.DateTime,
+  taskId: ScheduledTaskId,
+) {
+  return task.enabled && task.schedule.type === "once" && nextRunAt(task, now) === null
+    ? taskError("The run time has passed. Pick a time in the future.", { taskId })
+    : Effect.void;
+}
+
 function errorMessage(error: unknown): string {
   if (Cause.isCause(error)) return Cause.pretty(error);
   if (error instanceof Error) return error.message;
@@ -427,7 +450,7 @@ export const layer = Layer.effect(
     // the task forever (it filters out 'running' rows) nor re-fires it
     // immediately: the dispatch may already have gone out, so next_run_at must
     // advance and run_count must count the attempt.
-    const releaseStuckRun = (task: ScheduledTask, message: string) =>
+    const releaseStuckRun = (task: ScheduledTask, startedAt: DateTime.DateTime, message: string) =>
       Effect.gen(function* () {
         const now = yield* localNow;
         // Compute the next occurrence from the current row so a schedule
@@ -440,7 +463,7 @@ export const layer = Layer.effect(
           UPDATE scheduled_tasks
           SET last_run_status = 'failed',
               last_run_error = ${message},
-              next_run_at = ${nextRunAt(source, now)},
+              next_run_at = ${nextRunAfterRun(source, startedAt, now)},
               updated_at = ${iso(now)},
               run_count = run_count + 1
           WHERE task_id = ${task.id} AND last_run_status = 'running'
@@ -459,6 +482,9 @@ export const layer = Layer.effect(
       task: ScheduledTask,
       trigger: "scheduled" | "manual",
     ) {
+      // Read outside the guarded run so releaseStuckRun knows when this run started.
+      const startedAt = yield* localNow;
+      const startedAtIso = iso(startedAt);
       const reserved = yield* Ref.modify(activeRuns, (active) => {
         if (active.has(task.id)) return [false, active] as const;
         const next = new Set(active);
@@ -473,9 +499,6 @@ export const layer = Layer.effect(
       }
 
       return yield* Effect.gen(function* () {
-        const startedAt = yield* localNow;
-        const startedAtIso = iso(startedAt);
-
         // The in-memory snapshot may be stale: re-read before touching run
         // state. The task may have been deleted, paused, or postponed since
         // the poll loaded it — none of those may fire.
@@ -564,7 +587,7 @@ export const layer = Layer.effect(
           ...scheduleSource,
           updatedAt: iso(completedAt),
           lastRunAt: startedAtIso,
-          nextRunAt: nextRunAt(scheduleSource, completedAt),
+          nextRunAt: nextRunAfterRun(scheduleSource, startedAt, completedAt),
           lastRunStatus,
           lastRunError,
           runCount: scheduleSource.runCount + 1,
@@ -585,7 +608,7 @@ export const layer = Layer.effect(
         }
         return completed;
       }).pipe(
-        Effect.onError((cause) => releaseStuckRun(task, errorMessage(cause))),
+        Effect.onError((cause) => releaseStuckRun(task, startedAt, errorMessage(cause))),
         Effect.ensuring(
           Ref.update(activeRuns, (active) => {
             const next = new Set(active);
@@ -668,11 +691,14 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             const decoded = yield* Effect.result(decodeRow(row));
             if (Result.isSuccess(decoded)) {
+              const task = decoded.success;
+              // markRunning stamped last_run_at with the interrupted run's start.
+              const startedAt = task.lastRunAt ? DateTime.makeUnsafe(task.lastRunAt) : now;
               yield* sql`
                 UPDATE scheduled_tasks
                 SET last_run_status = 'failed',
                     last_run_error = 'Run was interrupted by a server restart.',
-                    next_run_at = ${nextRunAt(decoded.success, now)},
+                    next_run_at = ${nextRunAfterRun(task, startedAt, now)},
                     updated_at = ${iso(now)},
                     run_count = run_count + 1
                 WHERE task_id IS ${row.task_id} AND last_run_status = 'running'
@@ -748,19 +774,26 @@ export const layer = Layer.effect(
         // keep their run history, and so real load failures propagate instead
         // of silently resetting an existing row.
         const existingTask = yield* findTask(id);
+        // Store one-time runs in UTC so equal instants compare and sort as equal strings.
+        const schedule =
+          input.schedule.type === "once"
+            ? { type: "once" as const, runAt: iso(DateTime.makeUnsafe(input.schedule.runAt)) }
+            : input.schedule;
         // Keep the existing next_run_at when the schedule itself is untouched:
         // editing a title or prompt must not postpone (or resurrect) a due
         // run — only schedule/enabled changes restart the clock.
         const scheduleUnchanged =
           existingTask !== null &&
           existingTask.enabled === input.enabled &&
-          isSameSchedule(existingTask.schedule, input.schedule);
+          isSameSchedule(existingTask.schedule, schedule);
+        if (!scheduleUnchanged)
+          yield* requireFutureOnce({ enabled: input.enabled, schedule }, now, id);
         const task: ScheduledTask = {
           id,
           title: input.title,
           prompt: input.prompt,
           enabled: input.enabled,
-          schedule: input.schedule,
+          schedule,
           projectId: input.projectId,
           threadId: input.threadId ?? null,
           workspaceStrategy: input.workspaceStrategy,
@@ -773,7 +806,7 @@ export const layer = Layer.effect(
           updatedAt: iso(now),
           nextRunAt: scheduleUnchanged
             ? existingTask.nextRunAt
-            : nextRunAt({ enabled: input.enabled, schedule: input.schedule }, now),
+            : nextRunAt({ enabled: input.enabled, schedule }, now),
           lastRunAt: existingTask?.lastRunAt ?? null,
           lastRunStatus: existingTask?.lastRunStatus ?? "never",
           lastRunError: existingTask?.lastRunError ?? null,
@@ -789,6 +822,11 @@ export const layer = Layer.effect(
         const existing = yield* loadTask(input.id);
         if (existing.enabled === input.enabled) return { task: existing };
         const now = yield* localNow;
+        yield* requireFutureOnce(
+          { enabled: input.enabled, schedule: existing.schedule },
+          now,
+          input.id,
+        );
         const next = nextRunAt({ enabled: input.enabled, schedule: existing.schedule }, now);
         // RETURNING so a task deleted between the load and this UPDATE is a
         // visible not-found error, not a false success.

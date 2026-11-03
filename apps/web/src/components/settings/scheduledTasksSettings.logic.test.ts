@@ -6,12 +6,13 @@ import {
   ScheduledTaskId,
   type ScheduledTask,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import {
   scheduledTaskDefaultModel,
   scheduledTaskRuntimeMode,
+  scheduleFromDraft,
   taskToDraft,
   workspaceFromDraft,
 } from "./scheduledTasksSettings.logic";
@@ -52,6 +53,32 @@ describe("editing scheduled task branch settings", () => {
       workspaceStrategy: { type: "worktree", baseRef: "release", startFromOrigin },
     });
     expect(draft.startFromOrigin).toBe(startFromOrigin);
+  });
+});
+
+describe("one-time scheduled tasks", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("round-trips the run time through the local date-time input", () => {
+    const runAt = "2026-11-03T17:00:42.000Z";
+    const draft = taskToDraft({ ...legacyTask, schedule: { type: "once", runAt } });
+    expect(draft.scheduleMode).toBe("once");
+    // Untouched, the stored instant goes back as is, seconds included.
+    expect(scheduleFromDraft(draft)).toEqual({ type: "once", runAt });
+    expect(scheduleFromDraft({ ...draft, runAt: "2026-11-04T09:30" })).toEqual({
+      type: "once",
+      runAt: new Date("2026-11-04T09:30").toISOString(),
+    });
+    expect(scheduleFromDraft({ ...draft, runAt: "" })).toBeNull();
+  });
+
+  it("rejects a time skipped by daylight saving", () => {
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    const draft = taskToDraft({
+      ...legacyTask,
+      schedule: { type: "once", runAt: "2027-03-14T18:00:00.000Z" },
+    });
+    expect(scheduleFromDraft({ ...draft, runAt: "2027-03-14T02:30" })).toBeNull();
   });
 });
 

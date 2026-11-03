@@ -6,6 +6,7 @@ import { assert, it } from "@effect/vitest";
 import {
   ScheduledTaskError,
   ScheduledTaskId,
+  ScheduledTaskUpsertInput,
   ProviderInstanceId,
   ModelSelection,
   OrchestrationV2ThreadLaunchWorkspaceStrategy,
@@ -641,3 +642,87 @@ for (const mutation of ["edit", "pause", "delete", "recreate"] as const) {
     }).pipe(Effect.provide(SqlitePersistenceMemory)),
   );
 }
+
+const decodeUpsertInput = Schema.decodeUnknownEffect(ScheduledTaskUpsertInput);
+const onceInput = {
+  commandId: "once",
+  title: "Check CI",
+  prompt: "Check whether CI is green.",
+  enabled: true,
+  projectId: "project:test",
+  schedule: { type: "once", runAt: "2026-11-01T03:00:00-05:00" },
+  workspaceStrategy: { type: "root" },
+  modelSelection: { instanceId: "codex", model: "gpt-5" },
+  runtimeMode: "full-access",
+  interactionMode: "default",
+};
+// Each launch takes two minutes, so a manual run can start before the run time and end after it.
+const slowLaunchLayer = ScheduledTaskService.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+        launch: () => TestClock.adjust("2 minutes").pipe(Effect.as({} as never)),
+      }),
+      Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+      NodeCrypto.layer,
+      Scheduler.layer,
+    ),
+  ),
+);
+
+it.effect("runs a one-time schedule once and rejects past times", () =>
+  Effect.gen(function* () {
+    yield* TestClock.setTime(Date.parse("2026-11-01T07:59:00.000Z"));
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const decoded = yield* decodeUpsertInput(onceInput);
+      const created = yield* service.upsert(decoded);
+      assert.deepEqual(created.task.schedule, { type: "once", runAt: "2026-11-01T08:00:00.000Z" });
+      assert.equal(created.task.nextRunAt, "2026-11-01T08:00:00.000Z");
+
+      // A manual run that starts before the time keeps the scheduled run, even if it ends after.
+      const early = yield* service.runNow({ id: created.task.id });
+      assert.equal(early.task.nextRunAt, "2026-11-01T08:00:00.000Z");
+
+      const due = yield* service.runNow({ id: created.task.id });
+      assert.isNull(due.task.nextRunAt);
+      assert.isNull((yield* service.list()).tasks[0]?.nextRunAt);
+
+      // Editing only the title of a task that already ran still saves.
+      const renamed = yield* service.upsert({ ...decoded, title: "Renamed" });
+      assert.isNull(renamed.task.nextRunAt);
+
+      yield* service.setEnabled({ id: created.task.id, enabled: false });
+      const resumed = yield* service
+        .setEnabled({ id: created.task.id, enabled: true })
+        .pipe(Effect.flip);
+      assert.equal(resumed.message, "The run time has passed. Pick a time in the future.");
+
+      const past = yield* service
+        .upsert({ ...decoded, commandId: undefined, title: "Late" })
+        .pipe(Effect.flip);
+      assert.equal(past.message, "The run time has passed. Pick a time in the future.");
+    }).pipe(Effect.provide(slowLaunchLayer), Effect.scoped);
+  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);
+
+it.effect("keeps a one-time run after a restart interrupts an earlier manual run", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* TestClock.setTime(Date.parse("2026-11-01T07:59:00.000Z"));
+    const created = yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      return yield* service.upsert(yield* decodeUpsertInput(onceInput));
+    }).pipe(Effect.provide(slowLaunchLayer), Effect.scoped);
+    yield* sql`UPDATE scheduled_tasks SET last_run_status = 'running', last_run_at = '2026-11-01T07:59:00.000Z'`;
+
+    yield* TestClock.setTime(Date.parse("2026-11-01T08:05:00.000Z"));
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const [task] = (yield* service.list()).tasks;
+      assert.equal(task?.id, created.task.id);
+      assert.equal(task?.lastRunStatus, "failed");
+      assert.equal(task?.nextRunAt, "2026-11-01T08:00:00.000Z");
+    }).pipe(Effect.provide(slowLaunchLayer), Effect.scoped);
+  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);

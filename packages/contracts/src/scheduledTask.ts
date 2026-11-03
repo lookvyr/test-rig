@@ -44,6 +44,29 @@ const ScheduledTaskFixedTimeSchedule = Schema.Struct({
   ),
 });
 
+const ISO_WITH_OFFSET =
+  /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** Date.parse rolls impossible days like Feb 30 into the next month, so check the day too. */
+function isIsoWithOffset(value: string): boolean {
+  const match = ISO_WITH_OFFSET.exec(value);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  return days !== undefined && day >= 1 && day <= days;
+}
+
+// Checked by filter, not pattern, to keep the MCP tool schema small.
+const ScheduledTaskOnceSchedule = Schema.Struct({
+  type: Schema.Literal("once"),
+  runAt: TrimmedNonEmptyString.check(
+    Schema.makeFilter(
+      (value) => isIsoWithOffset(value) || "Expected an ISO date and time with an offset.",
+    ),
+  ).annotate({ description: "ISO date and time with an offset, such as 2026-11-03T15:00:00Z." }),
+});
+
 /**
  * Read model for persisted schedules. Keep accepting legacy sub-minute rows so
  * users can list, disable, edit, or delete them after the write minimum changes.
@@ -51,9 +74,9 @@ const ScheduledTaskFixedTimeSchedule = Schema.Struct({
 export const ScheduledTaskSchedule = Schema.Union([
   ScheduledTaskIntervalSchedule,
   ScheduledTaskFixedTimeSchedule,
+  ScheduledTaskOnceSchedule,
 ]).annotate({
-  description:
-    "Structured recurring schedule. Pass an object with type 'interval' or 'fixed_time'.",
+  description: "Structured schedule. Pass an object with type 'interval', 'fixed_time', or 'once'.",
 });
 export type ScheduledTaskSchedule = typeof ScheduledTaskSchedule.Type;
 
@@ -68,8 +91,9 @@ export const ScheduledTaskUpsertSchedule = Schema.Union([
     }),
   }),
   ScheduledTaskFixedTimeSchedule,
+  ScheduledTaskOnceSchedule,
 ]).annotate({
-  description: "Writable recurring schedule. Pass an object with type 'interval' or 'fixed_time'.",
+  description: "Writable schedule. Pass an object with type 'interval', 'fixed_time', or 'once'.",
 });
 export type ScheduledTaskUpsertSchedule = typeof ScheduledTaskUpsertSchedule.Type;
 

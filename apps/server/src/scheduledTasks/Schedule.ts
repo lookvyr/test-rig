@@ -13,6 +13,10 @@ export function nextScheduledRunAt(
   schedule: ScheduledTaskSchedule,
   from: DateTime.DateTime,
 ): DateTime.DateTime | null {
+  if (schedule.type === "once") {
+    const runAt = DateTime.makeUnsafe(schedule.runAt);
+    return DateTime.toEpochMillis(runAt) > DateTime.toEpochMillis(from) ? runAt : null;
+  }
   if (schedule.type === "interval") {
     // Persisted rows created before the one-minute floor remain readable, but
     // they must not retain their old high-frequency execution rate.
@@ -55,6 +59,7 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
   if (a.type === "interval") {
     return b.type === "interval" && a.everyMs === b.everyMs;
   }
+  if (a.type === "once") return b.type === "once" && Date.parse(a.runAt) === Date.parse(b.runAt);
   if (b.type !== "fixed_time") return false;
   // The contract accepts padded and unpadded hours ("9:00" and "09:00"), so
   // compare the parsed time — string equality would treat a format-only edit
@@ -90,23 +95,4 @@ export function isMissedFixedTimeRun(
 ): boolean {
   if (schedule.type !== "fixed_time") return false;
   return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_FIXED_TIME_GRACE_MS;
-}
-
-function describeSchedule(schedule: ScheduledTaskSchedule): string {
-  if (schedule.type === "interval") {
-    const minutes = schedule.everyMs / MINUTE_MS;
-    if (Number.isInteger(minutes)) {
-      return `Every ${minutes === 1 ? "minute" : `${minutes} minutes`}`;
-    }
-    return `Every ${Math.round(schedule.everyMs / 1000)} seconds`;
-  }
-
-  const weekdayCount = schedule.weekdays?.length ?? 0;
-  const days =
-    weekdayCount === 0
-      ? "day"
-      : weekdayCount === 5 && schedule.weekdays?.every((day) => day >= 1 && day <= 5)
-        ? "weekday"
-        : "selected day";
-  return `At ${schedule.timeOfDay} every ${days}`;
 }

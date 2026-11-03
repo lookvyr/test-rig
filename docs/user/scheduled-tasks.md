@@ -2,9 +2,10 @@
 
 Open **Settings → Scheduled Tasks** to see tasks on your connected environments.
 Choose **New task**, select a project, workspace, model, and permissions, and write
-the prompt to repeat. Choose **No project** to run without a repository; each run
-gets its own folder on the selected environment. Pick a time and weekdays or an interval of at least one
-minute. The form shows the server timezone. No tasks are created automatically.
+the prompt to run. Choose **No project** to run without a repository; each run
+gets its own folder on the selected environment. Pick a time and weekdays, an interval of at least one
+minute, or **Once** with a date and time. The form shows the server timezone. No tasks are created
+automatically.
 
 New tasks start with the selected project's permission default, or the environment
 default when the project has no override. Once you choose permissions explicitly,
@@ -61,6 +62,12 @@ scheduled occurrence.
 
 Editing, pausing, or deleting a task while a missed occurrence is being skipped
 keeps your saved changes. A replacement task keeps its own schedule.
+
+A **Once** task runs a single time at the date and time you pick, in your own
+timezone. If the server is off or asleep then, it runs as soon as the scheduler
+resumes, however late. **Run now** before that time does not use up the scheduled
+run. After it runs, the task stays in the list with no next run; edit it to pick a
+new time, or delete it. You cannot save or resume a Once task whose time has passed.
 
 Intervals have a one-minute minimum. An overdue interval runs once when the
 scheduler resumes, rather than replaying every missed occurrence. The next

@@ -14,6 +14,7 @@ LOO-33 owns the remaining settings UI and broader scheduling acceptance.
 | Timezone                     | Fixed-time schedules use the server's local timezone. LOO-33 should identify that timezone in the form instead of implying browser-local time. No per-task timezone selector.                                                          |
 | Missed fixed-time occurrence | Allow at most ten minutes of lateness; otherwise skip to the next occurrence.                                                                                                                                                          |
 | Missed interval              | Dispatch once when overdue; don't replay all missed intervals. The next interval starts after dispatch settles. Minimum one minute.                                                                                                    |
+| Missed one-time run          | Dispatch once, however late, when the scheduler resumes. A Run now that starts before the time keeps the scheduled run. Saving or resuming an enabled one-time task whose time has passed is rejected.                                 |
 | Opt-in                       | No default tasks. Explicit task creation/enabling opts into recurring execution. Retain upstream's per-task Enabled control and pause/delete actions; no additional global feature toggle. Explicit Run now may run a paused task.     |
 | Availability                 | Local server must run and machine must be awake. No OS wake or cloud scheduling guarantee.                                                                                                                                             |
 | Launch settings              | New conversations use saved settings. Bound conversations retain their current workspace and permission mode, with the saved provider/model requested for the scheduled turn.                                                          |
@@ -22,7 +23,8 @@ LOO-33 owns the remaining settings UI and broader scheduling acceptance.
 This supersedes the older LOO-14 recommendation to prevent overlap by default.
 The queue applies to internally scheduled work and fits FORK.md's retained deferred
 work boundary. It does not restore interactive composer queuing. Upstream's newer
-webhook features are outside this interval/fixed-time decision and are not ported.
+webhook features are outside this decision and are not ported. One-time runs
+(`{type:'once', runAt}`, ported November 2, 2026) use the picker's local time.
 
 The settings UI remains LOO-33. Its task list, create/edit form, per-task toggle,
 and action menu should follow upstream, limited to retained local scheduling

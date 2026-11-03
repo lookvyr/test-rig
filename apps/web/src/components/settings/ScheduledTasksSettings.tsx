@@ -48,7 +48,9 @@ import { WorktreeBaseBranchPicker } from "../WorktreeBaseBranchPicker";
 import {
   scheduledTaskDefaultModel,
   scheduledTaskRuntimeMode,
+  scheduleFromDraft,
   taskToDraft,
+  toDateTimeLocalValue,
   workspaceFromDraft,
   type DraftState,
   type WorkspaceMode,
@@ -108,6 +110,8 @@ const EMPTY_DRAFT: DraftState = {
   scheduleMode: "fixed",
   intervalMinutes: "15",
   timeOfDay: "09:00",
+  runAt: "",
+  savedRunAt: "",
   weekdays: new Set([1, 2, 3, 4, 5]),
   projectId: "",
   threadId: "",
@@ -156,20 +160,13 @@ function splitModelKey(value: string): ModelSelection | null {
   };
 }
 
-function scheduleFromDraft(draft: DraftState): ScheduledTaskSchedule {
-  if (draft.scheduleMode === "interval") {
-    const everyMs = Math.round(Number(draft.intervalMinutes) * 60_000);
-    return { type: "interval", everyMs };
-  }
-  const selectedEveryDay = draft.weekdays.size === 0 || draft.weekdays.size === 7;
-  return {
-    type: "fixed_time",
-    timeOfDay: draft.timeOfDay,
-    ...(selectedEveryDay ? {} : { weekdays: [...draft.weekdays].toSorted() }),
-  };
-}
+const ONCE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
 
 export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
+  if (schedule.type === "once") return `Once, ${ONCE_FORMATTER.format(new Date(schedule.runAt))}`;
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
     return Number.isInteger(minutes)
@@ -358,7 +355,7 @@ function ScheduledTaskEnvironmentSection({
           {tasks.length === 0 ? (
             <SettingsRow
               title="No scheduled tasks"
-              description="Create a task to run a recurring prompt with or without a project."
+              description="Create a task to run a prompt on a schedule, with or without a project."
             />
           ) : (
             tasks.map((task) => (
@@ -614,6 +611,10 @@ function ScheduledTaskEditorDialog({
       return;
     }
     const schedule = scheduleFromDraft(draft);
+    if (schedule === null) {
+      reportFailure("Invalid run time", "Pick a date and time that exists in your time zone.");
+      return;
+    }
     if (
       schedule.type === "interval" &&
       (!Number.isSafeInteger(schedule.everyMs) || schedule.everyMs < MIN_SCHEDULED_TASK_INTERVAL_MS)
@@ -690,8 +691,10 @@ function ScheduledTaskEditorDialog({
         <DialogHeader>
           <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
           <DialogDescription>
-            Run a prompt automatically — on an interval or at a fixed time.
-            {tasksQuery.data ? ` Times use ${tasksQuery.data.timeZone} (server timezone).` : ""}
+            Run a prompt automatically — on an interval, at a fixed time, or once at a set date.
+            {tasksQuery.data
+              ? ` Repeating times use ${tasksQuery.data.timeZone} (server timezone); Once uses yours.`
+              : ""}
           </DialogDescription>
         </DialogHeader>
 
@@ -946,11 +949,23 @@ function ScheduledTaskEditorDialog({
                   value={[draft.scheduleMode]}
                   onValueChange={(values) => {
                     const mode = values[0];
-                    if (mode === "fixed" || mode === "interval")
-                      setDraft((current) => ({ ...current, scheduleMode: mode }));
+                    if (mode === "fixed" || mode === "once" || mode === "interval")
+                      setDraft((current) => {
+                        if (mode !== "once" || current.runAt)
+                          return { ...current, scheduleMode: mode };
+                        // Suggest the next whole hour on the local clock.
+                        const suggested = new Date();
+                        suggested.setHours(suggested.getHours() + 1, 0, 0, 0);
+                        return {
+                          ...current,
+                          scheduleMode: mode,
+                          runAt: toDateTimeLocalValue(suggested),
+                        };
+                      });
                   }}
                 >
                   <Toggle value="fixed">At a time</Toggle>
+                  <Toggle value="once">Once</Toggle>
                   <Toggle value="interval">Every interval</Toggle>
                 </ToggleGroup>
               </div>
@@ -991,6 +1006,20 @@ function ScheduledTaskEditorDialog({
                       </Toggle>
                     ))}
                   </ToggleGroup>
+                </div>
+              ) : draft.scheduleMode === "once" ? (
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="scheduled-task-run-at">Run on</Label>
+                  <Input
+                    type="datetime-local"
+                    id="scheduled-task-run-at"
+                    nativeInput
+                    className="w-56"
+                    value={draft.runAt}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, runAt: event.target.value }))
+                    }
+                  />
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
