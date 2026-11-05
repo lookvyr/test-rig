@@ -635,6 +635,7 @@ function runStackedAction(
     actionId?: string;
     commitMessage?: string;
     featureBranch?: boolean;
+    stagedOnly?: boolean;
     filePaths?: readonly string[];
   },
   options?: Parameters<GitManager.GitManager["Service"]["runStackedAction"]>[1],
@@ -3322,6 +3323,101 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           Effect.map((result) => result.stdout.trim()),
         ),
       ).toContain("- details from user");
+    }),
+  );
+
+  it.effect.each([
+    { featureBranch: false, commitMessage: undefined },
+    { featureBranch: true, commitMessage: undefined },
+    { featureBranch: false, commitMessage: "Commit staged changes" },
+  ])("staged-only commit preserves unstaged content (%s)", ({ featureBranch, commitMessage }) =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-staged-only-");
+      yield* initRepo(repoDir);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "staged content\n");
+      NodeFS.writeFileSync(NodePath.join(repoDir, "staged.txt"), "staged new file\n");
+      yield* runGit(repoDir, ["add", "README.md", "staged.txt"]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "unstaged content\n");
+      for (let index = 0; index < 204; index++) {
+        NodeFS.writeFileSync(NodePath.join(repoDir, `untracked-${index}.txt`), "untracked\n");
+      }
+      let generatedPatch = "";
+      const { manager } = yield* makeManager({
+        textGeneration: {
+          generateCommitMessage: (input) =>
+            Effect.sync(() => {
+              generatedPatch = input.stagedPatch;
+              return {
+                subject: "Commit the staged index",
+                body: "",
+                ...(input.includeBranch ? { branch: "feature/staged-only" } : {}),
+              };
+            }),
+        },
+      });
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        stagedOnly: true,
+        featureBranch,
+        ...(commitMessage ? { commitMessage } : {}),
+      });
+      expect(result.commit.status).toBe("created");
+      const committedFiles = yield* runGit(repoDir, [
+        "diff-tree",
+        "--no-commit-id",
+        "--name-only",
+        "-r",
+        "HEAD",
+      ]);
+      expect(committedFiles.stdout.trim().split("\n").sort()).toEqual(["README.md", "staged.txt"]);
+      expect((yield* runGit(repoDir, ["show", "HEAD:README.md"])).stdout).toBe("staged content\n");
+      expect(NodeFS.readFileSync(NodePath.join(repoDir, "README.md"), "utf8")).toBe(
+        "unstaged content\n",
+      );
+      if (!commitMessage) expect(generatedPatch).toContain("staged content");
+      expect(generatedPatch).not.toContain("unstaged content");
+      expect(generatedPatch).not.toContain("untracked-");
+      const status = (yield* runGit(repoDir, ["status", "--porcelain"])).stdout;
+      expect(status).toContain(" M README.md");
+      expect(status.split("\n").filter((line) => line.startsWith("?? "))).toHaveLength(204);
+    }),
+  );
+
+  it.effect("staged-only commit skips an empty index without adding workspace changes", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-empty-staged-");
+      yield* initRepo(repoDir);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "untracked.txt"), "leave untracked\n");
+      const before = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout;
+      const { manager } = yield* makeManager();
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        stagedOnly: true,
+      });
+      expect(result.commit.status).toBe("skipped_no_changes");
+      expect((yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout).toBe(before);
+      expect((yield* runGit(repoDir, ["status", "--porcelain"])).stdout).toContain(
+        "?? untracked.txt",
+      );
+    }),
+  );
+
+  it.effect("rejects combining staged-only and selected-workspace commits", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-invalid-staged-");
+      yield* initRepo(repoDir);
+      const { manager } = yield* makeManager();
+      const error = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+        stagedOnly: true,
+        filePaths: ["README.md"],
+      }).pipe(Effect.flip);
+      expect(error.message).toContain(
+        "Staged-only commits cannot also select workspace file paths",
+      );
     }),
   );
 
