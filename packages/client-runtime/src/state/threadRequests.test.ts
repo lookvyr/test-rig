@@ -1,3 +1,9 @@
+import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
+import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { threadKey } from "./entities.ts";
+import { presentThreadShell } from "./models.ts";
+import { v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
+import { createChildThreadApprovalsAtom, type PendingThreadRequests } from "./threadRequests.ts";
 import {
   NodeId,
   ProviderSessionId,
@@ -183,4 +189,60 @@ it("sends trimmed approval feedback only to the exact supported live request", a
   ).toBe(false);
   expect(await sendApprovalFeedback(pending.approvals[0]!, "  ", respond)).toBe(false);
   expect(respond).toHaveBeenCalledTimes(1);
+});
+
+it("loads only child approvals and retains their destination across environments", () => {
+  const local = EnvironmentId.make("local");
+  const remote = EnvironmentId.make("remote");
+  const parent = { environmentId: local, threadId: ThreadId.make("parent") };
+  const childId = ThreadId.make("child");
+  const children = Atom.make(
+    [local, remote].map((environmentId) => ({
+      ...presentThreadShell(environmentId, v2ThreadShell),
+      id: childId,
+      title: environmentId,
+      hasPendingApprovals: true,
+    })),
+  );
+  const details = Atom.family((key: string) =>
+    Atom.make<PendingThreadRequests | null>({
+      approvals: [
+        {
+          requestId: RuntimeRequestId.make(key),
+          requestKind: "command",
+          createdAt: "2026-10-19T00:00:00Z",
+          responseCapability: "live",
+        },
+      ],
+      userInputs: [],
+    }),
+  );
+  const readDetails = vi.fn((ref: ScopedThreadRef) => details(threadKey(ref)));
+  const approvalsAtom = createChildThreadApprovalsAtom({
+    childThreadInputsAtom: () => children,
+    pendingRequestsAtom: readDetails,
+  });
+  const registry = AtomRegistry.make();
+  const unmount = registry.mount(approvalsAtom(parent));
+  const pending = registry.get(approvalsAtom(parent));
+  expect(pending.map((entry) => entry.thread)).toEqual(
+    [local, remote].map((environmentId) => ({ environmentId, threadId: childId })),
+  );
+  expect(pending.map((entry) => entry.title)).toEqual(["local", "remote"]);
+  registry.set(details(threadKey({ environmentId: remote, threadId: childId })), {
+    approvals: [],
+    userInputs: [],
+  });
+  expect(registry.get(approvalsAtom(parent))).toEqual([pending[0]]);
+  readDetails.mockClear();
+  registry.set(
+    children,
+    registry
+      .get(children)
+      .map((child) => ({ ...child, hasPendingApprovals: false, hasPendingUserInput: true })),
+  );
+  expect(registry.get(approvalsAtom(parent))).toEqual([]);
+  expect(readDetails).not.toHaveBeenCalled();
+  unmount();
+  registry.dispose();
 });

@@ -295,10 +295,10 @@ export interface RichRun {
 }
 
 export interface RichDocMap {
-  value: string;
-  runs: RichRun[];
-  docLength: number;
-  contextIds: string[];
+  readonly value: string;
+  readonly runs: ReadonlyArray<Readonly<RichRun>>;
+  readonly docLength: number;
+  readonly contextIds: ReadonlyArray<string>;
 }
 
 function readAtomSource(node: ProseMirrorNode): string {
@@ -525,7 +525,19 @@ function pushPrefix(acc: RichAccumulator, prefix: string, pmPos: number): void {
   acc.md += prefix.length;
 }
 
+// ProseMirror documents are immutable; selection and change handlers share this result.
+const serializedDocs = new WeakMap<ProseMirrorNode, RichDocMap>();
+
 export function serializeEditorDoc(doc: ProseMirrorNode): RichDocMap {
+  let map = serializedDocs.get(doc);
+  if (!map) {
+    map = serializeDoc(doc);
+    serializedDocs.set(doc, map);
+  }
+  return map;
+}
+
+function serializeDoc(doc: ProseMirrorNode): RichDocMap {
   const acc: RichAccumulator = { runs: [], value: "", flat: 0, collapsed: 0, md: 0 };
   const contextIds: string[] = [];
   doc.descendants((node) => {

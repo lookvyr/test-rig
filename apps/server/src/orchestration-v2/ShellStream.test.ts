@@ -24,6 +24,7 @@ import {
   archivedShellStreamItemFromThreadShell,
   buildActiveShellSnapshot,
   coalesceShellApplicationEvents,
+  projectShellApplicationEvents,
   coalesceStoredThreadEvents,
   composeShellStreamWithEnrichment,
   dedupeShellEnrichment,
@@ -150,6 +151,73 @@ describe("subagent shell events", () => {
     ).toBe(true);
     expect(subagents.has("new-child")).toBe(true);
   });
+});
+
+describe("projectShellApplicationEvents", () => {
+  it.effect(
+    "batches distinct threads, including archived and missing rows, and preserves event sequences",
+    () =>
+      Effect.gen(function* () {
+        const ids: Array<ReadonlyArray<ThreadId>> = [];
+        const active = shellFixture({ id: ThreadId.make("active") });
+        const archived = shellFixture({
+          id: ThreadId.make("archived"),
+          archivedAt: DateTime.makeUnsafe(0),
+        });
+        const items = yield* projectShellApplicationEvents({
+          events: [
+            thread(1, "active"),
+            thread(2, "missing"),
+            thread(3, "archived"),
+            thread(4, "active"),
+          ] as ReadonlyArray<import("./ShellStream.ts").ShellApplicationEvent>,
+          readThread: () => Effect.die("batch should serve every thread"),
+          readThreads: (threadIds) => {
+            ids.push(threadIds);
+            return Effect.succeed({
+              schemaVersion: 1,
+              snapshotSequence: 999,
+              threads: [active],
+              archivedThreads: [archived],
+            });
+          },
+          projectItem: () => Effect.die("no project events"),
+        });
+        expect(ids).toEqual([["missing", "archived", "active"]]);
+        expect(items.map((item) => ("sequence" in item ? item.sequence : null))).toEqual([2, 3, 4]);
+        expect(items.map((item) => item.kind)).toEqual([
+          "thread.removed",
+          "thread.removed",
+          "thread.updated",
+        ]);
+      }),
+  );
+
+  it.effect("keeps single-thread reads scalar and falls back after a failed batch", () =>
+    Effect.gen(function* () {
+      for (const count of [1, 2]) {
+        const reads: Array<ThreadId> = [];
+        let batches = 0;
+        const items = yield* projectShellApplicationEvents({
+          events: Array.from({ length: count }, (_, i) =>
+            thread(i + 1, `thread-${i}`),
+          ) as ReadonlyArray<import("./ShellStream.ts").ShellApplicationEvent>,
+          readThread: (id) => {
+            reads.push(id);
+            return Effect.succeed(null);
+          },
+          readThreads: () => {
+            batches++;
+            return Effect.fail("batch unavailable");
+          },
+          projectItem: () => Effect.die("no project events"),
+        });
+        expect(batches).toBe(count === 1 ? 0 : 1);
+        expect(reads).toHaveLength(count);
+        expect(items).toHaveLength(count);
+      }
+    }),
+  );
 });
 
 describe("loadShellSnapshotParts", () => {

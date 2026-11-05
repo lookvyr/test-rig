@@ -1181,6 +1181,16 @@ describe("work-log failure policy (#7999/#7893)", () => {
     expect(workEntryDisplayIndicatesToolFailure(entry)).toBe(false);
   });
 
+  it("does not carry cached failure checks into an updated immutable entry", () => {
+    const clean = toolEntry({ toolLifecycleStatus: "completed", detail: "3 files changed" });
+    expect(workEntryIndicatesToolFailure(clean)).toBe(false);
+    expect(workEntryDisplayIndicatesToolFailure(clean)).toBe(false);
+    const failed = toolEntry({ toolLifecycleStatus: "failed", detail: "3 files changed" });
+    expect(workEntryIndicatesToolFailure(failed)).toBe(true);
+    expect(workEntryDisplayIndicatesToolFailure(failed)).toBe(true);
+    expect(workEntryIndicatesToolFailure(clean)).toBe(false);
+  });
+
   it("does not call a clean completed row failed", () => {
     const entry = toolEntry({ toolLifecycleStatus: "completed", detail: "3 files changed" });
     expect(workEntryIndicatesToolFailure(entry)).toBe(false);
@@ -1194,6 +1204,51 @@ describe("work-log failure policy (#7999/#7893)", () => {
 });
 
 describe("incremental v2 timeline entries", () => {
+  it("re-derives only the work entry whose tool item changed", () => {
+    const fixture = makeStreamingTimelineFixture("Partial");
+    const visibleTurnItems = fixture.visibleTurnItems.map((row) =>
+      row.item.id === "live-work"
+        ? { ...row, item: { ...row.item, status: "running" as const, completedAt: null } }
+        : row,
+    );
+    const input = { visibleTurnItems, optimisticMessages: [] };
+    const previous = deriveTimelineEntriesFromVisibleTurnItemsWithState(input);
+    const nextInput = { ...input, visibleTurnItems: fixture.visibleTurnItems };
+    const next = deriveTimelineEntriesFromVisibleTurnItemsWithState(nextInput, previous);
+    expect(next.entries).toEqual(deriveTimelineEntriesFromVisibleTurnItems(nextInput));
+    for (const [index, entry] of previous.entries.entries()) {
+      if (entry.id === "live-work") expect(next.entries[index]).not.toBe(entry);
+      else expect(next.entries[index]).toBe(entry);
+    }
+
+    const anchoredInput = {
+      ...nextInput,
+      anchoredMessages: [
+        {
+          id: MessageId.make("feedback"),
+          runId: null,
+          role: "assistant" as const,
+          text: "Feedback received",
+          streaming: false,
+          createdAt: fixture.time(6),
+          updatedAt: fixture.time(6),
+        },
+      ],
+    };
+    const anchored = deriveTimelineEntriesFromVisibleTurnItemsWithState(anchoredInput);
+    const movedInput = {
+      ...anchoredInput,
+      visibleTurnItems: anchoredInput.visibleTurnItems.map((row) =>
+        row.item.id === "live-work"
+          ? { ...row, item: { ...row.item, startedAt: DateTime.makeUnsafe(fixture.time(8)) } }
+          : row,
+      ),
+    };
+    expect(
+      deriveTimelineEntriesFromVisibleTurnItemsWithState(movedInput, anchored).entries,
+    ).toEqual(deriveTimelineEntriesFromVisibleTurnItems(movedInput));
+  });
+
   it("retains history and attachment previews through decoded streaming updates", () => {
     const fixture = makeStreamingTimelineFixture("Partial");
     const attachment = {

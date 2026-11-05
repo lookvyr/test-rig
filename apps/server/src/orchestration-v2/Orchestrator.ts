@@ -105,6 +105,7 @@ import {
   type OlderSettledThreadsListing,
   type OlderSettledThreadsQuery,
   type ShellSnapshotOptions,
+  type ActiveShellIndexEntry,
 } from "./ProjectionStore.ts";
 import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
@@ -310,6 +311,10 @@ export interface OrchestratorV2Shape {
     options?: ShellSnapshotOptions,
   ) => Effect.Effect<OrchestrationV2ThreadShellSnapshot, OrchestratorV2Error>;
   /** See `ProjectionStoreV2Shape.readShellSnapshot`. */
+  readonly listActiveShellIndex: () => Effect.Effect<
+    ReadonlyArray<ActiveShellIndexEntry>,
+    OrchestratorV2Error
+  >;
   readonly listActiveSubagentThreadIds: () => Effect.Effect<
     ReadonlyArray<ThreadId>,
     OrchestratorV2Error
@@ -4040,6 +4045,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly senderThreadId?: OrchestrationV2ConversationMessage["senderThreadId"];
     readonly idleCompaction?: OrchestrationV2ConversationMessage["idleCompaction"];
     readonly delegatedCompletion?: OrchestrationV2ConversationMessage["delegatedCompletion"];
+    readonly notification?: OrchestrationV2ConversationMessage["notification"];
     readonly forceRestart: boolean;
   }) =>
     Effect.gen(function* () {
@@ -4189,6 +4195,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...(input.delegatedCompletion === undefined
               ? {}
               : { delegatedCompletion: input.delegatedCompletion }),
+            ...(input.notification === undefined ? {} : { notification: input.notification }),
             ...(input.scheduledTaskId === undefined
               ? {}
               : { scheduledTaskId: input.scheduledTaskId }),
@@ -4283,6 +4290,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           input.projection.thread.providerInstanceId !== input.modelSelection.instanceId;
         if (
           input.delegatedCompletion === undefined &&
+          input.notification === undefined &&
           (instanceChanged ||
             !modelSelectionsEqual(input.projection.thread.modelSelection, input.modelSelection))
         ) {
@@ -5061,13 +5069,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           taskIds: delivery.taskIds,
         };
       }
-      // Route durable mailbox deliveries under the thread lock, using the live
-      // session's capabilities. Never interrupt/restart a turn for a notification.
+      // Deliver child questions during a safe native steer rather than waiting behind the parent.
       if (
-        delegatedCompletion !== undefined &&
-        delegatedCompletion.taskIds.every(
-          (id) => projection.subagents.find((task) => task.id === id)?.completionWake === "always",
-        )
+        delegatedCompletion !== undefined
+          ? delegatedCompletion.taskIds.every(
+              (id) =>
+                projection.subagents.find((task) => task.id === id)?.completionWake === "always",
+            )
+          : command.notification?.source.kind === "delegated_task"
       ) {
         const active = projection.runs.find((run) => run.status === "running");
         const providerThread = projection.providerThreads.find(
@@ -5091,7 +5100,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           if (
             Option.isSome(session) &&
             session.value.providerSession.capabilities.turns.supportsActiveSteering &&
-            session.value.providerSession.capabilities.turns.activeSteeringInterruptsTools !== true
+            session.value.providerSession.capabilities.turns.activeSteeringInterruptsTools !==
+              true &&
+            !(yield* stopReachedRun(command, command.threadId, active.id))
           ) {
             dispatchMode = { type: "steer_active", targetRunId: active.id };
           }
@@ -5159,11 +5170,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           effects,
           projection,
           modelSelection:
-            delegatedCompletion === undefined
+            delegatedCompletion === undefined && command.notification === undefined
               ? modelSelection
               : (projection.runs.find((run) => run.id === dispatchMode.targetRunId)
                   ?.modelSelection ?? modelSelection),
           delegatedCompletion,
+          ...(command.notification === undefined ? {} : { notification: command.notification }),
           targetRunId: dispatchMode.targetRunId,
           messageId: command.messageId,
           text: dispatchText,
@@ -11581,6 +11593,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause }))),
     getShellSnapshot: (options) =>
       projectionStore.getShellSnapshot(options).pipe(Effect.mapError(shellProjectionError)),
+    listActiveShellIndex: () =>
+      projectionStore.listActiveShellIndex().pipe(Effect.mapError(shellProjectionError)),
     listActiveSubagentThreadIds: () =>
       projectionStore.listActiveSubagentThreadIds().pipe(Effect.mapError(shellProjectionError)),
     listOlderSettledThreads: (query) =>
@@ -11728,6 +11742,8 @@ const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
           cause: "Orchestration V2 live runtime is not configured.",
         }),
       ),
+    listActiveShellIndex: () =>
+      Effect.fail(new OrchestratorProjectionError({ threadId: ThreadId.make("thread:shell") })),
     listActiveSubagentThreadIds: () =>
       Effect.fail(
         new OrchestratorProjectionError({

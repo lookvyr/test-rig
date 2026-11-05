@@ -1,4 +1,8 @@
 import {
+  CheckpointId,
+  CheckpointRef,
+  CheckpointScopeId,
+  NodeId,
   EventId,
   ThreadId,
   TurnItemId,
@@ -260,4 +264,74 @@ describe("decideThreadResume", () => {
       }),
     ).toEqual({ mode: "replay", afterSequence: 9, throughSequence: 10 });
   });
+});
+
+it("caps checkpoint records and cards in bounded snapshots and replay events", () => {
+  const projection = timelineProjection(1);
+  const files = Array.from({ length: 250 }, (_, index) => ({
+    path: `vendor/${index}`,
+    kind: "modified",
+    additions: 2,
+    deletions: 1,
+  }));
+  const checkpoint = {
+    id: CheckpointId.make("large"),
+    threadId: THREAD_ID,
+    scopeId: CheckpointScopeId.make("large"),
+    runId: null,
+    nodeId: NodeId.make("large"),
+    parentCheckpointId: null,
+    ordinalWithinScope: 1,
+    appRunOrdinal: null,
+    ref: CheckpointRef.make("refs/checkpoints/large"),
+    status: "ready" as const,
+    files,
+    capturedAt: NOW,
+  };
+  const item = {
+    id: TurnItemId.make("item-0"),
+    threadId: THREAD_ID,
+    runId: null,
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    ordinal: 1,
+    status: "completed" as const,
+    title: "Checkpoint",
+    startedAt: NOW,
+    completedAt: NOW,
+    updatedAt: NOW,
+    type: "checkpoint" as const,
+    checkpointId: checkpoint.id,
+    scopeId: checkpoint.scopeId,
+    files,
+  };
+  const snapshot = buildBoundedThreadStreamSnapshot({
+    snapshotSequence: 1,
+    projection: {
+      ...projection,
+      checkpoints: [checkpoint],
+      turnItems: [item],
+      visibleTurnItems: projection.visibleTurnItems.map((row) => ({ ...row, item })),
+    },
+  });
+  const expected = {
+    files: files.slice(0, 200),
+    filesTotal: { count: 250, additions: 500, deletions: 250 },
+  };
+  expect(snapshot.projection.checkpoints[0]).toMatchObject(expected);
+  expect(snapshot.projection.turnItems[0]).toMatchObject(expected);
+  expect(snapshot.projection.visibleTurnItems[0]?.item).toMatchObject(expected);
+  expect(
+    projectDomainEventForWire({
+      id: EventId.make("large"),
+      threadId: THREAD_ID,
+      occurredAt: NOW,
+      type: "checkpoint.captured",
+      payload: checkpoint,
+    }),
+  ).toMatchObject({ payload: expected });
+  expect(checkpoint.files).toHaveLength(250);
 });

@@ -2225,6 +2225,89 @@ it.effect("schedules an accepted preparing message exactly once across concurren
   }),
 );
 
+it.effect(
+  "prepares a run from its run and message records without reading the full projection",
+  () =>
+    Effect.gen(function* () {
+      const setupEntered = yield* Deferred.make<void>();
+      const allowSetup = yield* Deferred.make<void>();
+      const reads: Array<string> = [];
+      const harness = makeHarness({
+        preparationThreads: (threads) => ({
+          ...threads,
+          getThreadProjection: () => Effect.die("prepareRun must not read the full projection"),
+          getThreadRecords: (threadId, fields, filter) => {
+            reads.push(fields.join(","));
+            assert.equal(fields.length, 1);
+            if (fields[0] === "runs" && reads.length === 1)
+              assert.lengthOf(filter?.runIds ?? [], 1);
+            if (fields[0] === "messages") assert.lengthOf(filter?.messageIds ?? [], 1);
+            return threads.getThreadRecords(threadId, fields, filter);
+          },
+        }),
+        runSetup: () =>
+          Deferred.succeed(setupEntered, undefined).pipe(
+            Effect.andThen(Deferred.await(allowSetup)),
+            Effect.as({ status: "no-script" as const }),
+          ),
+      });
+      yield* Effect.gen(function* () {
+        const launches = yield* ThreadLaunch.ThreadLaunchService;
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        const input = launchInput({
+          command: "command:launch:accepted-before-fork",
+          thread: "thread:launch:accepted-before-fork",
+          message: "Resume preparation",
+          workspace: { type: "worktree", baseRef: "main" },
+        });
+        const messageId = MessageId.make("message:launch:accepted-before-fork");
+
+        yield* threads.dispatch({
+          type: "thread.create",
+          commandId: input.commandId,
+          threadId: input.threadId,
+          projectId: input.projectId,
+          title: input.title,
+          modelSelection: input.modelSelection,
+          runtimeMode: input.runtimeMode,
+          interactionMode: input.interactionMode,
+          branch: null,
+          worktreePath: null,
+          createdBy: input.createdBy,
+          creationSource: input.creationSource,
+        });
+        yield* threads.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make(`${input.commandId}:initial-message`),
+          threadId: input.threadId,
+          messageId,
+          text: "Resume preparation",
+          attachments: [],
+          modelSelection: input.modelSelection,
+          dispatchMode: {
+            type: "defer_start",
+            workspaceStrategy: { type: "worktree", baseRef: "main" },
+          },
+          createdBy: input.createdBy,
+          creationSource: input.creationSource,
+        });
+        const preparing = yield* threads.getThreadProjection(input.threadId);
+        assert.equal(preparing.runs[0]?.status, "preparing");
+
+        const runId = preparing.runs[0]!.id;
+        yield* launches.prepareRun({
+          commandId: CommandId.make("command:narrow-prepare"),
+          threadId: input.threadId,
+          runId,
+        });
+        yield* Deferred.await(setupEntered);
+        assert.deepEqual(reads.slice(0, 2), ["runs", "messages"]);
+        assert.equal(harness.runSetup.mock.calls.length, 1);
+        yield* Deferred.succeed(allowSetup, undefined);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+);
+
 it.effect("creates a strong provider-thread mapping for an imported native session", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {

@@ -39,6 +39,76 @@ const writeTextFile = Effect.fn("CodexHomeLayout.test.writeTextFile")(function* 
 });
 
 it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
+  it.effect(
+    "refuses to replace an existing writer lock directory, including coordination locks",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sharedHome = yield* makeTempDir("codex-shared-");
+        const shadowHome = yield* makeTempDir("codex-shadow-");
+        const shadowLocks = path.join(shadowHome, "thread-writer-locks");
+        const threadLock = path.join(shadowLocks, "thread.lock");
+        yield* writeTextFile(path.join(shadowLocks, ".coordination.lock"), "");
+        yield* writeTextFile(threadLock, "");
+        yield* writeTextFile(path.join(sharedHome, "auth.lock"), "shared");
+        yield* writeTextFile(path.join(shadowHome, "auth.lock"), "private");
+        const layout = yield* resolveCodexHomeLayout(
+          decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+        );
+        const first = yield* materializeCodexShadowHome(layout).pipe(Effect.result);
+        expect(first._tag).toBe("Failure");
+        if (first._tag === "Failure") {
+          expect(first.failure).toBeInstanceOf(CodexShadowHomeEntryConflictError);
+          expect(first.failure.message).toContain("Stop every Codex process");
+        }
+        expect(yield* fileSystem.exists(threadLock)).toBe(true);
+        expect(yield* fileSystem.readFileString(path.join(shadowHome, "auth.lock"))).toBe(
+          "private",
+        );
+        yield* fileSystem.remove(threadLock);
+        const second = yield* materializeCodexShadowHome(layout).pipe(Effect.result);
+        expect(second._tag).toBe("Failure");
+        expect(yield* fileSystem.exists(path.join(shadowLocks, ".coordination.lock"))).toBe(true);
+        yield* fileSystem.remove(path.join(shadowLocks, ".coordination.lock"));
+        expect((yield* materializeCodexShadowHome(layout).pipe(Effect.result))._tag).toBe(
+          "Failure",
+        );
+        yield* fileSystem.rename(shadowLocks, `${shadowLocks}.previous`);
+        yield* materializeCodexShadowHome(layout);
+        yield* materializeCodexShadowHome(layout);
+        expect(yield* fileSystem.readLink(shadowLocks)).toBe(
+          path.join(sharedHome, "thread-writer-locks"),
+        );
+      }),
+  );
+  it.effect(
+    "can retry after concurrent shadow-home setup without deleting shared writer locks",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sharedHome = yield* makeTempDir("codex-shared-race-");
+        const shadowHome = yield* makeTempDir("codex-shadow-race-");
+        const sharedLock = path.join(sharedHome, "thread-writer-locks", "thread.lock");
+        yield* writeTextFile(sharedLock, "held");
+        const layout = yield* resolveCodexHomeLayout(
+          decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+        );
+        yield* Effect.all(
+          [
+            materializeCodexShadowHome(layout).pipe(Effect.result),
+            materializeCodexShadowHome(layout).pipe(Effect.result),
+          ],
+          { concurrency: "unbounded" },
+        );
+        yield* materializeCodexShadowHome(layout);
+        expect(yield* fileSystem.readLink(path.join(shadowHome, "thread-writer-locks"))).toBe(
+          path.dirname(sharedLock),
+        );
+        expect(yield* fileSystem.readFileString(sharedLock)).toBe("held");
+      }),
+  );
   describe("resolveCodexHomeLayout", () => {
     it.effect("uses direct CODEX_HOME when no shadow home is configured", () =>
       Effect.gen(function* () {

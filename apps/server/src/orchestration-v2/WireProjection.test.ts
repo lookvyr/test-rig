@@ -1,4 +1,6 @@
 import {
+  CheckpointId,
+  CheckpointScopeId,
   MessageId,
   ContextHandoffId,
   ProviderThreadId,
@@ -449,5 +451,46 @@ describe("orchestration V2 wire projection", () => {
         content: [{ type: "image", mimeType: "image/png" }],
       },
     });
+  });
+});
+
+describe("checkpoint wire summaries", () => {
+  it("caps large file lists without mutating stored data and preserves full totals", () => {
+    const files = Array.from({ length: 250 }, (_, index) => ({
+      path: `vendor/file-${index}.ts`,
+      kind: "modified",
+      additions: 2,
+      deletions: 1,
+    }));
+    const item = decodeTurnItem({
+      ...base,
+      type: "checkpoint",
+      checkpointId: CheckpointId.make("large"),
+      scopeId: CheckpointScopeId.make("large"),
+      files,
+    });
+    const wire = projectTurnItemForWire(item);
+    expect(wire).toMatchObject({
+      files: files.slice(0, 200),
+      filesTotal: { count: 250, additions: 500, deletions: 250 },
+    });
+    expect(item).toMatchObject({ files });
+    expect(projectTurnItemForWire(item)).toBe(wire);
+    expect(projectTurnItemForWire(wire)).toBe(wire);
+    expect(projectTurnItemForDetail(item)).toMatchObject({ files });
+    expect(decodeTurnItemJson(encodeTurnItemJson(wire))).toMatchObject({
+      filesTotal: { count: 250, additions: 500, deletions: 250 },
+    });
+  });
+
+  it("leaves old and small checkpoint records unchanged", () => {
+    const item = decodeTurnItem({
+      ...base,
+      type: "checkpoint",
+      checkpointId: CheckpointId.make("small"),
+      scopeId: CheckpointScopeId.make("small"),
+      files: [],
+    });
+    expect(projectTurnItemForWire(item)).toBe(item);
   });
 });

@@ -36,6 +36,7 @@ import type {
   MessageId,
 } from "@t3tools/contracts";
 import {
+  isLiveSubagentShell,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
   OrchestrationV2CheckpointJson as OrchestrationV2CheckpointJsonSchema,
   OrchestrationV2CheckpointScopeJson as OrchestrationV2CheckpointScopeJsonSchema,
@@ -320,6 +321,20 @@ export interface ProjectionTimelinePage {
   readonly hasMore: boolean;
 }
 
+export interface ActiveShellIndexEntry extends Pick<
+  OrchestrationV2ThreadShell,
+  | "id"
+  | "projectId"
+  | "lineage"
+  | "sideOfThreadId"
+  | "settledOverride"
+  | "settledAt"
+  | "pinnedAt"
+  | "snoozedUntil"
+> {
+  readonly mayBeLive: boolean;
+}
+
 export interface ShellSnapshotOptions {
   /** Restricts targets only; archived and cross-project fork sources still load by ID. */
   readonly projectId?: ProjectId;
@@ -399,6 +414,10 @@ export interface ProjectionStoreV2Shape {
   readonly listOlderSettledThreads: (
     query: OlderSettledThreadsQuery,
   ) => Effect.Effect<OlderSettledThreadsListing, ProjectionStoreV2Error>;
+  readonly listActiveShellIndex: () => Effect.Effect<
+    ReadonlyArray<ActiveShellIndexEntry>,
+    ProjectionStoreV2Error
+  >;
   readonly listActiveSubagentThreadIds: () => Effect.Effect<
     ReadonlyArray<ThreadId>,
     ProjectionStoreV2Error
@@ -5928,6 +5947,90 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     // Per-thread shell for the live shell streams: reads only the target thread
     // plus its fork-source chain instead of materializing every thread. Returns
     // null when the thread is deleted or unknown.
+    const listActiveShellIndex = Effect.fn("ProjectionStore.listActiveShellIndex")(function* () {
+      const rows = yield* sql<{
+        readonly thread_id: string;
+        readonly project_id: string;
+        readonly side_of_thread_id: string | null;
+        readonly relationship_to_parent: string | null;
+        readonly parent_thread_id: string | null;
+        readonly root_thread_id: string;
+        readonly settled_override: string | null;
+        readonly settled_at: string | null;
+        readonly pinned_at: string | null;
+        readonly snoozed_until: string | null;
+        readonly may_be_live: number;
+      }>`
+        SELECT
+          t.thread_id,
+          t.project_id,
+          json_extract(t.payload_json, '$.sideOfThreadId') AS side_of_thread_id,
+          json_extract(t.payload_json, '$.lineage.relationshipToParent') AS relationship_to_parent,
+          json_extract(t.payload_json, '$.lineage.parentThreadId') AS parent_thread_id,
+          json_extract(t.payload_json, '$.lineage.rootThreadId') AS root_thread_id,
+          json_extract(t.payload_json, '$.settledOverride') AS settled_override,
+          json_extract(t.payload_json, '$.settledAt') AS settled_at,
+          json_extract(t.payload_json, '$.pinnedAt') AS pinned_at,
+          json_extract(t.payload_json, '$.snoozedUntil') AS snoozed_until,
+          -- A superset of isLiveSubagentShell: the sources of its run status, pending request,
+          -- and pending background work.
+          (
+            EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_runs r
+              WHERE r.thread_id = t.thread_id
+                AND r.status IN ('queued', 'preparing', 'starting', 'running', 'waiting')
+            )
+            OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_runtime_requests request
+              WHERE request.thread_id = t.thread_id AND request.status = 'pending'
+            )
+            -- Waiting secrets already require a live run; pending work uses its shell index.
+            OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_turn_items item
+              WHERE item.thread_id = t.thread_id
+                AND item.type IN ('command_execution', 'dynamic_tool', 'subagent')
+                AND item.status NOT IN ('completed', 'interrupted', 'failed', 'cancelled')
+            )
+            OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_provider_threads provider_thread
+              WHERE provider_thread.thread_id = t.thread_id
+                AND json_array_length(provider_thread.payload_json, '$.pendingBackgroundTasks') > 0
+            )
+            OR EXISTS (
+              SELECT 1 FROM json_each(t.payload_json, '$.pullRequests') link
+              WHERE json_type(link.value, '$.watch') IS NOT NULL
+            )
+          ) AS may_be_live
+        FROM orchestration_v2_projection_threads t
+        WHERE t.deleted_at IS NULL
+          AND json_extract(t.payload_json, '$.archivedAt') IS NULL
+        ORDER BY t.updated_at ASC, t.thread_id ASC
+      `;
+      return rows.map((row): ActiveShellIndexEntry => ({
+        id: ThreadId.make(row.thread_id),
+        projectId: ProjectId.make(row.project_id),
+        sideOfThreadId:
+          row.side_of_thread_id === null ? null : ThreadId.make(row.side_of_thread_id),
+        lineage: {
+          parentThreadId:
+            row.parent_thread_id === null ? null : ThreadId.make(row.parent_thread_id),
+          relationshipToParent:
+            row.relationship_to_parent === "fork" || row.relationship_to_parent === "subagent"
+              ? row.relationship_to_parent
+              : null,
+          rootThreadId: ThreadId.make(row.root_thread_id),
+        },
+        settledOverride:
+          row.settled_override === "settled" || row.settled_override === "active"
+            ? row.settled_override
+            : null,
+        settledAt: row.settled_at === null ? null : DateTime.makeUnsafe(row.settled_at),
+        pinnedAt: row.pinned_at === null ? null : DateTime.makeUnsafe(row.pinned_at),
+        snoozedUntil: row.snoozed_until === null ? null : DateTime.makeUnsafe(row.snoozed_until),
+        mayBeLive: row.may_be_live === 1,
+      }));
+    }, Effect.mapError(shellSnapshotReadError));
+
     const listActiveSubagentThreadIds = Effect.fn("ProjectionStore.listActiveSubagentThreadIds")(
       function* () {
         const rows = yield* sql<{ readonly thread_id: string }>`
@@ -6061,6 +6164,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     return {
       apply,
       getShellSnapshot,
+      listActiveShellIndex,
       listActiveSubagentThreadIds,
       listOlderSettledThreads,
       readShellSnapshot,
@@ -6184,6 +6288,15 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             archivedThreads: visible.filter((thread) => thread.archivedAt !== null),
           };
         }),
+      listActiveShellIndex: () =>
+        service.getShellSnapshot({ location: "active" }).pipe(
+          Effect.map((snapshot) =>
+            snapshot.threads.map((thread) => ({
+              ...thread,
+              mayBeLive: isLiveSubagentShell(thread),
+            })),
+          ),
+        ),
       listActiveSubagentThreadIds: () =>
         Ref.get(replayState).pipe(
           Effect.map(({ projections }) =>

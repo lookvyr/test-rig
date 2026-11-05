@@ -1,4 +1,10 @@
-import { EnvironmentId, RunId, type OrchestrationV2ShellSnapshot } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  RunId,
+  ThreadId,
+  RuntimeRequestId,
+  type OrchestrationV2ShellSnapshot,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import { Atom, AtomRegistry } from "effect/unstable/reactivity";
@@ -74,4 +80,54 @@ describe("quiet thread shell subscriptions", () => {
       registry.dispose();
     }
   });
+});
+
+it("finds pending approvals in nested owned children, excluding independent forks", () => {
+  const environmentId = EnvironmentId.make("environment");
+  const parent = v2ThreadShell;
+  const child = {
+    ...parent,
+    id: ThreadId.make("child"),
+    lineage: {
+      ...parent.lineage,
+      parentThreadId: parent.id,
+      relationshipToParent: "subagent" as const,
+    },
+  };
+  const grandchild = {
+    ...child,
+    id: ThreadId.make("grandchild"),
+    lineage: { ...child.lineage, parentThreadId: child.id },
+    pendingRuntimeRequest: {
+      id: RuntimeRequestId.make("approval"),
+      createdAt: v2Now,
+      kind: "command" as const,
+    },
+  };
+  const fork = {
+    ...grandchild,
+    id: ThreadId.make("fork"),
+    lineage: {
+      ...parent.lineage,
+      parentThreadId: parent.id,
+      relationshipToParent: "fork" as const,
+    },
+  };
+  const snapshot = Atom.make<OrchestrationV2ShellSnapshot | null>({
+    ...v2ShellSnapshot,
+    threads: [parent, child, grandchild, fork],
+  });
+  const atoms = createEnvironmentThreadShellAtoms({
+    catalogValueAtom: Atom.make({ isReady: true, entries: new Map() }),
+    snapshotAtom: () => snapshot,
+  });
+  const registry = AtomRegistry.make();
+  const atom = atoms.childThreadInputsAtom({ environmentId, threadId: parent.id });
+  expect(registry.get(atom).map((thread) => thread.id)).toEqual([grandchild.id]);
+  registry.set(snapshot, {
+    ...v2ShellSnapshot,
+    threads: [parent, child, { ...grandchild, pendingRuntimeRequest: null }, fork],
+  });
+  expect(registry.get(atom)).toEqual([]);
+  registry.dispose();
 });

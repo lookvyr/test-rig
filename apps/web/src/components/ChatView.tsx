@@ -1,3 +1,4 @@
+import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { isPreviewAvailableFor } from "~/browser/previewRuntime";
 import * as Option from "effect/Option";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
@@ -6777,6 +6778,7 @@ function ChatViewContent(props: ChatViewProps) {
                           </button>
                         </div>
                       )}
+                      <ChildThreadApprovals threadRef={activeThreadRef} />
                       {threadSyncPhase && !activeEnvironmentUnavailable ? (
                         <ThreadSyncStatusPill phase={threadSyncPhase} />
                       ) : null}

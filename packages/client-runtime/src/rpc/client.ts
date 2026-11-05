@@ -279,6 +279,13 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
                               Stream.concat(subscribeToSession()),
                             );
                           }
+                          // A reported defect waits for a new session or explicit resubscribe.
+                          if (
+                            options?.onDefect !== undefined &&
+                            cause.reasons.some((reason) => reason._tag === "Die")
+                          ) {
+                            return Stream.empty;
+                          }
                           return Stream.failCause(cause);
                         }),
                       );

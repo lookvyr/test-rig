@@ -330,7 +330,21 @@ function normalizeT3McpToolLabel(value: string): string {
  * agents. The prefix match is deliberately loose because the display-name
  * inventory is the real gate; unknown tools stay on the generic renderer.
  */
+const toolNameCache = new Map<string, string | null>();
+const TOOL_NAME_CACHE_LIMIT = 10_000;
+const TOOL_NAME_CACHE_MAX_KEY_LENGTH = 256;
+
 function resolveT3McpToolName(value: string): string | null {
+  if (value.length > TOOL_NAME_CACHE_MAX_KEY_LENGTH) return parseT3McpToolName(value);
+  const cached = toolNameCache.get(value);
+  if (cached !== undefined) return cached;
+  const name = parseT3McpToolName(value);
+  if (toolNameCache.size >= TOOL_NAME_CACHE_LIMIT) toolNameCache.clear();
+  toolNameCache.set(value, name);
+  return name;
+}
+
+function parseT3McpToolName(value: string): string | null {
   const label = normalizeT3McpToolLabel(value);
   // Preserve rendering of stored OpenCode results from its per-thread MCP server.
   if (label.startsWith("test_rig-")) {

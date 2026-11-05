@@ -218,6 +218,7 @@ it.effect(
           getLimitRecoveryCandidates: () => Effect.die("unused getLimitRecoveryCandidates"),
           getShellSnapshot: () => Effect.die("unused getShellSnapshot"),
           listOlderSettledThreads: () => Effect.die("unused listOlderSettledThreads"),
+          listActiveShellIndex: () => Effect.die("unused listActiveShellIndex"),
           listActiveSubagentThreadIds: () => Effect.die("unused listActiveSubagentThreadIds"),
           readShellSnapshot: () => Effect.die("unused readShellSnapshot"),
           getThreadShell: () => Effect.die("unused getThreadShell"),

@@ -37,6 +37,11 @@ import { V2SqlitePersistenceMemory as SqlitePersistenceMemory } from "../persist
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import {
+  loadSubscriberShellSnapshot,
+  buildActiveShellSnapshot,
+  shellSnapshotForSubscriber,
+} from "./ShellStream.ts";
+import {
   buildBoundedThreadProjection,
   decodeThreadHistoryCursor,
   encodeThreadHistoryCursor,
@@ -2191,6 +2196,122 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         (thread) => thread.id === threadId,
       );
       assert.deepEqual(shell?.providerInstanceHistory, [providerInstanceId, claudeInstanceId]);
+    }),
+  );
+
+  it.effect("selects subscriber shell rows before building them and preserves every opt-in", () =>
+    Effect.gen(function* () {
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const sql = yield* SqlClient.SqlClient;
+      const now = yield* DateTime.now;
+      const createThread = (
+        threadId: ThreadId,
+        overrides: Partial<ProjectionStore.ActiveShellIndexEntry> = {},
+      ) =>
+        projectionStore.apply({
+          id: EventId.make(`event:${threadId}:created`),
+          type: "thread.created",
+          threadId,
+          occurredAt: now,
+          payload: {
+            createdBy: "user",
+            creationSource: "web",
+            id: threadId,
+            projectId: ProjectId.make("project:shell-read"),
+            title: "Shell read",
+            providerInstanceId,
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            activeProviderThreadId: null,
+            lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            lastVisitedAt: null,
+            deletedAt: null,
+            ...overrides,
+          },
+        });
+
+      const root = ThreadId.make("thread:index-root");
+      const child = ThreadId.make("thread:index-idle");
+      for (let i = 0; i < 32; i++) {
+        yield* createThread(ThreadId.make(`thread:index-settled:${i}`), {
+          settledOverride: "settled",
+          settledAt: DateTime.makeUnsafe(DateTime.toEpochMillis(now) - (i + 1) * 1000),
+          ...(i === 31 ? { pinnedAt: now } : {}),
+        });
+      }
+      yield* createThread(root);
+      yield* createThread(child, {
+        lineage: { parentThreadId: root, relationshipToParent: "subagent", rootThreadId: root },
+      });
+      yield* createThread(ThreadId.make("thread:index-side"), {
+        sideOfThreadId: root,
+        settledOverride: "settled",
+        settledAt: DateTime.makeUnsafe(0),
+      });
+      const base = buildActiveShellSnapshot({
+        projects: [],
+        threads: yield* projectionStore.getShellSnapshot({ location: "active" }),
+        snapshotSequence: 7,
+      });
+      for (const omitIdleSubagents of [false, true]) {
+        for (const omitOlderSettled of [false, true]) {
+          const options = { omitIdleSubagents, omitOlderSettled };
+          let selected: ReadonlyArray<ThreadId> | undefined;
+          const actual = yield* loadSubscriberShellSnapshot({
+            sql,
+            listShellIndex: projectionStore.listActiveShellIndex(),
+            readThreads: (threadIds) => {
+              selected = threadIds;
+              return projectionStore.readShellSnapshot({
+                location: "active",
+                ...(threadIds === undefined ? {} : { threadIds }),
+              });
+            },
+            listProjects: Effect.succeed([]),
+            latestSequence: Effect.succeed(7),
+            options,
+          });
+          const expected = shellSnapshotForSubscriber(base, { ...options, now });
+          assert.deepEqual(actual.snapshot, expected.snapshot);
+          assert.sameMembers([...actual.subagentThreadIds], [...expected.subagentThreadIds]);
+          if (omitIdleSubagents) assert.notInclude(selected ?? [], child);
+          if (omitOlderSettled) {
+            assert.notInclude(selected ?? [], ThreadId.make("thread:index-settled:30"));
+            assert.include(selected ?? [], ThreadId.make("thread:index-settled:31"));
+            assert.include(selected ?? [], ThreadId.make("thread:index-side"));
+          }
+        }
+      }
+    }),
+  );
+
+  it.effect("recovery queries use active-item indexes", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const ordered = yield* sql<{ readonly detail: string }>`EXPLAIN QUERY PLAN
+        SELECT payload_json FROM orchestration_v2_projection_turn_items
+        WHERE thread_id = 'thread:index' AND status IN ('pending', 'running', 'waiting')
+        ORDER BY ordinal ASC, turn_item_id ASC`;
+      assert.include(
+        ordered.map((row) => row.detail).join("\n"),
+        "orchestration_v2_projection_turn_items_active_ordinal_idx",
+      );
+      const run = yield* sql<{ readonly detail: string }>`EXPLAIN QUERY PLAN
+        SELECT 1 FROM orchestration_v2_projection_turn_items
+        WHERE thread_id = 'thread:index' AND run_id = 'run:index' AND status IN ('pending', 'running', 'waiting')`;
+      assert.include(
+        run.map((row) => row.detail).join("\n"),
+        "orchestration_v2_projection_turn_items_active_run_idx",
+      );
     }),
   );
 

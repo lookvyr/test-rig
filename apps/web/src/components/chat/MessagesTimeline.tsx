@@ -1,3 +1,4 @@
+import { checkpointFileTotals } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { useDiffTheme } from "~/hooks/useDiffTheme";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
@@ -3879,6 +3880,7 @@ function AssistantChangedFilesSectionInner({
     <ChangedFilesCard
       runId={turnSummary.runId}
       files={checkpointFiles}
+      totals={checkpointFileTotals(turnSummary)}
       allDirectoriesExpanded={allDirectoriesExpanded}
       resolvedTheme={resolvedTheme}
       onToggleAllDirectories={() =>

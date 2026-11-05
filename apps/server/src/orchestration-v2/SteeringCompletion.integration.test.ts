@@ -714,3 +714,99 @@ it.effect("starts a steer that missed the turn on the saved next-turn selection"
     }),
   ),
 );
+
+it.effect("steers a delegated task question notice into the running parent turn", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { started, steered, layer, startFirstTurn } = yield* nextTurnSelectionHarness(
+        "delegated-question-steer",
+      );
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+        const threadId = yield* startFirstTurn;
+        const { thread } = yield* orchestrator.getThreadProjection(threadId);
+        yield* (yield* EventSink.EventSinkV2).write({
+          events: [
+            {
+              id: EventId.make("event:composer-selection"),
+              type: "thread.model-selection-updated",
+              threadId,
+              providerInstanceId: instanceId,
+              occurredAt: yield* DateTime.now,
+              payload: { ...thread, modelSelection: composerSelection },
+            },
+          ],
+        });
+        const first = started[0]!;
+        const now = yield* DateTime.now;
+        yield* (yield* EventSink.EventSinkV2).write({
+          events: [
+            {
+              id: EventId.make("question:task"),
+              type: "subagent.updated",
+              threadId,
+              runId: first.runId,
+              nodeId: NodeId.make("task:question"),
+              occurredAt: now,
+              payload: {
+                id: NodeId.make("task:question"),
+                threadId,
+                runId: first.runId,
+                parentNodeId: first.rootNodeId,
+                origin: "app_owned",
+                createdBy: "agent",
+                driver,
+                providerInstanceId: instanceId,
+                providerThreadId: null,
+                childThreadId: ThreadId.make("thread:question-child"),
+                nativeTaskRef: null,
+                prompt: "Ask a question",
+                title: "Question task",
+                model: null,
+                completionWake: "always",
+                completionDelivery: { state: "pending", observedByRunId: null },
+                status: "running",
+                result: null,
+                startedAt: now,
+                completedAt: null,
+                updatedAt: now,
+              },
+            },
+          ],
+        });
+        const messageId = MessageId.make("message:delegated-task-question:child-question");
+        const notification = {
+          source: {
+            kind: "delegated_task" as const,
+            taskIds: [NodeId.make("task:question")],
+            childThreadId: ThreadId.make("thread:question-child"),
+          },
+          outcome: "updated" as const,
+          summary: "Delegated task has a question",
+        };
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          commandId: CommandId.make("question-wake"),
+          threadId,
+          messageId,
+          text: "Delegated task asked a question",
+          notification,
+          attachments: [],
+          dispatchMode: { type: "queue_after_active" },
+          createdBy: "agent",
+          creationSource: "server",
+        });
+        yield* worker.drain();
+        const after = yield* orchestrator.getThreadProjection(threadId);
+        assert.deepEqual(steered, ["Delegated task asked a question"]);
+        assert.lengthOf(started, 1);
+        assert.isFalse(after.runs.some((run) => run.status === "queued"));
+        const message = after.messages.find((candidate) => candidate.id === messageId);
+        assert.equal(message?.runId, started[0]?.runId);
+        assert.deepEqual(message?.notification, notification);
+        assert.deepEqual(after.thread.modelSelection, composerSelection);
+      }).pipe(Effect.provide(layer));
+    }),
+  ),
+);

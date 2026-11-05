@@ -400,3 +400,14 @@ describe("rich composer Markdown boundary", () => {
     expect(roundTrip(normalized)).toBe(normalized);
   });
 });
+
+it("shares immutable document serialization and invalidates after edits", () => {
+  const original = doc("before");
+  const first = serializeEditorDoc(original);
+  expect(serializeEditorDoc(original)).toBe(first);
+  const state = EditorState.create({ doc: original });
+  const changed = state.apply(state.tr.insertText("after", 1, original.content.size - 1));
+  expect(serializeEditorDoc(changed.doc)).not.toBe(first);
+  expect(serializeEditorDoc(changed.doc).value).toBe("after");
+  expect(first.value).toBe("before");
+});

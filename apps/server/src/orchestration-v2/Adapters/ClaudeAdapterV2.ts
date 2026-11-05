@@ -122,6 +122,7 @@ import * as ServerConfig from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
   claudeSignedOutMessage,
+  claudeProcessEnvironment,
   makeClaudeEnvironment,
 } from "../../provider/Drivers/ClaudeHome.ts";
 import {
@@ -9822,7 +9823,10 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     const queryRunner = yield* ClaudeAgentSdkQueryRunner;
     const serverConfig = yield* ServerConfig.ServerConfig;
     const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
-    const baseEnvironment = mergeProviderInstanceEnvironment(environment, hostEnvironment);
+    const baseEnvironment = mergeProviderInstanceEnvironment(
+      environment,
+      claudeProcessEnvironment(hostEnvironment),
+    );
     const claudeEnvironment = yield* makeClaudeEnvironment(config, baseEnvironment);
     const path = yield* Path.Path;
     const binaryPath = yield* resolveClaudeSdkExecutablePath(

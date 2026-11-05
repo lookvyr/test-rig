@@ -296,7 +296,7 @@ function readEditorSnapshot(editor: Editor) {
     value: map.value,
     cursor: clampCollapsedComposerCursor(map.value, flatToCollapsed(map, flat)),
     expandedCursor: Math.max(0, Math.min(map.value.length, flatToMarkdown(map, flat))),
-    terminalContextIds: map.contextIds,
+    terminalContextIds: [...map.contextIds],
   };
 }
 

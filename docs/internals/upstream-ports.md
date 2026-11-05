@@ -1,5 +1,18 @@
 # Selected upstream ports
 
+## November 5 nightly intake
+
+This batch adapts local-core changes through T3 Code `v0.1.8-nightly.20261105.4234`.
+
+- Parents can respond to a delegated child's approval in the child's environment. A child question can reach a busy parent when its provider supports steering without interrupting tools. [Parent approvals](https://github.com/pingdotgg/t3code/pull/28516), [environment routing](https://github.com/pingdotgg/t3code/pull/28592), [busy-parent delivery](https://github.com/pingdotgg/t3code/pull/29909).
+- Run preparation reads the target run and message. Sidebar snapshots select eligible threads before building their summaries, and shell updates read changed threads in batches. A new migration indexes active turn items. Startup also skips the project and thread reads that previously fed a disabled analytics event. [Run lookup](https://github.com/pingdotgg/t3code/pull/27105), [shell snapshots](https://github.com/pingdotgg/t3code/pull/27106), [batched updates](https://github.com/pingdotgg/t3code/pull/29101), [recovery indexes](https://github.com/pingdotgg/t3code/pull/27099).
+- Test Rig serializes commits with branch switches in the same checkout. GitHub refresh runs in the background after turn completion. [Checkout races](https://github.com/pingdotgg/t3code/pull/24473), [GitHub refresh](https://github.com/pingdotgg/t3code/pull/28431).
+- Tool updates reuse unchanged timeline entries. Work rows cache repeated checks, and the composer serializes each immutable draft document once. [Timeline](https://github.com/pingdotgg/t3code/pull/26727), [work rows](https://github.com/pingdotgg/t3code/pull/29971), [composer](https://github.com/pingdotgg/t3code/pull/26720).
+- Codex shadow homes share thread-writer locks. Existing shadow lock directories require an explicit move after stopping Codex. Claude subprocesses drop inherited host session markers and Electron's Node-mode flag before applying the instance's explicit settings. [Codex locks](https://github.com/pingdotgg/t3code/pull/26286), [Claude sessions](https://github.com/pingdotgg/t3code/pull/29169), [Electron environment](https://github.com/pingdotgg/t3code/pull/29413).
+- Thread updates carry at most 200 files per checkpoint plus aggregate totals. The full diff reads the complete checkpoint. Client subscriptions can resume on a new session after a stream defect. Browser tabs release their resources after failed setup or first navigation. [Checkpoint payloads](https://github.com/pingdotgg/t3code/pull/27110), [stream recovery](https://github.com/pingdotgg/t3code/pull/31071), [failed setup](https://github.com/pingdotgg/t3code/pull/29885), [failed navigation](https://github.com/pingdotgg/t3code/pull/29865).
+
+In a local synthetic SQLite database with 1,500 active threads and 15,000 completed items, both sidebar implementations returned the same 125 thread summaries with both omission options enabled. Over 25 alternating warm runs per implementation, median snapshot time fell from 24.1 ms to 7.9 ms. This comparison measures the store and snapshot loader. It excludes project enrichment, transport and rendering.
+
 ## November 2 thread Servers list
 
 Completes [#22542](https://github.com/pingdotgg/t3code/pull/22542). The October 31 browser

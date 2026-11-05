@@ -258,8 +258,47 @@ export function createEnvironmentThreadShellAtoms(input: {
     return next;
   }).pipe(Atom.withLabel("environment-navigation-thread-shells"));
 
+  const ownedChildrenAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => {
+      const children = new Map<ThreadId, Array<OrchestrationV2ThreadShell>>();
+      for (const child of get(environmentThreadsAtom(environmentId))) {
+        const parentId =
+          child.sideOfThreadId ??
+          (child.lineage.relationshipToParent === "subagent" ? child.lineage.parentThreadId : null);
+        if (parentId == null) continue;
+        const siblings = children.get(parentId);
+        if (siblings) siblings.push(child);
+        else children.set(parentId, [child]);
+      }
+      return children;
+    }),
+  );
+  const childThreadInputsAtomFamily = Atom.family((key: string) => {
+    let previous: ReadonlyArray<EnvironmentThreadShell> = [];
+    return Atom.make((get) => {
+      const parent = parseThreadKey(key);
+      const children = get(ownedChildrenAtom(parent.environmentId));
+      const seen = new Set<ThreadId>([parent.threadId]);
+      const pending = [parent.threadId];
+      const next: EnvironmentThreadShell[] = [];
+      for (const parentId of pending) {
+        for (const child of children.get(parentId) ?? []) {
+          if (seen.has(child.id)) continue;
+          seen.add(child.id);
+          pending.push(child.id);
+          const shell = scopedThread(parent.environmentId, child);
+          if (shell.hasPendingApprovals || shell.hasPendingUserInput) next.push(shell);
+        }
+      }
+      if (arrayElementsEqual(previous, next)) return previous;
+      previous = next;
+      return next;
+    });
+  });
+
   return {
     environmentThreadsAtom,
+    childThreadInputsAtom: (ref: ScopedThreadRef) => childThreadInputsAtomFamily(threadKey(ref)),
     environmentThreadIndexAtom,
     environmentThreadRefsAtom,
     environmentThreadRefsByProjectAtom,

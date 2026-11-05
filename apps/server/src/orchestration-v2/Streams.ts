@@ -1,17 +1,14 @@
-import * as DateTime from "effect/DateTime";
 import type { ApplicationStoredEvent } from "@t3tools/contracts";
 import {
-  buildActiveShellSnapshot,
-  shellSnapshotForSubscriber,
+  loadSubscriberShellSnapshot,
   loadShellSnapshotParts,
   skipUnchangedThreadShells,
   archivedShellStreamItemFromThreadShell,
   coalesceStoredThreadEvents,
-  coalesceShellApplicationEvents,
+  projectShellApplicationEvents,
   composeShellStreamWithEnrichment,
   dedupeShellEnrichment,
   shellStreamItemFromEnrichmentRefresh,
-  shellStreamItemFromThreadShell,
   shellStreamItemsFromInitialSnapshot,
   shellStreamItemsFromResumeSnapshot,
   toShellApplicationEvent,
@@ -344,21 +341,23 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       },
     );
     const loadSnapshot = Effect.fn("ws.orchestrationV2.loadShellSnapshot")(function* () {
-      const base = buildActiveShellSnapshot(
-        yield* loadShellSnapshotParts({
-          sql,
-          readThreads: threadManagement.readShellSnapshot({ location: "active" }),
-          listProjects: projects.listShells(),
-          latestSequence: applicationEvents.latestApplicationSequence,
-        }),
-      );
-      const forSubscriber = shellSnapshotForSubscriber(base, {
-        omitIdleSubagents: input.omitIdleSubagents === true,
-        omitOlderSettled: input.omitOlderSettled === true,
-        now: yield* DateTime.now,
+      const forSubscriber = yield* loadSubscriberShellSnapshot({
+        sql,
+        listShellIndex: threadManagement.listActiveShellIndex(),
+        readThreads: (threadIds) =>
+          threadManagement.readShellSnapshot({
+            location: "active",
+            ...(threadIds === undefined ? {} : { threadIds }),
+          }),
+        listProjects: projects.listShells(),
+        latestSequence: applicationEvents.latestApplicationSequence,
+        options: {
+          omitIdleSubagents: input.omitIdleSubagents === true,
+          omitOlderSettled: input.omitOlderSettled === true,
+        },
       });
       subagentThreadIds = forSubscriber.subagentThreadIds;
-      const enriched = yield* enrichProjectShells(base.projects);
+      const enriched = yield* enrichProjectShells(forSubscriber.snapshot.projects);
       return {
         snapshot: {
           ...forSubscriber.snapshot,
@@ -392,26 +391,13 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
       });
     });
 
-    // Coalescing makes each per-thread shell read represent every event
-    // for that thread in the current window; reading only the affected
-    // threads keeps the cost of a busy stream independent of how many
-    // threads exist overall.
-    const projectShellItems = Effect.fn("ws.orchestrationV2.projectShellItems")(function* (
-      events: ReadonlyArray<ShellApplicationEvent>,
-    ) {
-      return yield* Effect.forEach(
-        coalesceShellApplicationEvents(events),
-        (stored) =>
-          Effect.gen(function* () {
-            if ("aggregateKind" in stored) {
-              return yield* projectItem(stored);
-            }
-            const shell = yield* threadManagement.getThreadShell(stored.event.threadId);
-            return shellStreamItemFromThreadShell({ stored, shell });
-          }),
-        { concurrency: 8 },
-      );
-    });
+    const projectShellItems = (events: ReadonlyArray<ShellApplicationEvent>) =>
+      projectShellApplicationEvents({
+        events,
+        readThread: threadManagement.getThreadShell,
+        readThreads: (threadIds) => threadManagement.getShellSnapshot({ threadIds }),
+        projectItem,
+      });
 
     const toShellStream = <E, R>(stream: Stream.Stream<ShellApplicationEvent, E, R>) =>
       stream.pipe(

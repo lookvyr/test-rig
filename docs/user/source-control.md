@@ -116,6 +116,8 @@ Choose the changes to inspect:
 
 Use **Show changed files** to search paths and navigate the changed-file tree. The diff lists files in the same order as the tree, folders first. The tree stays beside the diff in a wide panel and opens over it in a narrow panel. Drag its left edge to adjust its width; your preferred width is remembered. Arrow keys browse files; clicking a file or pressing Enter opens it and keeps the tree open at any panel width. Use **Hide changed files** to close the tree. **Previous changed file** and **Next changed file** move back and forth between diffs in either stacked or split view. Selecting a collapsed file expands it.
 
+A turn’s changed-files card lists up to 200 files while showing the totals for the entire turn. For larger changes, use **more files in the full diff** to review the complete file list.
+
 Small reviews show a continuous diff. Large Git reviews show one file at a time while keeping the complete changed-file list available. A file that exceeds the preview limit is marked individually. Split/stacked views, line wrapping, whitespace filtering, syntax colors, and line comments remain available.
 
 Use **Stage** or **Unstage** beside a file to change its index state. In Uncommitted, a partially staged file offers both actions. Staging a file includes all its current changes; hunk selection is not available here.

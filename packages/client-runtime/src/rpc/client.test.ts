@@ -2,6 +2,7 @@ import { EnvironmentId, WS_METHODS } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
@@ -307,6 +308,47 @@ describe("environment RPC", () => {
         expect(Cause.hasDies(exit.cause)).toBe(true);
       }
       expect(expectedFailureCount).toBe(0);
+    }),
+  );
+
+  it.effect("reported subscription defects recover on the next session", () =>
+    Effect.gen(function* () {
+      const defect = new Error("subscription invariant failed");
+      const observed = yield* Deferred.make<void>();
+      const resumed = yield* Deferred.make<void>();
+      const firstClient = {
+        [WS_METHODS.subscribeTerminalEvents]: () => Stream.die(defect),
+      } as unknown as WsRpcProtocolClient;
+      const secondClient = {
+        [WS_METHODS.subscribeTerminalEvents]: () =>
+          Stream.fromEffect(Deferred.succeed(resumed, undefined)).pipe(
+            Stream.drain,
+            Stream.concat(Stream.never),
+          ),
+      } as unknown as WsRpcProtocolClient;
+      const { activeSession, supervisor } = yield* makeHarness();
+      yield* SubscriptionRef.set(activeSession, Option.some(session(firstClient)));
+      const fiber = yield* subscribe(
+        WS_METHODS.subscribeTerminalEvents,
+        {},
+        {
+          onDefect: (cause) => {
+            expect(Cause.squash(cause)).toBe(defect);
+            return Deferred.succeed(observed, undefined).pipe(Effect.asVoid);
+          },
+          onExpectedFailure: () => Effect.die("Defects must not be domain failures"),
+        },
+      ).pipe(
+        Stream.runDrain,
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(observed);
+      yield* TestClock.adjust("1 second");
+      expect(fiber.pollUnsafe()).toBeUndefined();
+      yield* SubscriptionRef.set(activeSession, Option.some(session(secondClient)));
+      yield* Deferred.await(resumed);
+      yield* Fiber.interrupt(fiber);
     }),
   );
 });

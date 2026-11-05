@@ -1,6 +1,9 @@
 import { assert, describe, expect, it, vi } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
@@ -15,8 +18,10 @@ function makeLayer(
   input: {
     readonly detect: VcsDriverRegistry.VcsDriverRegistry["Service"]["detect"];
     readonly resolve?: VcsDriverRegistry.VcsDriverRegistry["Service"]["resolve"];
+    readonly realPath?: FileSystem.FileSystem["realPath"];
   },
   manager: Partial<GitManager.GitManager["Service"]> = {},
+  driver: Partial<GitVcsDriver.GitVcsDriver["Service"]> = {},
 ) {
   return GitWorkflowService.layer.pipe(
     Layer.provide(
@@ -25,8 +30,13 @@ function makeLayer(
         ...(input.resolve ? { resolve: input.resolve } : {}),
       }),
     ),
-    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)(driver)),
     Layer.provide(Layer.mock(GitManager.GitManager)(manager)),
+    Layer.provide(
+      FileSystem.layerNoop({
+        realPath: input.realPath ?? ((path) => Effect.succeed(path)),
+      }),
+    ),
   );
 }
 
@@ -158,6 +168,7 @@ describe("GitWorkflowService", () => {
           status,
         }),
       ),
+      Layer.provide(FileSystem.layerNoop({})),
     );
 
     return Effect.gen(function* () {
@@ -248,3 +259,63 @@ describe("GitWorkflowService", () => {
     );
   });
 });
+
+it.effect.each(["/repo", "/alias"])(
+  "checkout from %s waits for an ordinary commit in the same worktree",
+  (checkoutRoot) =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const resolvedNested = yield* Deferred.make<void>();
+      const order: string[] = [];
+      const layer = makeLayer(
+        {
+          detect: () => Effect.succeed(null),
+          realPath: () => Effect.succeed("/repo"),
+          resolve: ({ cwd }) =>
+            Effect.gen(function* () {
+              if (cwd === `${checkoutRoot}/nested`)
+                yield* Deferred.succeed(resolvedNested, undefined);
+              return {
+                kind: "git",
+                repository: { rootPath: cwd === "/repo" ? "/repo" : checkoutRoot },
+              } as VcsDriverRegistry.VcsDriverHandle;
+            }),
+        },
+        {
+          runStackedAction: () =>
+            Effect.gen(function* () {
+              order.push("commit started");
+              yield* Deferred.succeed(started, undefined);
+              yield* Deferred.await(release);
+              order.push("commit finished");
+              return {} as never;
+            }),
+        },
+        {
+          switchRef: () =>
+            Effect.sync(() => {
+              order.push("checkout");
+              return {} as never;
+            }),
+        },
+      );
+      yield* Effect.gen(function* () {
+        const workflow = yield* GitWorkflowService.GitWorkflowService;
+        const commit = yield* workflow
+          .runStackedAction({ cwd: "/repo", actionId: "commit", action: "commit" })
+          .pipe(Effect.forkScoped);
+        yield* Deferred.await(started);
+        const checkout = yield* workflow
+          .switchRef({ cwd: `${checkoutRoot}/nested`, refName: "other" })
+          .pipe(Effect.forkScoped);
+        yield* Deferred.await(resolvedNested);
+        yield* Effect.yieldNow;
+        assert.deepEqual(order, ["commit started"]);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(commit);
+        yield* Fiber.join(checkout);
+        assert.deepEqual(order, ["commit started", "commit finished", "checkout"]);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);

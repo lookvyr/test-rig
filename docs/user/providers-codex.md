@@ -162,13 +162,12 @@ If two Codex providers show the same account or the same unexpected model list:
 2. Refresh provider status.
 3. Confirm the second provider has `Shadow home path` set.
 4. Confirm the shadow directory has its own `auth.json`.
-5. If you copied `~/.codex` into the shadow directory, remove everything except `auth.json`.
 
-Example cleanup:
-
-```bash
-find ~/.codex_p -mindepth 1 ! -name auth.json -exec rm -rf {} +
-```
+Both accounts use the shared home’s thread writer locks. If Test Rig reports that
+`thread-writer-locks` already exists as a directory in the shadow home, stop every
+Codex process using that home, move that directory aside, and refresh the provider.
+Test Rig then creates a link to the shared locks. Each account keeps its own login
+and authentication lock.
 
 ## When To Use A Separate CODEX_HOME
 

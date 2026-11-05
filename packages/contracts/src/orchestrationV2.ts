@@ -1372,6 +1372,14 @@ export const OrchestrationV2CheckpointFileSummary = Schema.Struct({
 });
 export type OrchestrationV2CheckpointFileSummary = typeof OrchestrationV2CheckpointFileSummary.Type;
 
+/** Sent only when the wire carries a prefix of `files`; the totals cover the full list. */
+export const OrchestrationV2CheckpointFileTotals = Schema.Struct({
+  count: NonNegativeInt,
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type OrchestrationV2CheckpointFileTotals = typeof OrchestrationV2CheckpointFileTotals.Type;
+
 export const OrchestrationV2Checkpoint = Schema.Struct({
   id: CheckpointId,
   threadId: ThreadId,
@@ -1384,6 +1392,7 @@ export const OrchestrationV2Checkpoint = Schema.Struct({
   ref: CheckpointRef,
   status: Schema.Literals(["ready", "missing", "error", "stale"]),
   files: Schema.Array(OrchestrationV2CheckpointFileSummary),
+  filesTotal: Schema.optionalKey(OrchestrationV2CheckpointFileTotals),
   capturedAt: Schema.DateTimeUtc,
 });
 export type OrchestrationV2Checkpoint = typeof OrchestrationV2Checkpoint.Type;
@@ -1652,6 +1661,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     checkpointId: CheckpointId,
     scopeId: CheckpointScopeId,
     files: Schema.Array(OrchestrationV2CheckpointFileSummary),
+    filesTotal: Schema.optionalKey(OrchestrationV2CheckpointFileTotals),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2472,6 +2482,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     checkpointId: CheckpointId,
     scopeId: CheckpointScopeId,
     files: Schema.Array(OrchestrationV2CheckpointFileSummary),
+    filesTotal: Schema.optionalKey(OrchestrationV2CheckpointFileTotals),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,

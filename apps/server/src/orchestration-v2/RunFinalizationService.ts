@@ -3,6 +3,7 @@ import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
@@ -106,6 +107,7 @@ export const observerLive = Layer.effect(
     const pullRequests = yield* PullRequestService.PullRequestService;
     const projects = yield* ProjectStore.ProjectStoreV2;
     const events = yield* EventSink.EventSinkV2;
+    const pullRequestLookups = yield* FiberMap.make<string>();
     return {
       refreshAfterTool: (cwd) =>
         vcsStatus.refreshLocalStatus(cwd, { onlyIfBranchChanged: true }).pipe(
@@ -160,6 +162,7 @@ export const observerLive = Layer.effect(
             });
             if (!result.committed) return;
           }
+          // A newer turn replaces a slow lookup instead of waiting for the GitHub CLI.
           yield* vcsStatus.refreshPullRequestStatus(cwd).pipe(
             Effect.catch((error) =>
               Effect.logWarning("failed to refresh pull request status after run completion", {
@@ -168,6 +171,7 @@ export const observerLive = Layer.effect(
                 detail: error.message,
               }),
             ),
+            FiberMap.run(pullRequestLookups, cwd),
           );
         }).pipe(Effect.mapError((cause) => new RunFinalizationRefreshError({ cwd, cause }))),
     };

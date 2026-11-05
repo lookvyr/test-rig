@@ -1,4 +1,4 @@
-import { type RunId } from "@t3tools/contracts";
+import { type OrchestrationV2CheckpointFileTotals, type RunId } from "@t3tools/contracts";
 import { type MouseEvent, memo, useCallback, useMemo, useState } from "react";
 import { type TurnDiffFileChange } from "../../types";
 import {
@@ -29,6 +29,7 @@ export type ChangedFileContextMenuHandler = (filePath: string, event: MouseEvent
 export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   runId: RunId;
   files: ReadonlyArray<TurnDiffFileChange>;
+  totals?: OrchestrationV2CheckpointFileTotals;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
   onToggleAllDirectories: () => void;
@@ -44,7 +45,12 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     onOpenTurnDiff,
     onFileContextMenu,
   } = props;
-  const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
+  const summaryStat = useMemo(
+    () => props.totals ?? summarizeTurnDiffStats(files),
+    [files, props.totals],
+  );
+  const fileCount = props.totals?.count ?? files.length;
+  const hiddenFileCount = fileCount - files.length;
   const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
 
   return (
@@ -58,7 +64,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-foreground">
           <span>
-            {files.length} changed file{files.length === 1 ? "" : "s"}
+            {fileCount.toLocaleString()} changed file{fileCount === 1 ? "" : "s"}
           </span>
           {hasNonZeroStat(summaryStat) && (
             <DiffStatLabel
@@ -125,6 +131,18 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
         onOpenTurnDiff={onOpenTurnDiff}
         onFileContextMenu={onFileContextMenu}
       />
+      {hiddenFileCount > 0 && (
+        <div className="px-3 pb-2">
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost-muted"
+            onClick={() => onOpenTurnDiff(runId)}
+          >
+            {hiddenFileCount.toLocaleString()} more files in the full diff
+          </Button>
+        </div>
+      )}
     </div>
   );
 });

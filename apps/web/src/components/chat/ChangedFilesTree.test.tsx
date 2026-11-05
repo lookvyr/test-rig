@@ -5,6 +5,24 @@ import { describe, expect, it } from "vite-plus/test";
 import { ChangedFilesCard, ChangedFilesTree } from "./ChangedFilesTree";
 
 describe("ChangedFilesCard", () => {
+  it("shows full totals and a full-diff action for a capped list", () => {
+    const markup = renderToStaticMarkup(
+      <ChangedFilesCard
+        runId={RunId.make("large")}
+        files={[{ path: "a.ts", kind: "modified", additions: 2, deletions: 1 }]}
+        totals={{ count: 250, additions: 500, deletions: 250 }}
+        allDirectoriesExpanded={false}
+        resolvedTheme="light"
+        onToggleAllDirectories={() => {}}
+        onOpenTurnDiff={() => {}}
+      />,
+    );
+    expect(markup).toContain("250 changed files");
+    expect(markup).toContain('aria-label="500 additions, 250 deletions"');
+    expect(markup).toContain("249");
+    expect(markup).toContain("more files in the full diff");
+  });
+
   it("keeps its compact header sticky while preserving singular labels", () => {
     const markup = renderToStaticMarkup(
       <ChangedFilesCard

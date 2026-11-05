@@ -13,7 +13,11 @@ instructions or ask you for the missing information. If the parent is waiting
 for the child, a blocking question ends that wait so it can respond; completion
 still delivers the child's result afterward. Questions the child asks while it
 continues working also notify the parent. Approval requests still need your
-approval.
+approval. Pending child approvals appear above the parent conversation’s composer,
+where you can review the request and approve or decline it without switching
+conversations. A busy parent receives child questions during its turn when its
+provider supports steering without interrupting tools; otherwise the notice waits
+for the next turn.
 
 Answering or dismissing a question cancels a parent notification that has not
 started yet. Canceling or interrupting a delegated task dismisses its unanswered

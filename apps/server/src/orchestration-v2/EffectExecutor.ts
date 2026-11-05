@@ -231,9 +231,10 @@ export const executorLayer: Layer.Layer<
                         : { modelSelection: run.modelSelection }),
                       dispatchMode: {
                         type:
-                          message.delegatedCompletion === undefined
-                            ? "start_immediately"
-                            : "queue_after_active",
+                          message.delegatedCompletion !== undefined ||
+                          message.notification !== undefined
+                            ? "queue_after_active"
+                            : "start_immediately",
                       },
                       createdBy: message.createdBy,
                       creationSource: message.creationSource,

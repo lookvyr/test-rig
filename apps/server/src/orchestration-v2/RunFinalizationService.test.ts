@@ -6,6 +6,7 @@ import {
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
 
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
@@ -260,4 +261,65 @@ it.effect.each([
       ),
     );
   },
+);
+
+it.effect(
+  "post-turn refresh returns while GitHub is blocked and replaces the previous lookup",
+  () =>
+    Effect.gen(function* () {
+      const firstStarted = yield* Deferred.make<void>();
+      const firstInterrupted = yield* Deferred.make<void>();
+      const secondStarted = yield* Deferred.make<void>();
+      let lookups = 0;
+      const threadId = ThreadId.make("slow-github");
+      const runId = RunId.make("completed-run");
+      const layer = RunFinalization.observerLive.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(ProjectStore.ProjectStoreV2)({}),
+            Layer.mock(EventSink.EventSinkV2)({}),
+            Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
+            Layer.mock(PullRequestService.PullRequestService)({}),
+            Layer.mock(ProjectionStore.ProjectionStoreV2)({
+              getThreadShell: () =>
+                Effect.succeed({
+                  id: threadId,
+                  branch: "feature",
+                  activeRunId: null,
+                } as OrchestrationV2ThreadShell),
+            }),
+            Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
+              refreshLocalStatus: () =>
+                Effect.succeed({
+                  isRepo: true,
+                  hasPrimaryRemote: true,
+                  isDefaultRef: false,
+                  refName: "feature",
+                  hasWorkingTreeChanges: false,
+                  workingTree: { files: [], insertions: 0, deletions: 0 },
+                }),
+              refreshPullRequestStatus: () =>
+                Effect.suspend(() => {
+                  lookups++;
+                  return lookups === 1
+                    ? Deferred.succeed(firstStarted, undefined).pipe(
+                        Effect.andThen(Effect.never),
+                        Effect.onInterrupt(() => Deferred.succeed(firstInterrupted, undefined)),
+                      )
+                    : Deferred.succeed(secondStarted, undefined).pipe(Effect.as(null));
+                }),
+            }),
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const observer = yield* RunFinalization.RunFinalizationObserver;
+        yield* observer.refresh({ cwd: "/repo", threadId, runId });
+        yield* Deferred.await(firstStarted);
+        yield* observer.refresh({ cwd: "/repo", threadId, runId });
+        yield* Deferred.await(firstInterrupted);
+        yield* Deferred.await(secondStarted);
+        assert.equal(lookups, 2);
+      }).pipe(Effect.provide(layer));
+    }),
 );

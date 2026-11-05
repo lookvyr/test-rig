@@ -14,7 +14,6 @@ import * as ProjectService from "./project/ProjectService.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
 import { v2Projection, v2Project, v2ThreadShell } from "./orchestration-v2/testkit/fixtures.ts";
-import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 
 it("uses the canonical Codex default for auto-bootstrapped model selection", () => {
@@ -67,39 +66,6 @@ it.effect("enqueueCommand fails queued work when readiness fails", () =>
 
       const error = yield* Effect.flip(Fiber.join(queuedCommandFiber));
       assert.equal(error.message, "Server runtime startup failed before command readiness.");
-    }),
-  ),
-);
-
-it.effect("launchStartupHeartbeat does not block the caller while counts are loading", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const releaseCounts = yield* Deferred.make<void, never>();
-
-      yield* ServerRuntimeStartup.launchStartupHeartbeat.pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            Layer.mock(ProjectService.ProjectService)({
-              snapshot: Effect.succeed({ projects: [], updatedAt: "2026-01-01T00:00:00.000Z" }),
-            }),
-            Layer.mock(ThreadManagement.ThreadManagementService)({
-              getShellSnapshot: () =>
-                Deferred.await(releaseCounts).pipe(
-                  Effect.as({
-                    schemaVersion: 1,
-                    snapshotSequence: 0,
-                    threads: [],
-                    archivedThreads: [],
-                  }),
-                ),
-            }),
-          ),
-        ),
-        Effect.provideService(AnalyticsService.AnalyticsService, {
-          record: () => Effect.void,
-          flush: Effect.void,
-        }),
-      );
     }),
   ),
 );

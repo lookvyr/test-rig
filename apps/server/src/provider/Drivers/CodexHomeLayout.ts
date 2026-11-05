@@ -27,9 +27,10 @@ const KNOWN_SHARED_DIRECTORIES = [
   "cache",
   "logs",
   "mcp-oauth-locks",
+  "thread-writer-locks",
 ] as const;
 
-const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
+const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "auth.lock", "models_cache.json"]);
 const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp"]);
 const REPLACEABLE_SHARED_RUNTIME_DIRECTORIES = new Set(["mcp-oauth-locks"]);
 
@@ -106,7 +107,10 @@ export class CodexShadowHomeEntryConflictError extends Schema.TaggedError<CodexS
   },
 ) {
   override get message(): string {
-    return `Cannot create Codex shadow home entry '${this.entryName}' because '${this.linkPath}' already exists and is not a symlink.`;
+    const message = `Cannot create Codex shadow home entry '${this.entryName}' because '${this.linkPath}' already exists and is not a symlink.`;
+    return this.entryName === "thread-writer-locks"
+      ? `${message} Stop every Codex process using this home, move this directory aside, then retry to create the shared lock link.`
+      : message;
   }
 }
 

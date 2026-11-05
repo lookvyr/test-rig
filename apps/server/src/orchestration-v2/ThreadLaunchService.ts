@@ -977,26 +977,31 @@ const make = Effect.gen(function* () {
     "ThreadLaunchService.prepareRun",
   )(function* (input) {
     yield* Effect.gen(function* () {
-      const projection = yield* threads.getThreadProjection(input.threadId);
-      const run = projection.runs.find((candidate) => candidate.id === input.runId);
+      const { thread, runs } = yield* threads.getThreadRecords(input.threadId, ["runs"], {
+        runIds: [input.runId],
+      });
+      const run = runs.find((candidate) => candidate.id === input.runId);
       if (run?.status !== "preparing" || run.workspacePreparation === undefined) return;
+      const { messages } = yield* threads.getThreadRecords(input.threadId, ["messages"], {
+        messageIds: [run.userMessageId],
+      });
+      const message = messages.find((candidate) => candidate.id === run.userMessageId);
       if (!(yield* reservePreparation(input.commandId))) return;
-      const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
       const launchInput: ThreadLaunchInput = {
         commandId: input.commandId,
         threadId: input.threadId,
-        projectId: projection.thread.projectId,
-        title: projection.thread.title,
+        projectId: thread.projectId,
+        title: thread.title,
         modelSelection: run.modelSelection,
-        runtimeMode: projection.thread.runtimeMode,
-        interactionMode: projection.thread.interactionMode,
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
         workspaceStrategy: run.workspacePreparation,
         runSetupScript: run.workspacePreparationRunSetupScript,
         ...(message === undefined
           ? {}
           : { initialMessage: { text: message.text, attachments: message.attachments } }),
-        createdBy: projection.thread.createdBy,
-        creationSource: projection.thread.creationSource,
+        createdBy: thread.createdBy,
+        creationSource: thread.creationSource,
       };
       yield* schedulePreparation(launchInput, input.threadId, input.runId).pipe(
         Effect.onError(() => releasePreparation(input.commandId)),
