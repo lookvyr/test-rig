@@ -6611,6 +6611,20 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           const projection = (yield* Ref.get(replayState)).projections.get(threadId);
           if (projection === undefined)
             return yield* new ProjectionStoreThreadNotFoundError({ threadId });
+          // Mirrors the SQL read: a cancelled run that never started is not the latest.
+          const latestStartedRunId = projection.runs
+            .filter((run) => run.status !== "cancelled" || run.startedAt !== null)
+            .reduce<(typeof projection.runs)[number] | undefined>(
+              (latest, run) =>
+                latest === undefined || run.ordinal > latest.ordinal ? run : latest,
+              undefined,
+            )?.id;
+          const providerTurns =
+            filter?.providerTurnThreadIds === undefined
+              ? projection.providerTurns
+              : projection.providerTurns.filter((row) =>
+                  filter.providerTurnThreadIds!.includes(row.providerThreadId),
+                );
           const selected = {
             ...projection,
             messages: projection.messages.filter(
@@ -6620,10 +6634,36 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 (filter?.messageIds === undefined || filter.messageIds.includes(row.id)) &&
                 (filter?.messageRoles === undefined || filter.messageRoles.includes(row.role)),
             ),
-            runs:
-              filter?.runIds === undefined
-                ? projection.runs
-                : projection.runs.filter((row) => filter.runIds!.includes(row.id)),
+            runs: projection.runs.filter(
+              (row) =>
+                (filter?.runIds === undefined || filter.runIds.includes(row.id)) &&
+                (filter?.runStatuses === undefined ||
+                  filter.runStatuses.includes(row.status) ||
+                  (filter.includeLatestRun === true && row.id === latestStartedRunId)),
+            ),
+            providerTurns:
+              filter?.latestProviderTurnUsageOnly === true
+                ? providerTurns
+                    .filter((row) => row.tokenUsage !== undefined)
+                    .toSorted(
+                      (left, right) =>
+                        Date.parse(right.tokenUsage!.updatedAt) -
+                        Date.parse(left.tokenUsage!.updatedAt),
+                    )
+                    .slice(0, 1)
+                : providerTurns,
+            runtimeRequests:
+              filter?.runtimeRequestStatuses === undefined
+                ? projection.runtimeRequests
+                : projection.runtimeRequests.filter((row) =>
+                    filter.runtimeRequestStatuses!.includes(row.status),
+                  ),
+            contextTransfers:
+              filter?.contextTransferStatuses === undefined
+                ? projection.contextTransfers
+                : projection.contextTransfers.filter((row) =>
+                    filter.contextTransferStatuses!.includes(row.status),
+                  ),
             turnItems: projection.turnItems.filter(
               (row) =>
                 (filter?.turnItemRunIds === undefined ||
