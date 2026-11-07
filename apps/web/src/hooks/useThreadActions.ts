@@ -670,12 +670,12 @@ export function useThreadActions() {
   );
 
   const confirmAndDeleteThread = useCallback(
-    async (target: ScopedThreadRef) => {
+    async (target: ScopedThreadRef, knownTitle?: string) => {
       const localApi = readLocalApi();
       const resolved = resolveThreadTarget(target);
 
       if (confirmThreadDelete && localApi) {
-        const title = resolved?.thread.title ?? "this thread";
+        const title = resolved?.thread.title ?? knownTitle ?? "this thread";
         const confirmationResult = await settlePromise(() =>
           localApi.dialogs.confirm(
             [

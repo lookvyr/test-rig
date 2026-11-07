@@ -1,3 +1,4 @@
+import { withLegacyUltracodeEffort } from "@t3tools/shared/model";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Exit from "effect/Exit";
@@ -1189,10 +1190,10 @@ const make = Effect.gen(function* () {
         );
       }
 
-      const requestedOptions = input.target?.options;
+      const descriptors = provider.models.find((candidate) => candidate.slug === model)
+        ?.capabilities?.optionDescriptors;
+      const requestedOptions = withLegacyUltracodeEffort(descriptors, input.target?.options);
       if (requestedOptions !== undefined) {
-        const descriptors = provider.models.find((candidate) => candidate.slug === model)
-          ?.capabilities?.optionDescriptors;
         const invalid = invalidOptionSelections(requestedOptions, descriptors);
         if (invalid.length > 0) {
           return yield* failure(
@@ -1206,7 +1207,7 @@ const make = Effect.gen(function* () {
       const options =
         requestedOptions ??
         (instanceId === inheritedSelection.instanceId && model === inheritedSelection.model
-          ? inheritedSelection.options?.filter(
+          ? withLegacyUltracodeEffort(descriptors, inheritedSelection.options)?.filter(
               (option) => option.id !== "fastMode" && option.id !== "serviceTier",
             )
           : undefined);

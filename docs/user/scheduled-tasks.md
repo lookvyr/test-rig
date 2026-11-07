@@ -80,3 +80,5 @@ Pausing keeps the task saved and prevents future automatic runs. Deleting remove
 the schedule. Neither action cancels work already accepted by a conversation; use
 that conversation's Stop control if needed. An explicit Run now can dispatch a
 paused task without enabling its recurrence.
+
+Tasks bound to a conversation show a thread link in **Settings → Scheduled tasks**. Select the title, or **Open thread**, to return to that conversation in its environment. Tasks that have not created or selected a conversation have no thread link.

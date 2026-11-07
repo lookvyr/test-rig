@@ -493,6 +493,10 @@ export function buildTraitsTriggerDisplay(input: {
   let fastModeEnabled = false;
   const labels: Array<string> = [];
   for (const descriptor of input.descriptors) {
+    if (descriptor.id === "ultracode" && descriptor.type === "boolean") {
+      if (descriptor.currentValue === true) labels.push("Ultracode");
+      continue;
+    }
     if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
       hasFastMode = true;
       fastModeEnabled = descriptor.currentValue === true;

@@ -148,9 +148,9 @@ describe("PR review draft", () => {
 
 ${explain.prompt}`);
     const ask = buildAskAboutPullRequestHandoff(pr);
-    attachPullRequestTask(target, ask, explain.prompt);
+    attachPullRequestTask(target, ask);
     expect(store().getComposerDraft(target)).toMatchObject({
-      prompt: "My notes",
+      prompt: `My notes\n\n${explain.prompt}`,
       reviewComments: [unrelated, ...ask.reviewComments],
     });
     expect(store().listDraftThreadKeys()).toEqual([]);
@@ -289,5 +289,58 @@ ${explain.prompt}`);
       pullRequestReference: null,
     });
     expect(store().getComposerDraft(draftId)?.prompt).toBe("Review cancellation handling");
+  });
+});
+
+describe("accumulating PR handoffs", () => {
+  const target = { environmentId, threadId: ThreadId.make("preserved-findings") };
+  const metadata = {
+    number: 42,
+    title: "First PR",
+    url: input.reference,
+    headBranch: "fix",
+    baseBranch: "main",
+    state: "open" as const,
+    isDraft: false,
+  };
+  it("preserves edited text and multiple PRs with the same number, without duplicate context", () => {
+    const first = buildExplainPullRequestHandoff(metadata);
+    attachPullRequestTask(target, first);
+    store().setPrompt(target, `My edited request\n\n${first.prompt}`);
+    const second = buildExplainPullRequestHandoff({
+      ...metadata,
+      title: "Second PR",
+      url: "https://github.com/other/repo/pull/42",
+    });
+    attachPullRequestTask(target, second);
+    const beforeRepeat = store().getComposerDraft(target)!;
+    expect(beforeRepeat.prompt).toContain("My edited request");
+    expect(beforeRepeat.reviewComments.map((comment) => comment.pullRequest?.url)).toEqual([
+      metadata.url,
+      "https://github.com/other/repo/pull/42",
+    ]);
+    attachPullRequestTask(target, second);
+    expect(store().getComposerDraft(target)?.prompt).toBe(beforeRepeat.prompt);
+    expect(store().getComposerDraft(target)?.reviewComments).toHaveLength(2);
+  });
+  it("refreshes same-id replies while keeping earlier findings and the user's edits", () => {
+    const base = buildExplainPullRequestHandoff(metadata).reviewComments[0]!;
+    const first = { ...base, id: "finding-1", pullRequest: undefined, text: "Original finding" };
+    const second = { ...base, id: "finding-2", pullRequest: undefined, text: "Other finding" };
+    attachPullRequestTask(target, { prompt: "Fix attached findings", reviewComments: [first] });
+    store().setPrompt(target, "Fix these carefully, preserving my changes");
+    attachPullRequestTask(target, { prompt: "Fix attached findings", reviewComments: [second] });
+    attachPullRequestTask(target, {
+      prompt: "Fix attached findings",
+      reviewComments: [{ ...first, text: "Original finding with a new reply" }],
+    });
+    const draft = store().getComposerDraft(target)!;
+    expect(draft.prompt).toBe(
+      "Fix these carefully, preserving my changes\n\nFix attached findings",
+    );
+    expect(draft.reviewComments.map(({ id, text }) => ({ id, text }))).toEqual([
+      { id: "finding-1", text: "Original finding with a new reply" },
+      { id: "finding-2", text: "Other finding" },
+    ]);
   });
 });

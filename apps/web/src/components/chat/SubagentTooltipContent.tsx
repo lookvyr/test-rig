@@ -1,4 +1,6 @@
+import { formatSubagentEffort } from "@t3tools/client-runtime/state/threadExecution";
 import type {
+  ModelSelection,
   OrchestrationV2ThreadShell,
   OrchestrationProjectShell,
   ServerProvider,
@@ -7,11 +9,7 @@ import type {
   OrchestrationV2Subagent,
 } from "@t3tools/contracts";
 import { fileBasename } from "@t3tools/client-runtime/markdown-links";
-import {
-  formatModelSlugName,
-  getModelSelectionStringOptionValue,
-  resolveSelectableModel,
-} from "@t3tools/shared/model";
+import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
 import { getTriggerDisplayModelName } from "./providerIconUtils";
 import type { ReactNode } from "react";
 import {
@@ -34,6 +32,7 @@ import { cn } from "~/lib/utils";
 export function SubagentTooltipContent(props: {
   title: string;
   model: string | null;
+  modelSelection?: ModelSelection | undefined;
   providerInstanceId: ProviderInstanceId;
   origin: OrchestrationV2Subagent["origin"];
   provider?: ServerProvider | undefined;
@@ -50,9 +49,12 @@ export function SubagentTooltipContent(props: {
   result?: string | null | undefined;
   progress?: string | null | undefined;
 }) {
-  const model = props.model?.trim();
+  const childSelection =
+    props.modelSelection ??
+    (props.origin === "app_owned" ? props.childThread?.modelSelection : undefined);
+  const model = props.model?.trim() || childSelection?.model.trim();
   const modelSlug = props.provider
-    ? resolveSelectableModel(props.provider.driver, model, props.provider.models)
+    ? (resolveSelectableModel(props.provider.driver, model, props.provider.models) ?? model)
     : model;
   const providerModel = props.provider?.models.find((candidate) => candidate.slug === modelSlug);
   const modelLabel = providerModel
@@ -60,21 +62,24 @@ export function SubagentTooltipContent(props: {
     : model
       ? formatModelSlugName(model)
       : "Not reported";
-  const childSelection = props.childThread?.modelSelection;
   const childModel = props.provider
-    ? resolveSelectableModel(props.provider.driver, childSelection?.model, props.provider.models)
+    ? (resolveSelectableModel(
+        props.provider.driver,
+        childSelection?.model,
+        props.provider.models,
+      ) ?? childSelection?.model.trim())
     : childSelection?.model.trim();
   // Native children do not inherit the parent's saved traits. App-owned child
   // settings describe this model only when both account and model match.
   const matchingSelection =
-    props.origin === "app_owned" &&
-    childModel === (modelSlug ?? model) &&
-    childSelection?.instanceId === props.providerInstanceId
+    childModel === (modelSlug ?? model) && childSelection?.instanceId === props.providerInstanceId
       ? childSelection
       : undefined;
-  const effort = ["reasoningEffort", "effort", "reasoning"]
-    .map((id) => getModelSelectionStringOptionValue(matchingSelection, id))
-    .find(Boolean);
+  const effort = formatSubagentEffort({
+    modelSlug: modelSlug ?? null,
+    modelSelection: matchingSelection,
+    provider: props.provider,
+  });
   const speedLabel = providerModel?.capabilities?.optionDescriptors
     ?.map((descriptor) => {
       const saved = matchingSelection?.options?.find((option) => option.id === descriptor.id);

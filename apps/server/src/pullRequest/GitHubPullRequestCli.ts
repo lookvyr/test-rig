@@ -112,6 +112,7 @@ import {
   REVIEW_DISMISSALS_GRAPHQL_QUERY,
   REVIEW_THREAD_REPLY_GRAPHQL_MUTATION,
   REVIEW_THREADS_GRAPHQL_QUERY,
+  REVIEW_THREAD_PAGES_GRAPHQL_QUERY,
   reviewThreadConversation,
   UNRESOLVE_REVIEW_THREAD_GRAPHQL_MUTATION,
   UPDATE_ISSUE_COMMENT_GRAPHQL_MUTATION,
@@ -2288,7 +2289,8 @@ export const make = Effect.gen(function* () {
             host: input.host,
             operation: "listReviewThreadComments",
             variables: { owner, name, number: input.number, cursor },
-            query: REVIEW_THREADS_GRAPHQL_QUERY,
+            query:
+              cursor === null ? REVIEW_THREADS_GRAPHQL_QUERY : REVIEW_THREAD_PAGES_GRAPHQL_QUERY,
             decode: decodeReviewThreadsJson,
           });
         const entries: GitHubReviewThreadEntry[] = [];
@@ -2314,8 +2316,7 @@ export const make = Effect.gen(function* () {
           for (const login of read.botLogins) botLogins.add(login);
           for (const [login, avatarUrl] of read.avatarsByLogin)
             avatarsByLogin.set(login, avatarUrl);
-          // The roster, the commits and the viewer's standing travel with every page, and the
-          // first one already carries all of them.
+          // PR-wide fields arrive on the first page only.
           if (page === 0) {
             reviewers = read.reviewers;
             reactions = read.reactions;

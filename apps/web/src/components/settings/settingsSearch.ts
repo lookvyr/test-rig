@@ -41,6 +41,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * here once instead of separately in the panel and the index.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  { id: "tool-call-visibility", title: "Tool calls in chat", to: "/settings/general" },
   {
     id: "browser-profiles",
     title: "Browser profiles, cookies and logins",

@@ -3,6 +3,7 @@ import {
   type ModelCapabilities,
   type ModelSelection,
   type ServerProviderSlashCommand,
+  type ServerProviderModel,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -30,7 +31,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   isCommandMissingCause,
   parseGenericCliVersion,
-  providerModelsFromSettings,
+  providerModelsFromSettings as baseProviderModelsFromSettings,
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
@@ -41,7 +42,7 @@ import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   formatClaudeVersionUpgradeMessage,
   getClaudeCatalogModelCapabilities,
-  isClaudeCatalogUltracodeEffort,
+  withUltracodeToggle,
   normalizeClaudeCatalogEffort,
   resolveClaudeCatalogApiModelId,
   resolveClaudeCatalogContextWindow,
@@ -52,6 +53,17 @@ import {
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
+
+function providerModelsFromSettings(
+  models: ReadonlyArray<ServerProviderModel>,
+  customModels: ClaudeSettings["customModels"],
+  defaults: ModelCapabilities,
+) {
+  return baseProviderModelsFromSettings(models, customModels, defaults).map((model) => ({
+    ...model,
+    capabilities: withUltracodeToggle(model.capabilities),
+  }));
+}
 
 const CLAUDE_PRESENTATION = {
   displayName: "Claude",
@@ -89,7 +101,7 @@ export function normalizeClaudeCliEffort(
 }
 
 export function isClaudeUltracodeEffort(effort: string | null | undefined): boolean {
-  return isClaudeCatalogUltracodeEffort(effort);
+  return effort === "ultracode";
 }
 
 export function resolveClaudeContextWindow(

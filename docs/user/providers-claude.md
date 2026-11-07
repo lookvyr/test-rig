@@ -254,3 +254,7 @@ Do not put environment variable assignments in `Launch arguments`.
 If Claude stops because the prompt exceeds its context window, run `/compact` or start a new
 thread. A full context window does not mean your usage allowance is exhausted. When Claude
 reports a usage limit, send the message again after that limit resets.
+
+## Ultracode
+
+On models that support it, **Ultracode** is a separate on/off option in the model traits menu. Choose reasoning effort independently. Earlier saved Ultracode effort selections retain their behavior as Extra High effort with Ultracode enabled, unless you explicitly switch it off. Sonnet 5.5 support requires Claude Code 2.1.284 or later; Haiku 5.5 retains its model-version requirement.

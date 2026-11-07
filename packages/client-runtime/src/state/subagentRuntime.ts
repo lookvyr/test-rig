@@ -4,6 +4,7 @@
  */
 import * as DateTime from "effect/DateTime";
 import type {
+  ModelSelection,
   OrchestrationV2Subagent,
   OrchestrationV2SubagentWorkflow,
   OrchestrationV2TurnItem,
@@ -90,6 +91,19 @@ export function isActiveSubagentStatus(status: RuntimeSubagentStatus): boolean {
 /** A working child's card outlives its launching turn until the child finishes. */
 export function isLiveSubagentTurnItem(item: OrchestrationV2TurnItem): boolean {
   return item.type === "subagent" && isOrchestrationV2WorkActive(item.status);
+}
+
+/** Builds picker metadata for a workflow member’s reported model and effort. */
+export function workflowMemberModelSelection(
+  member: Pick<RuntimeSubagent, "model" | "effort">,
+  instanceId: ModelSelection["instanceId"],
+): ModelSelection | undefined {
+  if (!member.model) return undefined;
+  return {
+    instanceId,
+    model: member.model,
+    options: member.effort ? [{ id: "effort", value: member.effort }] : [],
+  };
 }
 
 /**

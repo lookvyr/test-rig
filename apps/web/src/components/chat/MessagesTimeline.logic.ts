@@ -1,3 +1,5 @@
+import type { ToolCallVisibility } from "@t3tools/contracts/settings";
+import { workEntryHiddenByToolCallVisibility } from "@t3tools/client-runtime/work-log/presentation";
 import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { isLiveSubagentTurnItem } from "@t3tools/client-runtime/state/subagentRuntime";
@@ -1254,6 +1256,7 @@ function settleSupersededReasoning(entries: ReadonlyArray<TimelineEntry>) {
 }
 
 export function deriveMessagesTimelineRows(input: {
+  toolCallVisibility?: ToolCallVisibility;
   timelineEntries: ReadonlyArray<TimelineEntry>;
   latestRun?: TimelineLatestRun | null;
   runningRunId?: RunId | null;
@@ -1274,7 +1277,11 @@ export function deriveMessagesTimelineRows(input: {
   worktreeSetup?: WorktreeSetupSnapshot | null;
 }): MessagesTimelineRow[] {
   const timelineEntries = withoutSubagentDelegationRows(
-    settleSupersededReasoning(input.timelineEntries),
+    settleSupersededReasoning(input.timelineEntries).filter(
+      (entry) =>
+        entry.kind !== "work" ||
+        !workEntryHiddenByToolCallVisibility(entry.entry, input.toolCallVisibility ?? "showAll"),
+    ),
   );
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
   for (const summary of input.turnDiffSummaries) {

@@ -25,3 +25,7 @@ Raw command chunks are transient. They bypass orchestration event storage and th
 thread stream. Each expanded panel receives a normalized, bounded snapshot at most
 four times per second. The server retains a bounded set of live and recently
 finished tails; this preview is not an output archive.
+
+## Quieter conversations
+
+In **Settings → General → Tool calls in chat**, choose **Show all**, **Hide successful**, or **Hide all**. Hide successful keeps calls visible while they run and retains failures. Hide all removes ordinary tool calls from the conversation. Errors, approvals, questions, secret requests, and agent interactions remain available. This display preference is saved on this device and does not delete history. Switch back to Show all to see the full activity.

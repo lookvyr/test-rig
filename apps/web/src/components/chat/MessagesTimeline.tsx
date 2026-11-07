@@ -751,6 +751,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     });
   }, [latestRun]);
 
+  const toolCallVisibility = useClientSettings((settings) => settings.toolCallVisibility);
   const rowsProjectionRef = useRef<{
     readonly threadKey: string;
     readonly workspaceRoot: string | undefined;
@@ -760,6 +761,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const previous = rowsProjectionRef.current;
     const projection = deriveMessagesTimelineRowsWithState(
       {
+        toolCallVisibility,
         timelineEntries,
         latestRun,
         runningRunId,
@@ -779,6 +781,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     rowsProjectionRef.current = { threadKey: listIdentityKey, workspaceRoot, projection };
     return projection.rows;
   }, [
+    toolCallVisibility,
     rowsProjectionRef,
     listIdentityKey,
     workspaceRoot,

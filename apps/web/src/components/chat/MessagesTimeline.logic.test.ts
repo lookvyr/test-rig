@@ -5343,3 +5343,59 @@ describe("timeline distance from visible content", () => {
     expect(resolveTimelineIsAtEnd({ ...state, scroll: 1100, isAtEnd: true })).toBe(false);
   });
 });
+
+describe("quieter timeline projections", () => {
+  it("recomputes cached rows when visibility changes and restores the activity", () => {
+    const runId = RunId.make("quiet-turn");
+    const timelineEntries: TimelineEntry[] = [
+      {
+        id: "quiet-command",
+        kind: "work",
+        createdAt: "2026-11-07T00:00:01Z",
+        entry: {
+          id: "quiet-command",
+          runId,
+          createdAt: "2026-11-07T00:00:01Z",
+          label: "Run tests",
+          tone: "tool",
+          itemType: "command_execution",
+          toolLifecycleStatus: "completed",
+        },
+      },
+    ];
+    const input = {
+      timelineEntries,
+      isWorking: false,
+      turnDiffSummaries: [],
+      expandedRunIds: new Set([runId]),
+    };
+    const shown = deriveMessagesTimelineRowsWithState(
+      { ...input, toolCallVisibility: "showAll" },
+      null,
+    );
+    const hidden = deriveMessagesTimelineRowsWithState(
+      { ...input, toolCallVisibility: "hideSuccessful" },
+      shown,
+    );
+    const restored = deriveMessagesTimelineRowsWithState(
+      { ...input, toolCallVisibility: "showAll" },
+      hidden,
+    );
+    expect(shown.rows.length).toBeGreaterThan(0);
+    expect(hidden.rows).toEqual([]);
+    expect(restored.rows).toEqual(shown.rows);
+    const failed = deriveMessagesTimelineRowsWithState(
+      {
+        ...input,
+        toolCallVisibility: "hideAll",
+        timelineEntries: timelineEntries.map((entry) =>
+          entry.kind === "work"
+            ? { ...entry, entry: { ...entry.entry, toolLifecycleStatus: "failed" } }
+            : entry,
+        ),
+      },
+      hidden,
+    );
+    expect(failed.rows.length).toBeGreaterThan(0);
+  });
+});

@@ -1085,6 +1085,32 @@ export const REVIEW_THREADS_GRAPHQL_QUERY = `query($owner: String!, $name: Strin
   }
 }`;
 
+/** Later pages carry only review threads; PR-wide metadata already arrived on the first page. */
+export const REVIEW_THREAD_PAGES_GRAPHQL_QUERY = `query($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  viewer { login }
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: ${GRAPHQL_PAGE_SIZE}, after: $cursor) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          diffSide
+          comments(first: 10) {
+            totalCount
+            pageInfo { hasNextPage endCursor }
+            nodes { id author { __typename login avatarUrl } body createdAt lastEditedAt url ${REACTION_GROUPS_FIELDS} }
+          }
+        }
+      }
+    }
+  }
+}`;
+
 /**
  * The rest of one thread's conversation. GraphQL pages a connection nested inside another only
  * from the inner node itself, so a thread longer than a page is followed on its own — a request
@@ -1513,7 +1539,7 @@ function toReviewDecisionWithReviews(
         : latestReviews;
   const states = new Set(reviews.map((review) => review.state?.trim().toUpperCase() ?? ""));
   if (states.has("CHANGES_REQUESTED")) return "changes-requested";
-  if (states.has("APPROVED")) return "approved";
+  if (summarized === null && states.has("APPROVED")) return "approved";
   return summarized;
 }
 

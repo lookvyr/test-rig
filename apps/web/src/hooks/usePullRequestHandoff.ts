@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import type {
   EnvironmentId,
   ProjectId,
@@ -15,9 +15,7 @@ import {
   buildPullRequestCommentContext,
   buildPullRequestReferenceContext,
   type PullRequestChatSubject,
-  handoffPrompt,
-  handoffReviewComments,
-  stripPullRequestHandoffReferences,
+  appendHandoff,
 } from "../components/pullRequest/pullRequestDetail.logic";
 import { toastManager } from "../components/ui/toast";
 
@@ -92,31 +90,18 @@ export function attachPullRequestDiscussion(
 }
 
 /** Add the requested work to the open thread while preserving the user's unsent text and attachments. */
-export function attachPullRequestTask(
-  target: ScopedThreadRef,
-  task: HandoffTask,
-  lastPrompt?: string,
-) {
+export function attachPullRequestTask(target: ScopedThreadRef, task: HandoffTask) {
   const store = useComposerDraftStore.getState();
   const draft = store.getComposerDraft(target);
   const existing = draft?.reviewComments ?? [];
-  const incoming = task.reviewComments ?? [];
-  const incomingIds = new Set(incoming.map(({ id }) => id));
-  const prompt = stripPullRequestHandoffReferences(draft?.prompt ?? "", existing, incomingIds);
-  store.setPrompt(target, handoffPrompt({ prompt, lastHandoffPrompt: lastPrompt }, task.prompt));
-  store.setReviewComments(
-    target,
-    handoffReviewComments(
-      existing.filter(({ id }) => !incomingIds.has(id)),
-      incoming,
-    ),
-  );
+  const next = appendHandoff({ prompt: draft?.prompt ?? "", reviewComments: existing }, task);
+  store.setPrompt(target, next.prompt);
+  store.setReviewComments(target, next.reviewComments);
 }
 
 export function usePullRequestHandoff(input: PullRequestHandoffInput, target?: ScopedThreadRef) {
   const navigate = useNavigate();
   const pending = useRef(false);
-  const previous = useRef<{ key: string; prompt: string } | null>(null);
   const [isPending, setIsPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const startReview = async (handoff?: HandoffTask, kind: "checkout" | "question" = "checkout") => {
@@ -126,13 +111,7 @@ export function usePullRequestHandoff(input: PullRequestHandoffInput, target?: S
     setError(null);
     try {
       if (target && handoff) {
-        const key = scopedThreadKey(target);
-        attachPullRequestTask(
-          target,
-          handoff,
-          previous.current?.key === key ? previous.current.prompt : undefined,
-        );
-        previous.current = { key, prompt: handoff.prompt };
+        attachPullRequestTask(target, handoff);
         toastManager.add({ type: "success", title: "Added to this thread’s composer" });
         return;
       }

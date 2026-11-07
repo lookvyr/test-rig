@@ -211,3 +211,5 @@ readiness, so related changes may arrive in successive updates.
 A closed PR ends its watch and sends a closure update. You can watch it again if
 it reopens, even before the saved PR card refreshes. Eight consecutive failed host
 reads end a watch with an explanation; rate-limit pauses do not count.
+
+Adding another review finding to a conversation keeps earlier findings, attachments, and unsent text. Re-adding the same finding refreshes its context without duplicating it. Findings from different pull requests remain distinct, even when the requests share a number. A partial approval no longer changes **Review required** to **Approved** while GitHub still requires more reviews.

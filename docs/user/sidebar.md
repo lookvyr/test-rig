@@ -119,3 +119,5 @@ from settling or deleting a thread.
 Drag the sidebar edge to change its width. Releasing saves that width. Collapsing
 the sidebar during a drag cancels the unsaved change; the restored width still
 fits the current window.
+
+In **Settings → Archive**, each conversation has visible **Unarchive** and **Delete** actions. Delete uses your deletion-confirmation preference and names the archived conversation in the confirmation. Deletion permanently clears its conversation history; unarchive restores it to the sidebar.

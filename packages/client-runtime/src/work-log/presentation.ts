@@ -1,3 +1,4 @@
+import type { ToolCallVisibility } from "@t3tools/contracts/settings";
 import {
   isToolLifecycleItemType,
   type AssetResource,
@@ -784,4 +785,22 @@ export function toolGroupSummaryKind(
     }),
   );
   return fallbackKinds.size === 1 ? fallbackKinds.values().next().value! : "mixed";
+}
+
+const HIDEABLE_TOOL_CALL_ITEM_TYPES: ReadonlySet<WorkLogPresentationEntry["itemType"]> = new Set([
+  "command_execution",
+  "file_change",
+  "file_search",
+  "web_search",
+  "dynamic_tool",
+]);
+
+/** Display filtering only: errors and interactive items remain available in every mode. */
+export function workEntryHiddenByToolCallVisibility(
+  entry: WorkLogPresentationEntry,
+  visibility: ToolCallVisibility,
+): boolean {
+  if (visibility === "showAll" || !HIDEABLE_TOOL_CALL_ITEM_TYPES.has(entry.itemType)) return false;
+  if (entry.tone === "error" || workEntryDisplayIndicatesToolFailure(entry)) return false;
+  return visibility === "hideAll" || entry.toolLifecycleStatus === "completed";
 }

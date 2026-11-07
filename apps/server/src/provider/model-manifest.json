@@ -452,6 +452,50 @@
             }
           }
         },
+        "sonnet-5-5": {
+          "capabilities": {
+            "optionDescriptors": [
+              {
+                "id": "effort",
+                "label": "Reasoning",
+                "type": "select",
+                "options": [
+                  {
+                    "id": "low",
+                    "label": "Low"
+                  },
+                  {
+                    "id": "medium",
+                    "label": "Medium"
+                  },
+                  {
+                    "id": "high",
+                    "label": "High",
+                    "isDefault": true
+                  },
+                  {
+                    "id": "xhigh",
+                    "label": "Extra High"
+                  },
+                  {
+                    "id": "max",
+                    "label": "Max"
+                  },
+                  {
+                    "id": "ultracode",
+                    "label": "Ultracode",
+                    "description": "Multi-agent workflow orchestration"
+                  }
+                ]
+              }
+            ]
+          },
+          "adapter": {
+            "claudeCode": {
+              "fixedContextWindowTokens": 1000000
+            }
+          }
+        },
         "sonnet-4-6": {
           "capabilities": {
             "optionDescriptors": [
@@ -526,7 +570,12 @@
                   { "id": "medium", "label": "Medium", "isDefault": true },
                   { "id": "high", "label": "High" },
                   { "id": "xhigh", "label": "Extra High" },
-                  { "id": "max", "label": "Max" }
+                  { "id": "max", "label": "Max" },
+                  {
+                    "id": "ultracode",
+                    "label": "Ultracode",
+                    "description": "Multi-agent workflow orchestration"
+                  }
                 ]
               }
             ]
@@ -566,7 +615,7 @@
           "name": "Claude Sonnet 5.5",
           "aliases": ["sonnet", "sonnet-5.5", "claude-sonnet-5.5"],
           "status": "current",
-          "profile": "sonnet-5",
+          "profile": "sonnet-5-5",
           "adapter": { "claudeCode": { "minVersion": "2.1.284" } }
         },
         {

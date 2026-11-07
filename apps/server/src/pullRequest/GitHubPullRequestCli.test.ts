@@ -3735,6 +3735,9 @@ layer("GitHubPullRequestCli.layer", (it) => {
       // The first page asks from the beginning; the next carries on from where it stopped.
       expect(varsAt(0)["cursor"]).toBeNull();
       expect(varsAt(1)["cursor"]).toBe("Y3Vyc29yOjE");
+      for (const field of ["reviewRequests(", "commits(", "reviewDismissals:", "latestReviews("])
+        expect(queryAt(1)).not.toContain(field);
+      expect(queryAt(0)).toContain("commits(");
       expect(conversation.comments.map((comment) => comment.id)).toEqual(["c1", "c2"]);
       assert.isFalse(conversation.truncated);
     }),
