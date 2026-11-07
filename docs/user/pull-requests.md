@@ -20,8 +20,10 @@ Enable GitHub in Settings → Source Control and sign in with GitHub CLI, or pro
 a server environment token. A remote environment uses its own credentials and
 repository paths.
 
-Filter the queue by project, state, or your involvement, and search the loaded
-results by title, number, author, repository, or URL. Use **Refresh** to fetch
+Filter the queue by project, state, or your involvement. Enter a number such as
+`#32226` to find that PR on GitHub across the selected projects, or paste its
+GitHub URL to search just its repository. Both lookups honor the queue filters.
+Other text searches the loaded rows by title, author, repository, or URL. Use **Refresh** to fetch
 current information. Either refresh button in the workspace updates both the
 queue and the selected review, including check results and changed files. The
 workspace tells you when results are incomplete.
@@ -49,7 +51,8 @@ HTML, including expandable sections. Fenced code blocks with a language such as
 and line wrapping as chat. Unknown languages remain readable as plain text.
 Images appear as **View image** links that you can open explicitly.
 
-Use **Open in GitHub** to view the complete diff, commits, comments, and reviews.
+Use **Timeline** for comments and reviews, and **Code** for file diffs.
+**Open in GitHub** shows the complete record, including content beyond the loaded limits.
 
 Choose **Review** beside the GitHub link on a pull request row to prepare a worktree on its
 branch and immediately open a new thread draft containing the PR link. Start
@@ -75,20 +78,76 @@ coding threads as well as threads started from the PR page. Detection may take
 a moment after checkout. By default, the panel and PR badge follow the PR detected for the thread's branch.
 Pasting another PR link into a message does not change the association.
 
-Right-click the PR badge in the sidebar or below the composer and choose
-**Unlink PR from thread** to stop automatic detection for that thread. This choice
-survives app restarts and branch changes. To link again, open the thread's menu
-and choose **Link PR**, then enter a PR number or URL from the project's repository.
-An explicit link stays attached even when the checkout changes. The same dialog
-can remove an explicit link if its badge is unavailable.
+A thread can link several PRs, including PRs from other saved GitHub projects in
+its environment. Choose **Link PR** in the thread menu, or in its **Pull requests**
+panel. Enter a number for the thread's project or a full URL for another project.
+The panel lists every linked PR and groups branch relationships into stacks,
+ordered from bottom to top. GitHub-reported stacks can add their other layers
+automatically. Branch relationships group PRs that are already linked.
 
-Linked PRs continue to settle inactive threads when they merge or close, subject
-to the usual pin, active-work, and manual settlement settings. Unlinking stops
-PR-based settlement; ordinary inactivity settlement still applies.
-If no PR is detected, an already-open panel offers **Refresh Git status**.
+Select a PR to browse **Summary**, **Timeline**, or **Code**. Code shows that PR's
+change against its own base, including incremental changes within a stack.
+Summary loads separately from the diff and conversation. Open **Code** to read
+the files in one continuous diff; large changes load more files as you scroll.
+Use the file tree to jump to a file, or collapse individual files and switch
+between unified and split views.
+**Viewed** saves your progress on GitHub and folds that file's diff. Untick it
+to expand the file again. Shift-click marks the files between your last mark
+and the current file. Files updated after review show **Changed**.
+Marks update immediately and save together in the background, so you can keep
+reviewing. A small spinner beside Viewed indicates an unfinished save.
+The refresh icon spins while the pull request reloads.
+The Timeline includes commits, comments, reviews, and grouped review threads,
+with resolved and outdated discussions identified separately.
+Select lines in a thread's PR diff to add feedback to its composer. Feedback
+includes the PR URL and revision. Switching PRs keeps saved feedback attached
+to its original PR.
 
-This workspace does not publish reviews or merge pull requests. Use the pull
-request link to open GitHub for those actions.
+The linked-PR list shows check and review status, stack relationships, and
+change counts. Each PR's actions menu offers **Watch for changes**, **Stop
+watching**, and individual unlinking. Use the back arrow to return from a PR's
+details to the linked list, or the selector to switch directly to another PR.
+
+Browsing a PR does not switch the thread's checkout. **Work on PR** prepares a
+separate thread draft in a worktree for that PR; send instructions when ready.
+The local **Review** pane continues to show the thread's own workspace changes,
+with staging and commit controls.
+
+Use **Unlink** beside a PR to remove only that link. Automatic discovery remembers
+the dismissal; explicitly linking the PR again restores it. **Automatically link
+branch and stack PRs** controls discovery separately. Manual and agent links
+still work while discovery is disabled.
+
+An open linked PR, or one whose state is not yet known, keeps a thread active even
+when its inactivity threshold has elapsed. Once every linked PR is merged or
+closed, the latest completion can settle the thread, subject to its settlement
+settings and active-work protections. Manual settlement remains available.
+Unlinked PRs no longer contribute to this decision; ordinary inactivity settings
+still apply when no linked work remains.
+
+Type `@` in a review field to find a GitHub user, or `#` to find an issue or pull request in the same repository.
+
+The review composer publishes comments, approvals, or requests for changes with
+pending inline comments. Discussions support replies, editing your comments,
+reactions, and resolve/unresolve. Drafts stay separate by PR, environment, and head
+revision; comments on an older revision are not submitted on a newer head.
+
+Code opens with files folded. Expand a file or select it in the tree to read its diff. Switching between Summary, Timeline, and Code preserves your place and file folds. In a narrow review, the file tree sits above the code. Code supports commit selection, whitespace and test-file filters, and expanding unchanged lines. The open review refreshes when you return and periodically while
+visible. GitHub changes made here refresh related review data.
+
+PR actions include title/description editing, labels, reviewers, draft/ready,
+close/reopen, merge, auto-merge, and branch updates where permitted. Host-reported
+stacks offer merge through a selected layer and stack rebase, with confirmation
+showing the affected layers. Rebase rewrites and pushes branch history; a failure
+may leave earlier layers updated.
+
+In a thread, choose **Add to chat** on a comment or review discussion in Summary,
+Timeline, or Code to attach the PR and the quoted conversation to your composer.
+
+Agent shortcuts add PR context, questions, and requested fixes to the open
+thread's composer alongside any text you've entered. From the project queue,
+asking about a PR opens a project draft, while starting a fix prepares a worktree
+for the PR branch.
 
 ## Automatically linked pull requests
 

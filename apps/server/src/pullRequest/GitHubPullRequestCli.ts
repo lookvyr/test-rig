@@ -1,3 +1,10 @@
+import {
+  REPOSITORY_MENTIONS_QUERY,
+  REPOSITORY_REFERENCES_QUERY,
+  decodeMentions,
+  decodeReferences,
+} from "./gitHubReviewCompletions.ts";
+import type { PullRequestCompletionInput, PullRequestCompletions } from "@t3tools/contracts";
 import { KnownWorkflowRuns, makeChecksRevalidator } from "./gitHubConditionalChecks.ts";
 import { runGitHubStackAction, type GitHubStackActionError } from "./githubStackActions.ts";
 import * as Cause from "effect/Cause";
@@ -674,6 +681,12 @@ export class GitHubPullRequestCli extends Context.Service<
     }) => Effect.Effect<GitHubViewerAccess & GitHubRepositoryAccess, GitHubPullRequestCliError>;
 
     /** Who this pull request may be sent to, and who it has already been sent to. */
+    readonly completions: (
+      input: { readonly cwd: string; readonly repository: string; readonly host: string } & Pick<
+        PullRequestCompletionInput,
+        "kind" | "query"
+      >,
+    ) => Effect.Effect<PullRequestCompletions, GitHubPullRequestCliError>;
     readonly listReviewerCandidates: (input: {
       readonly cwd: string;
       readonly repository: string;
@@ -842,6 +855,10 @@ function isCommitSha(value: string): boolean {
  *
  * The phrase is one argv element, so nothing in it can become a flag of its own either.
  */
+function referenceSearch(repository: string, query: string): string {
+  const title = query && !/^\d+$/.test(query) ? ` in:title ${searchPhrase(query)}` : "";
+  return `repo:${repository}${title} sort:updated-desc`;
+}
 function searchPhrase(query: string): string {
   return `"${query.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
@@ -2392,6 +2409,41 @@ export const make = Effect.gen(function* () {
       });
     },
 
+    completions: (input) => {
+      const { owner, name } = parseRepositorySelector(input.repository);
+      const read = {
+        cwd: input.cwd,
+        host: input.host,
+        operation: "completions",
+        allowReserve: true,
+      };
+      if (input.kind === "mention")
+        return graphqlRead({
+          ...read,
+          query: REPOSITORY_MENTIONS_QUERY,
+          variables: { owner, name, query: input.query || null },
+          decode: decodeMentions,
+        });
+      const number = /^\d+$/.test(input.query) ? Number(input.query) : 0;
+      const exact = number > 0 && number <= 2_147_483_647;
+      const search = (includeExact: boolean) =>
+        graphqlRead({
+          ...read,
+          query: REPOSITORY_REFERENCES_QUERY,
+          variables: {
+            owner,
+            name,
+            search: referenceSearch(input.repository, input.query),
+            number: includeExact ? number : 0,
+            exact: includeExact,
+          },
+          decode: decodeReferences,
+        });
+      // GitHub rejects the combined query for a missing number. Keep its prefix matches.
+      return exact
+        ? search(true).pipe(Effect.catchTag("GitHubApiNotFoundError", () => search(false)))
+        : search(false);
+    },
     listReviewerCandidates: (input) => {
       const { owner, name } = parseRepositorySelector(input.repository);
       return graphqlRead({

@@ -1,4 +1,26 @@
 import {
+  PullRequestActionInput,
+  PullRequestChecks,
+  PullRequestCommentInput,
+  PullRequestCommentUpdateInput,
+  PullRequestDiffFileContentsInput,
+  PullRequestDiffFileContentsResult,
+  PullRequestLabelCandidateList,
+  PullRequestLabelChangeInput,
+  PullRequestReactionInput,
+  PullRequestCompletionInput,
+  PullRequestCompletions,
+  PullRequestReviewerCandidateList,
+  PullRequestReviewerRequestInput,
+  PullRequestStack,
+  PullRequestSubmitReviewInput,
+  PullRequestThreadCommentsInput,
+  PullRequestThreadCommentsResult,
+  PullRequestThreadReplyInput,
+  PullRequestThreadResolutionInput,
+  PullRequestUpdateInput,
+} from "./pullRequest.ts";
+import {
   ToolsProjectScopesInput,
   ToolsProjectScopesResult,
   ToolsScopeError,
@@ -76,6 +98,18 @@ import {
 import { OrchestrationSearchThreadsError } from "./threadSearch.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 import { ThreadId, MessageId } from "./baseSchemas.ts";
+import {
+  PullRequestRef,
+  PullRequestFilesViewedResult,
+  PullRequestSetFilesViewedInput,
+  PullRequestUnavailableError,
+  PullRequestOperationError,
+  PullRequestActivity,
+  PullRequestDetail,
+  PullRequestDiffInput,
+  PullRequestDiffResult,
+  PullRequestInvalidateInput,
+} from "./pullRequest.ts";
 import {
   GitGetPullRequestStatsInput,
   GitGetPullRequestStatsResult,
@@ -285,6 +319,30 @@ export const WS_METHODS = {
   gitGetPullRequestStats: "git.getPullRequestStats",
   gitListPullRequests: "git.listPullRequests",
   gitGetPullRequestDetails: "git.getPullRequestDetails",
+  pullRequestSubscribeRefreshes: "pullRequest.subscribeRefreshes",
+  pullRequestThreadComments: "pullRequest.threadComments",
+  pullRequestDiffFileContents: "pullRequest.diffFileContents",
+  pullRequestChecks: "pullRequest.checks",
+  pullRequestStack: "pullRequest.stack",
+  pullRequestRunAction: "pullRequest.runAction",
+  pullRequestUpdate: "pullRequest.update",
+  pullRequestComment: "pullRequest.comment",
+  pullRequestUpdateComment: "pullRequest.updateComment",
+  pullRequestSubmitReview: "pullRequest.submitReview",
+  pullRequestReplyToThread: "pullRequest.replyToThread",
+  pullRequestSetThreadResolution: "pullRequest.setThreadResolution",
+  pullRequestSetReaction: "pullRequest.setReaction",
+  pullRequestCompletions: "pullRequest.completions",
+  pullRequestReviewerCandidates: "pullRequest.reviewerCandidates",
+  pullRequestRequestReviewers: "pullRequest.requestReviewers",
+  pullRequestLabelCandidates: "pullRequest.labelCandidates",
+  pullRequestSetLabels: "pullRequest.setLabels",
+  pullRequestFilesViewed: "pullRequest.filesViewed",
+  pullRequestSetFilesViewed: "pullRequest.setFilesViewed",
+  pullRequestActivity: "pullRequest.activity",
+  pullRequestDetail: "pullRequest.detail",
+  pullRequestDiff: "pullRequest.diff",
+  pullRequestInvalidate: "pullRequest.invalidate",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
@@ -673,6 +731,246 @@ export const WsGitGetPullRequestDetailsRpc = Rpc.make(WS_METHODS.gitGetPullReque
   payload: GitGetPullRequestDetailsInput,
   success: GitGetPullRequestDetailsResult,
   error: Schema.Union([GitPullRequestWorkspaceError, EnvironmentAuthorizationError]),
+});
+export const WsPullRequestSubscribeRefreshesRpc = Rpc.make(
+  WS_METHODS.pullRequestSubscribeRefreshes,
+  {
+    payload: Schema.Struct({}),
+    success: Schema.Number,
+    error: EnvironmentAuthorizationError,
+    stream: true,
+  },
+);
+
+export const WsPullRequestThreadCommentsRpc = Rpc.make(WS_METHODS.pullRequestThreadComments, {
+  payload: PullRequestThreadCommentsInput,
+  success: PullRequestThreadCommentsResult,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestDiffFileContentsRpc = Rpc.make(WS_METHODS.pullRequestDiffFileContents, {
+  payload: PullRequestDiffFileContentsInput,
+  success: PullRequestDiffFileContentsResult,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestChecksRpc = Rpc.make(WS_METHODS.pullRequestChecks, {
+  payload: PullRequestRef,
+  success: Schema.NullOr(PullRequestChecks),
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestStackRpc = Rpc.make(WS_METHODS.pullRequestStack, {
+  payload: PullRequestRef,
+  success: Schema.NullOr(PullRequestStack),
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestRunActionRpc = Rpc.make(WS_METHODS.pullRequestRunAction, {
+  payload: PullRequestActionInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestUpdateRpc = Rpc.make(WS_METHODS.pullRequestUpdate, {
+  payload: PullRequestUpdateInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestCommentRpc = Rpc.make(WS_METHODS.pullRequestComment, {
+  payload: PullRequestCommentInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestUpdateCommentRpc = Rpc.make(WS_METHODS.pullRequestUpdateComment, {
+  payload: PullRequestCommentUpdateInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestSubmitReviewRpc = Rpc.make(WS_METHODS.pullRequestSubmitReview, {
+  payload: PullRequestSubmitReviewInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestReplyToThreadRpc = Rpc.make(WS_METHODS.pullRequestReplyToThread, {
+  payload: PullRequestThreadReplyInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestSetThreadResolutionRpc = Rpc.make(
+  WS_METHODS.pullRequestSetThreadResolution,
+  {
+    payload: PullRequestThreadResolutionInput,
+    success: Schema.Void,
+    error: Schema.Union([
+      PullRequestUnavailableError,
+      PullRequestOperationError,
+      EnvironmentAuthorizationError,
+    ]),
+  },
+);
+
+export const WsPullRequestSetReactionRpc = Rpc.make(WS_METHODS.pullRequestSetReaction, {
+  payload: PullRequestReactionInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestCompletionsRpc = Rpc.make(WS_METHODS.pullRequestCompletions, {
+  payload: PullRequestCompletionInput,
+  success: PullRequestCompletions,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestReviewerCandidatesRpc = Rpc.make(
+  WS_METHODS.pullRequestReviewerCandidates,
+  {
+    payload: PullRequestRef,
+    success: PullRequestReviewerCandidateList,
+    error: Schema.Union([
+      PullRequestUnavailableError,
+      PullRequestOperationError,
+      EnvironmentAuthorizationError,
+    ]),
+  },
+);
+
+export const WsPullRequestRequestReviewersRpc = Rpc.make(WS_METHODS.pullRequestRequestReviewers, {
+  payload: PullRequestReviewerRequestInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestLabelCandidatesRpc = Rpc.make(WS_METHODS.pullRequestLabelCandidates, {
+  payload: PullRequestRef,
+  success: PullRequestLabelCandidateList,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestSetLabelsRpc = Rpc.make(WS_METHODS.pullRequestSetLabels, {
+  payload: PullRequestLabelChangeInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+export const WsPullRequestFilesViewedRpc = Rpc.make(WS_METHODS.pullRequestFilesViewed, {
+  payload: PullRequestRef,
+  success: PullRequestFilesViewedResult,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+export const WsPullRequestSetFilesViewedRpc = Rpc.make(WS_METHODS.pullRequestSetFilesViewed, {
+  payload: PullRequestSetFilesViewedInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+export const WsPullRequestActivityRpc = Rpc.make(WS_METHODS.pullRequestActivity, {
+  payload: PullRequestRef,
+  success: PullRequestActivity,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+export const WsPullRequestDetailRpc = Rpc.make(WS_METHODS.pullRequestDetail, {
+  payload: PullRequestRef,
+  success: PullRequestDetail,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+export const WsPullRequestDiffRpc = Rpc.make(WS_METHODS.pullRequestDiff, {
+  payload: PullRequestDiffInput,
+  success: PullRequestDiffResult,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+export const WsPullRequestInvalidateRpc = Rpc.make(WS_METHODS.pullRequestInvalidate, {
+  payload: PullRequestInvalidateInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    PullRequestUnavailableError,
+    PullRequestOperationError,
+    EnvironmentAuthorizationError,
+  ]),
 });
 
 export const WsGitResolvePullRequestRpc = Rpc.make(WS_METHODS.gitResolvePullRequest, {
@@ -1263,6 +1561,30 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitGetPullRequestStatsRpc,
   WsGitListPullRequestsRpc,
   WsGitGetPullRequestDetailsRpc,
+  WsPullRequestSubscribeRefreshesRpc,
+  WsPullRequestThreadCommentsRpc,
+  WsPullRequestDiffFileContentsRpc,
+  WsPullRequestChecksRpc,
+  WsPullRequestStackRpc,
+  WsPullRequestRunActionRpc,
+  WsPullRequestUpdateRpc,
+  WsPullRequestCommentRpc,
+  WsPullRequestUpdateCommentRpc,
+  WsPullRequestSubmitReviewRpc,
+  WsPullRequestReplyToThreadRpc,
+  WsPullRequestSetThreadResolutionRpc,
+  WsPullRequestSetReactionRpc,
+  WsPullRequestCompletionsRpc,
+  WsPullRequestReviewerCandidatesRpc,
+  WsPullRequestRequestReviewersRpc,
+  WsPullRequestLabelCandidatesRpc,
+  WsPullRequestSetLabelsRpc,
+  WsPullRequestFilesViewedRpc,
+  WsPullRequestSetFilesViewedRpc,
+  WsPullRequestActivityRpc,
+  WsPullRequestDetailRpc,
+  WsPullRequestDiffRpc,
+  WsPullRequestInvalidateRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,

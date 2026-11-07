@@ -20,6 +20,7 @@ export interface PullRequestTestThread {
   readonly interactionMode: OrchestrationV2ThreadShell["interactionMode"];
   readonly branch: string | null;
   readonly worktreePath: string | null;
+  readonly pullRequestAutoLink?: boolean;
   readonly pullRequestAssociation?: OrchestrationV2ThreadShell["pullRequestAssociation"];
   readonly pullRequests: ReadonlyArray<ThreadPullRequestLink>;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
@@ -44,6 +45,7 @@ export function v2PullRequestThread(thread: PullRequestTestThread): Orchestratio
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     pullRequests: thread.pullRequests,
+    pullRequestAutoLink: thread.pullRequestAutoLink,
     pullRequestAssociation: thread.pullRequestAssociation ?? null,
     linkedPullRequest: thread.linkedPullRequest,
     branchPullRequest: thread.branchPullRequest,

@@ -536,6 +536,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     environmentId: thread.environmentId,
     projectCwd: props.projectCwd,
     association: thread.pullRequestAssociation,
+    pullRequests: thread.pullRequests,
+    pullRequestAutoLink: thread.pullRequestAutoLink,
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
     providerSettings,

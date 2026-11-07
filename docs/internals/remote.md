@@ -6,6 +6,11 @@ A client talks directly to one Test Rig server over HTTP and WebSocket. The serv
 projects, threads, terminals, Git, and filesystem operations; the connection layer only decides how
 the client reaches that server.
 
+The PR viewer reads patch pages through authenticated `POST /api/pull-requests/diff`.
+HTTP compression keeps large patches off the shared WebSocket. The route enforces the
+same scope and GitHub credential checks as the diff RPC. Clients can still use that
+RPC when a paired server predates the HTTP route.
+
 ## Connection targets
 
 [`connection/model.ts`][model] defines the active target taxonomy:

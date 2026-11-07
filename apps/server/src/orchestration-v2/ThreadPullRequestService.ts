@@ -1,4 +1,10 @@
 import {
+  threadPullRequestsOf,
+  threadPullRequestAutoLinkEnabled,
+  threadPullRequestKeysEqual,
+  legacyThreadPullRequestKey,
+} from "@t3tools/shared/threadPullRequests";
+import {
   canonicalRepositoryKey,
   sourceControlRepositorySelector,
 } from "@t3tools/shared/sourceControl";
@@ -172,6 +178,7 @@ export const make = Effect.gen(function* () {
     const threads = threadSnapshot.threads.filter(
       (thread) =>
         thread.archivedAt === null &&
+        threadPullRequestAutoLinkEnabled(thread) &&
         ((thread.settledOverride !== "settled" && thread.settledAt === null) ||
           request.threadId !== null ||
           pendingBackfill.has(thread.id)) &&
@@ -236,30 +243,17 @@ export const make = Effect.gen(function* () {
                 }
               }
 
-              let replacement: ThreadLinkedPullRequest | undefined;
-              if (
-                thread.pullRequestAssociation == null &&
-                (thread.pullRequests ?? []).length === 0 &&
-                thread.linkedPullRequest != null &&
-                detected?.state === "open" &&
-                detectedReference !== null &&
-                !samePullRequest(thread.linkedPullRequest, detectedReference)
-              ) {
-                const linked = yield* pullRequests.summary(thread.linkedPullRequest, {
-                  recoverTransientFailure: false,
-                });
-                if (linked.state === "merged" || linked.state === "closed") {
-                  replacement = detectedReference;
-                }
-              }
               if (
                 samePullRequest(thread.branchPullRequest, branchPullRequest) &&
-                replacement === undefined
+                (branchPullRequest === null ||
+                  threadPullRequestsOf(thread).some((link) =>
+                    threadPullRequestKeysEqual(link, legacyThreadPullRequestKey(branchPullRequest)),
+                  ))
               ) {
                 pendingBackfill.delete(thread.id);
                 return null;
               }
-              return { thread, branchPullRequest, replacement };
+              return { thread, branchPullRequest };
             }).pipe(
               Effect.catchCauseIf(
                 (cause) => !Cause.hasInterruptsOnly(cause),
@@ -299,7 +293,7 @@ export const make = Effect.gen(function* () {
 
           yield* Effect.forEach(
             updates,
-            ({ thread, branchPullRequest, replacement }) =>
+            ({ thread, branchPullRequest }) =>
               Effect.gen(function* () {
                 // Discovery can perform network I/O. Re-read the project at
                 // the transaction boundary so a deleted project or changed
@@ -323,7 +317,6 @@ export const make = Effect.gen(function* () {
                     branchPullRequest: thread.branchPullRequest ?? null,
                   },
                   branchPullRequest,
-                  ...(replacement === undefined ? {} : { linkedPullRequest: replacement }),
                 });
                 pendingBackfill.delete(thread.id);
               }).pipe(

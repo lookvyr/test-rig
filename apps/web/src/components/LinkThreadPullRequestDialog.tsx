@@ -1,20 +1,17 @@
+import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
+import { projectForPullRequest } from "./pull-requests/threadPullRequests";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useState } from "react";
 import { create } from "zustand";
 import { useEnvironmentSettings } from "../hooks/useSettings";
-import { useProject, useThreadShell } from "../state/entities";
+import { useProject, useProjects, useThreadShell } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { gitEnvironment } from "../state/git";
-import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
-import {
-  parsePullRequestReference,
-  pullRequestReferenceProviderKind,
-} from "../pullRequestReference";
-import { isSourceControlProviderEnabled } from "../sourceControlPresentation";
+import { parsePullRequestReference } from "../pullRequestReference";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import {
@@ -44,27 +41,22 @@ function LinkDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
   const project = useProject(
     thread ? scopeProjectRef(threadRef.environmentId, thread.projectId) : null,
   );
-  const cwd = project?.workspaceRoot ?? null;
-  const [reference, setReference] = useState(
-    thread?.pullRequestAssociation?.mode === "linked"
-      ? thread.pullRequestAssociation.reference
-      : "",
-  );
+  const projects = useProjects();
+  const [reference, setReference] = useState("");
   const [debouncedReference] = useDebouncedValue(reference, { wait: 450 });
   const [saving, setSaving] = useState(false);
   const settings = useEnvironmentSettings(
     threadRef.environmentId,
     (settings) => settings.sourceControlProviders,
   );
-  const status = useEnvironmentQuery(
-    cwd ? vcsEnvironment.status({ environmentId: threadRef.environmentId, input: { cwd } }) : null,
-  );
-  const provider =
-    pullRequestReferenceProviderKind(reference) ?? status.data?.sourceControlProvider?.kind;
-  const enabled = isSourceControlProviderEnabled(settings, provider);
+  const urlKey = parseChangeRequestUrl(debouncedReference);
+  const targetProject = urlKey
+    ? projectForPullRequest(projects, threadRef.environmentId, urlKey)
+    : project;
+  const cwd = targetProject?.workspaceRoot ?? null;
   const parsed = parsePullRequestReference(debouncedReference);
   const resolution = useEnvironmentQuery(
-    cwd && parsed && enabled
+    cwd && parsed && settings.github
       ? gitEnvironment.pullRequestResolution({
           environmentId: threadRef.environmentId,
           input: { cwd, reference: parsed },
@@ -72,30 +64,19 @@ function LinkDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
       : null,
   );
   const pr = reference === debouncedReference ? resolution.data?.pullRequest : null;
-  // Resolve the number in this project too: a URL lookup can otherwise target another repository.
-  const projectResolution = useEnvironmentQuery(
-    cwd && pr && enabled
-      ? gitEnvironment.pullRequestResolution({
-          environmentId: threadRef.environmentId,
-          input: { cwd, reference: String(pr.number) },
-        })
-      : null,
-  );
-  const belongsToProject = pr != null && projectResolution.data?.pullRequest.url === pr.url;
   const repositoryError =
-    pr && !projectResolution.isPending && !belongsToProject
-      ? "Choose a PR from this project's repository."
+    urlKey && !targetProject
+      ? "Add this GitHub repository as a project in this environment before linking its PRs."
       : null;
-  const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata);
+  const linkPullRequest = useAtomCommand(threadEnvironment.linkPullRequest);
   const link = async () => {
-    if (!pr || !provider || !enabled || !belongsToProject) return;
+    if (!pr) return;
+    const key = parseChangeRequestUrl(pr.url);
+    if (!key) return;
     setSaving(true);
-    const result = await updateMetadata({
+    const result = await linkPullRequest({
       environmentId: threadRef.environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        pullRequestAssociation: { mode: "linked", provider, reference: pr.url },
-      },
+      input: { threadId: threadRef.threadId, ...key, url: pr.url, source: "manual" },
     });
     setSaving(false);
     if (result._tag === "Success") close();
@@ -111,7 +92,7 @@ function LinkDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
         <DialogHeader>
           <DialogTitle>Link PR to thread</DialogTitle>
           <DialogDescription>
-            Choose a pull request for {thread?.title ?? "this thread"}. Linking does not change the
+            Add a pull request to {thread?.title ?? "this thread"}. Linking does not change the
             checked-out branch.
           </DialogDescription>
         </DialogHeader>
@@ -132,7 +113,7 @@ function LinkDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
             </p>
           ) : reference.trim() ? (
             <p className="text-sm text-muted-foreground">
-              {!enabled
+              {!settings.github
                 ? "Enable this source control provider in Settings to link a PR."
                 : (resolution.error ??
                   (resolution.isPending || reference !== debouncedReference
@@ -143,31 +124,11 @@ function LinkDialog({ threadRef }: { threadRef: ScopedThreadRef }) {
           {repositoryError ? <p className="text-sm text-destructive">{repositoryError}</p> : null}
         </DialogPanel>
         <DialogFooter>
-          {thread?.pullRequestAssociation?.mode === "linked" ? (
-            <Button
-              variant="ghost"
-              disabled={saving}
-              onClick={async () => {
-                setSaving(true);
-                const result = await updateMetadata({
-                  environmentId: threadRef.environmentId,
-                  input: {
-                    threadId: threadRef.threadId,
-                    pullRequestAssociation: { mode: "unlinked" },
-                  },
-                });
-                setSaving(false);
-                if (result._tag === "Success") close();
-              }}
-            >
-              Unlink PR
-            </Button>
-          ) : null}
           <Button variant="outline" onClick={close}>
             Cancel
           </Button>
           <Button
-            disabled={!pr || !enabled || !belongsToProject || saving}
+            disabled={!pr || !settings.github || !!repositoryError || saving}
             onClick={() => void link()}
           >
             {saving ? "Linking…" : "Link PR"}

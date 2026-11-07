@@ -376,6 +376,7 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  pullRequestAutoLink: Schema.optional(Schema.Boolean),
   pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
@@ -448,6 +449,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  pullRequestAutoLink: Schema.optional(Schema.Boolean),
   pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   createdAt: IsoDateTime,
@@ -761,6 +763,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  pullRequestAutoLink: Schema.optional(Schema.Boolean),
   pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
 }).check(
   Schema.makeFilter(
@@ -1189,6 +1192,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  pullRequestAutoLink: Schema.optional(Schema.Boolean),
   pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
   updatedAt: IsoDateTime,
 });

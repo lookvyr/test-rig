@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
-import { createPullRequestDraft } from "./usePullRequestHandoff";
+import {
+  attachPullRequestTask,
+  attachPullRequestDiscussion,
+  createPullRequestDraft,
+} from "./usePullRequestHandoff";
+import {
+  buildAskAboutPullRequestHandoff,
+  buildExplainPullRequestHandoff,
+} from "../components/pullRequest/pullRequestDetail.logic";
 import { preparePullRequestDraft } from "./usePullRequestDraftWorkspace";
 
 const environmentId = EnvironmentId.make("local");
@@ -34,6 +42,120 @@ beforeEach(() => {
 });
 
 describe("PR review draft", () => {
+  it("adds the whole attributed discussion from a reply and keeps the existing prompt and attachments", () => {
+    const target = { environmentId, threadId: ThreadId.make("discussion") };
+    const author = { login: "alice", name: null, avatarUrl: null };
+    const root = {
+      id: "root",
+      author,
+      body: "Is this safe?",
+      createdAt: "2026-01-01T00:00:00Z",
+      url: null,
+    };
+    const reply = {
+      ...root,
+      id: "reply",
+      author: { ...author, login: "bob" },
+      body: "Covered by a regression test.",
+    };
+    const thread = {
+      id: "t1",
+      path: "src/queue.ts",
+      line: 8,
+      side: "left" as const,
+      isResolved: true,
+      isOutdated: false,
+      comments: [root, reply],
+    };
+    const pr = {
+      url: input.reference,
+      number: 42,
+      title: "Queue",
+      headBranch: "fix",
+      baseBranch: "main",
+      state: "open" as const,
+      isDraft: false,
+      reviewThreads: [thread],
+    };
+    store().setPrompt(target, "Compare with the previous patch.");
+    const { pullRequest: _metadata, ...other } =
+      buildAskAboutPullRequestHandoff(pr).reviewComments[0]!;
+    const otherContext = { ...other, id: "my-other-context" };
+    store().setReviewComments(target, [otherContext]);
+    const subject = {
+      kind: "comment" as const,
+      comment: { ...reply, kind: "review-comment" as const, path: thread.path, reviewState: null },
+    };
+    expect(attachPullRequestDiscussion(target, pr, subject)).toBe(true);
+    expect(attachPullRequestDiscussion(target, pr, { kind: "thread", thread })).toBe(true);
+    expect(store().getComposerDraft(target)).toMatchObject({
+      prompt: "Compare with the previous patch.",
+      reviewComments: [
+        otherContext,
+        { pullRequest: { url: pr.url } },
+        {
+          id: `pr-comment:${pr.url}:thread:t1`,
+          filePath: "src/queue.ts",
+          rangeLabel: "L8 (before)",
+          text: "alice: Is this safe?\nbob: Covered by a regression test.",
+        },
+      ],
+    });
+    const general = {
+      ...subject.comment,
+      id: "general",
+      kind: "issue-comment" as const,
+      path: null,
+      body: "Ship it.",
+    };
+    expect(attachPullRequestDiscussion(target, pr, { kind: "comment", comment: general })).toBe(
+      true,
+    );
+    expect(store().getComposerDraft(target)?.reviewComments.at(-1)).toMatchObject({
+      id: `pr-comment:${pr.url}:comment:general`,
+      filePath: "@bob",
+      text: "bob: Ship it.",
+    });
+    expect(
+      attachPullRequestDiscussion(target, pr, {
+        kind: "comment",
+        comment: { ...general, body: "<!-- hidden -->" },
+      }),
+    ).toBe(false);
+    expect(store().getComposerDraft(target)?.reviewComments).toHaveLength(4);
+  });
+  it("lets a project question use PR context without preparing a checkout", () => {
+    const draftId = createPullRequestDraft(input, "question");
+    expect(store().getDraftSession(draftId)?.pullRequestReference).toBeNull();
+  });
+  it("writes follow-ups to the open thread and preserves its unrelated work", () => {
+    const target = { environmentId, threadId: ThreadId.make("active") };
+    const pr = {
+      number: 42,
+      title: "Change",
+      url: input.reference,
+      headBranch: "fix",
+      baseBranch: "main",
+      state: "open" as const,
+      isDraft: false,
+    };
+    const explain = buildExplainPullRequestHandoff(pr);
+    const unrelated = { ...explain.reviewComments[0]!, id: "local-file-feedback" };
+    store().setPrompt(target, "My notes");
+    store().setReviewComments(target, [unrelated]);
+    attachPullRequestTask(target, explain);
+    expect(store().getComposerDraft(target)?.prompt).toBe(`My notes
+
+${explain.prompt}`);
+    const ask = buildAskAboutPullRequestHandoff(pr);
+    attachPullRequestTask(target, ask, explain.prompt);
+    expect(store().getComposerDraft(target)).toMatchObject({
+      prompt: "My notes",
+      reviewComments: [unrelated, ...ask.reviewComments],
+    });
+    expect(store().listDraftThreadKeys()).toEqual([]);
+  });
+
   it("opens immediately and preserves text typed while preparation is pending", async () => {
     const draftId = createPullRequestDraft(input);
     let finish!: (value: typeof checkout) => void;

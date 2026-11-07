@@ -173,12 +173,14 @@ export type ProjectionThreadPullRequests = Pick<
   | "settledAt"
   | "pullRequests"
   | "pullRequestAssociation"
+  | "pullRequestAutoLink"
 >;
 
 /** Thread activity needed by settlement, without transcript or fork history. */
 export type ProjectionSettlementCandidate = Pick<
   OrchestrationV2ThreadShell,
   | "pullRequestAssociation"
+  | "pullRequestAutoLink"
   | "id"
   | "projectId"
   | "branch"
@@ -1553,6 +1555,7 @@ export function threadShellFromProjection(
   });
   return {
     sideOfThreadId: projection.thread.sideOfThreadId,
+    pullRequestAutoLink: projection.thread.pullRequestAutoLink,
     pullRequestAssociation: projection.thread.pullRequestAssociation,
     createdBy: projection.thread.createdBy,
     creationSource: projection.thread.creationSource,
@@ -1836,6 +1839,7 @@ function shellFromState(input: {
 }): OrchestrationV2ThreadShell {
   return {
     sideOfThreadId: input.state.thread.sideOfThreadId,
+    pullRequestAutoLink: input.state.thread.pullRequestAutoLink,
     pullRequestAssociation: input.state.thread.pullRequestAssociation,
     createdBy: input.state.thread.createdBy,
     creationSource: input.state.thread.creationSource,
@@ -5674,6 +5678,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         return yield* Effect.forEach(rows, (row) =>
           decodeThreadPayload(row.payload_json).pipe(
             Effect.map((thread): ProjectionThreadPullRequests => ({
+              pullRequestAutoLink: thread.pullRequestAutoLink,
               pullRequestAssociation: thread.pullRequestAssociation,
               id: thread.id,
               projectId: thread.projectId,
@@ -6418,6 +6423,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                     DateTime.toEpochMillis(right.updatedAt) || left.id.localeCompare(right.id),
               )
               .map((thread): ProjectionThreadPullRequests => ({
+                pullRequestAutoLink: thread.pullRequestAutoLink,
                 pullRequestAssociation: thread.pullRequestAssociation,
                 id: thread.id,
                 projectId: thread.projectId,

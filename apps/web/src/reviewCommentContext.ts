@@ -460,3 +460,34 @@ export function buildReviewCommentRenderablePatch(comment: ReviewCommentContext)
     diff,
   ].join("\n");
 }
+
+/** Anchor only to an actual patch line; expanded context cannot receive GitHub reviews. */
+export function resolveDiffReviewAnchor(
+  fileDiff: FileDiffMetadata,
+  range: SelectedLineRange,
+  _ranged: boolean,
+) {
+  const lines = buildDiffReviewLines(fileDiff);
+  const side = range.endSide ?? range.side;
+  const index = findDiffReviewLineIndex(lines, range.end, side);
+  const line = lines[index];
+  if (
+    !line ||
+    (side === "additions" && line.newLineNumber !== range.end) ||
+    (side === "deletions" && line.oldLineNumber !== range.end)
+  )
+    return null;
+  if (line.change === "add" && line.newLineNumber !== null)
+    return { position: { kind: "added" as const, newLine: line.newLineNumber } };
+  if (line.change === "delete" && line.oldLineNumber !== null)
+    return { position: { kind: "deleted" as const, oldLine: line.oldLineNumber } };
+  if (line.oldLineNumber === null || line.newLineNumber === null) return null;
+  return {
+    position: {
+      kind: "context" as const,
+      oldLine: line.oldLineNumber,
+      newLine: line.newLineNumber,
+      side: side === "deletions" ? ("left" as const) : ("right" as const),
+    },
+  };
+}

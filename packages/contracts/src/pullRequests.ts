@@ -1,15 +1,19 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 export const GitListPullRequestsInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   state: Schema.Literals(["open", "closed", "merged", "all"]),
   involvement: Schema.Literals(["all", "authored", "review-requested"]),
+  lookup: Schema.optional(
+    Schema.Struct({ number: PositiveInt, repository: Schema.optional(TrimmedNonEmptyString) }),
+  ),
 });
 export type GitListPullRequestsInput = typeof GitListPullRequestsInput.Type;
 export const GitGetPullRequestDetailsInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   reference: TrimmedNonEmptyString,
+  includeTimeline: Schema.optional(Schema.Boolean),
 });
 export type GitGetPullRequestDetailsInput = typeof GitGetPullRequestDetailsInput.Type;
 export const GitPullRequestSummary = Schema.Struct({

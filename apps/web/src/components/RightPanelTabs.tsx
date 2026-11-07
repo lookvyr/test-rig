@@ -194,9 +194,9 @@ function RightPanelEmptyState(props: {
     ...(props.onAddPullRequest
       ? [
           {
-            label: "Pull request",
+            label: "Pull requests",
             shortcut: "P",
-            description: "Review the linked pull request.",
+            description: "Browse and review linked pull requests.",
             icon: GitPullRequest,
             available: true,
             disabledReason: null,
@@ -379,7 +379,7 @@ function surfaceTitle(
     case "agents":
       return "Agents";
     case "pull-request":
-      return "Pull request";
+      return "Pull requests";
     case "side-chat":
       return sideChatTitles?.get(surface.threadId) ?? "Side chat";
     case "preview": {

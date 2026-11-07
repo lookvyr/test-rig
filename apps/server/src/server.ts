@@ -110,6 +110,7 @@ import {
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from "./serverRuntimeState.ts";
+import { pullRequestHttpApiLayer } from "./pullRequest/http.ts";
 import { orchestrationHttpApiLayer } from "./orchestration-v2/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { ServerActivation } from "./serverActivation.ts";
@@ -349,7 +350,7 @@ const OrchestrationWorkersLive = Layer.mergeAll(
     Effect.gen(function* () {
       yield* (yield* PullRequestSyncReactor.PullRequestSyncReactor).start();
     }),
-  ).pipe(Layer.provide(PullRequestSyncReactor.layer)),
+  ).pipe(Layer.provideMerge(PullRequestSyncReactor.layer)),
   Layer.effectDiscard(
     Effect.gen(function* () {
       yield* (yield* PullRequestWatchReactor.PullRequestWatchReactor).start();
@@ -442,6 +443,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(authHttpApiLayer),
       Layer.provide(orchestrationHttpApiLayer),
+      Layer.provide(pullRequestHttpApiLayer),
       Layer.provide(projectHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),

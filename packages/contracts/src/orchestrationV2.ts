@@ -388,6 +388,7 @@ const LenientThreadOpens = Schema.NullOr(OrchestrationV2ThreadOpens).pipe(
 export const OrchestrationV2AppThread = Schema.Struct({
   worktreeCleanup: OrchestrationThreadShell.fields.worktreeCleanup,
   sideOfThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  pullRequestAutoLink: Schema.optional(Schema.Boolean),
   pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -1998,6 +1999,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   planProgress: OrchestrationThreadShell.fields.planProgress,
   worktreeCleanup: OrchestrationThreadShell.fields.worktreeCleanup,
   sideOfThreadId: OrchestrationV2AppThread.fields.sideOfThreadId,
+  pullRequestAutoLink: OrchestrationV2AppThread.fields.pullRequestAutoLink,
   pullRequestAssociation: OrchestrationV2AppThread.fields.pullRequestAssociation,
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -2976,6 +2978,7 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("thread.metadata.update"),
+    pullRequestAutoLink: Schema.optional(Schema.Boolean),
     pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
     commandId: CommandId,
     threadId: ThreadId,

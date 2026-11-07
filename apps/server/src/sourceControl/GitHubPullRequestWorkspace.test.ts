@@ -8,6 +8,7 @@ import { SourceControlProvider } from "./SourceControlProvider.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { make } from "./GitHubPullRequestWorkspace.ts";
 
+const decodeVariables = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const summary = {
   number: 7,
   title: "PR",
@@ -187,6 +188,53 @@ it.effect("forwards filters and detects a truncated list", () =>
     }
   }),
 );
+it.effect(
+  "looks up an exact number outside the first page, honoring project and queue filters",
+  () =>
+    Effect.gen(function* () {
+      const f = fixture({
+        response: () =>
+          JSON.stringify({
+            data: {
+              search: {
+                nodes: [7, 32226].map((number) => ({ ...summary, number, labels: { nodes: [] } })),
+                pageInfo: { hasNextPage: false },
+              },
+            },
+          }),
+      });
+      const service = yield* f.workspace;
+      const input = {
+        cwd: "/repo",
+        state: "open",
+        involvement: "review-requested",
+        lookup: { number: 32226, repository: "https://github.com/owner/repo" },
+      } as const;
+      const result = yield* service.listPullRequests(input);
+      assert.deepEqual(
+        result.pullRequests.map((row) => row.number),
+        [32226],
+      );
+      assert.include(f.queries[0], "search(query:");
+      assert.deepEqual(yield* decodeVariables(f.calls[0]![0]!), {
+        query: "repo:owner/repo is:pr 32226 is:open review-requested:@me",
+      });
+      const all = yield* service.listPullRequests({ ...input, involvement: "all" });
+      assert.deepEqual(
+        all.pullRequests.map((row) => row.number),
+        [32226],
+      );
+      assert.deepEqual(yield* decodeVariables(f.calls[1]![0]!), {
+        query: "repo:owner/repo is:pr 32226 is:open",
+      });
+      const unrelated = yield* service.listPullRequests({
+        ...input,
+        lookup: { number: 32226, repository: "https://github.com/different/repo" },
+      });
+      assert.deepEqual(unrelated.pullRequests, []);
+      assert.lengthOf(f.calls, 2);
+    }),
+);
 it.effect("rejects malformed and byte-truncated responses with safe errors", () =>
   Effect.gen(function* () {
     for (const f of [
@@ -326,15 +374,12 @@ it.effect("loads a batch of counts and omits unavailable PRs without inventing z
     assert.deepEqual(result.pullRequests, [
       { number: 7, headSha: "new-head", additions: 42, deletions: 0, changedFiles: 3 },
     ]);
-    assert.deepEqual(
-      yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(f.calls[0]![0]!),
-      {
-        owner: "owner",
-        name: "repo",
-        n0: 7,
-        n1: 8,
-      },
-    );
+    assert.deepEqual(yield* decodeVariables(f.calls[0]![0]!), {
+      owner: "owner",
+      name: "repo",
+      n0: 7,
+      n1: 8,
+    });
     assert.lengthOf(f.calls, 1);
   }),
 );
@@ -349,3 +394,76 @@ it("bounds count requests to 1–25 positive PR numbers", () => {
   }
   assert.lengthOf(decode(input(Array.from({ length: 25 }, (_, i) => i + 1))).pullRequests, 25);
 });
+
+it.effect(
+  "loads timeline only on request and combines comments and submitted reviews in order",
+  () =>
+    Effect.gen(function* () {
+      const f = fixture({
+        response: (args) => {
+          const endpoint = args.at(-1)!;
+          if (endpoint.endsWith("pulls/7")) return JSON.stringify(raw);
+          if (endpoint.includes("/check-runs?"))
+            return JSON.stringify({ total_count: 0, check_runs: [] });
+          if (endpoint.includes("/status?"))
+            return JSON.stringify({ total_count: 0, statuses: [] });
+          if (endpoint.includes("/reviews?"))
+            return JSON.stringify([
+              {
+                id: 2,
+                user: { login: "reviewer" },
+                body: "Looks good",
+                submitted_at: "2026-01-03",
+                html_url: summary.url,
+                state: "APPROVED",
+              },
+              {
+                id: 3,
+                user: null,
+                body: "draft",
+                submitted_at: null,
+                html_url: summary.url,
+                state: "PENDING",
+              },
+            ]);
+          if (endpoint.includes("issues/7/comments?"))
+            return JSON.stringify([
+              {
+                id: 1,
+                user: null,
+                body: "Comment",
+                created_at: "2026-01-02",
+                html_url: summary.url,
+              },
+            ]);
+          if (endpoint.includes("pulls/7/comments?"))
+            return JSON.stringify([
+              {
+                id: 4,
+                user: { login: "reviewer" },
+                body: "Line comment",
+                created_at: "2026-01-04",
+                html_url: summary.url,
+                path: "a.ts",
+                line: null,
+                side: "RIGHT",
+              },
+            ]);
+          return "[]";
+        },
+      });
+      const service = yield* f.workspace;
+      const result = yield* service.getPullRequestDetails({
+        cwd: "/repo",
+        reference: "7",
+        includeTimeline: true,
+      });
+      assert.deepEqual(
+        result.timeline.map((entry) => entry.id),
+        ["comment:1", "review:2", "review-comment:4"],
+      );
+      assert.equal(result.timeline[0]?.author, "deleted user");
+      assert.equal(result.timeline[2]?.path, "a.ts");
+      assert.equal(f.calls.length, 8);
+    }),
+);

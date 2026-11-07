@@ -5,10 +5,13 @@ import {
   latestRootProviderFailure,
   usageLimitBlockedRun,
 } from "@t3tools/shared/orchestrationV2ThreadError";
-import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
+import {
+  threadPullRequestsOf,
+  normalizeThreadPullRequestState,
+  threadPullRequestAutoLinkEnabled,
+} from "@t3tools/shared/threadPullRequests";
 import {
   normalizeThreadPullRequestKey,
-  visibleThreadPullRequests,
   threadPullRequestKeysEqual,
   legacyThreadPullRequestKey,
 } from "@t3tools/shared/threadPullRequests";
@@ -2999,6 +3002,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return {
             ...thread,
             ...(command.title === undefined ? {} : { title: command.title }),
+            ...(command.pullRequestAutoLink === undefined
+              ? {}
+              : {
+                  ...normalizeThreadPullRequestState(thread),
+                  pullRequestAutoLink: command.pullRequestAutoLink,
+                }),
             ...(command.pullRequestAssociation === undefined
               ? {}
               : { pullRequestAssociation: command.pullRequestAssociation }),
@@ -3066,10 +3075,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           const existing = links.find((link) => threadPullRequestKeysEqual(link, key));
           let pullRequests = links;
           if (command.type === "thread.pull-request.link") {
-            if (command.source === "stack" && thread.pullRequestAssociation != null) return thread;
+            if (
+              (command.source === "stack" || command.source === "branch") &&
+              !threadPullRequestAutoLinkEnabled(thread)
+            )
+              return thread;
             const undismisses =
               existing?.source === "stack-dismissed" &&
               command.source !== "stack" &&
+              command.source !== "branch" &&
               command.source !== "stack-dismissed";
             if (existing && !undismisses) return thread;
             const link = existing
@@ -3082,50 +3096,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   snapshot: null,
                   stack: null,
                 };
-            const branch = thread.branchPullRequest;
-            const branchKey = branch ? legacyThreadPullRequestKey(branch) : null;
             pullRequests = [
-              ...(command.source === "manual" &&
-              branch &&
-              branchKey &&
-              visibleThreadPullRequests(links).length === 0 &&
-              !threadPullRequestKeysEqual(branchKey, key) &&
-              !links.some((entry) => threadPullRequestKeysEqual(entry, branchKey))
-                ? [
-                    {
-                      ...branchKey,
-                      url: branch.url,
-                      source: "manual" as const,
-                      linkedAt: DateTime.formatIso(now),
-                      snapshot: null,
-                      stack: null,
-                    },
-                  ]
-                : []),
               ...links.filter((entry) => !threadPullRequestKeysEqual(entry, key)),
               link,
             ];
           } else if (command.type === "thread.pull-request.unlink") {
             if (!existing) return thread;
-            const belongsToStack =
-              existing.source === "stack" ||
-              existing.stack !== null ||
-              links.some(
-                (link) =>
-                  link.host.toLowerCase() === key.host &&
-                  link.repository.toLowerCase() === key.repository &&
-                  link.stack?.layers.some((layer) => layer.number === key.number),
-              );
-            pullRequests = belongsToStack
-              ? links.map((link) =>
-                  link === existing
-                    ? {
-                        ...withPullRequestWatch(link, undefined),
-                        source: "stack-dismissed" as const,
-                      }
-                    : link,
-                )
-              : links.filter((link) => link !== existing);
+            pullRequests = links.map((link) =>
+              link === existing
+                ? { ...withPullRequestWatch(link, undefined), source: "stack-dismissed" as const }
+                : link,
+            );
           } else {
             if (!existing) return thread;
             pullRequests = links.map((link) =>
@@ -3136,6 +3117,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }
           return {
             ...thread,
+            ...(command.type === "thread.pull-request-link.sync"
+              ? {}
+              : normalizeThreadPullRequestState(thread)),
             pullRequests,
             linkedPullRequest:
               thread.linkedPullRequest &&
@@ -3202,6 +3186,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           if (watch === existing.watch && links === linked) return thread;
           return {
             ...thread,
+            ...normalizeThreadPullRequestState(thread),
             pullRequests: links.map((link) =>
               link === existing ? withPullRequestWatch(link, watch) : link,
             ),
@@ -3209,39 +3194,28 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: command.type === "thread.pull-request.watch" ? now : thread.updatedAt,
           };
         }
-        case "thread.pull-request.sync":
+        case "thread.pull-request.sync": {
+          const state = normalizeThreadPullRequestState(thread);
+          const discovered = command.branchPullRequest;
+          const shouldLink =
+            discovered !== null &&
+            state.pullRequestAutoLink &&
+            !state.pullRequests.some((link) =>
+              threadPullRequestKeysEqual(link, legacyThreadPullRequestKey(discovered)),
+            );
           return {
             ...thread,
-            branchPullRequest: command.branchPullRequest,
-            ...(command.linkedPullRequest === undefined || thread.pullRequestAssociation != null
-              ? {}
-              : {
-                  linkedPullRequest: command.linkedPullRequest,
-                  pullRequests: [
-                    ...threadPullRequestsOf(thread).filter(
-                      (link) =>
-                        !(
-                          thread.linkedPullRequest &&
-                          threadPullRequestKeysEqual(
-                            link,
-                            legacyThreadPullRequestKey(thread.linkedPullRequest),
-                          )
-                        ) &&
-                        !(
-                          command.linkedPullRequest &&
-                          threadPullRequestKeysEqual(
-                            link,
-                            legacyThreadPullRequestKey(command.linkedPullRequest),
-                          )
-                        ),
-                    ),
-                    ...(command.linkedPullRequest
-                      ? [legacyPullRequestLink(thread, command.linkedPullRequest, now)]
-                      : []),
-                  ],
-                }),
+            ...state,
+            branchPullRequest: discovered,
+            pullRequests: shouldLink
+              ? [
+                  ...state.pullRequests,
+                  { ...legacyPullRequestLink(thread, discovered, now), source: "branch" as const },
+                ]
+              : state.pullRequests,
             updatedAt: thread.updatedAt,
           };
+        }
         case "thread.title.regeneration.complete":
           return thread.titleRegeneration?.requestId === command.requestId
             ? {

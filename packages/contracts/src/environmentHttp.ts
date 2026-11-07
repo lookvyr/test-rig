@@ -1,3 +1,9 @@
+import {
+  PullRequestDiffInput,
+  PullRequestDiffResult,
+  PullRequestOperationError,
+  PullRequestUnavailableError,
+} from "./pullRequest.ts";
 import * as Context from "effect/Context";
 import type * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
@@ -415,8 +421,24 @@ export class EnvironmentProjectsHttpApi extends HttpApiGroup.make("projects")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullRequests").add(
+  HttpApiEndpoint.post("diff", "/api/pull-requests/diff", {
+    headers: OptionalBearerHeaders,
+    payload: PullRequestDiffInput,
+    success: PullRequestDiffResult,
+    error: [
+      PullRequestUnavailableError,
+      PullRequestOperationError,
+      EnvironmentAuthInvalidError,
+      EnvironmentScopeRequiredError,
+      EnvironmentInternalError,
+    ],
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
+
 export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentMetadataHttpApi)
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
-  .add(EnvironmentProjectsHttpApi) {}
+  .add(EnvironmentProjectsHttpApi)
+  .add(EnvironmentPullRequestsHttpApi) {}

@@ -41,6 +41,7 @@ const CAPABILITIES: PullRequestCapabilities = {
   viewedFiles: "host",
   review: {
     inlineComment: true,
+    rangeComments: true,
     reply: true,
     resolve: true,
     verdicts: ["comment", "approve", "request-changes"],
@@ -557,6 +558,7 @@ export const make = Effect.gen(function* () {
     setFilesViewed: (input) =>
       cli.setPullRequestFilesViewed(input).pipe(Effect.mapError(fail("setFilesViewed"))),
 
+    completions: (input) => cli.completions(input).pipe(Effect.mapError(fail("completions"))),
     listReviewerCandidates: (input) =>
       cli.listReviewerCandidates(input).pipe(Effect.mapError(fail("listReviewerCandidates"))),
 

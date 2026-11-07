@@ -14,6 +14,7 @@ import {
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ThreadShell,
   type PullRequestSummary,
+  type ThreadPullRequestLink,
   type ServerSettings as ContractServerSettings,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
@@ -305,6 +306,48 @@ describe("resolveAutoSettlementAt", () => {
         autoSettleOnMerge: false,
       }),
     ).toEqual(shell().createdAt);
+  });
+
+  it("keeps a multi-PR thread active until every linked PR is terminal", () => {
+    const link = (
+      number: number,
+      state: "open" | "merged" | "closed" | null,
+    ): ThreadPullRequestLink => ({
+      host: "github.com",
+      repository: "owner/repo",
+      number,
+      url: `https://github.com/owner/repo/pull/${number}`,
+      source: "manual",
+      linkedAt: DateTime.formatIso(at(-40 * DAY_MS)),
+      stack: null,
+      snapshot:
+        state === null
+          ? null
+          : {
+              state,
+              title: "Change",
+              headBranch: `feature-${number}`,
+              baseBranch: "main",
+              isDraft: false,
+              updatedAt: DateTime.formatIso(at(-1)),
+              syncedAt: DateTime.formatIso(at(-1)),
+              mergedAt: state === "merged" ? DateTime.formatIso(at(-1)) : null,
+              closedAt: state === "closed" ? DateTime.formatIso(at(-1)) : null,
+            },
+    });
+    for (const state of ["open", null, "closed", "merged"] as const) {
+      const result = ThreadSettlementService.resolveAutoSettlementAt({
+        thread: shell({
+          latestUserMessageAt: at(-30 * DAY_MS),
+          pullRequests: [link(1, "merged"), link(2, state)],
+        }),
+        pullRequest: null,
+        nowMs: NOW_MS,
+        autoSettleAfterDays: 2,
+        autoSettleOnMerge: true,
+      });
+      expect(result).toEqual(state === "open" || state === null ? null : at(-30 * DAY_MS));
+    }
   });
 
   it("settles inactive threads even when their pull request remains open", () => {
@@ -661,6 +704,47 @@ describe("ThreadSettlementServiceV2 worker", () => {
           expect((yield* Ref.get(fixture.commands)).map((command) => command.threadId)).toEqual([
             thread.id,
           ]);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("does not rediscover dismissed PRs for merge-based settlement", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const thread = makeThread("dismissed-pr", {
+          branch: "feature",
+          branchPullRequest: {
+            projectId: PROJECT_ID,
+            repository: "owner/repository",
+            number: 42,
+            url: "https://example.test/owner/repository/pull/42",
+          },
+          pullRequests: [
+            {
+              host: "example.test",
+              repository: "owner/repository",
+              number: 42,
+              url: "https://example.test/owner/repository/pull/42",
+              source: "stack-dismissed",
+              linkedAt: NOW,
+              snapshot: null,
+              stack: null,
+            },
+          ],
+        });
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([thread]),
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
+          branchPullRequest: () => Effect.succeed(makeBranchPullRequest("merged")),
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          assert.deepEqual(yield* Ref.get(fixture.commands), []);
+          assert.deepEqual(yield* Ref.get(fixture.branchCalls), []);
+          assert.deepEqual(yield* Ref.get(fixture.summaryCalls), []);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

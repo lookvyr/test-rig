@@ -38,12 +38,13 @@ type EnvironmentClient = Effect.Success<ReturnType<typeof makeEnvironmentHttpApi
 /** Shared cookie/bearer authorization for bounded HTTP snapshots and history. */
 export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
   "executeAuthenticatedEnvironmentHttpRequest",
-)(function* <Group extends keyof EnvironmentClient, A, E, R>(input: {
+)(function* <Group extends keyof EnvironmentClient, A, E, R, Preserved = never>(input: {
   readonly prepared: PreparedConnection;
   readonly method: "GET" | "POST";
   readonly url: (baseUrl: string) => string;
   readonly timeoutMs: number;
   readonly group: Group;
+  readonly preserveError?: (error: unknown) => error is Preserved;
   readonly request: (input: {
     readonly client: EnvironmentClient[Group];
     readonly headers: EnvironmentHttpAuthHeaders;
@@ -60,5 +61,6 @@ export const executeAuthenticatedEnvironmentHttpRequest = Effect.fn(
         headers: buildEnvironmentAuthHeaders(input.prepared.httpAuthorization),
       }),
     ),
+    input.preserveError,
   );
 });

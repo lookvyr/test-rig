@@ -139,11 +139,12 @@ const failRemoteRequest = (
   );
 };
 
-export const executeEnvironmentHttpRequest = <A, E, R>(
+export const executeEnvironmentHttpRequest = <A, E, R, Preserved = never>(
   requestUrl: string,
   timeoutMs: number,
   request: Effect.Effect<A, E, R>,
-): Effect.Effect<A, RemoteEnvironmentRequestError, R> =>
+  preserveError?: (error: unknown) => error is Preserved,
+): Effect.Effect<A, RemoteEnvironmentRequestError | Preserved, R> =>
   request.pipe(
     Effect.timeoutOption(Duration.millis(timeoutMs)),
     Effect.flatMap(
@@ -152,5 +153,7 @@ export const executeEnvironmentHttpRequest = <A, E, R>(
         onSome: Effect.succeed,
       }),
     ),
-    Effect.catch((cause) => failRemoteRequest(requestUrl, cause)),
+    Effect.catch((cause): Effect.Effect<never, RemoteEnvironmentRequestError | Preserved> =>
+      preserveError?.(cause) ? Effect.fail(cause) : failRemoteRequest(requestUrl, cause),
+    ),
   );

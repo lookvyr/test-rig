@@ -1,4 +1,7 @@
-import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
+import {
+  threadPullRequestsOf,
+  threadPullRequestAutoLinkEnabled,
+} from "@t3tools/shared/threadPullRequests";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
@@ -341,11 +344,10 @@ export const make = Effect.gen(function* () {
       { concurrency: 8 },
     ))
       .filter((thread) => thread !== null)
-      .filter((thread) => thread.pullRequestAssociation?.mode !== "unlinked")
+      .filter(threadPullRequestAutoLinkEnabled)
       .filter(
         (thread) =>
-          thread.pullRequestAssociation == null &&
-          visibleThreadPullRequests(thread.pullRequests ?? []).length === 0,
+          thread.pullRequestAssociation == null && (thread.pullRequests ?? []).length === 0,
       );
     // Use the same cwd as the sidebar so both paths share GitManager's PR cache.
     const lookupCwdByThreadId = new Map<string, string>();

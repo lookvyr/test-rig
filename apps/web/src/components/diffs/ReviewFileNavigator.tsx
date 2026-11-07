@@ -1,3 +1,4 @@
+import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronRightIcon, FileIcon, FolderIcon, SearchIcon, XIcon } from "lucide-react";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "../../lib/utils";
@@ -55,6 +56,8 @@ export function ReviewFileNavigator({
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NO_COLLAPSED_DIRECTORIES);
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const listRef = useRef<LegendListRef>(null);
+  const pendingFocus = useRef<string | null>(null);
   const tree = useMemo(() => buildReviewFileTree(files, query), [files, query]);
   const searching = query.trim().length > 0;
   const rows = useMemo(
@@ -89,7 +92,12 @@ export function ReviewFileNavigator({
   function focusRow(index: number) {
     const row = rows[index];
     if (!row) return;
-    buttons.current.get(row.key)?.focus();
+    const button = buttons.current.get(row.key);
+    if (button) button.focus();
+    else {
+      pendingFocus.current = row.key;
+      void listRef.current?.scrollToIndex({ index, animated: false });
+    }
     if (row.node.kind === "file") onSelectFile(row.node.path);
   }
 
@@ -175,97 +183,110 @@ export function ReviewFileNavigator({
           </button>
         )}
       </div>
-      <div
-        role="tree"
-        aria-label="Changed file tree"
-        className="min-h-0 flex-1 overflow-auto px-1 pb-2"
-      >
-        {rows.map(({ key, node, depth, position, siblingCount }, index) => {
-          const directory = node.kind === "directory";
-          const status = directory ? null : statusPresentation(node.file.status);
-          const selected = !directory && selectedPath === node.path;
-          return (
-            <button
-              key={key}
-              ref={(element) => {
-                if (element) buttons.current.set(key, element);
-                else buttons.current.delete(key);
-              }}
-              type="button"
-              role="treeitem"
-              aria-level={depth + 1}
-              aria-posinset={position}
-              aria-setsize={siblingCount}
-              aria-expanded={directory ? searching || !collapsed.has(node.path) : undefined}
-              aria-selected={directory ? undefined : selected}
-              aria-label={
-                directory
-                  ? `${node.name}, ${node.fileCount} files`
-                  : `${node.path}, ${status?.label}`
-              }
-              tabIndex={tabStop === key ? 0 : -1}
-              title={
-                !directory && node.file.oldPath
-                  ? `${node.path} (renamed from ${node.file.oldPath})`
-                  : node.path
-              }
-              onFocus={() => setFocusedKey(key)}
-              onClick={() => {
-                if (directory) {
-                  if (!searching) toggleDirectory(node.path);
-                } else {
-                  onSelectFile(node.path);
+      <div role="tree" aria-label="Changed file tree" className="min-h-0 flex-1 px-1 pb-2">
+        <LegendList
+          ref={listRef}
+          data={rows}
+          extraData={{ selectedPath, tabStop, collapsed, searching, compact }}
+          keyExtractor={(row) => row.key}
+          estimatedItemSize={compact ? 28 : 32}
+          getFixedItemSize={() => (compact ? 28 : 32)}
+          className="h-full"
+          renderItem={({ item: { key, node, depth, position, siblingCount }, index }) => {
+            const directory = node.kind === "directory";
+            const status = directory ? null : statusPresentation(node.file.status);
+            const selected = !directory && selectedPath === node.path;
+            return (
+              <button
+                key={key}
+                ref={(element) => {
+                  if (element) {
+                    buttons.current.set(key, element);
+                    if (pendingFocus.current === key) {
+                      pendingFocus.current = null;
+                      element.focus();
+                    }
+                  } else buttons.current.delete(key);
+                }}
+                type="button"
+                role="treeitem"
+                aria-level={depth + 1}
+                aria-posinset={position}
+                aria-setsize={siblingCount}
+                aria-expanded={directory ? searching || !collapsed.has(node.path) : undefined}
+                aria-selected={directory ? undefined : selected}
+                aria-label={
+                  directory
+                    ? `${node.name}, ${node.fileCount} files`
+                    : `${node.path}, ${status?.label}`
                 }
-              }}
-              onKeyDown={(event) => handleKeyDown(event, index)}
-              style={{ paddingLeft: 6 + depth * 12 }}
-              className={cn(
-                "flex w-full items-center gap-1.5 rounded pr-2 text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
-                compact ? "h-7" : "h-8",
-                selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
-                directory && "text-muted-foreground",
-              )}
-            >
-              {directory ? (
-                <ChevronRightIcon
-                  aria-hidden
-                  className={cn(
-                    "size-3 shrink-0",
-                    (searching || !collapsed.has(node.path)) && "rotate-90",
-                  )}
-                />
-              ) : (
-                <span className="w-3 shrink-0" />
-              )}
-              {directory ? (
-                <FolderIcon aria-hidden className="size-3.5 shrink-0" />
-              ) : (
-                <FileIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-              )}
-              <span className="min-w-0 flex-1 truncate">{node.name}</span>
-              {directory ? (
-                <span className="shrink-0 text-[10px] tabular-nums">{node.fileCount}</span>
-              ) : (
-                <>
-                  {node.file.additions === null && node.file.deletions === null ? (
-                    <span className="text-[10px] text-muted-foreground">Binary</span>
-                  ) : (
-                    <span aria-hidden className="flex shrink-0 gap-1 text-[10px] tabular-nums">
-                      <span className="text-success-foreground">+{node.file.additions ?? 0}</span>
-                      <span className="text-destructive">−{node.file.deletions ?? 0}</span>
-                    </span>
-                  )}
-                  <span
+                tabIndex={tabStop === key ? 0 : -1}
+                title={
+                  !directory && node.file.oldPath
+                    ? `${node.path} (renamed from ${node.file.oldPath})`
+                    : node.path
+                }
+                onFocus={() => setFocusedKey(key)}
+                onClick={() => {
+                  if (directory) {
+                    if (!searching) toggleDirectory(node.path);
+                  } else {
+                    onSelectFile(node.path);
+                  }
+                }}
+                onKeyDown={(event) => handleKeyDown(event, index)}
+                style={{ paddingLeft: 6 + depth * 12 }}
+                className={cn(
+                  "flex w-full items-center gap-1.5 rounded pr-2 text-left outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+                  compact ? "h-7" : "h-8",
+                  selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+                  directory && "text-muted-foreground",
+                )}
+              >
+                {directory ? (
+                  <ChevronRightIcon
                     aria-hidden
-                    className={cn("w-2 shrink-0 text-center text-[10px] font-medium", status?.tone)}
-                  >
-                    {status?.badge}
-                  </span>
-                </>
-              )}
-            </button>
-          );
-        })}
+                    className={cn(
+                      "size-3 shrink-0",
+                      (searching || !collapsed.has(node.path)) && "rotate-90",
+                    )}
+                  />
+                ) : (
+                  <span className="w-3 shrink-0" />
+                )}
+                {directory ? (
+                  <FolderIcon aria-hidden className="size-3.5 shrink-0" />
+                ) : (
+                  <FileIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <span className="min-w-0 flex-1 truncate">{node.name}</span>
+                {directory ? (
+                  <span className="shrink-0 text-[10px] tabular-nums">{node.fileCount}</span>
+                ) : (
+                  <>
+                    {node.file.additions === null && node.file.deletions === null ? (
+                      <span className="text-[10px] text-muted-foreground">Binary</span>
+                    ) : (
+                      <span aria-hidden className="flex shrink-0 gap-1 text-[10px] tabular-nums">
+                        <span className="text-success-foreground">+{node.file.additions ?? 0}</span>
+                        <span className="text-destructive">−{node.file.deletions ?? 0}</span>
+                      </span>
+                    )}
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "w-2 shrink-0 text-center text-[10px] font-medium",
+                        status?.tone,
+                      )}
+                    >
+                      {status?.badge}
+                    </span>
+                  </>
+                )}
+              </button>
+            );
+          }}
+        />
       </div>
       {rows.length === 0 && (
         <p role="status" className="px-3 py-3 text-muted-foreground">

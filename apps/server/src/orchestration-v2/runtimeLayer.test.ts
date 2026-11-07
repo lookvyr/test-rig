@@ -2287,6 +2287,82 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
+  it.effect(
+    "migrates a legacy link, keeps manual links with discovery disabled, and persists dismissals",
+    () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+        const threadId = ThreadId.make("legacy-multiple-pr");
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("legacy-multiple-create"),
+          threadId,
+          projectId: ProjectId.make("multi-pr-project"),
+          title: "Legacy links",
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+        });
+        yield* orchestrator.dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make("legacy-multiple-association"),
+          threadId,
+          pullRequestAssociation: {
+            mode: "linked",
+            provider: "github",
+            reference: "https://github.com/owner/repo/pull/1",
+          },
+        });
+        yield* orchestrator.dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make("legacy-multiple-disable"),
+          threadId,
+          pullRequestAutoLink: false,
+        });
+        for (const [number, source] of [
+          [2, "manual"],
+          [3, "stack"],
+          [4, "agent"],
+        ] as const) {
+          yield* orchestrator.dispatch({
+            type: "thread.pull-request.link",
+            commandId: CommandId.make(`legacy-multiple-link-${number}`),
+            threadId,
+            host: "github.com",
+            repository: "owner/repo",
+            number,
+            source,
+            url: `https://github.com/owner/repo/pull/${number}`,
+          });
+        }
+        yield* orchestrator.dispatch({
+          type: "thread.pull-request.unlink",
+          commandId: CommandId.make("legacy-multiple-unlink"),
+          threadId,
+          host: "github.com",
+          repository: "owner/repo",
+          number: 2,
+        });
+        assert.isTrue((yield* maintenance.rebuild).valid);
+        const result = yield* orchestrator.getThreadShell(threadId);
+        assert.isNull(result?.pullRequestAssociation);
+        assert.isFalse(result?.pullRequestAutoLink);
+        assert.deepEqual(
+          result?.pullRequests?.map(({ number, source }) => ({ number, source })),
+          [
+            { number: 1, source: "manual" },
+            { number: 2, source: "stack-dismissed" },
+            { number: 4, source: "agent" },
+          ],
+        );
+      }),
+  );
+
   it.effect("keeps the branch pull request when linking another pull request", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -2371,7 +2447,9 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
       });
       assert.isTrue((yield* maintenance.rebuild).valid);
       assert.deepEqual(
-        (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.map((link) => link.number),
+        (yield* orchestrator.getThreadShell(threadId))?.pullRequests
+          ?.filter((link) => link.source !== "stack-dismissed")
+          .map((link) => link.number),
         [2, 3, 4],
       );
     }),
@@ -2432,7 +2510,10 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
           number,
           source,
         })),
-        [{ number: 2, source: "stack-dismissed" }],
+        [
+          { number: 1, source: "stack-dismissed" },
+          { number: 2, source: "stack-dismissed" },
+        ],
       );
       yield* orchestrator.dispatch({
         type: "thread.pull-request.link",
@@ -2462,7 +2543,9 @@ it.layer(TestLayer)("OrchestrationV2LayerLive lifecycle", (it) => {
         source: "manual",
       });
       assert.equal(
-        (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.[0]?.source,
+        (yield* orchestrator.getThreadShell(threadId))?.pullRequests?.find(
+          (link) => link.number === 2,
+        )?.source,
         "manual",
       );
     }),

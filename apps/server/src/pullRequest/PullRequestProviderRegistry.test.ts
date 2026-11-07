@@ -37,6 +37,10 @@ it.effect(
         gateProvider(
           {
             ...base,
+            completions: () => {
+              calls.push("completions");
+              return Effect.succeed({ authors: [], references: [] });
+            },
             getViewer: () => {
               calls.push("read");
               return Effect.succeed("viewer");
@@ -58,12 +62,16 @@ it.effect(
         ),
       ]).get("github");
       if (!provider?.withVerifiedCredential) return yield* Effect.die("Missing provider");
+      if (!provider.completions) return yield* Effect.die("Missing completions");
       if (!provider.getChangeRequestWatchFingerprint) {
         return yield* Effect.die("Missing watch fingerprint capability");
       }
       const input = { cwd: "/repo", host: "github.com" };
       const operations = [
         provider.getViewer(input).pipe(Effect.asVoid),
+        provider
+          .completions({ ...input, repository: "acme/repo", kind: "mention", query: "octo" })
+          .pipe(Effect.asVoid),
         provider
           .getChangeRequestWatchFingerprint({ ...input, repository: "acme/repo", number: 1 })
           .pipe(
@@ -79,7 +87,14 @@ it.effect(
       ];
 
       for (const operation of operations) yield* operation;
-      assert.deepEqual(calls, ["read", "fingerprint", "mutation", "credential", "use credential"]);
+      assert.deepEqual(calls, [
+        "read",
+        "completions",
+        "fingerprint",
+        "mutation",
+        "credential",
+        "use credential",
+      ]);
       calls.length = 0;
       yield* Ref.set(enabled, false);
       for (const operation of operations) {
@@ -91,7 +106,14 @@ it.effect(
 
       yield* Ref.set(enabled, true);
       for (const operation of operations) yield* operation;
-      assert.deepEqual(calls, ["read", "fingerprint", "mutation", "credential", "use credential"]);
+      assert.deepEqual(calls, [
+        "read",
+        "completions",
+        "fingerprint",
+        "mutation",
+        "credential",
+        "use credential",
+      ]);
     }),
 );
 

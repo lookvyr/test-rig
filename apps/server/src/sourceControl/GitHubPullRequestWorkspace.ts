@@ -8,6 +8,7 @@ import {
   type GitPullRequestListItem,
   type GitGetPullRequestStatsInput,
   type GitGetPullRequestStatsResult,
+  type GitPullRequestTimelineEntry,
 } from "@t3tools/contracts";
 import { GitHubApi } from "./GitHubApi.ts";
 import { SourceControlProviderRegistry } from "./SourceControlProviderRegistry.ts";
@@ -55,6 +56,27 @@ const RawFile = Schema.Struct({
   additions: Schema.Int,
   deletions: Schema.Int,
   patch: Schema.optional(Schema.String),
+});
+const RawComment = Schema.Struct({
+  id: Schema.Int,
+  user: User,
+  body: Schema.NullOr(Schema.String),
+  created_at: Schema.String,
+  html_url: Schema.String,
+});
+const RawReview = Schema.Struct({
+  id: Schema.Int,
+  user: User,
+  body: Schema.NullOr(Schema.String),
+  submitted_at: Schema.NullOr(Schema.String),
+  html_url: Schema.String,
+  state: Schema.String,
+});
+const RawReviewComment = Schema.Struct({
+  ...RawComment.fields,
+  path: Schema.String,
+  line: Schema.NullOr(Schema.Int),
+  side: Schema.Literals(["LEFT", "RIGHT"]),
 });
 const RawChecks = Schema.Struct({
   total_count: Schema.Int,
@@ -178,9 +200,15 @@ export const make = Effect.gen(function* () {
     input: GitListPullRequestsInput,
   ) {
     const repo = yield* repositoryFor(input.cwd);
+    if (
+      input.lookup?.repository &&
+      input.lookup.repository.toLowerCase() !== repo.url.toLowerCase()
+    ) {
+      return { repository: repo.url, truncated: false, pullRequests: [] };
+    }
     const [owner, name] = repo.name.split("/");
     const request =
-      input.involvement === "all"
+      input.involvement === "all" && !input.lookup
         ? github
             .graphql({
               host: repo.host,
@@ -218,13 +246,14 @@ export const make = Effect.gen(function* () {
                 query: [
                   `repo:${repo.name}`,
                   "is:pr",
-                  "sort:created-desc",
+                  ...(input.lookup ? [String(input.lookup.number)] : ["sort:created-desc"]),
                   ...(input.state === "all"
                     ? []
                     : input.state === "closed"
                       ? ["is:closed", "is:unmerged"]
                       : [`is:${input.state}`]),
-                  input.involvement === "authored" ? "author:@me" : "review-requested:@me",
+                  ...(input.involvement === "authored" ? ["author:@me"] : []),
+                  ...(input.involvement === "review-requested" ? ["review-requested:@me"] : []),
                 ].join(" "),
               },
             })
@@ -233,10 +262,12 @@ export const make = Effect.gen(function* () {
               Effect.map((data) => data.data.search),
             );
     const result = yield* request.pipe(Effect.mapError((error) => failure(error.message)));
-    const rows = result.nodes;
+    const rows = input.lookup
+      ? result.nodes.filter((row) => row.number === input.lookup?.number)
+      : result.nodes;
     return {
       repository: repo.url,
-      truncated: result.pageInfo.hasNextPage,
+      truncated: input.lookup ? false : result.pageInfo.hasNextPage,
       pullRequests: rows.slice(0, LIMIT).map((row): GitPullRequestListItem => ({
         ...row,
         state: row.state === "OPEN" ? "open" : row.state === "MERGED" ? "merged" : "closed",
@@ -332,11 +363,24 @@ export const make = Effect.gen(function* () {
         return yield* failure("Enter a valid pull request number.");
       const raw = yield* api(repo, `pulls/${reference}`, RawPullRequest);
       // Collection requests are bounded; omitted files and check results are reported below.
-      const [files, checks, statuses] = yield* Effect.all(
+      const [files, checks, statuses, comments, reviews, reviewComments] = yield* Effect.all(
         [
           api(repo, `pulls/${reference}/files?per_page=${LIMIT}`, Schema.Array(RawFile)),
           api(repo, `commits/${raw.head.sha}/check-runs?per_page=${LIMIT}`, RawChecks),
           api(repo, `commits/${raw.head.sha}/status?per_page=${LIMIT}`, RawStatuses),
+          input.includeTimeline
+            ? api(repo, `issues/${reference}/comments?per_page=${LIMIT}`, Schema.Array(RawComment))
+            : Effect.succeed([]),
+          input.includeTimeline
+            ? api(repo, `pulls/${reference}/reviews?per_page=${LIMIT}`, Schema.Array(RawReview))
+            : Effect.succeed([]),
+          input.includeTimeline
+            ? api(
+                repo,
+                `pulls/${reference}/comments?per_page=${LIMIT}`,
+                Schema.Array(RawReviewComment),
+              )
+            : Effect.succeed([]),
         ],
         { concurrency: 4 },
       );
@@ -379,8 +423,46 @@ export const make = Effect.gen(function* () {
             url: status.target_url,
           })),
         ],
-        // Retain the wire field; activity is not loaded by the Summary view.
-        timeline: [],
+        timeline: [
+          ...comments.map((comment): GitPullRequestTimelineEntry => ({
+            id: `comment:${comment.id}`,
+            kind: "comment",
+            author: author(comment.user),
+            body: comment.body ?? "",
+            createdAt: comment.created_at,
+            url: comment.html_url,
+            state: null,
+            path: null,
+            line: null,
+            side: null,
+          })),
+          ...reviews
+            .filter((review) => review.submitted_at !== null)
+            .map((review): GitPullRequestTimelineEntry => ({
+              id: `review:${review.id}`,
+              kind: "review",
+              author: author(review.user),
+              body: review.body ?? "",
+              createdAt: review.submitted_at!,
+              url: review.html_url,
+              state: review.state,
+              path: null,
+              line: null,
+              side: null,
+            })),
+          ...reviewComments.map((comment): GitPullRequestTimelineEntry => ({
+            id: `review-comment:${comment.id}`,
+            kind: "review-comment",
+            author: author(comment.user),
+            body: comment.body ?? "",
+            createdAt: comment.created_at,
+            url: comment.html_url,
+            state: null,
+            path: comment.path,
+            line: comment.line,
+            side: comment.side,
+          })),
+        ].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt)),
         files: files.map((file) => ({
           path: file.filename,
           previousPath: file.previous_filename ?? null,
@@ -392,7 +474,10 @@ export const make = Effect.gen(function* () {
         truncated:
           raw.changed_files > files.length ||
           checks.total_count > checks.check_runs.length ||
-          statuses.total_count > statuses.statuses.length,
+          statuses.total_count > statuses.statuses.length ||
+          comments.length === LIMIT ||
+          reviews.length === LIMIT ||
+          reviewComments.length === LIMIT,
       } satisfies GitGetPullRequestDetailsResult;
     },
   );

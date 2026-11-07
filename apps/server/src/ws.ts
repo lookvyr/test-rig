@@ -102,6 +102,8 @@ import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitHubPullRequestWorkspace from "./sourceControl/GitHubPullRequestWorkspace.ts";
+import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
+import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
@@ -323,6 +325,8 @@ const makeWsRpcLayer = (
       const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const pullRequestWorkspace = yield* GitHubPullRequestWorkspace.GitHubPullRequestWorkspace;
+      const pullRequests = yield* PullRequestService.PullRequestService;
+      const pullRequestSync = yield* PullRequestSyncReactor.PullRequestSyncReactor;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
@@ -1223,6 +1227,140 @@ const makeWsRpcLayer = (
             WS_METHODS.gitListPullRequests,
             pullRequestWorkspace.listPullRequests(input),
             { "rpc.aggregate": "git" },
+          ),
+        [WS_METHODS.pullRequestSubscribeRefreshes]: () => pullRequests.subscribeRefreshes,
+        [WS_METHODS.pullRequestThreadComments]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestThreadComments,
+            pullRequests.withRoutingCredential(input, pullRequests.threadComments(input)),
+          ),
+        [WS_METHODS.pullRequestDiffFileContents]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestDiffFileContents,
+            pullRequests.withRoutingCredential(input, pullRequests.diffFileContents(input)),
+          ),
+        [WS_METHODS.pullRequestChecks]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestChecks,
+            pullRequests.withRoutingCredential(input, pullRequests.checks(input)),
+          ),
+        [WS_METHODS.pullRequestStack]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestStack,
+            pullRequests.withRoutingCredential(
+              input,
+              pullRequests.stack(input, { includeDetails: true }),
+            ),
+          ),
+        [WS_METHODS.pullRequestRunAction]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestRunAction,
+            pullRequests
+              .withRoutingCredential(input, pullRequests.runAction(input))
+              .pipe(
+                Effect.tap(() =>
+                  pullRequestSync.requestSync({ ...input, host: input.host ?? "github.com" }),
+                ),
+              ),
+          ),
+        [WS_METHODS.pullRequestUpdate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestUpdate,
+            pullRequests.withRoutingCredential(input, pullRequests.update(input)),
+          ),
+        [WS_METHODS.pullRequestComment]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestComment,
+            pullRequests.withRoutingCredential(input, pullRequests.comment(input)),
+          ),
+        [WS_METHODS.pullRequestUpdateComment]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestUpdateComment,
+            pullRequests.withRoutingCredential(input, pullRequests.updateComment(input)),
+          ),
+        [WS_METHODS.pullRequestSubmitReview]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestSubmitReview,
+            pullRequests.withRoutingCredential(input, pullRequests.submitReview(input)),
+          ),
+        [WS_METHODS.pullRequestReplyToThread]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestReplyToThread,
+            pullRequests.withRoutingCredential(input, pullRequests.replyToThread(input)),
+          ),
+        [WS_METHODS.pullRequestSetThreadResolution]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestSetThreadResolution,
+            pullRequests.withRoutingCredential(input, pullRequests.setThreadResolution(input)),
+          ),
+        [WS_METHODS.pullRequestSetReaction]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestSetReaction,
+            pullRequests.withRoutingCredential(input, pullRequests.setReaction(input)),
+          ),
+        [WS_METHODS.pullRequestCompletions]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestCompletions,
+            pullRequests.withRoutingCredential(input, pullRequests.completions(input)),
+          ),
+        [WS_METHODS.pullRequestReviewerCandidates]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestReviewerCandidates,
+            pullRequests.withRoutingCredential(input, pullRequests.reviewerCandidates(input)),
+          ),
+        [WS_METHODS.pullRequestRequestReviewers]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestRequestReviewers,
+            pullRequests.withRoutingCredential(input, pullRequests.requestReviewers(input)),
+          ),
+        [WS_METHODS.pullRequestLabelCandidates]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestLabelCandidates,
+            pullRequests.withRoutingCredential(input, pullRequests.labelCandidates(input)),
+          ),
+        [WS_METHODS.pullRequestSetLabels]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestSetLabels,
+            pullRequests.withRoutingCredential(input, pullRequests.setLabels(input)),
+          ),
+        [WS_METHODS.pullRequestFilesViewed]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestFilesViewed,
+            pullRequests.withRoutingCredential(input, pullRequests.filesViewed(input)),
+          ),
+        [WS_METHODS.pullRequestSetFilesViewed]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestSetFilesViewed,
+            pullRequests.withRoutingCredential(input, pullRequests.setFilesViewed(input)),
+          ),
+        [WS_METHODS.pullRequestDetail]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestDetail,
+            pullRequests.withRoutingCredential(input, pullRequests.detail(input)),
+          ),
+        [WS_METHODS.pullRequestDiff]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestDiff,
+            pullRequests.withRoutingCredential(input, pullRequests.diff(input)),
+          ),
+        [WS_METHODS.pullRequestActivity]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestActivity,
+            pullRequests.withRoutingCredential(input, pullRequests.activity(input)),
+          ),
+        [WS_METHODS.pullRequestInvalidate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.pullRequestInvalidate,
+            pullRequests.invalidate(input, { notifyReaders: true }).pipe(
+              Effect.tap(() =>
+                input.reference
+                  ? pullRequestSync.requestSync({
+                      ...input.reference,
+                      host: input.reference.host ?? "github.com",
+                    })
+                  : Effect.void,
+              ),
+            ),
           ),
         [WS_METHODS.gitGetPullRequestDetails]: (input) =>
           observeRpcEffect(

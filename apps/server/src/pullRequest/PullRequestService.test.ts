@@ -5456,10 +5456,60 @@ it.effect("keeps the diff cached across a file being ticked off", () =>
   }),
 );
 
+it.effect("keeps large review pages warm within the total patch budget", () =>
+  Effect.gen(function* () {
+    let reads = 0;
+    const patch = "x".repeat(350_000);
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getDiff: () =>
+            Effect.sync(() => {
+              reads++;
+              return { patch, truncated: false, nextCursor: null };
+            }),
+        }),
+      ],
+    });
+    const ref = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    yield* service.diff(ref);
+    yield* service.diff(ref);
+    assert.strictEqual(reads, 1);
+  }),
+);
+
+it.effect(
+  "evicts older patches when several individually cacheable pages exceed the shared budget",
+  () =>
+    Effect.gen(function* () {
+      const reads: number[] = [];
+      const patch = "x".repeat(6 * 1024 * 1024);
+      const service = yield* makeService({
+        projects: [
+          project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+        ],
+        providers: [
+          fakeProvider("github", {
+            getDiff: ({ number }) =>
+              Effect.sync(() => {
+                reads.push(number);
+                return { patch, truncated: false, nextCursor: null };
+              }),
+          }),
+        ],
+      });
+      for (const number of [1, 2, 3, 3, 1]) {
+        yield* service.diff({ projectId: "p1" as ProjectId, repository: "acme/web", number });
+      }
+      assert.deepEqual(reads, [1, 2, 3, 1]);
+    }),
+);
+
 it.effect("returns large diff slices intact without retaining them in either cache", () =>
   Effect.gen(function* () {
     let reads = 0;
-    const patch = "\u{1f4bb}".repeat(140_000);
+    const patch = "\u{1f4bb}".repeat(8 * 1024 * 1024 + 1);
     const service = yield* makeService({
       projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
       providers: [
@@ -5497,7 +5547,7 @@ it.effect("returns large diff slices intact without retaining them in either cac
 it.effect("caches a small replacement after releasing a large diff", () =>
   Effect.gen(function* () {
     let reads = 0;
-    const largePatch = "x".repeat(300_000);
+    const largePatch = "x".repeat(16 * 1024 * 1024 + 1);
     const service = yield* makeService({
       projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
       providers: [

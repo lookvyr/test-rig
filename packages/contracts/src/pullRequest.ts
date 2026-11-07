@@ -342,6 +342,7 @@ export type PullRequestCommit = typeof PullRequestCommit.Type;
  * to write against at all.
  */
 export const PullRequestReviewCapabilities = Schema.Struct({
+  rangeComments: Schema.optional(Schema.Boolean),
   /** A new comment can be anchored to a line of the diff. */
   inlineComment: Schema.Boolean,
   /** An existing thread can be replied to. */
@@ -680,6 +681,27 @@ export const PullRequestRef = Schema.Struct({
   number: PositiveInt,
 });
 export type PullRequestRef = typeof PullRequestRef.Type;
+
+export const PullRequestCompletionInput = Schema.Struct({
+  ...PullRequestRef.fields,
+  kind: Schema.Literals(["mention", "reference"]),
+  query: Schema.String.check(Schema.isMaxLength(100)),
+});
+export type PullRequestCompletionInput = typeof PullRequestCompletionInput.Type;
+
+export const PullRequestReferenceCandidate = Schema.Struct({
+  reference: TrimmedNonEmptyString,
+  kind: Schema.Literals(["issue", "change-request"]),
+  number: PositiveInt,
+  title: Schema.String,
+  state: PullRequestState,
+});
+export type PullRequestReferenceCandidate = typeof PullRequestReferenceCandidate.Type;
+export const PullRequestCompletions = Schema.Struct({
+  authors: Schema.Array(PullRequestActor),
+  references: Schema.Array(PullRequestReferenceCandidate),
+});
+export type PullRequestCompletions = typeof PullRequestCompletions.Type;
 
 /** Account discovery never needs the originating project's private repository metadata. */
 export const PullRequestRoutingIdentityInput = Schema.Struct({
@@ -1174,6 +1196,7 @@ export const PullRequestReviewCommentDraft = Schema.Struct({
    */
   oldPath: Schema.optional(TrimmedNonEmptyString),
   position: PullRequestReviewPosition,
+  startPosition: Schema.optional(PullRequestReviewPosition),
   body: CommentBody,
 });
 export type PullRequestReviewCommentDraft = typeof PullRequestReviewCommentDraft.Type;

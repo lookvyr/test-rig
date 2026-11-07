@@ -86,6 +86,8 @@ interface AnnotatableCodeViewProps {
   viewerRef?: Ref<AnnotatableCodeViewHandle>;
   className?: string;
   renderHeaderFilenameSuffix?: (fileDiff: FileDiffMetadata) => ReactNode;
+  renderHeaderMetadata?: (fileDiff: FileDiffMetadata) => ReactNode;
+  renderCodeViewFooter?: () => ReactNode;
   renderHeaderPrefix: (
     fileDiff: FileDiffMetadata,
     fileKey: string,
@@ -108,6 +110,8 @@ export function AnnotatableCodeView({
   className,
   renderHeaderPrefix,
   renderHeaderFilenameSuffix,
+  renderHeaderMetadata,
+  renderCodeViewFooter,
 }: AnnotatableCodeViewProps) {
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
@@ -268,6 +272,7 @@ export function AnnotatableCodeView({
       }
       renderHeaderMetadata={(item) => {
         if (item.type !== "diff") return null;
+        if (renderHeaderMetadata) return renderHeaderMetadata(item.fileDiff);
         // Render from the current item; the virtualized viewer caches its built-in header.
         const { additions, deletions } = getDiffLineStat([item.fileDiff]);
         return (
@@ -280,6 +285,7 @@ export function AnnotatableCodeView({
           </span>
         );
       }}
+      {...(renderCodeViewFooter ? { renderCodeViewFooter } : {})}
       renderAnnotation={(annotation) => {
         const hasDraft = annotation.metadata.entries.some((entry) => entry.kind === "draft");
         return (

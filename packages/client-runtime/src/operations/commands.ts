@@ -121,6 +121,7 @@ export interface VisitThreadInput extends ThreadCommandInput {
 export type MarkThreadUnreadInput = ThreadCommandInput;
 
 export interface UpdateThreadMetadataInput extends ThreadCommandInput {
+  readonly pullRequestAutoLink?: boolean;
   readonly pullRequestAssociation?: import("@t3tools/contracts").OrchestrationV2AppThread["pullRequestAssociation"];
   readonly limitRecovery?: import("@t3tools/contracts").OrchestrationV2LimitRecoveryUpdate | null;
   readonly title?: string;
@@ -570,10 +571,14 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.regenerateTitle !== undefined ||
       input.linkedPullRequest !== undefined ||
       input.limitRecovery !== undefined ||
-      input.pullRequestAssociation !== undefined
+      input.pullRequestAssociation !== undefined ||
+      input.pullRequestAutoLink !== undefined
     ) {
       result = yield* dispatch({
         type: "thread.metadata.update",
+        ...(input.pullRequestAutoLink === undefined
+          ? {}
+          : { pullRequestAutoLink: input.pullRequestAutoLink }),
         ...(input.pullRequestAssociation === undefined
           ? {}
           : { pullRequestAssociation: input.pullRequestAssociation }),

@@ -267,6 +267,8 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
     environmentId: thread.environmentId,
     projectCwd: threadProjectCwd,
     association: thread.pullRequestAssociation,
+    pullRequests: thread.pullRequests,
+    pullRequestAutoLink: thread.pullRequestAutoLink,
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
     providerSettings,

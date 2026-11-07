@@ -1577,6 +1577,31 @@ describe("reviewer request payload", () => {
 });
 
 describe("review submission payload", () => {
+  it("encodes a review range and collapses a one-line range", () => {
+    const payload = buildReviewSubmission({
+      verdict: "comment",
+      body: "",
+      comments: [
+        {
+          path: "a.ts",
+          body: "Range",
+          startPosition: { kind: "added", newLine: 2 },
+          position: { kind: "added", newLine: 5 },
+        },
+        {
+          path: "a.ts",
+          body: "Line",
+          startPosition: { kind: "deleted", oldLine: 8 },
+          position: { kind: "deleted", oldLine: 8 },
+        },
+      ],
+    });
+    expect(payload.comments).toEqual([
+      { path: "a.ts", body: "Range", start_line: 2, start_side: "RIGHT", line: 5, side: "RIGHT" },
+      { path: "a.ts", body: "Line", line: 8, side: "LEFT" },
+    ]);
+  });
+
   it("sends the verdict, the summary and every line comment in one body", () => {
     const payload = buildReviewSubmission({
       verdict: "request-changes",

@@ -4062,6 +4062,114 @@ layer("GitHubPullRequestCli.layer", (it) => {
     }),
   );
 
+  it.effect("completes GitHub mentions and old issue numbers in the selected repository", () =>
+    Effect.gen(function* () {
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+      const repository = { cwd: "/w", host: "github.example", repository: "acme/web" };
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            encodeJson({
+              data: {
+                repository: {
+                  mentionableUsers: {
+                    nodes: [{ login: "octocat", name: "Octocat", avatarUrl: null }],
+                  },
+                },
+              },
+            }),
+          ),
+        ),
+      );
+      const mentions = yield* cli.completions({ ...repository, kind: "mention", query: "octo" });
+      expect(mentions.authors.map((actor) => actor.login)).toEqual(["octocat"]);
+      expect(varsAt(0)).toMatchObject({ owner: "acme", name: "web", query: "octo" });
+      const merged = { __typename: "PullRequest", number: 7, title: "Released", prState: "MERGED" };
+      mockedExecute.mockReturnValueOnce(
+        Effect.succeed(
+          output(
+            encodeJson({
+              data: { repository: { issueOrPullRequest: merged }, search: { nodes: [merged] } },
+            }),
+          ),
+        ),
+      );
+      const exact = yield* cli.completions({ ...repository, kind: "reference", query: "7" });
+      expect(varsAt(1)).toMatchObject({ owner: "acme", name: "web", number: 7, exact: true });
+      expect(exact.references).toEqual([
+        { reference: "#7", number: 7, title: "Released", kind: "change-request", state: "merged" },
+      ]);
+    }),
+  );
+  it.effect(
+    "keeps text completion searches scoped to the project and distinguishes issues from PRs",
+    () =>
+      Effect.gen(function* () {
+        mockedExecute.mockReturnValueOnce(
+          Effect.succeed(
+            output(
+              encodeJson({
+                data: {
+                  search: {
+                    nodes: [
+                      { __typename: "Issue", number: 1, title: "Fix config", issueState: "OPEN" },
+                      {
+                        __typename: "PullRequest",
+                        number: 3,
+                        title: "Config update",
+                        prState: "MERGED",
+                      },
+                    ],
+                  },
+                },
+              }),
+            ),
+          ),
+        );
+        const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+        const result = yield* cli.completions({
+          cwd: "/w",
+          host: "github.com",
+          repository: "acme/web",
+          kind: "reference",
+          query: 'config" repo:other/private',
+        });
+        expect(varsAt(0).search).toBe(
+          "repo:acme/web in:title " +
+            encodeJson('config" repo:other/private') +
+            " sort:updated-desc",
+        );
+        expect(result.references.map((item) => [item.reference, item.kind, item.state])).toEqual([
+          ["#1", "issue", "open"],
+          ["#3", "change-request", "merged"],
+        ]);
+      }),
+  );
+
+  it.effect("falls back to repository suggestions when an exact number does not exist", () =>
+    Effect.gen(function* () {
+      mockedExecute
+        .mockReturnValueOnce(
+          Effect.fail(
+            new GitHubApi.GitHubApiNotFoundError({ host: "github.com", operation: "completions" }),
+          ),
+        )
+        .mockReturnValueOnce(
+          Effect.succeed(output(encodeJson({ data: { search: { nodes: [] } } }))),
+        );
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+      const result = yield* cli.completions({
+        cwd: "/w",
+        host: "github.com",
+        repository: "acme/web",
+        kind: "reference",
+        query: "9999",
+      });
+      expect(result.references).toEqual([]);
+      expect(varsAt(1).search).toBe("repo:acme/web sort:updated-desc");
+    }),
+  );
+
   it.effect("reads who may review and who already has in one request", () =>
     Effect.gen(function* () {
       mockedExecute.mockReturnValue(

@@ -100,6 +100,7 @@ export interface EnvironmentThreadShell {
   readonly worktreeCleanup: OrchestrationV2ThreadShell["worktreeCleanup"];
   readonly planProgress: OrchestrationV2ThreadShell["planProgress"];
   readonly sideOfThreadId: ThreadId | null;
+  readonly pullRequestAutoLink?: boolean | undefined;
   readonly pullRequestAssociation: OrchestrationV2ThreadShell["pullRequestAssociation"];
   readonly pendingRuntimeRequestAt: string | null;
   readonly branch: string | null;
@@ -248,6 +249,7 @@ export function presentThreadShell(
     worktreeCleanup: thread.worktreeCleanup ?? null,
     planProgress: thread.planProgress ?? null,
     sideOfThreadId: thread.sideOfThreadId ?? null,
+    pullRequestAutoLink: thread.pullRequestAutoLink,
     pullRequestAssociation: thread.pullRequestAssociation,
     pendingRuntimeRequestAt: nullableIso(thread.pendingRuntimeRequest?.createdAt ?? null),
     branch: thread.branch,

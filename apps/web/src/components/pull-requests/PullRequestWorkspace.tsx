@@ -39,7 +39,7 @@ import { isPullRequestSelectionAvailable } from "./selection";
 import { PullRequestInspector } from "./PullRequestInspector";
 import { StartPullRequestThreadButton } from "./StartPullRequestThreadButton";
 import { PullRequestSelect } from "./PullRequestSelect";
-import { buildPullRequestGroups } from "./queue";
+import { buildPullRequestGroups, pullRequestQueueLookup } from "./queue";
 import {
   DEFAULT_QUEUE_FILTERS,
   pullRequestProjectKey,
@@ -92,7 +92,7 @@ function ProjectPullRequests({
     for (const statsQuery of statsQueries) statsQuery.refresh();
   }, [refreshVersion, refreshList, statsQueries]);
   useEffect(() => {
-    if (!selection || query.isPending || query.error || !query.data) return;
+    if (panelOpen || !selection || query.isPending || query.error || !query.data) return;
     if (selection.environmentId !== project.environmentId || selection.projectId !== project.id)
       return;
     if (!items.some((pr) => pr.url === selection.reference)) clearSelection();
@@ -105,6 +105,7 @@ function ProjectPullRequests({
     query.isPending,
     selection,
     clearSelection,
+    panelOpen,
   ]);
 
   return (
@@ -303,6 +304,14 @@ export function PullRequestWorkspace() {
       ),
     [projects, filters.projectKey],
   );
+  const lookup = useMemo(() => pullRequestQueueLookup(filters.search), [filters.search]);
+  const [settledLookup, setSettledLookup] = useState(lookup);
+  useEffect(() => {
+    if (!lookup || lookup === settledLookup) return;
+    const timer = window.setTimeout(() => setSettledLookup(lookup), 250);
+    return () => window.clearTimeout(timer);
+  }, [lookup, settledLookup]);
+  const remoteLookup = lookup === settledLookup ? lookup : undefined;
   const queryAtoms = useMemo(
     () =>
       shownProjects.map((project) =>
@@ -312,10 +321,11 @@ export function PullRequestWorkspace() {
             cwd: project.workspaceRoot,
             state: filters.state,
             involvement: filters.involvement,
+            ...(remoteLookup ? { lookup: remoteLookup } : {}),
           },
         }),
       ),
-    [shownProjects, filters.state, filters.involvement],
+    [shownProjects, filters.state, filters.involvement, remoteLookup],
   );
   const queries = useEnvironmentQueries(queryAtoms);
   const groups = buildPullRequestGroups(shownProjects, queries, filters.search);
@@ -504,6 +514,17 @@ export function PullRequestWorkspace() {
               <PullRequestInspector
                 key={JSON.stringify(selection)}
                 selection={selection}
+                onSelectStackLayer={(reference) =>
+                  usePullRequestQueueStore.setState({ selection: { ...selection, reference } })
+                }
+                onActionCompleted={() => {
+                  const index = shownProjects.findIndex(
+                    (project) =>
+                      project.environmentId === selection.environmentId &&
+                      project.id === selection.projectId,
+                  );
+                  queries[index]?.refresh();
+                }}
                 refreshVersion={refreshVersion}
                 onRefresh={() => setRefreshVersion((value) => value + 1)}
                 expanded={panelExpanded}

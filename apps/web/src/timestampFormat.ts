@@ -356,3 +356,46 @@ export function formatExpiresInLabel(isoDate: string, nowMs: number = Date.now()
   if (seconds > 0) tail.push(`${seconds}s`);
   return tail.length > 0 ? `Expires in ${days}d ${tail.join(" ")}` : `Expires in ${days}d`;
 }
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+function relativeTimeUnitMs(elapsedMs: number): number {
+  if (elapsedMs < HOUR_MS) return MINUTE_MS;
+  if (elapsedMs < DAY_MS) return HOUR_MS;
+  return DAY_MS;
+}
+
+/** Elapsed time floored to formatRelativeTime precision; equal labels yield equal values. */
+export function relativeTimeElapsedMs(isoDate: string, nowMs: number = Date.now()): number | null {
+  const date = parseTimestampDate(isoDate);
+  if (!date) return null;
+  const elapsedMs = Math.max(0, nowMs - date.getTime());
+  const unitMs = relativeTimeUnitMs(elapsedMs);
+  return Math.floor(elapsedMs / unitMs) * unitMs;
+}
+
+export function msUntilRelativeTimeChange(
+  isoDate: string,
+  nowMs: number = Date.now(),
+): number | null {
+  const date = parseTimestampDate(isoDate);
+  if (!date) return null;
+  const elapsedMs = Math.max(0, nowMs - date.getTime());
+  const unitMs = relativeTimeUnitMs(elapsedMs);
+  const nextChangeMs = date.getTime() + (Math.floor(elapsedMs / unitMs) + 1) * unitMs;
+  // Delays above 2^31-1 fire immediately; cap safely and let callers reschedule.
+  return Math.min(nextChangeMs - nowMs, DAY_MS);
+}
+
+export function formatRelativeElapsed(elapsedMs: number): RelativeTimeParts {
+  const seconds = Math.floor(elapsedMs / 1000);
+  if (seconds < 60) return { value: "just now", suffix: null };
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return { value: `${minutes}m`, suffix: "ago" };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { value: `${hours}h`, suffix: "ago" };
+  const days = Math.floor(hours / 24);
+  return { value: `${days}d`, suffix: "ago" };
+}

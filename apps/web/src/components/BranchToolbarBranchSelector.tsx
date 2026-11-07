@@ -706,6 +706,8 @@ export function BranchToolbarBranchSelector({
     environmentId,
     projectCwd: activeProjectCwd,
     association: serverThread?.pullRequestAssociation,
+    pullRequests: serverThread?.pullRequests,
+    pullRequestAutoLink: serverThread?.pullRequestAutoLink,
     providerSettings: sourceControlProviderSettings,
     threadBranch: resolveBranchToolbarPrBranch({
       activeThreadBranch,

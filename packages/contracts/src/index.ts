@@ -348,3 +348,9 @@ export {
 } from "./orchestratorMcp.ts";
 
 export * from "./toolsScope.ts";
+
+export {
+  PullRequestCompletionInput,
+  PullRequestCompletions,
+  PullRequestReferenceCandidate,
+} from "./pullRequest.ts";

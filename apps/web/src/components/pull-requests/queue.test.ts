@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EnvironmentId, ProjectId, type GitPullRequestSummary } from "@t3tools/contracts";
-import { buildPullRequestGroups } from "./queue";
+import { buildPullRequestGroups, pullRequestQueueLookup } from "./queue";
 
 const projects = ["First", "Second", "Third"].map((title) => ({
   id: ProjectId.make(title),
@@ -40,6 +40,24 @@ const query = (pullRequests: GitPullRequestSummary[]) => ({
 });
 
 describe("PR shortcut ordering", () => {
+  it("recognizes exact numbers and repository URLs without searching partial or unrelated text", () => {
+    expect(pullRequestQueueLookup("#32226")).toEqual({ number: 32226 });
+    expect(pullRequestQueueLookup("32226")).toEqual({ number: 32226 });
+    expect(
+      pullRequestQueueLookup("https://GitHub.com/Owner/Repo/pull/32226/files?w=1#discussion"),
+    ).toEqual({
+      number: 32226,
+      repository: "https://github.com/owner/repo",
+    });
+    expect(pullRequestQueueLookup("fix #32226")).toBeUndefined();
+    expect(pullRequestQueueLookup("https://github.com/owner/repo/issues/32226")).toBeUndefined();
+    const groups = buildPullRequestGroups(
+      projects,
+      [query([pr(7, "#32226 discussion"), pr(32226)]), query([]), query([])],
+      "#32226",
+    );
+    expect(groups.flatMap(({ items }) => items.map(({ number }) => number))).toEqual([32226]);
+  });
   it("numbers rows continuously across projects, including more than nine results", () => {
     const groups = buildPullRequestGroups(
       projects,

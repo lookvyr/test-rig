@@ -200,6 +200,12 @@ export function gateProvider(
         }
       : {}),
     submitReview: (...args) => guard("submitReview", () => provider.submitReview(...args)),
+    ...(provider.completions
+      ? {
+          completions: (...args: Parameters<NonNullable<PullRequestProviderApi["completions"]>>) =>
+            guard("completions", () => provider.completions!(...args)),
+        }
+      : {}),
     listReviewerCandidates: (...args) =>
       guard("listReviewerCandidates", () => provider.listReviewerCandidates(...args)),
     setReviewerRequest: (...args) =>

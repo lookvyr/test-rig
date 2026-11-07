@@ -1,4 +1,7 @@
-import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
+import {
+  threadPullRequestsOf,
+  threadPullRequestAutoLinkEnabled,
+} from "@t3tools/shared/threadPullRequests";
 import { siblingPullRequestUrl, parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import {
   CommandId,
@@ -324,8 +327,8 @@ export const make = Effect.gen(function* () {
         !snapshotFieldsEqual(link.snapshot, fields) ||
         !stacksEqual(link.stack, nextStack);
       // Persist discovered siblings before a terminal snapshot can trigger settlement.
-      for (const layer of thread.pullRequestAssociation == null
-        ? (fetchedStack?.stack?.layers ?? [])
+      for (const layer of threadPullRequestAutoLinkEnabled(thread)
+        ? (nextStack?.layers ?? [])
         : []) {
         const layerKey = {
           host: normalizeThreadPullRequestKey(link).host,
@@ -548,6 +551,23 @@ export const make = Effect.gen(function* () {
         switch (event.type) {
           case "thread.pull-request-link-updated":
             return event.payload.snapshot === null ? requestSync(event.payload) : Effect.void;
+          case "thread.metadata-updated": {
+            if (!threadPullRequestAutoLinkEnabled(event.payload)) return Effect.void;
+            const links = threadPullRequestsOf(event.payload);
+            // Re-enabling discovery must also expand a saved stack whose linked layer has merged.
+            return Effect.forEach(
+              visibleThreadPullRequests(links).filter((link) =>
+                link.stack?.layers.some(
+                  (layer) =>
+                    !links.some((existing) =>
+                      threadPullRequestKeysEqual(existing, { ...link, number: layer.number }),
+                    ),
+                ),
+              ),
+              requestSync,
+              { discard: true },
+            );
+          }
           case "thread.pull-request-synced":
             return Effect.forEach(
               visibleThreadPullRequests(threadPullRequestsOf(event.payload)).filter(

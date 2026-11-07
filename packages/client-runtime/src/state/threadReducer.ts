@@ -208,6 +208,9 @@ export function applyThreadDetailEvent(
           ...(event.payload.worktreePath !== undefined
             ? { worktreePath: event.payload.worktreePath }
             : {}),
+          ...(event.payload.pullRequestAutoLink !== undefined
+            ? { pullRequestAutoLink: event.payload.pullRequestAutoLink }
+            : {}),
           ...(event.payload.pullRequestAssociation !== undefined
             ? { pullRequestAssociation: event.payload.pullRequestAssociation }
             : {}),

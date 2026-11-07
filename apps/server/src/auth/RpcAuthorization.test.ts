@@ -1,6 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthReviewWriteScope,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -9,6 +10,34 @@ import { describe, expect, it } from "@effect/vitest";
 import { RPC_REQUIRED_SCOPES, requiredScopeForRpcMethod } from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
+  it("requires review authority for GitHub writes", () => {
+    for (const method of [
+      WS_METHODS.pullRequestSetFilesViewed,
+      WS_METHODS.pullRequestRunAction,
+      WS_METHODS.pullRequestUpdate,
+      WS_METHODS.pullRequestComment,
+      WS_METHODS.pullRequestUpdateComment,
+      WS_METHODS.pullRequestSubmitReview,
+      WS_METHODS.pullRequestReplyToThread,
+      WS_METHODS.pullRequestSetThreadResolution,
+      WS_METHODS.pullRequestSetReaction,
+      WS_METHODS.pullRequestRequestReviewers,
+      WS_METHODS.pullRequestSetLabels,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthReviewWriteScope);
+    for (const method of [
+      WS_METHODS.pullRequestFilesViewed,
+      WS_METHODS.pullRequestActivity,
+      WS_METHODS.pullRequestInvalidate,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
+  it("allows refresh notifications with read authority", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.pullRequestSubscribeRefreshes)).toBe(
+      AuthOrchestrationReadScope,
+    );
+  });
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });

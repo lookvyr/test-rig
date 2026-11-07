@@ -279,6 +279,18 @@
     "./terminalOutput": {
       "types": "./src/terminalOutput.ts",
       "import": "./src/terminalOutput.ts"
+    },
+    "./changedFileKind": {
+      "types": "./src/changedFileKind.ts",
+      "default": "./src/changedFileKind.ts"
+    },
+    "./markdownTaskList": {
+      "types": "./src/markdownTaskList.ts",
+      "default": "./src/markdownTaskList.ts"
+    },
+    "./textDirection": {
+      "types": "./src/textDirection.ts",
+      "default": "./src/textDirection.ts"
     }
   },
   "scripts": {

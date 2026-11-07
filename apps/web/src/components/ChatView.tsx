@@ -98,7 +98,7 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
-import { PullRequestInspector } from "./pull-requests/PullRequestInspector";
+import { ThreadPullRequestsPanel } from "./pull-requests/ThreadPullRequestsPanel";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -4167,26 +4167,14 @@ function ChatViewContent(props: ChatViewProps) {
     environmentId: environmentId,
     projectCwd: activeProject?.workspaceRoot ?? null,
     association: activeThread?.pullRequestAssociation,
+    pullRequests: activeThread?.pullRequests,
+    pullRequestAutoLink: activeThread?.pullRequestAutoLink,
     threadBranch: activeThread?.branch ?? null,
     gitStatus: gitStatusQuery.data ?? null,
     providerSettings: activeServerConfig?.settings.sourceControlProviders ?? {
       github: false,
     },
   });
-  const pullRequestSelection =
-    activeThreadPr &&
-    activeProject &&
-    (activeThread?.pullRequestAssociation?.mode === "linked"
-      ? activeThread.pullRequestAssociation.provider
-      : gitStatusQuery.data?.sourceControlProvider?.kind) === "github"
-      ? {
-          environmentId,
-          projectId: activeProject.id,
-          projectName: activeProject.title,
-          cwd: activeProject.workspaceRoot,
-          reference: activeThreadPr.url,
-        }
-      : null;
   const supportsPinning = serverConfig?.environment.capabilities.threadPinning === true;
   const activeThreadPinned = supportsPinning && activeThreadShell?.pinnedAt != null;
   const supportsSettlement = serverConfig?.environment.capabilities.threadSettlement === true;
@@ -6339,33 +6327,11 @@ function ChatViewContent(props: ChatViewProps) {
         />
       ) : null
     ) : activeRightPanelSurface?.kind === "pull-request" ? (
-      pullRequestSelection ? (
-        <PullRequestInspector
-          key={JSON.stringify(pullRequestSelection)}
-          selection={pullRequestSelection}
-          onClose={() =>
-            useRightPanelStore.getState().closeSurface(activeThreadRef, "pull-request")
-          }
-        />
-      ) : (
-        <div className="space-y-3 p-4 text-sm text-muted-foreground">
-          <p>
-            {!gitStatusQuery.data && gitStatusQuery.isPending
-              ? "Detecting pull request…"
-              : "No GitHub pull request detected for this checkout."}
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              if (gitStatusCwd)
-                void refreshCheckoutStatus({ environmentId, input: { cwd: gitStatusCwd } });
-            }}
-          >
-            Refresh Git status
-          </Button>
-        </div>
-      )
+      <ThreadPullRequestsPanel
+        key={scopedThreadKey(activeThreadRef)}
+        threadRef={activeThreadRef}
+        onClose={() => useRightPanelStore.getState().closeSurface(activeThreadRef, "pull-request")}
+      />
     ) : activeRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
@@ -6944,7 +6910,7 @@ function ChatViewContent(props: ChatViewProps) {
                   onDiffPanelOpen?.();
                 }}
                 onShowPullRequest={
-                  pullRequestSelection
+                  isServerThread
                     ? () => {
                         useThreadDetailsStore.getState().setPopoverOpen(activeThreadRef, false);
                         useRightPanelStore.getState().open(activeThreadRef, "pull-request");
@@ -7065,7 +7031,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddAgents={addAgentsSurface}
           onAddPullRequest={
-            pullRequestSelection
+            isServerThread
               ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
               : undefined
           }
@@ -7080,6 +7046,7 @@ function ChatViewContent(props: ChatViewProps) {
       ) : null}
       {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelSheet
+          wide={activeRightPanelKind === "pull-request"}
           open={!background}
           onClose={() => {
             if (!background) closePreviewPanel();
@@ -7117,7 +7084,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddAgents={addAgentsSurface}
             onAddPullRequest={
-              pullRequestSelection
+              isServerThread
                 ? () => useRightPanelStore.getState().open(activeThreadRef, "pull-request")
                 : undefined
             }

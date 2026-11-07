@@ -1,3 +1,4 @@
+import type { PullRequestCompletionInput, PullRequestCompletions } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type {
@@ -620,6 +621,9 @@ export interface PullRequestProviderApi {
    * The author is left out by each provider rather than by the caller, because only the provider
    * knows how the host spells the same person in a candidate list and on a pull request.
    */
+  readonly completions?: (
+    input: ProviderRepositoryRef & Pick<PullRequestCompletionInput, "kind" | "query">,
+  ) => Effect.Effect<PullRequestCompletions, PullRequestProviderError>;
   readonly listReviewerCandidates: (
     input: ProviderRepositoryRef & { readonly number: number },
   ) => Effect.Effect<PullRequestReviewerCandidateList, PullRequestProviderError>;

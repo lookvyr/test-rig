@@ -407,6 +407,27 @@ export function threadPullRequestsOf(thread: {
       ];
 }
 
+/** Old unlink choices also disabled discovery. Explicit links remain independent of this setting. */
+export function threadPullRequestAutoLinkEnabled(thread: {
+  readonly pullRequestAutoLink?: boolean | undefined;
+  readonly pullRequestAssociation?: ThreadPullRequestAssociation | null | undefined;
+}): boolean {
+  return thread.pullRequestAutoLink ?? thread.pullRequestAssociation?.mode !== "unlinked";
+}
+
+/** Materialize the legacy single-link choice when a thread first changes its PR collection. */
+export function normalizeThreadPullRequestState(
+  thread: Parameters<typeof threadPullRequestsOf>[0] & {
+    readonly pullRequestAutoLink?: boolean | undefined;
+  },
+) {
+  return {
+    pullRequests: threadPullRequestsOf(thread),
+    pullRequestAutoLink: threadPullRequestAutoLinkEnabled(thread),
+    pullRequestAssociation: null,
+  };
+}
+
 /** Apply a single-link sync without copying unrelated PRs into the event history. */
 export function applyThreadPullRequestLinkUpdate(
   thread: OrchestrationV2AppThread,

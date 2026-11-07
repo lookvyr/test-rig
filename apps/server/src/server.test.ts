@@ -128,6 +128,8 @@ import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import { GitPullRequestWorkspaceError } from "@t3tools/contracts";
 import * as GitHubPullRequestWorkspace from "./sourceControl/GitHubPullRequestWorkspace.ts";
+import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
+import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -286,6 +288,7 @@ const buildAppUnderTest = (options?: {
     pullRequestWorkspace?: Partial<
       GitHubPullRequestWorkspace.GitHubPullRequestWorkspace["Service"]
     >;
+    pullRequestService?: Partial<PullRequestService.PullRequestService["Service"]>;
     sourceControlRepositoryService?: Partial<
       SourceControlRepositoryService.SourceControlRepositoryService["Service"]
     >;
@@ -605,10 +608,18 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provide(Layer.merge(gitManagerLayer, gitVcsDriverLayer)),
       Layer.provide(
-        Layer.merge(
+        Layer.mergeAll(
           gitWorkflowLayer,
           Layer.mock(GitHubPullRequestWorkspace.GitHubPullRequestWorkspace)({
             ...options?.layers?.pullRequestWorkspace,
+          }),
+          Layer.mock(PullRequestSyncReactor.PullRequestSyncReactor)({
+            requestSync: () => Effect.void,
+          }),
+          Layer.mock(PullRequestService.PullRequestService)({
+            subscribeRefreshes: Stream.empty,
+            withRoutingCredential: (_input, effect) => effect,
+            ...options?.layers?.pullRequestService,
           }),
         ),
       ),
@@ -3637,6 +3648,175 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assertFailure(result, externalLauncherError);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes pull request review progress and activity through the existing service", () =>
+    Effect.gen(function* () {
+      const reference = {
+        projectId: ProjectId.make("project-review"),
+        host: "github.com",
+        repository: "owner/repo",
+        number: 7,
+      };
+      const received: unknown[] = [];
+      let viewed = false;
+      let invalidated = false;
+      yield* buildAppUnderTest({
+        layers: {
+          pullRequestService: {
+            runAction: (input) =>
+              Effect.sync(() => {
+                received.push(input);
+              }),
+            submitReview: (input) =>
+              Effect.sync(() => {
+                received.push(input);
+              }),
+            replyToThread: (input) =>
+              Effect.sync(() => {
+                received.push(input);
+              }),
+            setThreadResolution: (input) =>
+              Effect.sync(() => {
+                received.push(input);
+              }),
+            setReaction: (input) =>
+              Effect.sync(() => {
+                received.push(input);
+              }),
+            diff: (input) => {
+              assert.equal(input.number, reference.number);
+              return Effect.succeed({
+                patch: input.cursor ? "second-page" : "first-page",
+                truncated: false,
+                nextCursor: input.cursor ? null : "next",
+              });
+            },
+            filesViewed: (input) => {
+              assert.deepEqual(input, reference);
+              return Effect.succeed({
+                files: [{ path: "src/file.ts", state: viewed ? "viewed" : "unviewed" }],
+                truncated: false,
+              });
+            },
+            setFilesViewed: (input) =>
+              Effect.sync(() => {
+                assert.equal(input.projectId, reference.projectId);
+                assert.equal(input.files[0]?.path, "src/file.ts");
+                viewed = input.files[0]!.viewed;
+              }),
+            activity: (input) => {
+              assert.deepEqual(input, reference);
+              return Effect.succeed({
+                comments: [],
+                commentCount: 0,
+                commentsTruncated: false,
+                reviewThreads: [],
+                commits: [],
+              });
+            },
+            invalidate: (input) =>
+              Effect.sync(() => {
+                assert.deepEqual(input.reference, reference);
+                invalidated = true;
+              }),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const { cookie } = parseSessionCookieFromWsUrl(wsUrl);
+      const body = yield* HttpBody.json({ ...reference, cursor: "next" });
+      const anonymous = yield* HttpClient.post("/api/pull-requests/diff", { body });
+      assert.equal(anonymous.status, 401);
+      const readOnlyPair = yield* HttpClient.post("/api/auth/pairing-token", {
+        headers: { cookie: cookie ?? "" },
+        body: yield* HttpBody.json({ scopes: ["orchestration:read"] }),
+      });
+      assert.equal(readOnlyPair.status, 200);
+      const { credential } = (yield* readOnlyPair.json) as { credential: string };
+      const limitedCookie = yield* getAuthenticatedSessionCookieHeader(credential);
+      const denied = yield* HttpClient.post("/api/pull-requests/diff", {
+        body,
+        headers: { cookie: limitedCookie },
+      });
+      assert.equal(denied.status, 403);
+      const overHttp = yield* HttpClient.post("/api/pull-requests/diff", {
+        body,
+        headers: { cookie: cookie ?? "" },
+      });
+      assert.equal(overHttp.status, 200);
+      assert.deepEqual(yield* overHttp.json, {
+        patch: "second-page",
+        truncated: false,
+        nextCursor: null,
+      });
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            assert.equal(
+              (yield* client[WS_METHODS.pullRequestFilesViewed](reference)).files[0]?.state,
+              "unviewed",
+            );
+            assert.deepEqual(yield* client[WS_METHODS.pullRequestDiff](reference), {
+              patch: "first-page",
+              truncated: false,
+              nextCursor: "next",
+            });
+            assert.deepEqual(
+              yield* client[WS_METHODS.pullRequestDiff]({ ...reference, cursor: "next" }),
+              { patch: "second-page", truncated: false, nextCursor: null },
+            );
+            yield* client[WS_METHODS.pullRequestSetFilesViewed]({
+              ...reference,
+              files: [{ path: "src/file.ts", viewed: true }],
+            });
+            assert.equal(
+              (yield* client[WS_METHODS.pullRequestFilesViewed](reference)).files[0]?.state,
+              "viewed",
+            );
+            assert.deepEqual(
+              (yield* client[WS_METHODS.pullRequestActivity](reference)).reviewThreads,
+              [],
+            );
+            yield* client[WS_METHODS.pullRequestInvalidate]({ reference });
+            assert.equal(invalidated, true);
+            const stackAction = {
+              ...reference,
+              action: "merge" as const,
+              mergeMethod: "squash" as const,
+              stackNumber: 5,
+              expectedStackHeads: [{ number: 7, headSha: "head-a" }],
+            };
+            const review = {
+              ...reference,
+              verdict: "request-changes" as const,
+              body: "Please revise",
+              comments: [
+                {
+                  path: "a.ts",
+                  position: { kind: "added" as const, newLine: 3 },
+                  body: "Handle null",
+                },
+              ],
+            };
+            const reply = { ...reference, threadId: "thread-a", body: "Updated" };
+            const resolution = { ...reference, threadId: "thread-a", resolved: true };
+            const reaction = {
+              ...reference,
+              subjectId: "comment-a",
+              content: "thumbs-up" as const,
+              reacted: true,
+            };
+            yield* client[WS_METHODS.pullRequestRunAction](stackAction);
+            yield* client[WS_METHODS.pullRequestSubmitReview](review);
+            yield* client[WS_METHODS.pullRequestReplyToThread](reply);
+            yield* client[WS_METHODS.pullRequestSetThreadResolution](resolution);
+            yield* client[WS_METHODS.pullRequestSetReaction](reaction);
+            assert.deepEqual(received, [stackAction, review, reply, resolution, reaction]);
+          }),
+        ),
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

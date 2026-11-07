@@ -1,3 +1,4 @@
+import type { PullRequestCompletionInput, PullRequestCompletions } from "@t3tools/contracts";
 import { isSshRemoteUrl, sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
@@ -150,10 +151,23 @@ const LIST_CACHE_CAPACITY = 64;
 const LIST_STATS_CACHE_CAPACITY = 32;
 const DETAIL_CACHE_CAPACITY = 128;
 const DIFF_CACHE_CAPACITY = 128;
-// Each diff cache can retain at most 64 MiB of patch text, counting UTF-16 storage.
-const MAX_CACHED_DIFF_PATCH_BYTES = 512 * 1024;
+// Each holder stays within this UTF-16 patch budget as well as its entry-count bound.
+const DIFF_CACHE_PATCH_BUDGET_BYTES = 32 * 1024 * 1024;
 const canCacheDiff = (value: PullRequestDiffResult) =>
-  value.patch.length * 2 <= MAX_CACHED_DIFF_PATCH_BYTES;
+  value.patch.length * 2 <= DIFF_CACHE_PATCH_BUDGET_BYTES;
+const diffCacheEvictions = (entries: Iterable<readonly [string, PullRequestDiffResult]>) => {
+  let bytes = 0;
+  const evictions: Array<readonly [string, PullRequestDiffResult]> = [];
+  for (const [key, value] of Array.from(entries).toReversed()) {
+    const size = value.patch.length * 2;
+    if (bytes + size > DIFF_CACHE_PATCH_BUDGET_BYTES) {
+      evictions.push([key, value]);
+    } else {
+      bytes += size;
+    }
+  }
+  return evictions;
+};
 const FILES_VIEWED_CACHE_CAPACITY = 128;
 const VIEWER_CACHE_CAPACITY = 32;
 
@@ -255,6 +269,9 @@ export class PullRequestService extends Context.Service<
     readonly setReaction: (
       input: PullRequestReactionInput,
     ) => Effect.Effect<void, PullRequestError>;
+    readonly completions: (
+      input: PullRequestCompletionInput,
+    ) => Effect.Effect<PullRequestCompletions, PullRequestError>;
     readonly reviewerCandidates: (
       input: PullRequestRef,
     ) => Effect.Effect<PullRequestReviewerCandidateList, PullRequestError>;
@@ -616,6 +633,7 @@ function withRateLimitBackoff(
       ? {}
       : { updateComment: interactive("updateComment", api.updateComment) }),
     submitReview: interactive("submitReview", api.submitReview),
+    ...(api.completions ? { completions: interactive("completions", api.completions) } : {}),
     listReviewerCandidates: interactive("listReviewerCandidates", api.listReviewerCandidates),
     setReviewerRequest: interactive("setReviewerRequest", api.setReviewerRequest),
     ...(api.listLabelCandidates === undefined
@@ -2533,6 +2551,10 @@ export const make = Effect.gen(function* () {
           if (oldest !== undefined) held.delete(oldest);
         }
         held.set(key, { at, value });
+        for (const [evicted] of diffCacheEvictions(
+          Array.from(held, ([entryKey, entry]) => [entryKey, entry.value] as const),
+        ))
+          held.delete(evicted);
       });
     return <E>(key: string, read: Effect.Effect<PullRequestDiffResult, E>) => {
       const recorded = read.pipe(Effect.tap((value) => record(key, value)));
@@ -3070,17 +3092,17 @@ export const make = Effect.gen(function* () {
         : null,
     ]);
     const read = Cache.get(diffCache, key).pipe(
-      Effect.tap((value) =>
-        canCacheDiff(value)
-          ? Effect.void
-          : Cache.getSuccess(diffCache, key).pipe(
-              Effect.flatMap((current) =>
-                Option.isSome(current) && current.value === value
-                  ? Cache.invalidate(diffCache, key)
-                  : Effect.void,
-              ),
-              Effect.uninterruptible,
+      Effect.ensuring(
+        Cache.entries(diffCache).pipe(
+          Effect.flatMap((entries) =>
+            Effect.forEach(
+              diffCacheEvictions(entries),
+              ([evicted, observed]) =>
+                Cache.invalidateWhen(diffCache, evicted, (current) => current === observed),
+              { discard: true },
             ),
+          ),
+        ),
       ),
     );
     return staleDiff(key, read);
@@ -3316,6 +3338,22 @@ export const make = Effect.gen(function* () {
     setThreadResolution: invalidatedByMutation(setThreadResolution),
     setReaction: invalidatedByMutation(setReaction),
     // The candidate list is deliberately read fresh per menu-open, so it stays uncached.
+    completions: (input) =>
+      requireProject(input).pipe(
+        Effect.flatMap(
+          (project) =>
+            project.api
+              .completions?.({
+                cwd: project.project.workspaceRoot,
+                host: project.host,
+                repository: project.repository,
+                kind: input.kind,
+                query: input.query,
+              })
+              ?.pipe(Effect.mapError(toPullRequestError("completions"))) ??
+            Effect.succeed({ authors: [], references: [] }),
+        ),
+      ),
     reviewerCandidates,
     requestReviewers: invalidatedByMutation(requestReviewers),
     labelCandidates,

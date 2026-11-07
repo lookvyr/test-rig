@@ -11,6 +11,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 
 const state = vi.hoisted(() => ({
   refresh: vi.fn(),
+  invalidate: vi.fn(async () => ({ _tag: "Success" })),
   statsRefresh: vi.fn(),
   statsData: null as GitGetPullRequestStatsResult | null,
   statsPending: true,
@@ -27,6 +28,7 @@ vi.mock("react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react")>()),
   useMemo: (create: () => unknown) => create(),
   useCallback: (callback: unknown) => callback,
+  useEffectEvent: (callback: unknown) => callback,
   useDebugValue: () => {},
   useRef: (initial: number) => (state.ref ??= { current: initial }),
   useEffect: (effect: () => void) => effect(),
@@ -64,7 +66,18 @@ vi.mock("../../state/query", () => ({
         : { data: state.listData, error: null, isPending: false, refresh: state.refresh },
     ),
   useEnvironmentQuery: (target: { kind: string }) => ({
-    data: target.kind === "list" ? state.listData : state.data,
+    data:
+      target.kind === "list"
+        ? state.listData
+        : state.data && {
+            ...state.data.pullRequest,
+            body: state.data.body,
+            repository: state.data.repository,
+            checks: state.data.checks,
+            headBranch: state.data.pullRequest.headRefName,
+            baseBranch: state.data.pullRequest.baseRefName,
+            author: { login: state.data.pullRequest.author },
+          },
     error: state.detailsError,
     isPending: state.detailsPending,
     refresh: state.refresh,
@@ -79,6 +92,11 @@ vi.mock("../../shortcutModifierState", () => ({
     shiftKey: false,
   }),
 }));
+vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.invalidate }));
+vi.mock("./reviewStore", () => ({
+  usePullRequestReviewStore: (select: (state: unknown) => unknown) =>
+    select({ tabByPr: {}, setTab: vi.fn() }),
+}));
 vi.mock("../../state/git", () => ({
   gitEnvironment: {
     pullRequestStats: (input: { input: { pullRequests: unknown[] } }) => {
@@ -86,7 +104,7 @@ vi.mock("../../state/git", () => ({
       return { kind: "stats" };
     },
     pullRequests: () => ({ kind: "list" }),
-    pullRequestDetails: () => ({ kind: "detail" }),
+    pullRequestDetail: () => ({ kind: "detail" }),
   },
 }));
 vi.mock("../../state/entities", () => ({
@@ -106,8 +124,6 @@ vi.mock("../../hooks/usePullRequestHandoff", async (importOriginal) => ({
 
 import { PullRequestInspector } from "./PullRequestInspector";
 import { StartPullRequestThreadButton } from "./StartPullRequestThreadButton";
-import { PullRequestChecks, PullRequestFiles } from "./PullRequestSummary";
-import { PullRequestMarkdown } from "./PullRequestMarkdown";
 import { PullRequestWorkspace } from "./PullRequestWorkspace";
 import { DEFAULT_QUEUE_FILTERS, usePullRequestQueueStore } from "./workspaceStore";
 
@@ -155,6 +171,7 @@ beforeEach(() => {
   vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("navigator", { platform: "MacIntel" });
   state.refresh.mockClear();
+  state.invalidate.mockClear();
   state.statsRefresh.mockClear();
   state.statsData = null;
   state.statsPending = true;
@@ -175,6 +192,20 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("pull request refresh lifecycle", () => {
+  it("keeps the visible project and expanded inspector on the selected stack layer, and refreshes its queue after an action", () => {
+    usePullRequestQueueStore.setState({ panelExpanded: true });
+    const inspector = elements(PullRequestWorkspace()).find(
+      (element) => element.type === PullRequestInspector,
+    )!;
+    const next = "https://github.com/owner/repo/pull/2";
+    (inspector.props.onSelectStackLayer as (url: string, number: number) => void)(next, 2);
+    expect(usePullRequestQueueStore.getState()).toMatchObject({
+      panelExpanded: true,
+      selection: { ...selection, reference: next },
+    });
+    (inspector.props.onActionCompleted as () => void)();
+    expect(state.refresh).toHaveBeenCalledTimes(1);
+  });
   it("global and inspector refresh use the same revision for visible list and details", () => {
     const first = elements(PullRequestWorkspace());
     const refresh = first.find(
@@ -194,60 +225,6 @@ describe("pull request refresh lifecycle", () => {
     expect(third.find((element) => element.props.project !== undefined)?.props.refreshVersion).toBe(
       2,
     );
-  });
-  it("refreshes details once per revision and replaces the visible snapshot", () => {
-    const first = elements(
-      PullRequestInspector({ selection, onClose: () => {}, refreshVersion: 0 }),
-    );
-    const originalContents = first.find((element) => element.props.details !== undefined)!;
-    expect(state.refresh).not.toHaveBeenCalled();
-    PullRequestInspector({ selection, onClose: () => {}, refreshVersion: 1 });
-    expect(state.refresh).toHaveBeenCalledTimes(1);
-    state.data = { ...details("after"), body: "Updated description" };
-    const updated = elements(
-      PullRequestInspector({ selection, onClose: () => {}, refreshVersion: 1 }),
-    ).find((element) => element.props.details !== undefined)!;
-    expect(state.refresh).toHaveBeenCalledTimes(1);
-    expect(updated.key).toBe(originalContents.key);
-    expect(updated.props.details).toMatchObject({
-      pullRequest: { headSha: "after" },
-      body: "Updated description",
-    });
-  });
-  it("keeps description, checks and the file tree without review tabs or note controls", () => {
-    const contents = elements(PullRequestInspector({ selection, onClose: () => {} })).find(
-      (element) => element.props.details !== undefined,
-    )!;
-    const renderContents = contents.type as (props: typeof contents.props) => ReactNode;
-    const controls = elements(renderContents(contents.props));
-    expect(controls.find((element) => element.type === PullRequestMarkdown)?.props.text).toBe(
-      "Description",
-    );
-    expect(controls.find((element) => element.type === PullRequestChecks)?.props.checks).toEqual(
-      [],
-    );
-    expect(controls.find((element) => element.type === PullRequestFiles)?.props.details).toBe(
-      state.data,
-    );
-    expect(
-      controls.some((element) =>
-        ["tab", "tablist", "tabpanel"].includes(String(element.props.role)),
-      ),
-    ).toBe(false);
-    expect(controls.some((element) => element.type === "textarea")).toBe(false);
-    expect(controls.some((element) => element.type === StartPullRequestThreadButton)).toBe(false);
-    expect(
-      controls.some(
-        (element) => element.type === "a" && element.props.href === selection.reference,
-      ),
-    ).toBe(true);
-  });
-  it("standalone conversation inspector refresh falls back to its detail query", () => {
-    const button = elements(PullRequestInspector({ selection, onClose: () => {} })).find(
-      (element) => element.props["aria-label"] === "Refresh pull request details",
-    )!;
-    (button.props.onClick as () => void)();
-    expect(state.refresh).toHaveBeenCalledOnce();
   });
   it.each(["loading", "failed"])(
     "offers a review thread directly from the list while details are %s",
@@ -293,7 +270,7 @@ describe("pull request refresh lifecycle", () => {
       ),
     ).toBe(false);
   });
-  it("shows Closed for a closed draft in both queue and inspector", () => {
+  it("shows Closed for a closed draft in the queue", () => {
     const closed = {
       ...details("after"),
       pullRequest: { ...details("after").pullRequest, state: "closed" as const },
@@ -306,15 +283,6 @@ describe("pull request refresh lifecycle", () => {
     const renderQueue = queue.type as (props: typeof queue.props) => ReactNode;
     expect(
       elements(renderQueue(queue.props)).some((element) => element.props.children === "closed"),
-    ).toBe(true);
-    const contents = elements(PullRequestInspector({ selection, onClose: () => {} })).find(
-      (element) => element.props.details !== undefined,
-    )!;
-    const renderContents = contents.type as (props: typeof contents.props) => ReactNode;
-    expect(
-      elements(renderContents(contents.props)).some(
-        (element) => element.props.children === "closed",
-      ),
     ).toBe(true);
   });
 });

@@ -38,7 +38,7 @@ import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as PullRequestSyncReactor from "./PullRequestSyncReactor.ts";
-import type { PullRequestTestThread } from "./testkit/pullRequestFixtures.ts";
+import { v2PullRequestThread, type PullRequestTestThread } from "./testkit/pullRequestFixtures.ts";
 
 const NOW = "2026-08-28T12:00:00.000Z";
 const PROJECT_ID = ProjectId.make("sync-project");
@@ -247,6 +247,7 @@ const makeHarness = Effect.fn("makePullRequestSyncHarness")(function* (options: 
                 settledAt: thread.settledAt === null ? null : DateTime.makeUnsafe(thread.settledAt),
                 pullRequests: thread.pullRequests,
                 pullRequestAssociation: thread.pullRequestAssociation ?? null,
+                pullRequestAutoLink: thread.pullRequestAutoLink,
               })),
           ),
         ),
@@ -457,6 +458,52 @@ describe("PullRequestSyncReactor", () => {
             kind: "native",
             ...nativeStack,
           });
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("enabling discovery expands a saved stack from a merged linked layer", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const stack: PullRequestStack = {
+          id: "saved-stack",
+          number: 7,
+          url: "https://github.com/owner/repository/stack/7",
+          base: "main",
+          layers: [
+            { number: 7, headBranch: "lower", state: "merged" },
+            { number: 8, headBranch: "upper", state: "open" },
+          ],
+        };
+        const thread = makeThread("saved-stack", {
+          pullRequestAutoLink: false,
+          pullRequests: [makeLink(7, { state: "merged" }, { stack: { kind: "native", ...stack } })],
+        });
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([thread]),
+          summary: (input) => Effect.succeed(makeSummary(input, { state: "merged" })),
+          stack: () => Effect.succeed(stack),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          assert.deepEqual(yield* Ref.get(fixture.summaryCalls), []);
+          const enabled = { ...thread, pullRequestAutoLink: true };
+          yield* Ref.set(fixture.snapshots, makeSnapshot([enabled]));
+          yield* Queue.offer(fixture.domainEvents, {
+            type: "thread.metadata-updated",
+            id: EventId.make("enable-stack-discovery"),
+            threadId: thread.id,
+            occurredAt: DateTime.makeUnsafe(NOW),
+            payload: { ...v2PullRequestThread(enabled), lastVisitedAt: null },
+          });
+          yield* Queue.take(fixture.snapshotReads);
+          yield* reactor.drain;
+          assert.deepEqual(
+            (yield* Ref.get(fixture.linkCommands)).map((command) => command.number),
+            [8],
+          );
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),
@@ -943,7 +990,7 @@ describe("PullRequestSyncReactor", () => {
     { mode: "unlinked" as const },
   ]) {
     it.effect(
-      `does not auto-link stack siblings after an explicit ${pullRequestAssociation.mode} choice`,
+      `does not auto-link stack siblings with detection disabled and ${pullRequestAssociation.mode} legacy state`,
       () =>
         Effect.scoped(
           Effect.gen(function* () {
@@ -953,6 +1000,7 @@ describe("PullRequestSyncReactor", () => {
                 makeThread("explicit", {
                   pullRequests: [makeLink(42)],
                   pullRequestAssociation,
+                  pullRequestAutoLink: false,
                 }),
               ]),
               stack: () =>
