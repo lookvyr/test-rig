@@ -182,6 +182,26 @@ describe("idleCompactionWindow", () => {
     expect(idleCompactionWindow(archived, NOW_MS)).toBeNull();
   });
 
+  it("ignores a queued message that was removed or steered before it started", () => {
+    const steered = records({ cacheExpiresInMs: 60 * MINUTE_MS });
+    steered.runs = [
+      ...steered.runs,
+      {
+        ...steered.runs[0]!,
+        id: RunId.make("run-2"),
+        ordinal: 2,
+        userMessageId: MessageId.make("message-2"),
+        status: "cancelled",
+        startedAt: null,
+        completedAt: at(),
+      },
+    ];
+    expect(idleCompactionWindow(steered, NOW_MS)?.runId).toBe(runId);
+    // A turn that did start and was then cancelled stays the latest run.
+    steered.runs = steered.runs.map((run) => ({ ...run, startedAt: at(-MINUTE_MS) }));
+    expect(idleCompactionWindow(steered, NOW_MS)).toBeNull();
+  });
+
   it("skips subagents and side chats", () => {
     const cache = { cacheExpiresInMs: 60 * MINUTE_MS };
     const subagent = records(cache);
