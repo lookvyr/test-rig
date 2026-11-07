@@ -9,6 +9,7 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   ProviderTurnId,
+  resolveIdleCompaction,
   RunId,
   ThreadId,
   type OrchestrationV2DomainEvent,
@@ -271,10 +272,23 @@ const runService = Effect.fn("runIdleCompactionService")(function* (
     readonly resendOlderCompletion: Effect.Effect<void>;
   }) => Effect.Effect<void>,
   settingsOverride: Partial<typeof DEFAULT_SERVER_SETTINGS> = {},
+  options: {
+    readonly seedExtra?: Effect.Effect<void, never, ProjectionStore.ProjectionStoreV2>;
+  } = {},
 ) {
   yield* TestClock.setTime(NOW_MS);
   const value = records({ cacheExpiresInMs });
   yield* seed(value);
+  if (options.seedExtra !== undefined) yield* options.seedExtra;
+  const serverSettings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    compactIdleThreads: "beforeCacheExpires" as const,
+    ...settingsOverride,
+  };
+  // An ineligible thread is ruled out from its row, before any history is read.
+  const readsHistory =
+    resolveIdleCompaction(serverSettings, instanceId) === "beforeCacheExpires" &&
+    serverSettings.providers.claudeAgent.enabled;
   const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
   const commands = yield* Queue.unbounded<OrchestrationV2ServerCommand>();
   const reads = yield* Queue.unbounded<void>();
@@ -286,11 +300,7 @@ const runService = Effect.fn("runIdleCompactionService")(function* (
         store.getThreadRecords(...args).pipe(Effect.tap(() => Queue.offer(reads, undefined))),
     }),
     Layer.mock(ServerSettings.ServerSettingsService)({
-      getSettings: Effect.succeed({
-        ...DEFAULT_SERVER_SETTINGS,
-        compactIdleThreads: true,
-        ...settingsOverride,
-      }),
+      getSettings: Effect.succeed(serverSettings),
     }),
     Layer.mock(Orchestrator.OrchestratorV2)({
       streamDomainEvents: Stream.fromQueue(events),
@@ -326,11 +336,7 @@ const runService = Effect.fn("runIdleCompactionService")(function* (
       payload: value.runs[0]!,
     }).pipe(Effect.asVoid);
     yield* completion;
-    // One read for the latest run, one for its records. A disabled service reads nothing.
-    if (settingsOverride.compactIdleThreads !== false) {
-      yield* Queue.take(reads);
-      yield* Queue.take(reads);
-    }
+    if (readsHistory) yield* Queue.take(reads);
     yield* drive({
       resendOlderCompletion: Effect.gen(function* () {
         const olderRunId = RunId.make("run-0");
@@ -345,6 +351,7 @@ const runService = Effect.fn("runIdleCompactionService")(function* (
           occurredAt: at(),
           payload: { ...value.runs[0]!, id: olderRunId, ordinal: 0 },
         });
+        // One read finds the newer run is latest, and one more waits for it instead.
         yield* Queue.take(reads);
         yield* Queue.take(reads);
       }),
@@ -435,16 +442,82 @@ it.effect("keeps waiting when an older run's completion is sent again", () =>
   ),
 );
 
-it.effect("does nothing while the setting is off", () =>
+const expectNoCompaction = ({
+  commands,
+}: {
+  readonly commands: Queue.Queue<OrchestrationV2ServerCommand>;
+}) =>
+  Effect.gen(function* () {
+    yield* TestClock.adjust("10 minutes");
+    expect(yield* Queue.size(commands)).toBe(0);
+  });
+
+const expectCompaction = ({
+  commands,
+}: {
+  readonly commands: Queue.Queue<OrchestrationV2ServerCommand>;
+}) =>
+  Effect.gen(function* () {
+    yield* TestClock.adjust("3 minutes");
+    expect(yield* Queue.take(commands)).toMatchObject({ text: "/compact" });
+  });
+
+it.effect("does nothing when idle threads compact when you return", () =>
+  withStore(runService(5 * MINUTE_MS, expectNoCompaction, { compactIdleThreads: "onReturn" })),
+);
+
+it.effect("does nothing when idle threads never compact", () =>
+  withStore(runService(5 * MINUTE_MS, expectNoCompaction, { compactIdleThreads: "off" })),
+);
+
+it.effect("follows the Claude instance's own mode over the default", () =>
+  Effect.gen(function* () {
+    yield* withStore(
+      runService(5 * MINUTE_MS, expectCompaction, {
+        compactIdleThreads: "off",
+        providerInstances: {
+          [instanceId]: { driver, config: { idleCompaction: "beforeCacheExpires" } },
+        },
+      }),
+    );
+    yield* withStore(
+      runService(5 * MINUTE_MS, expectNoCompaction, {
+        providerInstances: { [instanceId]: { driver, config: { idleCompaction: "off" } } },
+      }),
+    );
+  }),
+);
+
+it.effect("still compacts after a queued message was removed before it started", () =>
   withStore(
     runService(
       5 * MINUTE_MS,
-      ({ commands }) =>
-        Effect.gen(function* () {
-          yield* TestClock.adjust("10 minutes");
-          expect(yield* Queue.size(commands)).toBe(0);
-        }),
-      { compactIdleThreads: false },
+      expectCompaction,
+      {},
+      {
+        seedExtra: Effect.gen(function* () {
+          const store = yield* ProjectionStore.ProjectionStoreV2;
+          const removedRun = {
+            ...records().runs[0]!,
+            id: RunId.make("run-2"),
+            ordinal: 2,
+            userMessageId: MessageId.make("message-2"),
+            status: "cancelled" as const,
+            startedAt: null,
+          };
+          yield* store.apply({
+            id: EventId.make("e6"),
+            threadId,
+            occurredAt: at(),
+            type: "run.created",
+            runId: removedRun.id,
+            nodeId,
+            driver,
+            providerInstanceId: instanceId,
+            payload: removedRun,
+          });
+        }).pipe(Effect.orDie),
+      },
     ),
   ),
 );

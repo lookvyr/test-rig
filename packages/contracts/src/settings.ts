@@ -10,6 +10,7 @@ import {
   PreviewZoomFactor,
 } from "./preview.ts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -371,10 +372,17 @@ const makeBinaryPathSetting = (fallback: string) =>
     Schema.withDecodingDefault(Effect.succeed(fallback)),
   );
 
-export type ProviderSettingsFormControl = "text" | "password" | "textarea" | "switch";
+export type ProviderSettingsFormControl = "text" | "password" | "textarea" | "switch" | "select";
+
+export interface ProviderSettingsFormOption {
+  readonly value: string;
+  readonly label: string;
+}
 
 export interface ProviderSettingsFormAnnotation {
   readonly control?: ProviderSettingsFormControl | undefined;
+  /** The choices for a `select`. The first is the default, and choosing it clears the key. */
+  readonly options?: ReadonlyArray<ProviderSettingsFormOption> | undefined;
   readonly placeholder?: string | undefined;
   readonly hidden?: boolean | undefined;
   readonly clearWhenEmpty?: "omit" | "persist" | undefined;
@@ -466,6 +474,36 @@ export const CodexSettings = makeProviderSettingsSchema(
 );
 export type CodexSettings = typeof CodexSettings.Type;
 
+export const IDLE_COMPACTION_MODES = [
+  { value: "onReturn", label: "When you return" },
+  { value: "beforeCacheExpires", label: "Before the cache expires (beta)" },
+  { value: "off", label: "Never" },
+] as const satisfies ReadonlyArray<ProviderSettingsFormOption>;
+export const IdleCompactionMode = Schema.Literals(IDLE_COMPACTION_MODES.map((mode) => mode.value));
+export type IdleCompactionMode = typeof IdleCompactionMode.Type;
+export const DEFAULT_IDLE_COMPACTION_MODE: IdleCompactionMode = "onReturn";
+
+// `compactIdleThreads` used to be an on/off switch for compacting before the cache expires.
+const LegacyCompactIdleThreads = Schema.Boolean.pipe(
+  Schema.decodeTo(
+    IdleCompactionMode,
+    SchemaTransformation.transform({
+      decode: (enabled): IdleCompactionMode =>
+        enabled ? "beforeCacheExpires" : DEFAULT_IDLE_COMPACTION_MODE,
+      encode: (mode) => mode === "beforeCacheExpires",
+    }),
+  ),
+);
+const IdleCompactionModeSetting = Schema.Union([IdleCompactionMode, LegacyCompactIdleThreads]);
+
+const INSTANCE_IDLE_COMPACTION_MODES = [
+  { value: "default", label: "Use default" },
+  ...IDLE_COMPACTION_MODES,
+] as const satisfies ReadonlyArray<ProviderSettingsFormOption>;
+const InstanceIdleCompaction = Schema.Literals(
+  INSTANCE_IDLE_COMPACTION_MODES.map((mode) => mode.value),
+);
+
 export const ClaudeSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
@@ -517,9 +555,22 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
+    idleCompaction: InstanceIdleCompaction.pipe(
+      Schema.withDecodingDefault(Effect.succeed("default" as const)),
+      Schema.annotateKey({
+        title: "Compact idle threads",
+        description:
+          "When to compact an idle thread over 200,000 tokens: after you return, just before its prompt cache expires, or never. Overrides the default in General settings.",
+        providerSettingsForm: {
+          control: "select",
+          options: INSTANCE_IDLE_COMPACTION_MODES,
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "launchArgs"],
+    order: ["binaryPath", "homePath", "autoCompactWindow", "idleCompaction", "launchArgs"],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;
@@ -828,7 +879,9 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS)),
   ),
   sidebarAutoSettleOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  compactIdleThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  compactIdleThreads: IdleCompactionModeSetting.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_IDLE_COMPACTION_MODE)),
+  ),
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   snoozePresets: SnoozePresetSettings.pipe(
@@ -989,6 +1042,7 @@ const ClaudeSettingsPatch = Schema.Struct({
   homePath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
   launchArgs: Schema.optionalKey(TrimmedString),
+  idleCompaction: Schema.optionalKey(InstanceIdleCompaction),
 });
 
 export const ServerSettingsPatch = Schema.Struct({
@@ -1044,7 +1098,7 @@ export const ServerSettingsPatch = Schema.Struct({
   projectSettingsFolded: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
-  compactIdleThreads: Schema.optionalKey(Schema.Boolean),
+  compactIdleThreads: Schema.optionalKey(IdleCompactionMode),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozePresets: Schema.optionalKey(SnoozePresetSettings),
@@ -1189,6 +1243,27 @@ export const resolveProviderInstanceEnabled = (
     configEnabled !== false &&
     (instance.enabled ?? configEnabled ?? ["codex", "claudeAgent"].includes(instance.driver))
   );
+};
+
+const decodeClaudeSettings = Schema.decodeUnknownOption(ClaudeSettings);
+
+/**
+ * The idle compaction mode for a Claude instance: its own override, or the
+ * General default. A built-in instance without its own entry reads the older
+ * per-provider settings.
+ */
+export const resolveIdleCompaction = (
+  settings: Pick<ServerSettings, "providerInstances" | "providers" | "compactIdleThreads">,
+  instanceId: ProviderInstanceId,
+): IdleCompactionMode => {
+  const config = Object.hasOwn(settings.providerInstances, instanceId)
+    ? settings.providerInstances[instanceId]?.config
+    : (settings.providers as Record<string, unknown>)[instanceId];
+  const override = Option.match(decodeClaudeSettings(config ?? {}), {
+    onNone: () => "default" as const,
+    onSome: (claude) => claude.idleCompaction,
+  });
+  return override === "default" ? settings.compactIdleThreads : override;
 };
 
 /** Unused SQLite pages worth calling out in local diagnostics (1 GiB). */

@@ -763,6 +763,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         customModels: ["claude-custom"],
         autoCompactWindow: "",
         launchArgs: "",
+        idleCompaction: "default",
       });
       assert.deepEqual(
         next.textGenerationModelSelection,
@@ -1174,6 +1175,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         customModels: [],
         autoCompactWindow: "",
         launchArgs: "",
+        idleCompaction: "default",
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );

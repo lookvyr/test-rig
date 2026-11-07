@@ -5,7 +5,9 @@ import {
   MessageId,
   ProviderDriverKind,
   type ProviderInstanceId,
+  resolveIdleCompaction,
   resolveProviderInstanceEnabled,
+  type RunId,
   type ServerSettings as ServerSettingsValue,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -41,6 +43,21 @@ function providerInstanceEnabled(
   });
 }
 
+// A Claude instance enabled in settings whose idle compaction mode is "beforeCacheExpires".
+function compactsBeforeCacheExpires(
+  settings: ServerSettingsValue,
+  instanceId: ProviderInstanceId,
+): boolean {
+  const driver = Object.hasOwn(settings.providerInstances, instanceId)
+    ? settings.providerInstances[instanceId]?.driver
+    : instanceId;
+  return (
+    driver === "claudeAgent" &&
+    resolveIdleCompaction(settings, instanceId) === "beforeCacheExpires" &&
+    providerInstanceEnabled(settings, instanceId)
+  );
+}
+
 const sleepUntil = Effect.fnUntraced(function* (targetMs: number) {
   while (true) {
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
@@ -50,27 +67,27 @@ const sleepUntil = Effect.fnUntraced(function* (targetMs: number) {
 });
 
 /**
- * Opt-in: when a Claude run completes, waits until shortly before its prompt
- * cache expires and sends `/compact` as a visible Test Rig turn. Waits live in
- * memory, so a server restart skips compactions that were still waiting.
+ * When a run completes on a Claude instance set to compact before the cache
+ * expires, waits until shortly before its prompt cache expires and sends
+ * `/compact` as a visible Test Rig turn. Waits live in memory, so a server
+ * restart skips compactions that were still waiting.
  */
 export const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const settings = yield* ServerSettings.ServerSettingsService;
 
-  // Waits for whichever run is latest when it looks, so an update to an older run
-  // re-arms the wait for the latest one instead of cancelling it.
   const compactWhenDue = Effect.fn("IdleCompactionService.compactWhenDue")(
-    function* (threadId: ThreadId) {
-      // Loops once after the wait: the thread may have moved on.
+    function* (threadId: ThreadId, completedRunId: RunId) {
+      let runId = completedRunId;
+      // Loops after the wait or a retarget: the thread may have moved on.
       while (true) {
         const current = yield* settings.getSettings;
-        if (!current.compactIdleThreads) return;
-        const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
-        const latestRun = latestStartedRun(runs);
-        if (latestRun === null) return;
-        const runId = latestRun.id;
+        // The thread row alone rules most threads out, before any history is read.
+        const thread = yield* projections.getThread(threadId);
+        if (!compactsBeforeCacheExpires(current, thread.providerInstanceId)) return;
+        const activeProviderThreadIds =
+          thread.activeProviderThreadId === null ? [] : [thread.activeProviderThreadId];
         const records = yield* projections.getThreadRecords(
           threadId,
           [
@@ -82,9 +99,27 @@ export const make = Effect.gen(function* () {
             "turnItems",
             "contextTransfers",
           ],
-          { messageRunIds: [runId], turnItemStatuses: ["pending", "running", "waiting"] },
+          {
+            messageRunIds: [runId],
+            turnItemStatuses: ["pending", "running", "waiting"],
+            // The latest run, active runs that hold background work, and rolled-back runs whose
+            // items it ignores.
+            runStatuses: ["preparing", "starting", "running", "rolled_back"],
+            includeLatestRun: true,
+            // Without an active provider thread there is no session to compact.
+            providerTurnThreadIds: activeProviderThreadIds,
+            latestProviderTurnUsageOnly: true,
+            runtimeRequestStatuses: ["pending"],
+            contextTransferStatuses: ["pending"],
+          },
         );
-        if (!providerInstanceEnabled(current, records.thread.providerInstanceId)) return;
+        if (!compactsBeforeCacheExpires(current, records.thread.providerInstanceId)) return;
+        const latestRun = latestStartedRun(records.runs);
+        // An update for an earlier run replaced the latest run's wait, so take it over.
+        if (latestRun?.status === "completed" && latestRun.id !== runId) {
+          runId = latestRun.id;
+          continue;
+        }
         const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
         const window = idleCompactionWindow(records, nowMs);
         if (window?.runId !== runId) return;
@@ -120,7 +155,7 @@ export const make = Effect.gen(function* () {
     yield* forkParked(
       Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
         event.type === "run.updated" && event.payload.status === "completed"
-          ? FiberMap.run(timers, event.threadId, compactWhenDue(event.threadId))
+          ? FiberMap.run(timers, event.threadId, compactWhenDue(event.threadId, event.payload.id))
           : Effect.void,
       ),
     );

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type BackgroundActivityProfile,
+  IDLE_COMPACTION_MODES,
   ProviderDriverKind,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
@@ -293,7 +294,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Snooze options"]
         : []),
       ...(settings.compactIdleThreads !== DEFAULT_UNIFIED_SETTINGS.compactIdleThreads
-        ? ["Compact idle Claude threads"]
+        ? ["Compact idle threads"]
         : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
@@ -1672,23 +1673,43 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("compact-idle-threads")}
-          description="Compact long idle Claude threads just before their prompt cache expires, so coming back costs less. Off by default; the compaction appears as a status divider and stays quiet when it succeeds."
+          description="When to compact an idle Claude thread over 200,000 tokens: Claude asks when you return, Test Rig compacts just before its prompt cache expires, or never. Each Claude provider can override this."
           resetAction={
-            settings.compactIdleThreads ? (
+            settings.compactIdleThreads !== DEFAULT_UNIFIED_SETTINGS.compactIdleThreads ? (
               <SettingResetButton
-                label="Compact idle Claude threads"
-                onClick={() => updateSettings({ compactIdleThreads: false })}
+                label="Compact idle threads"
+                onClick={() =>
+                  updateSettings({
+                    compactIdleThreads: DEFAULT_UNIFIED_SETTINGS.compactIdleThreads,
+                  })
+                }
               />
             ) : null
           }
           control={
-            <Switch
-              checked={settings.compactIdleThreads}
-              onCheckedChange={(checked) =>
-                updateSettings({ compactIdleThreads: Boolean(checked) })
-              }
-              aria-label="Compact idle Claude threads (beta)"
-            />
+            <Select
+              value={settings.compactIdleThreads}
+              onValueChange={(value) => {
+                const mode = IDLE_COMPACTION_MODES.find((candidate) => candidate.value === value);
+                if (mode) updateSettings({ compactIdleThreads: mode.value });
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-64" aria-label="Compact idle threads">
+                <SelectValue>
+                  {
+                    IDLE_COMPACTION_MODES.find((mode) => mode.value === settings.compactIdleThreads)
+                      ?.label
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {IDLE_COMPACTION_MODES.map((mode) => (
+                  <SelectItem hideIndicator key={mode.value} value={mode.value}>
+                    {mode.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
 

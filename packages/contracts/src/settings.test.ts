@@ -6,6 +6,7 @@ import {
   ClientSettingsSchema,
   ClientSettingsPatch,
   DEFAULT_SERVER_SETTINGS,
+  resolveIdleCompaction,
   ServerSettings,
   ServerSettingsPatch,
 } from "./settings.ts";
@@ -315,6 +316,43 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
         providerInstances: { "1bad": { driver: "codex" } },
       }),
     ).toThrow();
+  });
+});
+
+describe("resolveIdleCompaction", () => {
+  it("lets a Claude instance override the default", () => {
+    const settings = decodeServerSettings({
+      compactIdleThreads: "off",
+      providerInstances: {
+        claude_work: { driver: "claudeAgent", config: { idleCompaction: "onReturn" } },
+        claude_personal: { driver: "claudeAgent" },
+      },
+    });
+    expect(resolveIdleCompaction(settings, ProviderInstanceId.make("claude_work"))).toBe(
+      "onReturn",
+    );
+    expect(resolveIdleCompaction(settings, ProviderInstanceId.make("claude_personal"))).toBe("off");
+    expect(resolveIdleCompaction(settings, ProviderInstanceId.make("claudeAgent"))).toBe("off");
+  });
+
+  it("reads the built-in instance's older per-provider settings", () => {
+    const settings = decodeServerSettings({
+      providers: { claudeAgent: { idleCompaction: "beforeCacheExpires" } },
+    });
+    expect(resolveIdleCompaction(settings, ProviderInstanceId.make("claudeAgent"))).toBe(
+      "beforeCacheExpires",
+    );
+  });
+
+  it("keeps what the old on/off switch did", () => {
+    expect(decodeServerSettings({ compactIdleThreads: true }).compactIdleThreads).toBe(
+      "beforeCacheExpires",
+    );
+    expect(decodeServerSettings({ compactIdleThreads: false }).compactIdleThreads).toBe("onReturn");
+    expect(decodeServerSettings({}).compactIdleThreads).toBe("onReturn");
+    expect(
+      encodeServerSettings(decodeServerSettings({ compactIdleThreads: "off" })).compactIdleThreads,
+    ).toBe("off");
   });
 });
 
