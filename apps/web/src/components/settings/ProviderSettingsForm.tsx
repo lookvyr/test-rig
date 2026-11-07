@@ -6,12 +6,14 @@ import * as Schema from "effect/Schema";
 import type {
   ProviderSettingsFormAnnotation,
   ProviderSettingsFormControl,
+  ProviderSettingsFormOption,
   ProviderSettingsFormSchemaAnnotation,
 } from "@t3tools/contracts";
 
 import { cn } from "../../lib/utils";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import type { ProviderClientDefinition } from "./providerDriverMeta";
@@ -24,6 +26,8 @@ export interface ProviderSettingsFieldModel {
   readonly placeholder?: string | undefined;
   readonly clearWhenEmpty: "omit" | "persist";
   readonly defaultBooleanValue?: boolean | undefined;
+  /** A `select`'s choices. The first is the default, and choosing it clears the key. */
+  readonly options?: ReadonlyArray<ProviderSettingsFormOption> | undefined;
 }
 
 function titleizeFieldKey(key: string): string {
@@ -105,6 +109,9 @@ export function deriveProviderSettingsFields(
           clearWhenEmpty: formAnnotation.clearWhenEmpty ?? "omit",
           ...(formAnnotation.control === "switch"
             ? { defaultBooleanValue: readFieldBooleanDefault(fieldSchema) }
+            : {}),
+          ...(formAnnotation.control === "select" && formAnnotation.options
+            ? { options: formAnnotation.options }
             : {}),
         } satisfies ProviderSettingsFieldModel,
       ];
@@ -213,6 +220,47 @@ function ProviderSettingsFieldRow({
             aria-label={field.label}
           />
         </div>
+      </FieldFrame>
+    );
+  }
+
+  if (field.control === "select") {
+    const options = field.options ?? [];
+    const fallback = options[0]?.value ?? "";
+    const current = readProviderConfigString(value, field.key) || fallback;
+    return (
+      <FieldFrame variant={variant}>
+        <label htmlFor={inputId} className={cn(variant === "card" && "block")}>
+          {label}
+          <Select
+            value={current}
+            onValueChange={(next) => {
+              if (typeof next !== "string") return;
+              onChange(
+                nextProviderConfigWithFieldValue(value, field, next === fallback ? "" : next),
+              );
+            }}
+          >
+            <SelectTrigger
+              id={inputId}
+              size="sm"
+              className={cn("w-full", variant === "card" && "mt-1.5")}
+              aria-label={field.label}
+            >
+              <SelectValue>
+                {options.find((option) => option.value === current)?.label ?? current}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="start" alignItemWithTrigger={false}>
+              {options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+          {description}
+        </label>
       </FieldFrame>
     );
   }

@@ -150,7 +150,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "compact-idle-threads",
-    title: "Compact idle Claude threads (beta)",
+    title: "Compact idle threads",
     to: "/settings/general",
   },
   {

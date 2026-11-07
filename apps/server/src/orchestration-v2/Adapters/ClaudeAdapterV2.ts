@@ -93,6 +93,9 @@ import {
   type ThreadId,
   type ToolActivitySource,
   TrimmedNonEmptyString,
+  DEFAULT_IDLE_COMPACTION_MODE,
+  type IdleCompactionMode,
+  resolveIdleCompaction,
 } from "@t3tools/contracts";
 
 import * as Cause from "effect/Cause";
@@ -119,6 +122,7 @@ import { planClaudeSkillDispatch } from "../../provider/Drivers/ClaudeSkillDispa
 import { discoverClaudeSkills } from "../../provider/Drivers/ClaudeSkills.ts";
 import { compileClaudeModelSelection } from "../../claudeModelOptions.ts";
 import * as ServerConfig from "../../config.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
   claudeSignedOutMessage,
@@ -3455,6 +3459,12 @@ const decodeClaudeEnvSettings = Schema.decodeUnknownEffect(
 export interface ClaudeAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
   readonly settings: ClaudeSettings;
+  /**
+   * The instance's idle compaction mode from current settings. Read on each use so a
+   * change in General settings applies without restarting the instance. Without it,
+   * the instance's own setting or the default applies.
+   */
+  readonly idleCompaction?: Effect.Effect<IdleCompactionMode>;
   readonly environment: NodeJS.ProcessEnv;
   readonly attachmentsDir: string;
   readonly fileSystem: FileSystem.FileSystem;
@@ -3482,6 +3492,13 @@ export function makeClaudeAdapterV2(
   const continuationRequests = adapterOptions.continuationRequests ?? {
     offer: () => Effect.void,
   };
+  const resolveIdleCompactionMode =
+    adapterOptions.idleCompaction ??
+    Effect.succeed(
+      adapterOptions.settings.idleCompaction === "default"
+        ? DEFAULT_IDLE_COMPACTION_MODE
+        : adapterOptions.settings.idleCompaction,
+    );
 
   // Claude Code's own subagent TTL setting, in its precedence order. Unset or unreadable means
   // Anthropic's default applies.
@@ -8610,6 +8627,10 @@ export function makeClaudeAdapterV2(
               if (request.dialogKind !== "resume_return") {
                 return { behavior: "cancelled" as const };
               }
+              // "Never" skips Claude's resume prompt along with idle compaction.
+              if ((yield* resolveIdleCompactionMode) === "off") {
+                return { behavior: "completed" as const, result: "continue" as const };
+              }
               const ageMinutes =
                 typeof request.payload.sessionAgeMinutes === "number" &&
                 Number.isFinite(request.payload.sessionAgeMinutes)
@@ -9846,9 +9867,20 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       expandHomePath(config.binaryPath),
       claudeEnvironment,
     );
+    const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+    const configuredIdleCompaction =
+      config.idleCompaction === "default" ? DEFAULT_IDLE_COMPACTION_MODE : config.idleCompaction;
     return makeClaudeAdapterV2({
       instanceId,
       settings: { ...config, enabled, binaryPath },
+      ...(Option.isSome(serverSettings)
+        ? {
+            idleCompaction: serverSettings.value.getSettings.pipe(
+              Effect.map((settings) => resolveIdleCompaction(settings, instanceId)),
+              Effect.orElseSucceed(() => configuredIdleCompaction),
+            ),
+          }
+        : {}),
       environment: claudeEnvironment,
       attachmentsDir: serverConfig.attachmentsDir,
       fileSystem,

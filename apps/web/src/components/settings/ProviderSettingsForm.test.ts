@@ -37,6 +37,31 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("offers Claude's idle compaction override as a select that defaults to the General setting", () => {
+    const claude = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("claudeAgent")];
+    expect(claude).toBeDefined();
+    const fields = deriveProviderSettingsFields(claude!);
+    expect(fields.map((field) => field.key)).toEqual([
+      "binaryPath",
+      "homePath",
+      "autoCompactWindow",
+      "idleCompaction",
+      "launchArgs",
+    ]);
+    const idleCompaction = fields.find((field) => field.key === "idleCompaction")!;
+    expect(idleCompaction).toMatchObject({ label: "Compact idle threads", control: "select" });
+    expect(idleCompaction.options?.map((option) => option.value)).toEqual([
+      "default",
+      "onReturn",
+      "beforeCacheExpires",
+      "off",
+    ]);
+    // Choosing the default clears the key, so the General setting applies again.
+    expect(
+      nextProviderConfigWithFieldValue({ idleCompaction: "off" }, idleCompaction, ""),
+    ).toBeUndefined();
+  });
+
   it("preserves unknown config keys while omitting empty configurable fields", () => {
     const codex = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("codex")];
     expect(codex).toBeDefined();
