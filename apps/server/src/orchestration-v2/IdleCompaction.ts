@@ -24,6 +24,22 @@ export type IdleCompactionRecords = Pick<
 >;
 
 /**
+ * The latest run, skipping cancelled runs that never started: removing or
+ * steering a queued message leaves one behind, and it says nothing about
+ * whether the thread is idle.
+ */
+export function latestStartedRun<
+  Run extends Pick<IdleCompactionRecords["runs"][number], "ordinal" | "status" | "startedAt">,
+>(runs: ReadonlyArray<Run>): Run | null {
+  return runs
+    .filter((run) => run.status !== "cancelled" || run.startedAt !== null)
+    .reduce<Run | null>(
+      (latest, run) => (latest === null || run.ordinal > latest.ordinal ? run : latest),
+      null,
+    );
+}
+
+/**
  * When an idle Claude thread should compact, or null when it should not. The
  * window ends when the prompt cache of Claude's last request expires (1h on
  * subscriptions, 5m on API keys, or whatever CLAUDE_CODE_PROMPT_CACHE_TTL
@@ -53,10 +69,7 @@ export function idleCompactionWindow(
   if (thread.lineage.relationshipToParent === "subagent") return null;
   // Side chats are temporary and end when closed; they never come back to a cold cache.
   if (thread.sideOfThreadId != null) return null;
-  const latestRun = runs.reduce<(typeof runs)[number] | null>(
-    (latest, run) => (latest === null || run.ordinal > latest.ordinal ? run : latest),
-    null,
-  );
+  const latestRun = latestStartedRun(runs);
   if (latestRun?.status !== "completed" || latestRun.completedAt === null) return null;
   const message = messages.find((candidate) => candidate.id === latestRun.userMessageId);
   // Never compact a compaction, so one idle spell compacts at most once.

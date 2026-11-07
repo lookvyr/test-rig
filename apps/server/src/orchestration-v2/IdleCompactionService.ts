@@ -17,7 +17,7 @@ import * as Stream from "effect/Stream";
 
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { idleCompactionWindow } from "./IdleCompaction.ts";
+import { idleCompactionWindow, latestStartedRun } from "./IdleCompaction.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 
@@ -68,10 +68,7 @@ export const make = Effect.gen(function* () {
         const current = yield* settings.getSettings;
         if (!current.compactIdleThreads) return;
         const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
-        const latestRun = runs.reduce<(typeof runs)[number] | null>(
-          (latest, run) => (latest === null || run.ordinal > latest.ordinal ? run : latest),
-          null,
-        );
+        const latestRun = latestStartedRun(runs);
         if (latestRun === null) return;
         const runId = latestRun.id;
         const records = yield* projections.getThreadRecords(
