@@ -13,10 +13,30 @@ index c499b8b933fce154f95f0cb698c61eaf146ce3e1..61a378d86049029884b844d12c29fbe8
    private syncContainerHeight;
    private getStickyBounds;
 diff --git a/dist/components/CodeView.js b/dist/components/CodeView.js
-index dfabd4963697284d5ea70812bca010efa5cce9b3..a8f40c7e57c647eb36c0d1fb562dd6e898b6fa9c 100644
 --- a/dist/components/CodeView.js
 +++ b/dist/components/CodeView.js
-@@ -1449,7 +1449,22 @@ var CodeView = class CodeView {
+@@ -384,20 +384,6 @@
+ 		this.root.addEventListener("keydown", this.clearPendingScroll, { passive: true });
+ 		this.resizeObserver.observe(this.root);
+ 		this.render(true);
+-		window.__INSTANCE = this;
+-		window.__TOGGLE = () => {
+-			if (CodeView.__STOP) {
+-				CodeView.__STOP = false;
+-				this.scrollTo({
+-					type: "position",
+-					position: CodeView.__lastScrollPosition,
+-					behavior: "instant"
+-				});
+-			} else {
+-				CodeView.__lastScrollPosition = this.getScrollTop();
+-				CodeView.__STOP = true;
+-			}
+-		};
+ 	}
+ 	reset() {
+ 		dequeueRender(this.computeRenderRangeAndEmit);
+@@ -1449,7 +1435,22 @@ var CodeView = class CodeView {
  		}
  		return animation.position;
  	}
@@ -39,7 +59,7 @@ index dfabd4963697284d5ea70812bca010efa5cce9b3..a8f40c7e57c647eb36c0d1fb562dd6e8
  		if (CodeView.__STOP || this.container == null) return;
  		if (!this.isReady()) return;
  		const viewportHeight = this.getHeight();
-@@ -1559,7 +1574,7 @@ var CodeView = class CodeView {
+@@ -1559,7 +1560,7 @@ var CodeView = class CodeView {
  		this.validateStickyContainerHeight();
  		this.fixContainerFocus();
  		if (fitPerfectly || this.scrollAnimation != null) this.render();
@@ -133,3 +153,24 @@ index ff61c90..1e170e5 100644
      }
    },
    "publishConfig": {
+diff --git a/dist/components/Virtualizer.js b/dist/components/Virtualizer.js
+--- a/dist/components/Virtualizer.js
++++ b/dist/components/Virtualizer.js
+@@ -61,17 +61,6 @@
+ 		});
+ 		if (root instanceof Document) this.setupWindow();
+ 		else this.setupElement(contentContainer);
+-		window.__INSTANCE = this;
+-		window.__TOGGLE = () => {
+-			if (Virtualizer.__STOP) {
+-				Virtualizer.__STOP = false;
+-				(this.getScrollContainerElement() ?? window).scrollTo({ top: Virtualizer.__lastScrollPosition });
+-				queueRender(this.computeRenderRangeAndEmit);
+-			} else {
+-				Virtualizer.__lastScrollPosition = this.getScrollTop();
+-				Virtualizer.__STOP = true;
+-			}
+-		};
+ 		for (const [container, instance] of this.connectQueue.entries()) this.connect(container, instance);
+ 		this.connectQueue.clear();
+ 		this.markDOMDirty();

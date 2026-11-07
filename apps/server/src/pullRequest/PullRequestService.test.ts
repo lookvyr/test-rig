@@ -5506,6 +5506,46 @@ it.effect(
     }),
 );
 
+it.effect("stops sweeping idle diff caches and restarts when another review opens", () =>
+  Effect.gen(function* () {
+    const clock = yield* Clock.Clock;
+    let sleeps = 0;
+    let reads = 0;
+    const service = yield* makeService({
+      projects: [project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" })],
+      providers: [
+        fakeProvider("github", {
+          getDiff: () =>
+            Effect.sync(() => ({ patch: String(++reads), truncated: false, nextCursor: null })),
+        }),
+      ],
+    }).pipe(
+      Effect.provideService(Clock.Clock, {
+        ...clock,
+        sleep: (duration) => {
+          sleeps++;
+          return clock.sleep(duration);
+        },
+      }),
+    );
+    const reference = { projectId: "p1" as ProjectId, repository: "acme/web", number: 1 };
+    const commit = { ...reference, commit: "a".repeat(40) };
+    assert.strictEqual(sleeps, 0);
+    yield* service.diff(reference);
+    yield* service.diff(commit);
+    yield* TestClock.adjust(0);
+    assert.strictEqual(sleeps, 1);
+    yield* TestClock.adjust("12 minutes");
+    const afterExpiry = sleeps;
+    assert.isAbove(afterExpiry, 1);
+    yield* TestClock.adjust("12 minutes");
+    assert.strictEqual(sleeps, afterExpiry);
+    assert.strictEqual((yield* service.diff(commit)).patch, "3");
+    yield* TestClock.adjust(0);
+    assert.strictEqual(sleeps, afterExpiry + 1);
+  }),
+);
+
 it.effect("returns large diff slices intact without retaining them in either cache", () =>
   Effect.gen(function* () {
     let reads = 0;

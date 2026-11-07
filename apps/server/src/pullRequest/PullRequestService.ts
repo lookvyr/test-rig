@@ -1858,6 +1858,7 @@ export const make = Effect.gen(function* () {
       }),
     );
 
+  const serviceScope = yield* Effect.scope;
   const context = yield* Effect.context<never>();
   /** Runs a refresh as its own fiber, for the reads that answer from a held value first. */
   const runFork = Effect.runForkWith(context);
@@ -2556,7 +2557,7 @@ export const make = Effect.gen(function* () {
         ))
           held.delete(evicted);
       });
-    return <E>(key: string, read: Effect.Effect<PullRequestDiffResult, E>) => {
+    const serve = <E>(key: string, read: Effect.Effect<PullRequestDiffResult, E>) => {
       const recorded = read.pipe(Effect.tap((value) => record(key, value)));
       return Effect.flatMap(Clock.currentTimeMillis, (now) => {
         const snapshot = held.get(key);
@@ -2567,6 +2568,13 @@ export const make = Effect.gen(function* () {
         return revalidate(recorded).pipe(Effect.as(snapshot.value));
       });
     };
+    const dropExpired = (now: number) => {
+      for (const [key, entry] of held) {
+        if (now - entry.at > staleMs) held.delete(key);
+      }
+      return held.size;
+    };
+    return { serve, dropExpired };
   })();
 
   const makeLastGoodRead = <A>(capacity: number) => {
@@ -3082,6 +3090,23 @@ export const make = Effect.gen(function* () {
       },
     },
   );
+  // Expiration is lazy in both caches. Release closed PRs even if nobody asks for another diff.
+  let sweepPending = false;
+  const sweepDiffs = Effect.gen(function* () {
+    while (true) {
+      yield* Effect.sleep("1 minute");
+      const held = staleDiff.dropExpired(yield* Clock.currentTimeMillis);
+      // Iterating the keys removes expired entries from Effect's cache.
+      const keys = Array.from(yield* Cache.keys(diffCache));
+      if (held === 0 && keys.length === 0) break;
+    }
+    sweepPending = false;
+  });
+  const armDiffSweep = () => {
+    if (sweepPending) return;
+    sweepPending = true;
+    runFork(Effect.forkIn(sweepDiffs, serviceScope));
+  };
   const diff: PullRequestService["Service"]["diff"] = (input) => {
     const key = JSON.stringify([
       refCacheKey(input),
@@ -3105,7 +3130,7 @@ export const make = Effect.gen(function* () {
         ),
       ),
     );
-    return staleDiff(key, read);
+    return staleDiff.serve(key, read.pipe(Effect.ensuring(Effect.sync(armDiffSweep))));
   };
 
   const filesViewedCache = yield* Cache.makeWith(

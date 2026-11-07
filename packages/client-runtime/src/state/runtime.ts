@@ -574,10 +574,10 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
       { initialValue: null },
     ),
   );
-  const family = Atom.family((key: string) => {
+  // A new observer must find the same cached result even after the previous observer is collected.
+  const resultFor = Atom.family((key: string) => {
     const target = parseEnvironmentRpcKey<Input>(key);
-    const idleTtlMs = options.idleTtlMs ?? 5 * 60_000;
-    const queryAtom = runtime
+    return runtime
       .atom((get) => {
         if (options.refreshSignal !== undefined && options.isFinal === undefined) {
           get(options.refreshSignal(target.environmentId));
@@ -590,16 +590,16 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
         }
         return runInEnvironment(target.environmentId, options.execute(target.input));
       })
-      .pipe(
-        // Retain the RPC result, but remount the SWR observer so returning to an
-        // inactive query revalidates stale data instead of reusing a mounted wrapper.
-        Atom.setIdleTTL(idleTtlMs),
-        Atom.swr({
-          staleTime: options.staleTimeMs ?? 30_000,
-          revalidateOnMount: true,
-        }),
-        Atom.setIdleTTL(0),
-      );
+      .pipe(Atom.setIdleTTL(options.idleTtlMs ?? 5 * 60_000));
+  });
+  const family = Atom.family((key: string) => {
+    const queryAtom = resultFor(key).pipe(
+      Atom.swr({
+        staleTime: options.staleTimeMs ?? 30_000,
+        revalidateOnMount: true,
+      }),
+      Atom.setIdleTTL(0),
+    );
     const isFinal = (result: AsyncResult.AsyncResult<A, unknown>) =>
       options.isFinal !== undefined &&
       AsyncResult.isSuccess(result) &&
@@ -611,7 +611,9 @@ export function createEnvironmentQueryAtomFamily<R, ER, Input, A, E>(
           ? queryAtom.pipe(Atom.withRefresh(options.refreshIntervalMs))
           : queryAtom.pipe(refreshEveryUntilFinal(options.refreshIntervalMs, isFinal));
     const signal =
-      options.isFinal === undefined ? undefined : options.refreshSignal?.(target.environmentId);
+      options.isFinal === undefined
+        ? undefined
+        : options.refreshSignal?.(parseEnvironmentRpcKey<Input>(key).environmentId);
     return (
       signal === undefined
         ? intervalQuery
