@@ -841,6 +841,15 @@ it.effect.each(["promote", "steer"] as const)(
           yield* queue("compact", "/compact");
           yield* queue("queued", "queued");
           if (delivery === "promote") yield* queue("next", "next");
+          const compacting = yield* orchestrator.streamDomainEvents.pipe(
+            Stream.filter(
+              (event) =>
+                event.type === "provider-turn.updated" && event.payload.status === "running",
+            ),
+            Stream.take(1),
+            Stream.runDrain,
+            Effect.forkScoped,
+          );
           const settled = yield* orchestrator.streamDomainEvents.pipe(
             Stream.filter(
               (event) =>
@@ -872,12 +881,7 @@ it.effect.each(["promote", "steer"] as const)(
           yield* worker.drain();
           yield* orchestrator.resumeQueuedRuns;
           yield* worker.drain();
-          // The compaction's provider turn must be live before it can be stopped.
-          for (let attempt = 0; attempt < 1_000; attempt += 1) {
-            const { providerTurns } = yield* orchestrator.getThreadProjection(threadId);
-            if (providerTurns.some((turn) => turn.status === "running")) break;
-            yield* Effect.yieldNow;
-          }
+          yield* Fiber.join(compacting);
           const runFor = (id: string) =>
             orchestrator
               .getThreadProjection(threadId)

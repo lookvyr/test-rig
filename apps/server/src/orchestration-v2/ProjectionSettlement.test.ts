@@ -225,31 +225,40 @@ it.effect.each([
       yield* createItem(rolledBack, yield* createRun(rolledBack, "rolled_back"), "running");
       yield* createRun(rolledBack, "completed", 2);
       const roster = yield* createThread("provider-roster");
-      yield* createRun(roster);
-      yield* store.apply({
-        id: EventId.make("event:settlement:roster"),
-        type: "provider-thread.updated",
-        threadId: roster,
-        occurredAt: old,
-        payload: {
-          id: ProviderThreadId.make("provider-thread:settlement"),
-          appThreadId: roster,
-          ownerNodeId: null,
-          driver: ProviderDriverKind.make("codex"),
-          providerInstanceId,
-          providerSessionId: null,
-          nativeThreadRef: null,
-          nativeConversationHeadRef: null,
-          status: "idle",
-          firstRunOrdinal: null,
-          lastRunOrdinal: null,
-          handoffIds: [],
-          forkedFrom: null,
-          createdAt: old,
-          updatedAt: old,
-          pendingBackgroundTasks: [{ taskId: "running-task", kind: "command" }],
-        },
-      });
+      const awaitedRoster = yield* createThread("awaited-provider-roster");
+      for (const threadId of [roster, awaitedRoster]) {
+        yield* createRun(threadId);
+        yield* store.apply({
+          id: EventId.make(`event:settlement:roster:${threadId}`),
+          type: "provider-thread.updated",
+          threadId,
+          occurredAt: old,
+          payload: {
+            id: ProviderThreadId.make(`provider-thread:${threadId}`),
+            appThreadId: threadId,
+            ownerNodeId: null,
+            driver: ProviderDriverKind.make("codex"),
+            providerInstanceId,
+            providerSessionId: null,
+            nativeThreadRef: null,
+            nativeConversationHeadRef: null,
+            status: "idle",
+            firstRunOrdinal: null,
+            lastRunOrdinal: null,
+            handoffIds: [],
+            forkedFrom: null,
+            createdAt: old,
+            updatedAt: old,
+            pendingBackgroundTasks: [
+              {
+                taskId: "running-task",
+                kind: "command",
+                ...(threadId === awaitedRoster ? { awaited: true as const } : {}),
+              },
+            ],
+          },
+        });
+      }
       const candidates = yield* store.getSettlementCandidates();
       const shell = yield* store.getShellSnapshot({ location: "active" });
       const eligible = candidates.filter((thread) =>
@@ -257,7 +266,7 @@ it.effect.each([
       );
       assert.deepEqual(
         new Set(eligible.map((thread) => thread.id)),
-        new Set([idle, completed, queued, woke, background, persistent, rolledBack]),
+        new Set([idle, completed, queued, woke, background, persistent, rolledBack, roster]),
       );
       assert.deepEqual(
         new Set(eligible.map((thread) => thread.id)),
