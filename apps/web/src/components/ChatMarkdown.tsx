@@ -937,6 +937,11 @@ function useMarkdownFileLinkChip() {
   };
 }
 
+// Native word selection stops at hyphens and dots, so a double-click takes the whole span.
+function selectInlineCode(event: ReactMouseEvent<HTMLElement>) {
+  window.getSelection()?.selectAllChildren(event.currentTarget);
+}
+
 // Stable renderer types preserve block state through streamed text and completion.
 const CHAT_MARKDOWN_COMPONENTS = {
   ...Object.fromEntries(
@@ -1168,6 +1173,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
       if (fileLinkMeta) {
         return fileLinkChip(fileLinkMeta, `\`${codeText}\``);
       }
+      return (
+        <code {...props} className={className} onDoubleClick={selectInlineCode}>
+          {children}
+        </code>
+      );
     }
     return (
       <code {...props} className={className}>

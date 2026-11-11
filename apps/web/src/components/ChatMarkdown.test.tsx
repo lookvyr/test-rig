@@ -13,7 +13,11 @@ vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
 vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => vi.fn() }));
 vi.mock("../editorPreferences", () => ({ useOpenInPreferredEditor: () => vi.fn() }));
 vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
-vi.mock("../hooks/useSettings", () => ({ getClientSettings: () => ({ wordWrap: false }) }));
+vi.mock("../hooks/useSettings", () => ({
+  getClientSettings: () => ({ wordWrap: false }),
+  useClientSettings: (select: (settings: { redesignEnabled: boolean }) => unknown) =>
+    select({ redesignEnabled: false }),
+}));
 vi.mock("./ui/collapsible", () => ({
   Collapsible: (props: { children?: ReactNode }) => <div {...props} />,
   CollapsibleTrigger: (props: { children?: ReactNode }) => <button {...props} />,
@@ -66,5 +70,29 @@ describe("streamed markdown state", () => {
       renderer!.update(<ChatMarkdown cwd={undefined} text={`${text}\n\nFollowing text`} />),
     );
     expect(disclosure().props["data-markdown-details-open"]).toBe("true");
+  });
+});
+
+describe("inline code selection", () => {
+  it("selects the whole inline code span on double-click, but leaves fenced code to native word selection", () => {
+    const selectAllChildren = vi.fn();
+    vi.stubGlobal("window", { getSelection: () => ({ selectAllChildren }) });
+    act(() => {
+      renderer = create(
+        <ChatMarkdown
+          cwd={undefined}
+          text={"Run `migration-gate --dry-run` first.\n\n```txt\nfenced-block word\n```"}
+        />,
+      );
+    });
+    const codes = renderer!.root.findAllByType("code");
+    const inline = codes.find((node) => node.props["data-inline-code"] !== undefined)!;
+    const fenced = codes.filter((node) => node.props["data-inline-code"] === undefined);
+    expect(fenced.length).toBeGreaterThan(0);
+    for (const node of fenced) expect(node.props.onDoubleClick).toBeUndefined();
+
+    const target = { tagName: "CODE" };
+    inline.props.onDoubleClick({ currentTarget: target });
+    expect(selectAllChildren).toHaveBeenCalledWith(target);
   });
 });
