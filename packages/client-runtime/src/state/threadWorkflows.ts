@@ -1,8 +1,9 @@
-import type {
-  ChatAttachment,
-  OrchestrationV2ProjectedTurnItem,
-  OrchestrationV2ProviderCapabilities,
-  OrchestrationV2ThreadProjection,
+import {
+  type ChatAttachment,
+  isCompactionCommandMessage,
+  type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2ProviderCapabilities,
+  type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import { copySorted } from "@t3tools/shared/array";
 
@@ -34,6 +35,8 @@ export interface ThreadQueueWorkflowState {
   readonly isHeld: boolean;
   readonly canReorder: boolean;
   readonly canPromoteToSteer: boolean;
+  /** The active run is a compaction, so promoting a queued message stops it instead of steering. */
+  readonly promoteSkipsCompaction: boolean;
 }
 
 export function resolveActiveThreadRun(projection: Pick<Projection, "runs">): Run | null {
@@ -49,10 +52,12 @@ export function canSendThreadFollowUp(projection: Projection | null | undefined)
     return false;
   }
   const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
+  // A compaction cannot take steering input; sending skips it and the message runs next.
+  if (message !== undefined && isCompactionCommandMessage(message)) return true;
   if (
     message !== undefined &&
     message.attachments.length === 0 &&
-    ["/compact", "/logout"].includes(message.text.trim().toLowerCase())
+    message.text.trim().toLowerCase() === "/logout"
   ) {
     return false;
   }
@@ -173,6 +178,13 @@ export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQu
     projection.providerTurns.some(
       (turn) => turn.runAttemptId === activeRun.activeAttemptId && turn.status === "running",
     );
+  const activeMessage = projection.messages.find(
+    (message) => message.id === activeRun?.userMessageId,
+  );
+  const promoteSkipsCompaction =
+    activeRun?.status === "running" &&
+    activeMessage !== undefined &&
+    isCompactionCommandMessage(activeMessage);
   const queuedRuns = copySorted(
     getUserQueuedThreadRuns(projection),
     (left, right) =>
@@ -195,9 +207,11 @@ export function deriveThreadQueueWorkflowState(projection: Projection): ThreadQu
     isHeld: projection.runs.some((run) => run.status === "queued" && run.queueHeld === true),
     canReorder: capabilities?.supportsQueuedMessages === true,
     canPromoteToSteer:
-      hasSteerableProviderTurn &&
-      (capabilities?.supportsActiveSteering === true ||
-        capabilities?.supportsSteeringByInterruptRestart === true),
+      promoteSkipsCompaction ||
+      (hasSteerableProviderTurn &&
+        (capabilities?.supportsActiveSteering === true ||
+          capabilities?.supportsSteeringByInterruptRestart === true)),
+    promoteSkipsCompaction,
   };
 }
 

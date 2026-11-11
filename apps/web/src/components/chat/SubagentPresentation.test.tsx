@@ -73,6 +73,16 @@ const provider: ServerProvider = {
       capabilities: {
         optionDescriptors: [
           {
+            id: "reasoningEffort",
+            label: "Reasoning effort",
+            type: "select",
+            currentValue: "medium",
+            options: [
+              { id: "medium", label: "Medium" },
+              { id: "high", label: "High" },
+            ],
+          },
+          {
             id: "serviceTier",
             label: "Speed",
             type: "select",
@@ -176,7 +186,7 @@ describe("subagent child traits", () => {
   }
 
   it("shows matching app-child effort and speed", () => {
-    expect(render()).toContain("high");
+    expect(render()).toContain("High");
     expect(render()).toContain("Fast mode on");
   });
 
@@ -185,7 +195,7 @@ describe("subagent child traits", () => {
     { instanceId: ProviderInstanceId.make("another-account") },
     { model: "different-model" },
   ])("does not infer child traits from unrelated saved settings: %j", (input) => {
-    expect(render(input)).not.toContain("high");
+    expect(render(input)).not.toContain("High");
     expect(render(input)).not.toContain("Fast mode on");
   });
 

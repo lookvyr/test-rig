@@ -76,7 +76,7 @@ export function deriveLatestContextWindowSnapshot(
       toolUses: null,
       durationMs: null,
       compactsAutomatically: true,
-      autoCompactThreshold: null,
+      autoCompactThreshold: liveUsage.autoCompactThreshold ?? null,
       updatedAt: liveUsage.updatedAt,
     };
   }

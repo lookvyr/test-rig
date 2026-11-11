@@ -212,6 +212,7 @@ import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings"
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import { COMPACT_COMMAND_PATTERN } from "../lib/compactBeforeSend";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { getTerminalFocusOwner, useTerminalFocusStore } from "../lib/terminalFocus";
 import { preventRepeatedTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
@@ -5499,6 +5500,13 @@ function ChatViewContent(props: ChatViewProps) {
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
     const messageTextForSend = preparedMessage.text;
     const messageCreatedAt = new Date().toISOString();
+    // A cold Claude session compacts before this message so the turn does not re-read the
+    // whole history uncached. The message queues behind the /compact run; `/compact` with
+    // instructions is itself the compaction.
+    const compactBeforeSend =
+      sendCtx.compactBeforeSend &&
+      isServerThread &&
+      !COMPACT_COMMAND_PATTERN.test(messageTextForSend.trim());
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
       model: ctxSelectedModel,
@@ -5616,6 +5624,30 @@ function ChatViewContent(props: ChatViewProps) {
       failure = turnAttachmentsResult;
     }
 
+    if (failure === null && turnAttachmentsResult._tag === "Success" && compactBeforeSend) {
+      const compactResult = await startThreadTurn({
+        environmentId,
+        input: {
+          threadId: threadIdForSend,
+          message: {
+            messageId: newMessageId(),
+            role: "user",
+            text: "/compact",
+            attachments: [],
+            idleCompaction: "onReturn",
+          },
+          modelSelection: ctxSelectedModelSelection,
+          runtimeMode,
+          interactionMode,
+          dispatchMode: "start",
+          createdAt: messageCreatedAt,
+        },
+      });
+      if (compactResult._tag === "Failure") {
+        failure = compactResult;
+      }
+    }
+
     let turnStartSucceeded = false;
     if (failure === null && turnAttachmentsResult._tag === "Success") {
       const bootstrap =
@@ -5669,6 +5701,7 @@ function ChatViewContent(props: ChatViewProps) {
           titleSeed: title,
           runtimeMode,
           interactionMode,
+          ...(compactBeforeSend ? { dispatchMode: "queue" as const } : {}),
           ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
@@ -5677,6 +5710,7 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        composerRef.current?.clearKeepFullHistory();
         if (isFirstMessage) setStickyComposerModelSelection(ctxSelectedModelSelection);
         acknowledgeActiveThreadWoke();
       }

@@ -2239,7 +2239,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           )}
         </p>
       ) : null}
-      {row.message.inputIntent && row.message.inputIntent !== "turn_start" ? (
+      {row.message.inputIntent &&
+      row.message.inputIntent !== "turn_start" &&
+      !row.sentAfterCompaction ? (
         <UserMessageIntentMarker intent={row.message.inputIntent} />
       ) : null}
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground [&_[data-context-chip]]:[--context-chip-ink:var(--context-chip-message,var(--context-chip-accent))]">
@@ -3498,12 +3500,12 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
     use(TimelineRowActivityCtx);
   // One span for every label so the setup-to-working handoff swaps text in
   // place instead of remounting the row.
-  const compacting = row.compacting ?? (isCompacting ? "Compacting…" : undefined);
-  const shimmer = isPreparingWorktree || compacting !== undefined;
+  const compacting = row.compacting === true || isCompacting;
+  const shimmer = isPreparingWorktree || compacting;
   const label = isPreparingWorktree ? (
     "Setting up worktree…"
-  ) : compacting !== undefined ? (
-    <CompactingLabel label={compacting} />
+  ) : compacting ? (
+    <CompactingLabel createdAt={row.createdAt} />
   ) : row.createdAt ? (
     <>
       Working for <WorkingTimer createdAt={row.createdAt} />
@@ -3571,11 +3573,17 @@ function BackgroundWorktreeSetupChip({ snapshot }: { snapshot: WorktreeSetupSnap
   );
 }
 
-function CompactingLabel({ label }: { label: string }) {
+function CompactingLabel({ createdAt }: { createdAt: string | null }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <Minimize2Icon aria-hidden="true" className="size-3" />
-      {label}
+      {createdAt ? (
+        <span>
+          Compacting for <WorkingTimer createdAt={createdAt} />
+        </span>
+      ) : (
+        "Compacting…"
+      )}
     </span>
   );
 }

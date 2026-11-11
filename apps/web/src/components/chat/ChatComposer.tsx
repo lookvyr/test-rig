@@ -20,7 +20,10 @@ import {
   inlineContextReferenceReplacement,
 } from "~/lib/composerContextReferences";
 import { THREAD_CONTEXT_DRAG_TYPE, readThreadContextDrag } from "./threadContextDrag";
-import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
+import {
+  canSendThreadFollowUp,
+  deriveThreadQueueWorkflowState,
+} from "@t3tools/client-runtime/state/thread-workflows";
 import type {
   RuntimeRequestId,
   EnvironmentId,
@@ -252,6 +255,13 @@ import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveThreadContextWindow, formatProviderDisplayName } from "../../lib/contextWindow";
+import {
+  hasDismissedResumeCompaction,
+  resumeCompactionTokens as deriveResumeCompactionTokens,
+} from "../../lib/compactBeforeSend";
+import { useNowMinute } from "../../hooks/useNowMinute";
+import { useLocalStorage } from "../../hooks/useLocalStorage";
+import * as Schema from "effect/Schema";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -430,6 +440,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
     canRespond?: boolean;
   } | null;
   isRunning: boolean;
+  sendSkipsCompaction?: boolean;
   canInterrupt: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -446,6 +457,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onResume?: (() => void) | undefined;
   onCompactContext?: (() => void) | undefined;
   compactDisabledReason: string | null;
+  compactBeforeSendTokens: number | null;
+  keepFullHistory: boolean;
+  onToggleKeepFullHistory: () => void;
 }) {
   return (
     <>
@@ -465,6 +479,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         compact={props.compact}
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
+        sendSkipsCompaction={props.sendSkipsCompaction ?? false}
         canInterrupt={props.canInterrupt}
         showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
         promptHasText={props.promptHasText}
@@ -480,6 +495,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
         onInterrupt={props.onInterrupt}
         onImplementPlanInNewThread={props.onImplementPlanInNewThread}
+        compactBeforeSendTokens={props.compactBeforeSendTokens}
+        keepFullHistory={props.keepFullHistory}
+        onToggleKeepFullHistory={props.onToggleKeepFullHistory}
       />
     </>
   );
@@ -511,9 +529,13 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  /** A send went through, so the next one compacts first again when the cache is cold. */
+  clearKeepFullHistory: () => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     answeringPendingUserInput: boolean;
+    /** Claude's prompt cache has expired, so this send compacts the history first. */
+    compactBeforeSend: boolean;
     prompt: string;
     images: ComposerImageAttachment[];
     terminalContexts: TerminalContextDraft[];
@@ -751,6 +773,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? "Waiting for the provider to accept steering"
       : null);
   const isSendDisabled = sendDisabledReason !== null;
+  // Sending while a compaction runs stops it and sends the message next.
+  const sendSkipsCompaction = useMemo(
+    () =>
+      activeThreadProjection != null &&
+      deriveThreadQueueWorkflowState(activeThreadProjection).promoteSkipsCompaction,
+    [activeThreadProjection],
+  );
 
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -1017,6 +1046,69 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const compactThreadContext = () => {
     if (compactDisabledReason === null && compactCommandAvailable) onCompactContext?.();
   };
+
+  // ------------------------------------------------------------------
+  // Compact before send
+  // ------------------------------------------------------------------
+  // Tokens a cold Claude session would re-read on its next turn. While set, the
+  // next send compacts first; the Compact chip switches that to Keep.
+  const nowMinute = useNowMinute();
+  const [resumeCompactionDismissed, setResumeCompactionDismissed] = useLocalStorage(
+    `t3code:resume-compaction-dismissed:${environmentId}:${selectedInstanceId}`,
+    false,
+    Schema.Boolean,
+  );
+  const nativeResumeCompactionDismissed =
+    activeThreadProjection != null &&
+    hasDismissedResumeCompaction(activeThreadProjection.runtimeRequests);
+  // "Don't ask again" on Claude's own question also retires the chip in other threads.
+  useEffect(() => {
+    if (nativeResumeCompactionDismissed && !resumeCompactionDismissed) {
+      setResumeCompactionDismissed(true);
+    }
+  }, [nativeResumeCompactionDismissed, resumeCompactionDismissed, setResumeCompactionDismissed]);
+  const resumeCompactionTokens = useMemo(
+    () =>
+      compactDisabledReason !== null || !compactCommandAvailable
+        ? null
+        : deriveResumeCompactionTokens({
+            projection: activeThreadProjection,
+            selection: selectedModelSelection,
+            settings,
+            dismissed: resumeCompactionDismissed,
+            nowMs: Date.parse(`${nowMinute}:00.000Z`),
+          }),
+    [
+      activeThreadProjection,
+      compactCommandAvailable,
+      compactDisabledReason,
+      nowMinute,
+      resumeCompactionDismissed,
+      selectedModelSelection,
+      settings,
+    ],
+  );
+  const [fullHistoryThreadIds, setFullHistoryThreadIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const keepFullHistoryThreadId = activeThread?.id ?? null;
+  const keepFullHistory =
+    keepFullHistoryThreadId !== null && fullHistoryThreadIds.has(keepFullHistoryThreadId);
+  const setKeepFullHistory = useCallback((threadId: string | null, keep: boolean) => {
+    if (threadId === null) return;
+    setFullHistoryThreadIds((current) => {
+      if (current.has(threadId) === keep) return current;
+      const next = new Set(current);
+      if (keep) next.add(threadId);
+      else next.delete(threadId);
+      return next;
+    });
+  }, []);
+  const toggleKeepFullHistory = useCallback(
+    () => setKeepFullHistory(keepFullHistoryThreadId, !keepFullHistory),
+    [keepFullHistory, keepFullHistoryThreadId, setKeepFullHistory],
+  );
+  const compactBeforeSend = resumeCompactionTokens !== null && !keepFullHistory;
 
   // ------------------------------------------------------------------
   // Context window
@@ -3026,8 +3118,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerEditorRef.current?.focusAt(nextCollapsedCursor);
         });
       },
+      clearKeepFullHistory: () => setKeepFullHistory(keepFullHistoryThreadId, false),
       getSendContext: () => ({
         answeringPendingUserInput: activePendingProgress !== null,
+        compactBeforeSend,
         prompt: promptRef.current,
         images: composerImagesRef.current,
         terminalContexts: composerTerminalContextsRef.current,
@@ -3075,6 +3169,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedPromptEffort,
       selectedProvider,
       selectedProviderModels,
+      compactBeforeSend,
+      keepFullHistoryThreadId,
+      setKeepFullHistory,
     ],
   );
 
@@ -3771,8 +3868,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onCompactContext && compactCommandAvailable ? compactThreadContext : undefined
                   }
                   compactDisabledReason={compactDisabledReason}
+                  compactBeforeSendTokens={resumeCompactionTokens}
+                  keepFullHistory={keepFullHistory}
+                  onToggleKeepFullHistory={toggleKeepFullHistory}
                   pendingAction={pendingPrimaryAction}
                   isRunning={phase === "running"}
+                  sendSkipsCompaction={sendSkipsCompaction}
                   canInterrupt={canInterrupt}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}

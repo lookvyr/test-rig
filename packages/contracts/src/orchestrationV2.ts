@@ -1141,6 +1141,8 @@ export const OrchestrationV2ProviderTurnTokenUsage = Schema.Struct({
   promptCacheTtlMs: Schema.optional(PositiveInt),
   /** ISO time that cache expires, measured from when the request started. */
   promptCacheExpiresAt: Schema.optional(Schema.String),
+  /** Token count at which the provider compacts on its own, when it reports one. */
+  autoCompactThreshold: Schema.optional(PositiveInt),
   /** ISO timestamp of the provider's report; string so wire encoding is stable. */
   updatedAt: Schema.String,
 });

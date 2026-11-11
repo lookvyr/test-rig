@@ -204,6 +204,18 @@ function claudePromptCacheTtlMs(
   return undefined;
 }
 
+// Claude caps the window at the model's context, so a setting at or above it never applies.
+// Below that, Claude compacts 33,000 tokens short of the window: Claude Code 2.1.305's
+// getContextUsage reports a 150,000 window as a 117,000 threshold, for every catalog model.
+const CLAUDE_AUTO_COMPACT_RESERVE_TOKENS = 33_000;
+
+export function claudeAutoCompactThreshold(autoCompactWindow: string, maxTokens: number | null) {
+  const windowTokens = Number(autoCompactWindow);
+  return windowTokens > 0 && (maxTokens === null || windowTokens < maxTokens)
+    ? { autoCompactThreshold: windowTokens - CLAUDE_AUTO_COMPACT_RESERVE_TOKENS }
+    : {};
+}
+
 export function claudeProviderTurnTokenUsage(
   usage: {
     readonly input_tokens: number;
@@ -215,6 +227,7 @@ export function claudeProviderTurnTokenUsage(
   modelSelection: ModelSelection,
   updatedAt: string,
   requestedAt?: DateTime.Utc,
+  autoCompactWindow = "",
 ) {
   const inputTokens =
     usage.input_tokens +
@@ -222,6 +235,7 @@ export function claudeProviderTurnTokenUsage(
     (usage.cache_read_input_tokens ?? 0);
   const outputTokens = usage.output_tokens;
   const promptCacheTtlMs = claudePromptCacheTtlMs(usage.cache_creation);
+  const maxTokens = claudeContextWindow(modelSelection);
   // The cache lifetime starts with the request, not when its response ends.
   const promptCacheExpiresAt =
     promptCacheTtlMs === undefined || requestedAt === undefined
@@ -229,13 +243,14 @@ export function claudeProviderTurnTokenUsage(
       : DateTime.formatIso(DateTime.add(requestedAt, { milliseconds: promptCacheTtlMs }));
   return {
     usedTokens: inputTokens + outputTokens,
-    maxTokens: claudeContextWindow(modelSelection),
+    maxTokens,
     inputTokens,
     cachedInputTokens: usage.cache_read_input_tokens ?? 0,
     outputTokens,
     reasoningOutputTokens: 0,
     ...(promptCacheTtlMs === undefined ? {} : { promptCacheTtlMs }),
     ...(promptCacheExpiresAt === undefined ? {} : { promptCacheExpiresAt }),
+    ...claudeAutoCompactThreshold(autoCompactWindow, maxTokens),
     updatedAt,
   };
 }
@@ -2935,6 +2950,8 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
 }
 
 interface ActiveClaudeTurnContext {
+  // Where Claude compacts on its own for this turn, from our setting or Claude's settings files.
+  readonly autoCompactWindow: string;
   compaction: Extract<OrchestrationV2TurnItem, { type: "compaction" }> | null;
   compactionFailure: { readonly message: string | undefined } | null;
   readonly input: ProviderAdapter.ProviderAdapterV2TurnInput;
@@ -3456,6 +3473,16 @@ const decodeClaudeEnvSettings = Schema.decodeUnknownEffect(
   ),
 );
 
+const decodeClaudeCompactSettings = Schema.decodeUnknownEffect(
+  fromLenientJson(
+    Schema.Struct({
+      autoCompactWindow: Schema.optionalKey(Schema.Unknown),
+      modelSettings: Schema.optionalKey(Schema.Unknown),
+    }),
+  ),
+);
+const decodeClaudeCompactWindow = Schema.decodeUnknownOption(Schema.Int);
+
 export interface ClaudeAdapterV2Options {
   readonly instanceId: ProviderInstanceId;
   readonly settings: ClaudeSettings;
@@ -3578,11 +3605,8 @@ export function makeClaudeAdapterV2(
   });
   // Settings env beats the process env, local over project over user, and a local file an older
   // Claude Code left in cwd applies under the root one. resolveSettings reads local from cwd only.
-  const resolveToolSearchOverride = Effect.fn("ClaudeAdapterV2.resolveToolSearchOverride")(
+  const settingsFilesByPrecedence = Effect.fn("ClaudeAdapterV2.settingsFilesByPrecedence")(
     function* (cwd: string | null) {
-      // Custom CLI settings must keep their own precedence; leave tool search to Claude.
-      const flags = parseCliArgs(adapterOptions.settings.launchArgs).flags;
-      if (flags.settings !== undefined || flags["setting-sources"] !== undefined) return undefined;
       const configOverride = adapterOptions.environment.CLAUDE_CONFIG_DIR?.trim();
       const configDirectory = configOverride
         ? path.resolve(cwd ?? ".", configOverride)
@@ -3598,13 +3622,64 @@ export function makeClaudeAdapterV2(
             ]),
         path.join(configDirectory, "settings.json"),
       ];
-      for (const settingsFile of settingsFiles) {
+      return settingsFiles;
+    },
+  );
+  // Custom CLI settings keep their own precedence, which only Claude resolves.
+  const hasCustomSettingSources = () => {
+    const flags = parseCliArgs(adapterOptions.settings.launchArgs).flags;
+    return flags.settings !== undefined || flags["setting-sources"] !== undefined;
+  };
+  const resolveToolSearchOverride = Effect.fn("ClaudeAdapterV2.resolveToolSearchOverride")(
+    function* (cwd: string | null) {
+      if (hasCustomSettingSources()) return undefined;
+      for (const settingsFile of yield* settingsFilesByPrecedence(cwd)) {
         const value = yield* readToolSearchSetting(settingsFile);
         if (value !== undefined) return claudeToolSearchOverride(value);
       }
       return claudeToolSearchOverride(adapterOptions.environment.ENABLE_TOOL_SEARCH);
     },
   );
+
+  // Our Auto-compact after setting wins, since we pass it to Claude. Otherwise Claude reads
+  // autoCompactWindow from its settings files, a model's modelSettings entry first ("auto" means
+  // Claude's default for that model). Only the context meter reads this.
+  const resolveAutoCompactWindow = Effect.fn("ClaudeAdapterV2.resolveAutoCompactWindow")(function* (
+    cwd: string | null,
+    modelSelection: ModelSelection,
+  ) {
+    if (adapterOptions.settings.autoCompactWindow !== "")
+      return adapterOptions.settings.autoCompactWindow;
+    if (hasCustomSettingSources()) return "";
+    const model = compileClaudeModelSelection(modelSelection, modelCatalog).apiModelId.replace(
+      /\[1m\]$/i,
+      "",
+    );
+    const validWindow = (value: unknown) => {
+      const selected = Option.getOrUndefined(decodeClaudeCompactWindow(value));
+      return typeof selected === "number" && selected >= 100_000 && selected <= 1_000_000
+        ? String(selected)
+        : undefined;
+    };
+    for (const settingsFile of yield* settingsFilesByPrecedence(cwd)) {
+      const settings = yield* fileSystem.readFileString(settingsFile).pipe(
+        Effect.flatMap(decodeClaudeCompactSettings),
+        Effect.orElseSucceed(() => undefined),
+      );
+      if (settings === undefined) continue;
+      const models = settings.modelSettings;
+      const modelSetting =
+        typeof models === "object" && models !== null ? Reflect.get(models, model) : undefined;
+      const modelWindow =
+        typeof modelSetting === "object" && modelSetting !== null
+          ? Reflect.get(modelSetting, "autoCompactWindow")
+          : undefined;
+      if (modelWindow === "auto") return "";
+      const value = validWindow(modelWindow) ?? validWindow(settings.autoCompactWindow);
+      if (value !== undefined) return value;
+    }
+    return "";
+  });
 
   // Re-scan on every send: skills are added and switched off mid-session, and
   // the scan is a few directory reads. A skill switched off via skillOverrides,
@@ -7210,9 +7285,12 @@ export function makeClaudeAdapterV2(
             (message.compact_result !== undefined ||
               (message.status === null && message.permissionMode === undefined))
           ) {
+            // The CLI reports a compaction it aborted for our interrupt as failed.
+            const failed =
+              message.compact_result === "failed" &&
+              !(yield* Ref.get(interruptedTurns)).has(context.providerTurnId);
             if (message.compact_result !== undefined) {
-              context.compactionFailure =
-                message.compact_result === "failed" ? { message: message.compact_error } : null;
+              context.compactionFailure = failed ? { message: message.compact_error } : null;
             }
             if (context.compaction?.status === "running") {
               const now = yield* DateTime.now;
@@ -7221,18 +7299,16 @@ export function makeClaudeAdapterV2(
                 status:
                   message.compact_result === "success"
                     ? "completed"
-                    : message.compact_result === "failed"
+                    : failed
                       ? "failed"
                       : "interrupted",
                 title:
                   message.compact_result === "success"
                     ? "Context compacted"
-                    : message.compact_result === "failed"
+                    : failed
                       ? "Context compaction failed"
                       : "Context compaction stopped",
-                ...(message.compact_result === "failed" && message.compact_error
-                  ? { summary: message.compact_error }
-                  : {}),
+                ...(failed && message.compact_error ? { summary: message.compact_error } : {}),
                 completedAt: now,
                 updatedAt: now,
               };
@@ -7317,6 +7393,7 @@ export function makeClaudeAdapterV2(
                   tokenUsage: {
                     usedTokens: afterTokenCount,
                     maxTokens,
+                    ...claudeAutoCompactThreshold(context.autoCompactWindow, maxTokens),
                     updatedAt: DateTime.formatIso(now),
                   },
                 },
@@ -7452,6 +7529,7 @@ export function makeClaudeAdapterV2(
                     context.requestStart?.messageId === message.message.id
                       ? context.requestStart.at
                       : undefined,
+                    context.autoCompactWindow,
                   ),
                 },
               });
@@ -9026,8 +9104,13 @@ export function makeClaudeAdapterV2(
             if (!goalsByNativeThread.has(nativeThreadId)) {
               goalsByNativeThread.set(nativeThreadId, turnInput.providerThread.goal ?? null);
             }
+            const autoCompactWindow = yield* resolveAutoCompactWindow(
+              turnInput.runtimePolicy.cwd,
+              turnInput.modelSelection,
+            );
             const context: ActiveClaudeTurnContext = {
               input: turnInput,
+              autoCompactWindow,
               nativeThreadId,
               nativeTurnId,
               nativeMessageCursor: null,

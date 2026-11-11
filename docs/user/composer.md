@@ -137,24 +137,46 @@ For a provider that supports compaction, choose **Compact context** in that
 indicator, or select **/compact** from the command suggestions. The indicator
 action keeps your unsent draft and attachments in place while compaction runs.
 
+While a compaction runs, you can still send a message: the send button reads
+**Skip compaction and send**. Sending stops the compaction, which shows as
+stopped rather than failed, and your message runs next.
+
+Claude compacts on its own as its context fills. Set **Auto-compact after** in a
+Claude provider's settings to a number between `100000` and `1000000` to choose
+when, for example `300000`. Leave it empty to use Claude's default, or the
+`autoCompactWindow` in Claude's own settings files, including a model's
+`modelSettings` entry. When that point is known, the context-window indicator
+says "Compacts automatically at about N tokens" and marks it on the bar. Claude
+compacts about 33,000 tokens before the number you set.
+
 **Compact idle threads** in **Settings > General** decides what happens to an
 idle Claude thread with at least 200,000 tokens of context. Each Claude
 provider's settings can override it:
 
-- **When you return** (the default) leaves it to Claude: when you come back to a
-  long session after a while, Claude asks whether to compact it or keep the full
-  history.
+- **When you return** (the default) offers to compact when you come back after
+  Claude's prompt cache has expired. A **Compact** chip with the thread's token
+  count shows next to the send button. While it is on, sending summarizes the
+  history first, then sends your message; the working row reads "Compacting
+  for 12s" and the result is titled "Context compacted before sending". Click
+  the chip to switch it to **Keep** and send with the full history. Answering
+  "Don't ask again" to Claude's own compact question hides the chip too. The
+  cache lasts about an hour on a Claude subscription and 5 minutes with an API
+  key, Bedrock or Vertex.
 - **Before the cache expires (beta)** compacts the thread shortly before its
   prompt cache expires, so coming back does not reprocess the whole
   conversation. The timing follows the cache lifetime Claude reports for the
   last request: usually 1 hour on a subscription and 5 minutes with an API key,
   or whatever your Claude prompt cache TTL setting chose. The thread shows one
   compaction status with its reason, followed by the result when it finishes.
-  There is no extra `/compact` message bubble or duplicate working row.
-  Failures show their reason in the compaction status. It is skipped when the
+  There is no extra `/compact` message bubble or duplicate working row. The
+  thread list keeps showing your last turn: the thread does not switch to
+  Working, become unread or send a notification, and **Mark unread** still
+  works. Failures show their reason in the compaction status and surface like
+  any failed turn. It is skipped when the
   thread is waiting on a question, approval, background work or a pending
   merge-back, and when the cache has already expired, for example after the
-  computer slept. Waiting compactions do not survive a restart.
+  computer slept. Waiting compactions do not survive a restart. When the
+  window is missed, the **Compact** chip from **When you return** shows instead.
 - **Never** skips idle compaction and Claude's question when you return. Claude
   still compacts automatically when the context fills, and you can still
   compact by hand.

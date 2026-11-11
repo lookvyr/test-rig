@@ -1,9 +1,17 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon, CornerUpRightIcon, PlayIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  CornerUpRightIcon,
+  Minimize2Icon,
+  PlayIcon,
+} from "lucide-react";
+import { formatContextWindowTokens } from "~/lib/contextWindow";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface PendingActionState {
   questionIndex: number;
@@ -18,6 +26,8 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
+  /** Sending while a compaction runs stops it and sends the message next. */
+  sendSkipsCompaction?: boolean;
   canInterrupt?: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -33,6 +43,10 @@ interface ComposerPrimaryActionsProps {
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
+  /** Tokens the next send compacts first because Claude's prompt cache expired. */
+  compactBeforeSendTokens?: number | null;
+  keepFullHistory?: boolean;
+  onToggleKeepFullHistory?: (() => void) | undefined;
 }
 
 export const formatPendingPrimaryActionLabel = (input: {
@@ -61,6 +75,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
   isRunning,
+  sendSkipsCompaction = false,
   canInterrupt = isRunning,
   showPlanFollowUpPrompt,
   promptHasText,
@@ -76,6 +91,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
+  compactBeforeSendTokens = null,
+  keepFullHistory = false,
+  onToggleKeepFullHistory,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
@@ -225,10 +243,57 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   }
 
   const showResume = canResume && !hasSendableContent;
-  const submitLabel = showResume ? "Resume thread" : isRunning ? "Steer message" : "Send message";
+  const compactTokens =
+    compactBeforeSendTokens !== null && !showResume && !isRunning
+      ? formatContextWindowTokens(compactBeforeSendTokens)
+      : null;
+  const compactsBeforeSend = compactTokens !== null && !keepFullHistory;
+  const submitLabel = showResume
+    ? "Resume thread"
+    : compactsBeforeSend
+      ? "Compact and send"
+      : isRunning && sendSkipsCompaction
+        ? "Skip compaction and send"
+        : isRunning
+          ? "Steer message"
+          : "Send message";
 
   return (
-    <div className="flex items-center gap-2">
+    <div
+      data-chat-composer-compact-send={compactTokens !== null ? "true" : undefined}
+      className="flex items-center gap-2"
+    >
+      {compactTokens !== null ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                className="flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 font-medium text-foreground/80 text-sm tabular-nums outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-64 aria-pressed:bg-accent/60 aria-pressed:text-foreground [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:text-muted-foreground"
+                {...pointerFocusProps}
+                aria-pressed={!keepFullHistory}
+                aria-label={`Compact ${compactTokens} tokens of history before sending`}
+                disabled={isEnvironmentUnavailable}
+                onClick={onToggleKeepFullHistory}
+              />
+            }
+          >
+            <Minimize2Icon aria-hidden="true" />
+            <span className={compact ? "hidden" : undefined}>
+              {keepFullHistory ? "Keep" : "Compact"}
+            </span>
+            <span className="text-muted-foreground">{compactTokens}</span>
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            <div>
+              {keepFullHistory
+                ? `Next send keeps all ${compactTokens} tokens.`
+                : `Next send compacts ${compactTokens} tokens first.`}
+            </div>
+            <div>{keepFullHistory ? "Click to compact first" : "Click to keep full history"}</div>
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       {stopButton}
       <button
         type={showResume ? "button" : "submit"}
@@ -258,7 +323,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                     ? "Sending"
                     : submitLabel
         }
-        title={sendDisabledReason ?? submitLabel}
+        title={
+          sendDisabledReason ??
+          (compactsBeforeSend
+            ? `Summarize ${compactTokens} tokens of history, then send`
+            : submitLabel)
+        }
       >
         {isConnecting || isSendBusy ? (
           <Spinner className="size-3.5" aria-hidden="true" />

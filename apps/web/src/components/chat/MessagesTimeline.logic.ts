@@ -529,7 +529,7 @@ type MessagesTimelineRowContent =
       id: string;
       createdAt: string | null;
       /** A running compaction owns the working row, so its divider appears only once it ends. */
-      compacting?: string;
+      compacting?: true;
     }
   | {
       kind: "thinking";
@@ -589,6 +589,8 @@ type MessagesTimelineRowContent =
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
+      /** Queued only behind the compaction "Compact and send" ran, so it shows no "Queued". */
+      sentAfterCompaction?: true;
     }
   | {
       kind: "assistant-meta";
@@ -1541,13 +1543,24 @@ export function deriveMessagesTimelineRows(input: {
   const compactedRunIds = new Set<RunId>();
   const pendingResumeCompactionAgeByRunId = new Map<RunId, string>();
   const resumeCompactionAgeByEntryId = new Map<string, string>();
+  // "Compact and send" queues the message behind its compaction; it was not the user's choice
+  // to queue, so the message does not say "Queued".
+  const sentAfterCompactionMessageIds = new Set<string>();
+  let followsReturnCompaction = false;
   for (const entry of timelineEntries) {
     if (
       entry.kind === "message" &&
       entry.message.runId !== null &&
       isCompactionCommandMessage(entry.message)
     ) {
-      compactionRuns.set(entry.message.runId, idleCompactionOf(entry.message));
+      const reason = idleCompactionOf(entry.message);
+      compactionRuns.set(entry.message.runId, reason);
+      followsReturnCompaction = reason === "onReturn";
+    } else if (entry.kind === "message" && entry.message.role === "user") {
+      if (followsReturnCompaction && entry.message.inputIntent === "queued_turn") {
+        sentAfterCompactionMessageIds.add(entry.message.id);
+      }
+      followsReturnCompaction = false;
     } else if (entry.kind === "work" && entry.entry.runId) {
       if (timelineEntryIsCompaction(entry)) {
         compactedRunIds.add(entry.entry.runId);
@@ -1595,20 +1608,17 @@ export function deriveMessagesTimelineRows(input: {
     activeRunIsCompaction && !compactionRunFinished ? unsettledRunId : null;
   // Compacting on return holds back the message the user just sent, so the working row says why
   // it is waiting. Any other compaction shows only its live divider, never both.
-  const activeCompactionRunId =
-    runningCompactionRunId !== null && compactionRuns.get(runningCompactionRunId) === "onReturn"
-      ? runningCompactionRunId
-      : activeCompactionEntry?.entry.runId != null &&
-          resumeCompactionAgeByEntryId.has(activeCompactionEntry.id)
-        ? activeCompactionEntry.entry.runId
-        : null;
-  const compactingLabel = (() => {
-    if (activeCompactionRunId === null) return undefined;
-    const age = activeCompactionEntry
-      ? resumeCompactionAgeByEntryId.get(activeCompactionEntry.id)
+  const compactsOnReturn =
+    runningCompactionRunId !== null && compactionRuns.get(runningCompactionRunId) === "onReturn";
+  // The question is answered mid-turn, so the row times this compaction, not the turn.
+  const resumeCompactionEntry =
+    activeCompactionEntry?.entry.runId != null &&
+    resumeCompactionAgeByEntryId.has(activeCompactionEntry.id)
+      ? activeCompactionEntry
       : undefined;
-    return age ? `Compacting after ${age} idle…` : IDLE_COMPACTING_LABELS.onReturn;
-  })();
+  const activeCompactionRunId = compactsOnReturn
+    ? runningCompactionRunId
+    : (resumeCompactionEntry?.entry.runId ?? null);
   // In Zen the final answer is the turn's only output; once it lands nothing is still working.
   const endedRunId = input.latestRun?.turnEnded === true ? input.latestRun.runId : null;
   const zenAnswerLanded =
@@ -1622,8 +1632,11 @@ export function deriveMessagesTimelineRows(input: {
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
-      createdAt: input.activeTurnStartedAt ?? null,
-      ...(compactingLabel ? { compacting: compactingLabel } : {}),
+      createdAt:
+        (compactsOnReturn ? undefined : resumeCompactionEntry?.entry.createdAt) ??
+        input.activeTurnStartedAt ??
+        null,
+      ...(activeCompactionRunId !== null ? { compacting: true as const } : {}),
     });
   };
   let hasActivityRow = false;
@@ -1659,9 +1672,14 @@ export function deriveMessagesTimelineRows(input: {
 
     // The terminal interrupt result is the useful timeline marker. The
     // preceding request is transient bookkeeping and duplicates that marker.
+    // A stopped compaction's own divider already says it stopped.
     if (
       timelineEntry.kind === "event" &&
-      timelineEntry.projectedItem.item.type === "run_interrupt_request"
+      (timelineEntry.projectedItem.item.type === "run_interrupt_request" ||
+        (timelineEntry.projectedItem.item.type === "run_interrupt_result" &&
+          timelineEntry.projectedItem.item.runId !== null &&
+          compactionRuns.has(timelineEntry.projectedItem.item.runId) &&
+          compactedRunIds.has(timelineEntry.projectedItem.item.runId)))
     ) {
       continue;
     }
@@ -1977,6 +1995,9 @@ export function deriveMessagesTimelineRows(input: {
       id: timelineEntry.id,
       createdAt: timelineEntry.createdAt,
       message: timelineEntry.message,
+      ...(sentAfterCompactionMessageIds.has(timelineEntry.message.id)
+        ? { sentAfterCompaction: true as const }
+        : {}),
       ...(timelineEntry.projectedItem === undefined
         ? {}
         : { projectedItem: timelineEntry.projectedItem }),
@@ -2374,6 +2395,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       const bm = b as typeof a;
       return (
         a.message === bm.message &&
+        a.sentAfterCompaction === bm.sentAfterCompaction &&
         a.projectedItem === bm.projectedItem &&
         a.durationStart === bm.durationStart &&
         a.showAssistantMeta === bm.showAssistantMeta &&

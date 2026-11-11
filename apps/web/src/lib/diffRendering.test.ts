@@ -16,10 +16,11 @@ describe("buildPatchCacheKey", () => {
     expect(buildPatchCacheKey(patch)).toBe(buildPatchCacheKey(patch));
   });
 
-  it("normalizes outer whitespace before hashing", () => {
-    const patch = "diff --git a/a.ts b/a.ts\n+console.log('hello')";
+  it("preserves trailing whitespace and newlines that change the parsed patch", () => {
+    const patch = "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-before\n+after";
 
-    expect(buildPatchCacheKey(`\n${patch}\n`)).toBe(buildPatchCacheKey(patch));
+    expect(buildPatchCacheKey(`${patch} `)).not.toBe(buildPatchCacheKey(patch));
+    expect(buildPatchCacheKey(`${patch}\n`)).not.toBe(buildPatchCacheKey(patch));
   });
 
   it("changes when diff content changes", () => {
