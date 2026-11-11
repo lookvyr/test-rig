@@ -253,6 +253,9 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Project Grouping"]
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
+      ...(settings.toolCallVisibility !== DEFAULT_UNIFIED_SETTINGS.toolCallVisibility
+        ? ["Tool calls in chat"]
+        : []),
       ...(settings.fontFamilySans !== DEFAULT_UNIFIED_SETTINGS.fontFamilySans
         ? ["Interface font"]
         : []),
@@ -412,6 +415,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
+      toolCallVisibility: DEFAULT_UNIFIED_SETTINGS.toolCallVisibility,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
@@ -1327,6 +1331,13 @@ function FontFamilySettingsRow({
   );
 }
 
+const TOOL_CALL_VISIBILITY_LABELS: Record<ToolCallVisibility, string> = {
+  showAll: "Show all",
+  hideSuccessful: "Hide successful",
+  hideAll: "Hide all",
+  zen: "Zen",
+};
+
 const isToolCallVisibility = Schema.is(ToolCallVisibility);
 
 export function GeneralSettingsPanel() {
@@ -1423,7 +1434,19 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("tool-call-visibility")}
-          description="Reduce commands, edits, searches, and tool calls in the conversation. Hide successful keeps running and failed calls. Errors, approvals, questions, and agent interactions remain visible. This preference applies to this device."
+          description="Reduce commands, edits, searches, and tool calls in the conversation. Hide successful keeps running and failed calls. Zen also hides the agent's in-between messages and shows only final answers. Errors, approvals, questions, and agent interactions remain visible. This preference applies to this device."
+          resetAction={
+            settings.toolCallVisibility !== DEFAULT_UNIFIED_SETTINGS.toolCallVisibility ? (
+              <SettingResetButton
+                label="tool calls in chat"
+                onClick={() =>
+                  updateSettings({
+                    toolCallVisibility: DEFAULT_UNIFIED_SETTINGS.toolCallVisibility,
+                  })
+                }
+              />
+            ) : null
+          }
           control={
             <Select
               value={settings.toolCallVisibility}
@@ -1433,17 +1456,15 @@ export function GeneralSettingsPanel() {
             >
               <SelectTrigger className="w-full sm:w-40" aria-label="Tool calls in chat">
                 <SelectValue>
-                  {
-                    { showAll: "Show all", hideSuccessful: "Hide successful", hideAll: "Hide all" }[
-                      settings.toolCallVisibility
-                    ]
-                  }
+                  {TOOL_CALL_VISIBILITY_LABELS[settings.toolCallVisibility]}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem value="showAll">Show all</SelectItem>
-                <SelectItem value="hideSuccessful">Hide successful</SelectItem>
-                <SelectItem value="hideAll">Hide all</SelectItem>
+                {ToolCallVisibility.literals.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {TOOL_CALL_VISIBILITY_LABELS[value]}
+                  </SelectItem>
+                ))}
               </SelectPopup>
             </Select>
           }
