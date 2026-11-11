@@ -1,6 +1,7 @@
 import * as SecretRequests from "../../../secrets/SecretRequests.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import {
+  BrowserNavigationTarget,
   OrchestratorMcpFailure,
   PreviewAutomationActInput,
   PreviewAutomationDialogInput,
@@ -57,11 +58,17 @@ export const PreviewStatusTool = Tool.make("preview_status", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
+// `url` already covers websites, so open only adds the dev-server target.
+const EnvironmentPortTarget = BrowserNavigationTarget.members[1];
+
 export const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Open and show a browser tab. open=false keeps it in the background. Use tabId for an existing tab, reuseExistingTab=false for a new one, or omit both for this session's current tab.",
-    parameters: PreviewAutomationOpenInput,
+      "Open and show a browser tab. For a dev server, pass `target` instead of `url`. open=false keeps it in the background. Use tabId for an existing tab, reuseExistingTab=false for a new one, or omit both for this session's current tab.",
+    parameters: PreviewAutomationOpenInput.mapFields(
+      (fields) => ({ ...fields, target: Schema.optional(EnvironmentPortTarget) }),
+      { unsafePreserveChecks: true },
+    ),
     success: PreviewAutomationStatus,
     failure: PreviewAutomationError,
     dependencies,
@@ -110,15 +117,18 @@ export const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = readonlyBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect before interacting: bounded text, element selectors, diagnostics, and PNG. Select tabId or omit for the current tab. Trimmed-data notes guide targeted preview_evaluate reads. includeImage=false omits PNG; save=true returns local screenshotPath and screenshotMarkdown. Include screenshotMarkdown verbatim to show it in chat.",
+      "Inspect before interacting: page text, `accessibilityTree` of controls with refs, and console and network errors. Target an element with `locator='aria-ref=<ref>'`; refs die on navigation or a new snapshot. Text caps near 20 KB; `omitted` notes guide targeted preview_evaluate reads. To show a screenshot when asked: `save=true`, then include `screenshotMarkdown` verbatim.",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(Schema.Boolean).annotate({
-        description: "Include the PNG image in the tool response. Defaults to true.",
+        description: "Default false. True only to see the page.",
+      }),
+      fullTree: Schema.optional(Schema.Boolean).annotate({
+        description: "Default false. True adds every node and link URL to the tree.",
       }),
       save: Schema.optional(Schema.Boolean).annotate({
         description:
-          "Save the PNG locally and return its absolute screenshotPath. Defaults to false.",
+          "Write a full-size PNG; return only `screenshotPath` and `screenshotMarkdown`.",
       }),
     }),
     success: PreviewAutomationSnapshot,

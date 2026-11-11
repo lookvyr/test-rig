@@ -6,99 +6,165 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
-import { MAX_SNAPSHOT_TEXT_BYTES, saveScreenshot, snapshotMetadata } from "./PreviewSnapshot.ts";
+import {
+  MAX_SNAPSHOT_TEXT_BYTES,
+  saveScreenshot,
+  savedScreenshotMetadata,
+  snapshotMetadata,
+} from "./PreviewSnapshot.ts";
+
+const tree = `- heading "Example" [level=1]
+- button "Continue" [ref=t3-abc-e2]`;
 
 const snapshot: PreviewAutomationSnapshot = {
   url: "https://example.test",
   title: "Example",
   loading: false,
   visibleText: "Example page",
-  interactiveElements: [
-    {
-      tag: "button",
-      role: "button",
-      name: "Continue",
-      selector: "#continue",
-      x: 10,
-      y: 20,
-      width: 100,
-      height: 30,
-    },
-  ],
-  accessibilityTree: { nodes: ["full accessibility tree"] },
+  interactiveElements: [],
+  accessibilityTree: tree,
   consoleEntries: [],
   networkEntries: [],
   actionTimeline: [],
   screenshot: { mimeType: "image/png", data: "cG5n", width: 100, height: 50 },
 };
 
-it("keeps actionable selectors and screenshot metadata without duplicating image bytes", () => {
+const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
+
+it("returns the tree's refs and screenshot size, leaving out image bytes and empty lists", () => {
   const result = snapshotMetadata(snapshot);
-  expect(result.interactiveElements).toEqual(snapshot.interactiveElements);
-  expect(result.screenshot).toEqual({ mimeType: "image/png", width: 100, height: 50 });
-  expect(result).not.toHaveProperty("accessibilityTree");
-  expect(result).not.toHaveProperty("screenshotPath");
-  expect(result.omitted).toContain("accessibilityTree (use selectors or preview_evaluate)");
+  expect(result).toEqual({
+    url: "https://example.test",
+    title: "Example",
+    loading: false,
+    visibleText: "Example page",
+    accessibilityTree: tree,
+    screenshot: { mimeType: "image/png", width: 100, height: 50 },
+  });
 });
 
-it("bounds Unicode and escaped JSON while keeping recent diagnostics and intact selectors", () => {
+it("notes a tree it cannot pass through", () => {
+  const result = snapshotMetadata({ ...snapshot, accessibilityTree: { nodes: [] } });
+  expect(result).not.toHaveProperty("accessibilityTree");
+  expect(result.omitted).toEqual([
+    "accessibilityTree (use interactiveElements locators or preview_evaluate)",
+  ]);
+});
+
+it("lists only console errors, failed requests, and actions that did not succeed", () => {
+  const result = snapshotMetadata({
+    ...snapshot,
+    consoleEntries: [
+      { level: "log", text: "ready", timestamp: "1" },
+      { level: "error", text: "boom", timestamp: "2" },
+      { level: "warning", text: "deprecated", timestamp: "3" },
+    ],
+    networkEntries: [
+      { url: "https://example.test/ok", method: "GET", status: 200, failed: false, timestamp: "1" },
+      {
+        url: "https://example.test/missing",
+        method: "GET",
+        status: 404,
+        failed: false,
+        timestamp: "2",
+      },
+      {
+        url: "https://example.test/offline",
+        method: "GET",
+        status: null,
+        failed: true,
+        errorText: "net::ERR_FAILED",
+        timestamp: "3",
+      },
+    ],
+    actionTimeline: [
+      { id: "1", action: "click", status: "succeeded", startedAt: "1" },
+      { id: "2", action: "type", status: "failed", startedAt: "2", error: "detached" },
+    ],
+  });
+  expect(result.consoleEntries?.map(({ text }) => text)).toEqual(["boom", "deprecated"]);
+  expect(result.networkEntries?.map(({ url }) => url)).toEqual([
+    "https://example.test/missing",
+    "https://example.test/offline",
+  ]);
+  expect(result.actionTimeline?.map(({ id }) => id)).toEqual(["2"]);
+});
+
+it("keeps the newest errors when there are many", () => {
+  const result = snapshotMetadata({
+    ...snapshot,
+    consoleEntries: Array.from({ length: 100 }, (_, index) => ({
+      level: "error",
+      text: `message ${index}`,
+      timestamp: String(index),
+    })),
+  });
+  expect(result.consoleEntries).toHaveLength(40);
+  expect(result.consoleEntries?.[0]?.text).toBe("message 60");
+  expect(result.consoleEntries?.at(-1)?.text).toBe("message 99");
+  expect(result.omitted).toContain("60 older console errors");
+});
+
+it("bounds Unicode and escaped JSON, shedding logs before page text and refs", () => {
   const large = snapshotMetadata({
     ...snapshot,
     title: "\u0000".repeat(20_000),
     url: "\u0000".repeat(20_000),
     visibleText: "\u0000".repeat(30_000),
-    interactiveElements: Array.from({ length: 200 }, (_, index) => ({
-      ...snapshot.interactiveElements[0]!,
-      name: "🙂".repeat(10_000),
-      selector: `#button-${index}`,
-    })),
     consoleEntries: Array.from({ length: 100 }, (_, index) => ({
-      level: "log",
+      level: "error",
       text: "文".repeat(5_000),
       timestamp: `entry-${index}`,
     })),
     networkEntries: Array.from({ length: 100 }, (_, index) => ({
       url: `https://example.test/${"x".repeat(5_000)}`,
       method: "GET",
-      status: 200,
+      status: 500,
       failed: false,
       timestamp: `entry-${index}`,
     })),
-    accessibilityTree: "tree".repeat(100_000),
+    accessibilityTree: `- button "Continue" [ref=t3-abc-e2]\n${'- link "🙂" [ref=t3-abc-e3]\n'.repeat(5_000)}`,
   });
-  expect(Buffer.byteLength(JSON.stringify(large), "utf8")).toBeLessThanOrEqual(
-    MAX_SNAPSHOT_TEXT_BYTES,
-  );
-  expect(large.interactiveElements.every(({ selector }) => /^#button-\d+$/.test(selector))).toBe(
-    true,
-  );
-  expect(large.omitted).toContain("visibleText (size limit)");
-  expect(large.omitted).toContain("older console entries");
-  const recent = snapshotMetadata({
-    ...snapshot,
-    consoleEntries: Array.from({ length: 100 }, (_, index) => ({
-      level: "log",
-      text: `message ${index}`,
-      timestamp: String(index),
-    })),
-  });
-  expect(recent.consoleEntries).toHaveLength(40);
-  expect(recent.consoleEntries[0]?.text).toBe("message 60");
-  expect(recent.consoleEntries.at(-1)?.text).toBe("message 99");
+  expect(bytes(large)).toBeLessThanOrEqual(MAX_SNAPSHOT_TEXT_BYTES);
+  expect(large.accessibilityTree).toMatch(/^- button "Continue" \[ref=t3-abc-e2\]/);
+  expect(large.consoleEntries).toBeUndefined();
+  expect(large.networkEntries).toBeUndefined();
+  expect(large.omitted).toContain("40 of 40 consoleEntries");
+  expect(large.omitted?.some((note) => note.startsWith("accessibilityTree after"))).toBe(true);
 });
 
-it("drops oversized selectors instead of returning shortened selectors that could target another element", () => {
+it("keeps page text beside a large tree", () => {
   const result = snapshotMetadata({
     ...snapshot,
-    interactiveElements: [
-      { ...snapshot.interactiveElements[0]!, selector: `#${"x".repeat(100_000)}` },
-    ],
+    visibleText: "word ".repeat(4_000),
+    accessibilityTree: '- link "x" [ref=t3-abc-e1]\n'.repeat(4_000),
   });
-  expect(result.interactiveElements).toEqual([]);
-  expect(result.omitted).toContain("interactive elements (size limit)");
-  expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThanOrEqual(
-    MAX_SNAPSHOT_TEXT_BYTES,
+  expect(bytes(result)).toBeLessThanOrEqual(MAX_SNAPSHOT_TEXT_BYTES);
+  expect(result.visibleText.length).toBeGreaterThanOrEqual(2_000);
+  expect(result.accessibilityTree?.length).toBeGreaterThanOrEqual(2_000);
+});
+
+it("never cuts an emoji in half", () => {
+  const result = snapshotMetadata({
+    ...snapshot,
+    visibleText: `a${"🙂".repeat(10_000)}`,
+    accessibilityTree: `b${"🙂".repeat(20_000)}`,
+  });
+  const text = JSON.stringify(result);
+  expect(text).not.toMatch(/\\ud83d(?!\\ude42)/i);
+  expect(`${result.visibleText}${result.accessibilityTree}`).not.toMatch(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/,
   );
+});
+
+it("returns only the path and markdown for a saved screenshot", () => {
+  expect(
+    savedScreenshotMetadata("https://example.test", "/tmp/a/browser-screenshot-x.png"),
+  ).toEqual({
+    url: "https://example.test",
+    screenshotPath: "/tmp/a/browser-screenshot-x.png",
+    screenshotMarkdown: "![Browser screenshot](/browser-artifacts/browser-screenshot-x.png)",
+  });
 });
 
 it.effect("saves distinct PNG files even when snapshots have the same timestamp", () =>

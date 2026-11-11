@@ -22,6 +22,7 @@ import { constVoid } from "effect/Function";
 import type { CDPSession, ConsoleMessage, Frame, Locator, Page } from "playwright-core";
 import * as NodeCrypto from "node:crypto";
 import { BrowserControlInterrupted } from "./SessionControl.ts";
+import { compactAriaTree } from "./AriaTree.ts";
 
 const MAX_EVALUATION_BYTES = 64_000;
 const MAX_VISIBLE_TEXT_LENGTH = 20_000;
@@ -499,6 +500,9 @@ type SnapshotInput = {
   readonly cdp: CDPSession;
   /** Headless pages render at the scale the server set; a desktop page at its display's. */
   readonly renderScale: number | "display";
+  readonly fullScreenshot?: boolean | undefined;
+  /** Every node and link URL, instead of the compact tree of what an agent can act on. */
+  readonly fullTree?: boolean | undefined;
   readonly consoleEntries: ReadonlyArray<PreviewAutomationConsoleEntry>;
   readonly networkEntries: ReadonlyArray<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: PreviewAutomationSnapshot["actionTimeline"];
@@ -542,15 +546,19 @@ const capture = async (
         "url" | "title" | "loading" | "visibleText" | "interactiveElements"
       >
     >,
-    captureViewport(input.cdp, { format: "png" }).then((png) =>
-      scale < 1 ? shrinkPng(input.cdp, png, scale) : png,
+    captureViewport(input.cdp, { format: "png" }).then(async (full) =>
+      scale < 1
+        ? {
+            data: await shrinkPng(input.cdp, full, scale),
+            full: input.fullScreenshot ? full : undefined,
+          }
+        : { data: full, full: undefined },
     ),
   ]);
   void pageAndScreenshot.catch(constVoid);
   // Leaves time for the second read; a frame that never loads holds the tree until then.
   const tree = await input.page.ariaSnapshot({
     mode: "ai",
-    boxes: true,
     timeout: Math.max(1, deadline - Date.now() - 2_000),
   });
   const after = await read(before);
@@ -568,13 +576,15 @@ const capture = async (
     void iframe.dispose().catch(constVoid);
     if (frame && unread.includes(frame)) throw tooBusy();
   }
-  const [page, data] = await pageAndScreenshot;
+  const [page, { full, data }] = await pageAndScreenshot;
   if (state.generation !== generation) throw pageChanged();
   const mask = (text: string) => (dotted ? text.replace(dotted, MASKED_VALUE) : text);
   // Redacted before the cut, so a payload crossing it can't leave its start showing, and before
   // masking, which could hide the `data:` scheme behind a password value's dots.
   const redacted = withoutTreeDataPayloads(tree);
-  const accessibilityTree = (dotted ? maskTree(redacted, dotted) : redacted)
+  const masked = dotted ? maskTree(redacted, dotted) : redacted;
+  // Compacted before the cut, so the cap spends its characters on what agents act on.
+  const accessibilityTree = (input.fullTree ? masked : compactAriaTree(masked))
     .slice(0, MAX_VISIBLE_TEXT_LENGTH)
     .replace(/\[ref=((?:f\d+)?e\d+)\]/g, (_match, nativeRef: string) => {
       const ref = `t3-${generation}-${nativeRef}`;
@@ -595,6 +605,7 @@ const capture = async (
       data,
       ...pngSize(data),
     },
+    ...(full !== undefined ? { fullScreenshot: { data: full, ...pngSize(full) } } : {}),
   };
 };
 

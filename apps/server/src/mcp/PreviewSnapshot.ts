@@ -8,42 +8,69 @@ import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
 
-export const MAX_SNAPSHOT_TEXT_BYTES = 60_000;
+/** Claude Code spills oversized results to files, losing locators; bound both text and its preferred structuredContent. */
+export const MAX_SNAPSHOT_TEXT_BYTES = 20_000;
+const MAX_VISIBLE_TEXT_CHARS = 8_000;
+const MAX_TREE_CHARS = 20_000;
+// Page text and the ARIA tree both shrink to this before either drops below it.
+const TEXT_FLOOR_CHARS = 2_000;
+const MAX_ELEMENT_NAME_CHARS = 200;
+const MAX_LOG_ENTRIES = 40;
+const MAX_LOG_TEXT_CHARS = 500;
+const MAX_IDENTIFIER_CHARS = 2_048;
+const IDENTIFIER_FLOOR_CHARS = 256;
+const ERROR_CONSOLE_LEVELS = new Set(["error", "warning", "assert"]);
 
-/** Keep the same bounded metadata in text and structured MCP results. */
+const cutText = (text: string, max: number) => {
+  if (text.length <= max) return text;
+  // Half an emoji serializes to a lone surrogate escape, which provider JSON parsers reject.
+  const last = text.charCodeAt(max - 1);
+  return `${text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max)}…`;
+};
+
+const halveToFloor = (chars: number) =>
+  chars > TEXT_FLOOR_CHARS
+    ? Math.max(TEXT_FLOOR_CHARS, Math.floor(chars / 2))
+    : Math.floor(chars / 2);
+
+const cutEntryStrings = <A extends object>(entry: A): A =>
+  Object.fromEntries(
+    Object.entries(entry).map(([key, value]) => [
+      key,
+      typeof value === "string" ? cutText(value, MAX_LOG_TEXT_CHARS) : value,
+    ]),
+  ) as A;
+
+const screenshotMarkdown = (screenshotPath: string) =>
+  `![Browser screenshot](/browser-artifacts/${screenshotPath.split(/[\\/]/).at(-1)})`;
+
+/** A save is for showing people the page, so its result skips the page state. */
+export const savedScreenshotMetadata = (url: string, screenshotPath: string) => ({
+  url: cutText(url, MAX_IDENTIFIER_CHARS),
+  screenshotPath,
+  screenshotMarkdown: screenshotMarkdown(screenshotPath),
+});
+
+/**
+ * Bounded snapshot metadata for both the text and structured MCP results. Successful requests,
+ * routine console output, and finished actions repeat on every snapshot, so logs list problems only.
+ */
 export function snapshotMetadata(snapshot: PreviewAutomationSnapshot, screenshotPath?: string) {
-  const omitted = new Set<string>(["accessibilityTree (use selectors or preview_evaluate)"]);
-  const cut = (value: string, max: number, label: string): string => {
-    if (value.length <= max) return value;
-    omitted.add(`${label} after ${max} characters`);
-    return `${value.slice(0, max)}…`;
+  const omitted: string[] = [];
+  const tree =
+    typeof snapshot.accessibilityTree === "string" ? snapshot.accessibilityTree : undefined;
+  if (snapshot.accessibilityTree !== undefined && tree === undefined) {
+    omitted.push("accessibilityTree (use interactiveElements locators or preview_evaluate)");
+  }
+  const tail = <T extends object>(entries: readonly T[], label: string): T[] => {
+    if (entries.length > MAX_LOG_ENTRIES) {
+      omitted.push(`${entries.length - MAX_LOG_ENTRIES} older ${label}`);
+    }
+    return entries.slice(-MAX_LOG_ENTRIES).map(cutEntryStrings);
   };
-  const logs = <T extends object>(entries: readonly T[], label: string): T[] => {
-    if (entries.length > 40) omitted.add(`older ${label}`);
-    return entries
-      .slice(-40)
-      .map(
-        (entry) =>
-          Object.fromEntries(
-            Object.entries(entry).map(([key, value]) => [
-              key,
-              typeof value === "string" ? cut(value, 500, `${label} strings`) : value,
-            ]),
-          ) as T,
-      );
-  };
-  const metadata = {
-    url: cut(snapshot.url, 2_048, "url"),
-    title: cut(snapshot.title, 2_048, "title"),
+  let identifierChars = MAX_IDENTIFIER_CHARS;
+  const bounded = {
     loading: snapshot.loading,
-    visibleText: cut(snapshot.visibleText, 8_000, "visibleText"),
-    interactiveElements: snapshot.interactiveElements.map((element) => ({
-      ...element,
-      name: cut(element.name, 200, "element names"),
-    })),
-    consoleEntries: logs(snapshot.consoleEntries, "console entries"),
-    networkEntries: logs(snapshot.networkEntries, "network entries"),
-    actionTimeline: logs(snapshot.actionTimeline, "action timeline entries"),
     screenshot: {
       mimeType: snapshot.screenshot.mimeType,
       width: snapshot.screenshot.width,
@@ -53,40 +80,120 @@ export function snapshotMetadata(snapshot: PreviewAutomationSnapshot, screenshot
       ? {}
       : {
           screenshotPath,
-          screenshotMarkdown: `![Browser screenshot](/browser-artifacts/${screenshotPath.split(/[\\/]/).at(-1)})`,
+          screenshotMarkdown: screenshotMarkdown(screenshotPath),
         }),
   };
-  const result = () => ({ ...metadata, omitted: [...omitted] });
-  const newestHalf = <T>(entries: T[]): T[] => entries.slice(Math.ceil(entries.length / 2));
-
-  // Shed logs before selectors. Never shorten a selector into an invalid target.
-  // Count the encoded JSON, including omission notes and escaping, in the limit.
-  while (Buffer.byteLength(JSON.stringify(result()), "utf8") > MAX_SNAPSHOT_TEXT_BYTES) {
-    if (metadata.actionTimeline.length > 0) {
-      metadata.actionTimeline = newestHalf(metadata.actionTimeline);
-      omitted.add("older action timeline entries (size limit)");
-    } else if (metadata.networkEntries.length > 0) {
-      metadata.networkEntries = newestHalf(metadata.networkEntries);
-      omitted.add("older network entries (size limit)");
-    } else if (metadata.consoleEntries.length > 0) {
-      metadata.consoleEntries = newestHalf(metadata.consoleEntries);
-      omitted.add("older console entries (size limit)");
-    } else if (metadata.interactiveElements.length > 0) {
-      metadata.interactiveElements = metadata.interactiveElements.slice(
-        0,
-        Math.floor(metadata.interactiveElements.length / 2),
-      );
-      omitted.add("interactive elements (size limit)");
-    } else {
-      // JSON escaping can expand page text beyond its character cap.
-      metadata.visibleText = metadata.visibleText.slice(
-        0,
-        Math.floor(metadata.visibleText.length / 2),
-      );
-      omitted.add("visibleText (size limit)");
-    }
+  const shedOrder = [
+    "actionTimeline",
+    "networkEntries",
+    "consoleEntries",
+    "interactiveElements",
+  ] as const;
+  type ListKey = (typeof shedOrder)[number];
+  type Lists = { readonly [K in ListKey]: PreviewAutomationSnapshot[K] };
+  const full: Lists = {
+    interactiveElements: snapshot.interactiveElements.map((element) => ({
+      ...element,
+      name: cutText(element.name, MAX_ELEMENT_NAME_CHARS),
+    })),
+    consoleEntries: tail(
+      snapshot.consoleEntries.filter((entry) => ERROR_CONSOLE_LEVELS.has(entry.level)),
+      "console errors",
+    ),
+    networkEntries: tail(
+      snapshot.networkEntries.filter(
+        (entry) => entry.failed || (entry.status !== null && entry.status >= 400),
+      ),
+      "failed requests",
+    ),
+    actionTimeline: tail(
+      snapshot.actionTimeline.filter((entry) => entry.status !== "succeeded"),
+      "unfinished or failed actions",
+    ),
+  };
+  const lists: { -readonly [K in ListKey]: Lists[K] } = { ...full };
+  const nonEmpty = <K extends ListKey>(key: K): { [P in K]?: Lists[K] } =>
+    lists[key].length > 0 ? ({ [key]: lists[key] } as { [P in K]?: Lists[K] }) : {};
+  let visibleTextChars = Math.min(snapshot.visibleText.length, MAX_VISIBLE_TEXT_CHARS);
+  let treeChars = Math.min(tree?.length ?? 0, MAX_TREE_CHARS);
+  // Empty lists are left out: an agent learns nothing from them, and they repeat every call.
+  const value = () => ({
+    url: cutText(snapshot.url, identifierChars),
+    title: cutText(snapshot.title, identifierChars),
+    ...bounded,
+    visibleText: cutText(snapshot.visibleText, visibleTextChars),
+    ...(tree === undefined || treeChars === 0
+      ? {}
+      : { accessibilityTree: cutText(tree, treeChars) }),
+    ...nonEmpty("interactiveElements"),
+    ...nonEmpty("consoleEntries"),
+    ...nonEmpty("networkEntries"),
+    ...nonEmpty("actionTimeline"),
+    ...(omitted.length === 0 ? {} : { omitted }),
+  });
+  const shed = <K extends ListKey>(key: K) => {
+    const entries: ReadonlyArray<unknown> = lists[key];
+    const keep = Math.floor(entries.length / 2);
+    // Elements keep page order from the top; logs keep their newest entries.
+    lists[key] = (key === "interactiveElements"
+      ? entries.slice(0, keep)
+      : entries.slice(entries.length - keep)) as unknown as Lists[K];
+  };
+  const size = () => Buffer.byteLength(JSON.stringify(value()), "utf8");
+  while (size() > MAX_SNAPSHOT_TEXT_BYTES) {
+    // Logs shed first, oldest first. Below the floors, locator-bearing elements and tree go last.
+    const key =
+      shedOrder.find(
+        (candidate) => candidate !== "interactiveElements" && lists[candidate].length > 0,
+      ) ??
+      (visibleTextChars > TEXT_FLOOR_CHARS
+        ? "visibleText"
+        : treeChars > TEXT_FLOOR_CHARS
+          ? "accessibilityTree"
+          : identifierChars > IDENTIFIER_FLOOR_CHARS
+            ? "identifiers"
+            : visibleTextChars > 0
+              ? "visibleText"
+              : lists.interactiveElements.length > 0
+                ? "interactiveElements"
+                : treeChars > 0
+                  ? "accessibilityTree"
+                  : identifierChars > 0
+                    ? "identifiers"
+                    : undefined);
+    if (key === undefined) break;
+    if (key === "visibleText") visibleTextChars = halveToFloor(visibleTextChars);
+    else if (key === "accessibilityTree") treeChars = halveToFloor(treeChars);
+    else if (key === "identifiers") identifierChars = Math.floor(identifierChars / 2);
+    else shed(key);
   }
-  return result();
+  // Notes are added after shedding, so measure once more and trim page text if they tipped it over.
+  const notes = () => {
+    omitted.length = baseNotes;
+    if (snapshot.url.length > identifierChars || snapshot.title.length > identifierChars) {
+      omitted.push(`url or title after ${identifierChars} characters`);
+    }
+    if (visibleTextChars < snapshot.visibleText.length) {
+      omitted.push(
+        `visibleText after ${visibleTextChars} characters (use preview_evaluate for more)`,
+      );
+    }
+    if (tree !== undefined && treeChars < tree.length) {
+      omitted.push(`accessibilityTree after ${treeChars} characters`);
+    }
+    for (const key of shedOrder) {
+      const dropped = full[key].length - lists[key].length;
+      if (dropped > 0) omitted.push(`${dropped} of ${full[key].length} ${key}`);
+    }
+  };
+  const baseNotes = omitted.length;
+  notes();
+  while (size() > MAX_SNAPSHOT_TEXT_BYTES && (visibleTextChars > 0 || identifierChars > 0)) {
+    if (visibleTextChars > 0) visibleTextChars = Math.floor(visibleTextChars / 2);
+    else identifierChars = Math.floor(identifierChars / 2);
+    notes();
+  }
+  return value();
 }
 
 export class PreviewScreenshotSaveError extends Schema.TaggedError<PreviewScreenshotSaveError>()(

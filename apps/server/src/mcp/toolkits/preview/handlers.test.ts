@@ -152,6 +152,66 @@ effectIt.effect(
     }),
 );
 
+effectIt.effect("preview_open navigates the opened tab to a dev server in one tool call", () =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make("open-target-thread");
+    const tabId = PreviewTabId.make("opened-tab");
+    const target = { kind: "environment-port" as const, port: 3000, path: "/settings?tab=account" };
+    const status = {
+      available: true,
+      visible: false,
+      tabId,
+      url: "http://localhost:3000/settings?tab=account",
+      title: "Settings",
+      loading: false,
+    };
+    const requests: Array<PreviewAutomationBroker.PreviewAutomationInvokeInput> = [];
+    const dependencies = Layer.mergeAll(
+      ServerConfig.layerTest(process.cwd(), { prefix: "test-rig-preview-open-" }).pipe(
+        Layer.provideMerge(NodeServices.layer),
+      ),
+      Layer.succeed(McpInvocationContext.McpInvocationContext, {
+        environmentId: EnvironmentId.make("open-target-environment"),
+        threadId,
+        providerSessionId: "session",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        capabilities: new Set(["preview" as const]),
+        issuedAt: 0,
+      }),
+      Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+      Layer.mock(SecretRequests.SecretRequests)({}),
+      Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({
+        invoke: <A>(request: PreviewAutomationBroker.PreviewAutomationInvokeInput) => {
+          requests.push(request);
+          return Effect.succeed(
+            (request.operation === "open" ? { ...status, url: "about:blank" } : status) as A,
+          );
+        },
+      }),
+    );
+    yield* Effect.gen(function* () {
+      const toolkit = yield* PreviewToolkit.pipe(Effect.provide(PreviewToolkitHandlersLive));
+      const results = yield* toolkit
+        .handle("preview_open", {
+          url: "http://localhost:3000",
+          target,
+          open: false,
+          reuseExistingTab: false,
+        })
+        .pipe(Stream.unwrap, Stream.runCollect);
+      expect(results.at(-1)?.result).toEqual(status);
+      expect(requests.map(({ operation, input, tabId }) => ({ operation, input, tabId }))).toEqual([
+        {
+          operation: "open",
+          input: { open: false, show: false, reuseExistingTab: false },
+          tabId: undefined,
+        },
+        { operation: "navigate", input: { target }, tabId },
+      ]);
+    }).pipe(Effect.provide(dependencies));
+  }),
+);
+
 describe("claimPreviewRecording", () => {
   effectIt.effect("overlapping and repeated claims return the same retained recording", () =>
     Effect.gen(function* () {

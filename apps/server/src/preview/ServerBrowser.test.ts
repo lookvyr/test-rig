@@ -1339,8 +1339,10 @@ it.effect("a tab showing a data: page reports its URL without the content", () =
       expect(status.tabs?.find((entry) => entry.tabId === sibling.tabId)?.url).toBe(
         "data:text/html,…",
       );
-      expect(JSON.stringify([event, status])).not.toContain("SECRET-KEY");
-      expect(JSON.stringify([event, status])).not.toContain("SIBLING-SECRET");
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      const serialized = JSON.stringify([event, status]);
+      expect(serialized).not.toContain("SECRET-KEY");
+      expect(serialized).not.toContain("SIBLING-SECRET");
     }),
   ).pipe(Effect.provide(layer)),
 );
