@@ -4236,6 +4236,76 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     }).pipe(Effect.provide(Layer.mergeAll(IdAllocator.layer, NodeServices.layer))),
   );
 
+  it.effect("shows a compaction aborted by our interrupt as stopped, not failed", () =>
+    Effect.gen(function* () {
+      const interruptSent = yield* Deferred.make<void>();
+      const abortReported = yield* Deferred.make<void>();
+      const harness = yield* makeWakeHarnessWithOptions({
+        close: (sdkMessages) => Queue.shutdown(sdkMessages),
+        interrupt: Deferred.succeed(interruptSent, undefined).pipe(
+          Effect.andThen(Deferred.await(abortReported)),
+        ),
+      });
+      const attemptId = RunAttemptId.make("attempt-claude-compaction-aborted");
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId,
+          text: "/compact",
+          attachments: [],
+        }),
+      );
+      yield* harness.offerAndWait(
+        claudeSdkFrame({
+          type: "system",
+          subtype: "status",
+          status: "compacting",
+          uuid: "00000000-0000-4000-8000-000000000630",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+      );
+      const idAllocator = yield* IdAllocator.IdAllocatorV2;
+      const interrupting = yield* harness.runtime
+        .interruptTurn({
+          providerThread: harness.providerThread,
+          providerTurnId: idAllocator.derive.providerTurn({
+            driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+            nativeTurnId: `turn:${attemptId}`,
+          }),
+        })
+        .pipe(Effect.forkScoped);
+      // The CLI reports the compaction it aborted for the interrupt as failed.
+      yield* Deferred.await(interruptSent);
+      yield* harness.offerAndWait(
+        claudeSdkFrame({
+          type: "system",
+          subtype: "status",
+          status: null,
+          compact_result: "failed",
+          compact_error: "API Error: Request was aborted.",
+          uuid: "00000000-0000-4000-8000-000000000631",
+          session_id: WAKE_NATIVE_SESSION,
+        }),
+      );
+      yield* Deferred.succeed(abortReported, undefined);
+      yield* Fiber.join(interrupting);
+      yield* Queue.take(harness.terminalReceipts);
+      const settled = harness.events
+        .flatMap((event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "compaction"
+            ? [event.turnItem]
+            : [],
+        )
+        .at(-1);
+      assert.equal(settled?.status, "interrupted");
+      assert.equal(settled?.title, "Context compaction stopped");
+      assert.isUndefined(settled?.summary);
+      assert.equal(harness.terminalEvents()[0]?.status, "interrupted");
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(IdAllocator.layer, NodeServices.layer))),
+  );
+
   it.effect("titles Claude reads, searches, and skills on tool completion", () =>
     Effect.gen(function* () {
       const harness = yield* makeWakeHarness;

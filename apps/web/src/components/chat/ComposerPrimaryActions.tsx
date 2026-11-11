@@ -18,6 +18,8 @@ interface ComposerPrimaryActionsProps {
   compact: boolean;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
+  /** Sending while a compaction runs stops it and sends the message next. */
+  sendSkipsCompaction?: boolean;
   canInterrupt?: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -61,6 +63,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   pendingAction,
   isRunning,
+  sendSkipsCompaction = false,
   canInterrupt = isRunning,
   showPlanFollowUpPrompt,
   promptHasText,
@@ -225,7 +228,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   }
 
   const showResume = canResume && !hasSendableContent;
-  const submitLabel = showResume ? "Resume thread" : isRunning ? "Steer message" : "Send message";
+  const submitLabel = showResume
+    ? "Resume thread"
+    : isRunning && sendSkipsCompaction
+      ? "Skip compaction and send"
+      : isRunning
+        ? "Steer message"
+        : "Send message";
 
   return (
     <div className="flex items-center gap-2">

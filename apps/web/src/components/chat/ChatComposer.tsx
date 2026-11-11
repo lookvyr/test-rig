@@ -20,7 +20,10 @@ import {
   inlineContextReferenceReplacement,
 } from "~/lib/composerContextReferences";
 import { THREAD_CONTEXT_DRAG_TYPE, readThreadContextDrag } from "./threadContextDrag";
-import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
+import {
+  canSendThreadFollowUp,
+  deriveThreadQueueWorkflowState,
+} from "@t3tools/client-runtime/state/thread-workflows";
 import type {
   RuntimeRequestId,
   EnvironmentId,
@@ -430,6 +433,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
     canRespond?: boolean;
   } | null;
   isRunning: boolean;
+  sendSkipsCompaction?: boolean;
   canInterrupt: boolean;
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
@@ -465,6 +469,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         compact={props.compact}
         pendingAction={props.pendingAction}
         isRunning={props.isRunning}
+        sendSkipsCompaction={props.sendSkipsCompaction ?? false}
         canInterrupt={props.canInterrupt}
         showPlanFollowUpPrompt={props.showPlanFollowUpPrompt}
         promptHasText={props.promptHasText}
@@ -751,6 +756,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? "Waiting for the provider to accept steering"
       : null);
   const isSendDisabled = sendDisabledReason !== null;
+  // Sending while a compaction runs stops it and sends the message next.
+  const sendSkipsCompaction = useMemo(
+    () =>
+      activeThreadProjection != null &&
+      deriveThreadQueueWorkflowState(activeThreadProjection).promoteSkipsCompaction,
+    [activeThreadProjection],
+  );
 
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -3773,6 +3785,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   compactDisabledReason={compactDisabledReason}
                   pendingAction={pendingPrimaryAction}
                   isRunning={phase === "running"}
+                  sendSkipsCompaction={sendSkipsCompaction}
                   canInterrupt={canInterrupt}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}

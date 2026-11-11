@@ -137,6 +137,10 @@ For a provider that supports compaction, choose **Compact context** in that
 indicator, or select **/compact** from the command suggestions. The indicator
 action keeps your unsent draft and attachments in place while compaction runs.
 
+While a compaction runs, you can still send a message: the send button reads
+**Skip compaction and send**. Sending stops the compaction, which shows as
+stopped rather than failed, and your message runs next.
+
 Claude compacts on its own as its context fills. Set **Auto-compact after** in a
 Claude provider's settings to a number between `100000` and `1000000` to choose
 when, for example `300000`. Leave it empty to use Claude's default, or the

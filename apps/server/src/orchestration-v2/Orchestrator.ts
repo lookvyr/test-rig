@@ -18,6 +18,7 @@ import {
 import {
   type ChatAttachment,
   CommandId,
+  isCompactionCommandMessage,
   isProviderNativeSubagentThread,
   MessageId,
   type NodeId,
@@ -4997,6 +4998,32 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           dispatchMode = { type: "start_immediately" };
         }
       }
+      // A compacting turn cannot take steering input. Steering into one sends the message next
+      // and stops the compaction, like promoting a queued message does.
+      let skipsCompaction: OrchestrationV2Run | undefined;
+      if (
+        dispatchMode.type === "steer_active" &&
+        command.createdBy === "user" &&
+        !isNativeMaintenanceCommand(command) &&
+        !isGoalCommand(command)
+      ) {
+        const targetRunId = dispatchMode.targetRunId;
+        const target = projection.runs.find((run) => run.id === targetRunId);
+        const targetMessage = projection.messages.find(
+          (message) => message.id === target?.userMessageId,
+        );
+        if (
+          target !== undefined &&
+          (target.status === "preparing" ||
+            target.status === "starting" ||
+            target.status === "running") &&
+          targetMessage !== undefined &&
+          isCompactionCommandMessage(targetMessage)
+        ) {
+          skipsCompaction = target;
+          dispatchMode = { type: "queue_after_active" };
+        }
+      }
       if (
         command.notification !== undefined &&
         (command.createdBy !== "agent" ||
@@ -5466,6 +5493,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               inputIntent: "queued_turn",
               updatedAt: now,
             },
+          });
+        }
+        if (skipsCompaction !== undefined) {
+          return yield* skipCompactionForQueuedRun({
+            command,
+            events,
+            effects,
+            projection,
+            queuedRun: run,
+            target: skipsCompaction,
+            now,
           });
         }
         return;
@@ -7935,6 +7973,90 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       );
     });
 
+  /**
+   * Sends a queued message next and stops the compaction ahead of it. A compacting turn cannot
+   * take steering input, so steering into one skips the compaction instead.
+   */
+  const skipCompactionForQueuedRun = Effect.fnUntraced(function* (input: {
+    readonly command: Extract<
+      OrchestrationV2Command,
+      { readonly type: "message.dispatch" | "queued-message.promote-to-steer" }
+    >;
+    readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
+    readonly effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>;
+    readonly projection: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">;
+    readonly queuedRun: OrchestrationV2Run;
+    readonly target: OrchestrationV2Run;
+    readonly now: DateTime.Utc;
+  }) {
+    const { command, events, effects, projection, queuedRun, target, now } = input;
+    const emitEvent = emit(events, command);
+    if (queuedRun.queuePosition !== 1) {
+      yield* emitEvent({
+        type: "run.updated",
+        threadId: command.threadId,
+        runId: queuedRun.id,
+        ...(queuedRun.rootNodeId === null ? {} : { nodeId: queuedRun.rootNodeId }),
+        providerInstanceId: queuedRun.providerInstanceId,
+        occurredAt: now,
+        payload: { ...queuedRun, queuePosition: 1 },
+      });
+    }
+    const others = queuedRunsInDeliveryOrder(projection).filter(
+      (run) => run.id !== queuedRun.id && !isAutomaticCompletionRun(projection, run),
+    );
+    for (const [index, run] of others.entries()) {
+      const queuePosition = index + 2;
+      if (run.queuePosition === queuePosition) continue;
+      yield* emitEvent({
+        type: "run.updated",
+        threadId: command.threadId,
+        runId: run.id,
+        ...(run.rootNodeId === null ? {} : { nodeId: run.rootNodeId }),
+        providerInstanceId: run.providerInstanceId,
+        occurredAt: now,
+        payload: { ...run, queuePosition },
+      });
+    }
+    const stops =
+      (target.status === "preparing" ||
+        target.status === "starting" ||
+        target.status === "running") &&
+      !(yield* stopReachedRun(command, command.threadId, target.id));
+    if (!stops) return undefined;
+    const interruptEvents = yield* Ref.make<Array<OrchestrationV2DomainEvent>>([]);
+    const interruptEffects = yield* Ref.make<Array<PendingOrchestrationEffectV2>>([]);
+    const interrupted = yield* Effect.exit(
+      dispatchRunInterrupt(
+        {
+          type: "run.interrupt",
+          commandId: command.commandId,
+          threadId: command.threadId,
+          runId: target.id,
+          reason: "Skipped compaction to send a queued message",
+        },
+        interruptEvents,
+        interruptEffects,
+      ),
+    );
+    // A failed interrupt may have written part of its events, so they are kept apart.
+    // The queued message then waits for the compaction to end.
+    if (Exit.isFailure(interrupted)) {
+      yield* Effect.logWarning("steering could not stop the running compaction", {
+        threadId: command.threadId,
+        runId: target.id,
+        cause: interrupted.cause,
+      });
+      return undefined;
+    }
+    const written = yield* Ref.get(interruptEvents);
+    const enqueued = yield* Ref.get(interruptEffects);
+    yield* Ref.update(events, (existing) => [...existing, ...written]);
+    yield* Ref.update(effects, (existing) => [...existing, ...enqueued]);
+    // Like Stop: a run stopped before its provider started also abandons that start.
+    return interrupted.value;
+  });
+
   const dispatchQueuedMessagePromoteToSteer = (
     command: Extract<OrchestrationV2Command, { readonly type: "queued-message.promote-to-steer" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -8011,6 +8133,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
       const now = yield* DateTime.now;
       const emitEvent = emit(events, command);
+      const target = projection.runs.find((run) => run.id === command.targetRunId);
+      const targetMessage = projection.messages.find(
+        (message) => message.id === target?.userMessageId,
+      );
+      // A compacting turn cannot take steering input, so steering skips the compaction instead.
+      if (
+        target !== undefined &&
+        targetMessage !== undefined &&
+        isCompactionCommandMessage(targetMessage)
+      ) {
+        return yield* skipCompactionForQueuedRun({
+          command,
+          events,
+          effects,
+          projection,
+          queuedRun,
+          target,
+          now,
+        });
+      }
       yield* emitEvent({
         type: "run.updated",
         threadId: command.threadId,
@@ -8076,6 +8218,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           : { idleCompaction: queuedMessage.idleCompaction }),
         forceRestart: false,
       });
+      return undefined;
     });
 
   const dispatchQueuedRunReorder = (
@@ -10947,7 +11090,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             threadId: command.threadId,
           });
         }
-        yield* dispatchMessage(command, events, effects);
+        cancelUnsettledEffects = yield* dispatchMessage(command, events, effects);
         yield* recordSubagentFollowup(command, events).pipe(mapDispatchError(command));
         break;
       }
@@ -10991,7 +11134,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cancelUnsettledEffects = yield* dispatchThreadStop(command, events, effects);
         break;
       case "queued-message.promote-to-steer":
-        yield* dispatchQueuedMessagePromoteToSteer(command, events, effects);
+        cancelUnsettledEffects = yield* dispatchQueuedMessagePromoteToSteer(
+          command,
+          events,
+          effects,
+        );
         break;
       case "queue.resume": {
         const projection = yield* loadProjectionForCommand(

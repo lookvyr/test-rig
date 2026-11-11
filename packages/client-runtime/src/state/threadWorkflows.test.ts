@@ -9,7 +9,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { v2Projection } from "./orchestrationV2TestFixtures.ts";
-import { canSendThreadFollowUp } from "./threadWorkflows.ts";
+import { canSendThreadFollowUp, deriveThreadQueueWorkflowState } from "./threadWorkflows.ts";
 
 // Only steering-relevant fields vary in these projection fixtures.
 function runningProjection(): OrchestrationV2ThreadProjection {
@@ -121,13 +121,36 @@ describe("interactive thread follow-up readiness", () => {
       false,
     );
   });
-  it.each(["/compact", "  /LOGOUT  "])("blocks native maintenance %s", (text) => {
+  it("blocks steering into a sign-out", () => {
     const p = runningProjection();
-    const withMaintenance = {
+    const withSignOut = {
       ...p,
-      messages: [{ id: p.runs[0]!.userMessageId, text, attachments: [] }],
+      messages: [
+        { id: p.runs[0]!.userMessageId, role: "user", text: "  /LOGOUT  ", attachments: [] },
+      ],
     } as unknown as OrchestrationV2ThreadProjection;
-    expect(canSendThreadFollowUp(withMaintenance)).toBe(false);
-    expect(canSendThreadFollowUp({ ...withMaintenance, runs: [] })).toBe(true);
+    expect(canSendThreadFollowUp(withSignOut)).toBe(false);
+    expect(canSendThreadFollowUp({ ...withSignOut, runs: [] })).toBe(true);
+  });
+  it("sends past a running compaction, even when the provider cannot steer", () => {
+    const p = runningProjection();
+    const session = p.providerSessions[0]!;
+    const compacting = {
+      ...p,
+      messages: [{ id: p.runs[0]!.userMessageId, role: "user", text: "/compact", attachments: [] }],
+      providerSessions: [
+        {
+          ...session,
+          capabilities: {
+            ...session.capabilities,
+            turns: { ...session.capabilities.turns, supportsActiveSteering: false },
+          },
+        },
+      ],
+    } as unknown as OrchestrationV2ThreadProjection;
+    expect(canSendThreadFollowUp(compacting)).toBe(true);
+    const state = deriveThreadQueueWorkflowState(compacting);
+    expect(state.canPromoteToSteer).toBe(true);
+    expect(state.promoteSkipsCompaction).toBe(true);
   });
 });

@@ -447,6 +447,29 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
     openSession: (input) =>
       Effect.gen(function* () {
         const now = yield* DateTime.now;
+        const startTurn = (turn: ProviderAdapterV2TurnInput) =>
+          Effect.gen(function* () {
+            started.push(turn);
+            yield* Queue.offer(events, {
+              type: "provider_turn.updated",
+              driver,
+              providerTurn: {
+                id: ProviderTurnId.make(`provider-turn:${turn.attemptId}`),
+                providerThreadId: turn.providerThread.id,
+                nodeId: turn.rootNodeId,
+                runAttemptId: turn.attemptId,
+                nativeTurnRef: {
+                  driver,
+                  nativeId: `native:${turn.attemptId}`,
+                  strength: "strong",
+                },
+                ordinal: turn.providerTurnOrdinal,
+                status: "running",
+                startedAt: now,
+                completedAt: null,
+              },
+            });
+          });
         return {
           instanceId,
           driver,
@@ -483,29 +506,8 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
               updatedAt: now,
             }),
           resumeThread: ({ providerThread }) => Effect.succeed(providerThread),
-          startTurn: (turn) =>
-            Effect.gen(function* () {
-              started.push(turn);
-              yield* Queue.offer(events, {
-                type: "provider_turn.updated",
-                driver,
-                providerTurn: {
-                  id: ProviderTurnId.make(`provider-turn:${turn.attemptId}`),
-                  providerThreadId: turn.providerThread.id,
-                  nodeId: turn.rootNodeId,
-                  runAttemptId: turn.attemptId,
-                  nativeTurnRef: {
-                    driver,
-                    nativeId: `native:${turn.attemptId}`,
-                    strength: "strong",
-                  },
-                  ordinal: turn.providerTurnOrdinal,
-                  status: "running",
-                  startedAt: now,
-                  completedAt: null,
-                },
-              });
-            }),
+          startTurn,
+          compactThread: startTurn,
           steerTurn: (turn) =>
             Effect.sync(() => {
               steered.push(turn.message.text);
@@ -809,4 +811,158 @@ it.effect("steers a delegated task question notice into the running parent turn"
       }).pipe(Effect.provide(layer));
     }),
   ),
+);
+
+it.effect.each(["promote", "steer"] as const)(
+  "a %s into a compaction stops it and sends the message next",
+  (delivery) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const name = `compaction-${delivery}`;
+        const { events, layer, started, steered, startFirstTurn } =
+          yield* nextTurnSelectionHarness(name);
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const threadId = yield* startFirstTurn;
+          const queue = (id: string, text: string) =>
+            orchestrator.dispatch({
+              type: "message.dispatch",
+              commandId: CommandId.make(id),
+              threadId,
+              messageId: MessageId.make(`message:${id}`),
+              text,
+              attachments: [],
+              modelSelection: runSelection,
+              dispatchMode: { type: "queue_after_active" },
+              createdBy: "user",
+              creationSource: "web",
+            });
+          yield* queue("compact", "/compact");
+          yield* queue("queued", "queued");
+          if (delivery === "promote") yield* queue("next", "next");
+          const settled = yield* orchestrator.streamDomainEvents.pipe(
+            Stream.filter(
+              (event) =>
+                event.type === "run.updated" &&
+                event.payload.id === started[0]!.runId &&
+                event.payload.status === "waiting",
+            ),
+            Stream.take(1),
+            Stream.runDrain,
+            Effect.forkScoped,
+          );
+          const turn = (yield* orchestrator.getThreadProjection(threadId)).providerTurns[0]!;
+          yield* Queue.offer(events, {
+            type: "provider_turn.updated",
+            driver,
+            providerTurn: { ...turn, status: "completed", completedAt: yield* DateTime.now },
+          });
+          yield* Queue.offer(events, {
+            type: "turn.terminal",
+            driver,
+            providerThreadId: turn.providerThreadId,
+            providerTurnId: turn.id,
+            runOrdinal: started[0]!.runOrdinal,
+            status: "completed",
+            failure: null,
+            threadDisposition: "reusable",
+          });
+          yield* Fiber.join(settled);
+          yield* worker.drain();
+          yield* orchestrator.resumeQueuedRuns;
+          yield* worker.drain();
+          // The compaction's provider turn must be live before it can be stopped.
+          for (let attempt = 0; attempt < 1_000; attempt += 1) {
+            const { providerTurns } = yield* orchestrator.getThreadProjection(threadId);
+            if (providerTurns.some((turn) => turn.status === "running")) break;
+            yield* Effect.yieldNow;
+          }
+          const runFor = (id: string) =>
+            orchestrator
+              .getThreadProjection(threadId)
+              .pipe(
+                Effect.map((projection) =>
+                  projection.runs.find(
+                    (run) => run.userMessageId === MessageId.make(`message:${id}`),
+                  )!,
+                ),
+              );
+          const compactRun = yield* runFor("compact");
+          if (delivery === "promote") {
+            const nextRun = yield* runFor("next");
+            yield* orchestrator.dispatch({
+              type: "queued-message.promote-to-steer",
+              commandId: CommandId.make("promote"),
+              threadId,
+              queuedRunId: nextRun.id,
+              targetRunId: compactRun.id,
+            });
+          } else {
+            yield* orchestrator.dispatch({
+              type: "message.dispatch",
+              commandId: CommandId.make("next"),
+              threadId,
+              messageId: MessageId.make("message:next"),
+              text: "next",
+              attachments: [],
+              modelSelection: runSelection,
+              dispatchMode: { type: "steer_active", targetRunId: compactRun.id },
+              createdBy: "user",
+              creationSource: "web",
+            });
+          }
+          // The adapter answers the interrupt with the compaction turn's terminal.
+          const draining = yield* worker.drain().pipe(Effect.forkScoped);
+          const compactTurn = (yield* orchestrator.getThreadProjection(
+            threadId,
+          )).providerTurns.find(
+            (candidate) => candidate.runAttemptId === compactRun.activeAttemptId,
+          )!;
+          yield* Queue.offer(events, {
+            type: "provider_turn.updated",
+            driver,
+            providerTurn: {
+              ...compactTurn,
+              status: "interrupted",
+              completedAt: yield* DateTime.now,
+            },
+          });
+          yield* Queue.offer(events, {
+            type: "turn.terminal",
+            driver,
+            providerThreadId: compactTurn.providerThreadId,
+            providerTurnId: compactTurn.id,
+            runOrdinal: compactRun.ordinal,
+            status: "interrupted",
+            failure: null,
+            threadDisposition: "reusable",
+          });
+          yield* Fiber.join(draining);
+          yield* orchestrator.resumeQueuedRuns;
+          yield* worker.drain();
+
+          const projection = yield* orchestrator.getThreadProjection(threadId);
+          assert.deepEqual(steered, []);
+          assert.isTrue(
+            projection.turnItems.some(
+              (item) => item.type === "run_interrupt_request" && item.runId === compactRun.id,
+            ),
+          );
+          const textOf = (run: (typeof projection.runs)[number]) =>
+            projection.messages.find((message) => message.id === run.userMessageId)?.text;
+          assert.deepEqual(
+            projection.runs
+              .filter((run) => run.status === "queued")
+              .toSorted((left, right) => (left.queuePosition ?? 0) - (right.queuePosition ?? 0))
+              .map(textOf),
+            ["queued"],
+          );
+          assert.deepEqual(
+            started.map((turn) => turn.message.text),
+            ["first", "/compact", "next"],
+          );
+        }).pipe(Effect.provide(layer));
+      }),
+    ),
 );
