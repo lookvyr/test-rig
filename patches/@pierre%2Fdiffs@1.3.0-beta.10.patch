@@ -1,21 +1,24 @@
 diff --git a/dist/components/CodeView.d.ts b/dist/components/CodeView.d.ts
-index c499b8b933fce154f95f0cb698c61eaf146ce3e1..61a378d86049029884b844d12c29fbe890928665 100644
+index c499b8b933fce154f95f0cb698c61eaf146ce3e1..cd02f3de4b210749afc74698fcf81f88f1292d14 100644
 --- a/dist/components/CodeView.d.ts
 +++ b/dist/components/CodeView.d.ts
-@@ -400,7 +400,9 @@ declare class CodeView<LAnnotation = undefined> {
+@@ -400,7 +400,11 @@ declare class CodeView<LAnnotation = undefined> {
     * anchoring corrections if necessary
     */
    private advanceScrollAnimation;
 +  private isRendering;
++  private heldLayoutAnchor;
++  private getHeldLayoutAnchor;
    private computeRenderRangeAndEmit;
 +  private renderRangeAndEmit;
    private flushManagers;
    private syncContainerHeight;
    private getStickyBounds;
 diff --git a/dist/components/CodeView.js b/dist/components/CodeView.js
+index dfabd4963697284d5ea70812bca010efa5cce9b3..34acbe73324c4688bb23c104518c1a97ee0a6e7d 100644
 --- a/dist/components/CodeView.js
 +++ b/dist/components/CodeView.js
-@@ -384,20 +384,6 @@
+@@ -384,20 +384,6 @@ var CodeView = class CodeView {
  		this.root.addEventListener("keydown", this.clearPendingScroll, { passive: true });
  		this.resizeObserver.observe(this.root);
  		this.render(true);
@@ -36,11 +39,62 @@ diff --git a/dist/components/CodeView.js b/dist/components/CodeView.js
  	}
  	reset() {
  		dequeueRender(this.computeRenderRangeAndEmit);
-@@ -1449,7 +1435,22 @@ var CodeView = class CodeView {
+@@ -556,6 +542,7 @@ var CodeView = class CodeView {
+ 	}
+ 	scrollTo(target) {
+ 		if (this.root == null) return;
++		this.heldLayoutAnchor = void 0;
+ 		const pendingTarget = this.normalizeScrollTarget(target);
+ 		if (pendingTarget == null) return;
+ 		const destination = this.resolveScrollTargetTop(pendingTarget);
+@@ -1129,6 +1116,10 @@ var CodeView = class CodeView {
+ 	*/
+ 	reconcileItems(items) {
+ 		const { items: previousItems, idToItem: previousById } = this;
++		// T3 patch: read the reader's place before records change, so a replaced diff can carry it over.
++		const anchor = this.root != null && previousItems.length > 0 && this.pendingScrollTarget == null ? this.getScrollAnchor(this.getScrollTop()) : void 0;
++		const anchorItem = anchor?.type === "line" ? previousById.get(anchor.id) : void 0;
++		const anchorPreviousDiff = anchorItem?.type === "diff" ? anchorItem.item.fileDiff : void 0;
+ 		const removedItems = new Set(previousItems);
+ 		const nextItems = [];
+ 		const nextIdToItem = /* @__PURE__ */ new Map();
+@@ -1158,6 +1149,20 @@ var CodeView = class CodeView {
+ 			firstDirtyIndex = Math.min(firstDirtyIndex ?? dirtyIndex, dirtyIndex);
+ 		}
+ 		if (firstDirtyIndex == null) return;
++		// T3 patch: a line anchor is a line number, and lines added or removed above it in its
++		// own file would slide the reader's content. Follow the anchored line into the new diff, and
++		// hold it there while the replaced diff's rows are measured again (estimates first, real
++		// wrapped heights over the next frames). Any scroll input lets go.
++		if (anchor != null && anchorPreviousDiff != null && nextIdToItem.get(anchor.id) === anchorItem && anchorItem.item.fileDiff !== anchorPreviousDiff) {
++			this.heldLayoutAnchor = {
++				anchor: {
++					...anchor,
++					lineNumber: remapDiffLineNumber(anchorPreviousDiff, anchorItem.item.fileDiff, anchor.lineNumber, anchor.side)
++				},
++				until: performance.now() + HELD_LAYOUT_ANCHOR_MS
++			};
++			this.pendingLayoutAnchor = this.heldLayoutAnchor.anchor;
++		}
+ 		this.items = nextItems;
+ 		this.idToItem = nextIdToItem;
+ 		this.instanceToItem = nextInstanceToItem;
+@@ -1449,7 +1454,33 @@ var CodeView = class CodeView {
  		}
  		return animation.position;
  	}
 +	isRendering = false;
++	heldLayoutAnchor;
++	/** T3 patch: the line anchor a replaced diff holds in place, until it expires or its item leaves. */
++	getHeldLayoutAnchor() {
++		const held = this.heldLayoutAnchor;
++		if (held == null) return;
++		if (performance.now() > held.until || !this.idToItem.has(held.anchor.id)) {
++			this.heldLayoutAnchor = void 0;
++			return;
++		}
++		return held.anchor;
++	}
  	computeRenderRangeAndEmit = (timestamp = performance.now()) => {
 +		// React slot publication can request an immediate render inside this frame.
 +		// Finish settling its scroll target before starting another frame.
@@ -59,7 +113,7 @@ diff --git a/dist/components/CodeView.js b/dist/components/CodeView.js
  		if (CodeView.__STOP || this.container == null) return;
  		if (!this.isReady()) return;
  		const viewportHeight = this.getHeight();
-@@ -1559,7 +1560,7 @@ var CodeView = class CodeView {
+@@ -1559,7 +1590,7 @@ var CodeView = class CodeView {
  		this.validateStickyContainerHeight();
  		this.fixContainerFocus();
  		if (fitPerfectly || this.scrollAnimation != null) this.render();
@@ -68,8 +122,116 @@ diff --git a/dist/components/CodeView.js b/dist/components/CodeView.js
  	flushManagers(updatedItems) {
  		for (const item of updatedItems) item.instance.flushManagers();
  	}
+@@ -1649,6 +1680,7 @@ var CodeView = class CodeView {
+ 	clearPendingScroll = () => {
+ 		this.pendingScrollTarget = void 0;
+ 		this.pendingLayoutAnchor = void 0;
++		this.heldLayoutAnchor = void 0;
+ 		this.scrollAnimation = void 0;
+ 	};
+ 	handleResize = (entries) => {
+@@ -1710,6 +1742,8 @@ var CodeView = class CodeView {
+ 	*/
+ 	getScrollAnchor(scrollTop) {
+ 		if (this.pendingLayoutAnchor != null) return this.pendingLayoutAnchor;
++		const held = this.getHeldLayoutAnchor();
++		if (held != null) return held;
+ 		if (scrollTop <= 0) return;
+ 		const { firstIndex, lastIndex, stickyTop, stickyBottom } = this.renderState;
+ 		if (firstIndex === -1 || lastIndex === -1) return;
+@@ -1965,6 +1999,68 @@ function syncRenderedItemOrder(container, element, prevElement) {
+ 	}
+ 	if (prevElement.nextSibling !== element) prevElement.after(element);
+ }
++/** T3 patch: each line number and its text on one side of a diff, partial or whole. */
++function getDiffSideLines(fileDiff, side) {
++	const texts = side === "deletions" ? fileDiff.deletionLines : fileDiff.additionLines;
++	const lines = /* @__PURE__ */ new Map();
++	if (!fileDiff.isPartial) {
++		for (let index = 0; index < texts.length; index++) lines.set(index + 1, texts[index]);
++		return lines;
++	}
++	for (const hunk of fileDiff.hunks) {
++		const start = side === "deletions" ? hunk.deletionStart : hunk.additionStart;
++		const count = side === "deletions" ? hunk.deletionCount : hunk.additionCount;
++		const lineIndex = side === "deletions" ? hunk.deletionLineIndex : hunk.additionLineIndex;
++		for (let offset = 0; offset < count; offset++) {
++			const text = texts[lineIndex + offset];
++			if (text !== void 0) lines.set(start + offset, text);
++		}
++	}
++	return lines;
++}
++const REMAP_CONTEXT_LINES = 3;
++const HELD_LAYOUT_ANCHOR_MS = 1e3;
++/**
++* T3 patch: find where a line of a previous diff sits in its replacement. Matches the line's text,
++* ranks candidates by how many neighbouring lines also match, then by distance. When the line
++* itself changed, the nearest unchanged neighbour stands in for it.
++*/
++function remapDiffLineNumber(previousDiff, nextDiff, lineNumber, side = "additions") {
++	const previousLines = getDiffSideLines(previousDiff, side);
++	const nextLines = getDiffSideLines(nextDiff, side);
++	const nextByText = /* @__PURE__ */ new Map();
++	for (const [nextLineNumber, text] of nextLines) {
++		const candidates = nextByText.get(text);
++		if (candidates == null) nextByText.set(text, [nextLineNumber]);
++		else candidates.push(nextLineNumber);
++	}
++	for (let distance = 0; distance <= REMAP_CONTEXT_LINES; distance++) for (const sign of distance === 0 ? [1] : [-1, 1]) {
++		const sourceLineNumber = lineNumber + sign * distance;
++		const text = previousLines.get(sourceLineNumber);
++		const candidates = text == null ? void 0 : nextByText.get(text);
++		if (candidates == null) continue;
++		let best;
++		let bestScore = -1;
++		let bestDistance = Infinity;
++		for (const candidate of candidates) {
++			let score = 0;
++			for (let offset = 1; offset <= REMAP_CONTEXT_LINES; offset++) {
++				const before = previousLines.get(sourceLineNumber - offset);
++				if (before != null && before === nextLines.get(candidate - offset)) score++;
++				const after = previousLines.get(sourceLineNumber + offset);
++				if (after != null && after === nextLines.get(candidate + offset)) score++;
++			}
++			const candidateDistance = Math.abs(candidate - sourceLineNumber);
++			if (score > bestScore || score === bestScore && candidateDistance < bestDistance) {
++				best = candidate;
++				bestScore = score;
++				bestDistance = candidateDistance;
++			}
++		}
++		if (best != null && (distance === 0 || bestScore > 0)) return best - sign * distance;
++	}
++	return lineNumber;
++}
+ function hasAnnotations(item) {
+ 	return (item.annotations?.length ?? 0) > 0;
+ }
+diff --git a/dist/components/Virtualizer.js b/dist/components/Virtualizer.js
+index 03c39d63a56a8ddc05096481c17dd07b4fc2dbb6..a387331f21f74ede16a4f43883ad302b43efc468 100644
+--- a/dist/components/Virtualizer.js
++++ b/dist/components/Virtualizer.js
+@@ -61,17 +61,6 @@ var Virtualizer = class Virtualizer {
+ 		});
+ 		if (root instanceof Document) this.setupWindow();
+ 		else this.setupElement(contentContainer);
+-		window.__INSTANCE = this;
+-		window.__TOGGLE = () => {
+-			if (Virtualizer.__STOP) {
+-				Virtualizer.__STOP = false;
+-				(this.getScrollContainerElement() ?? window).scrollTo({ top: Virtualizer.__lastScrollPosition });
+-				queueRender(this.computeRenderRangeAndEmit);
+-			} else {
+-				Virtualizer.__lastScrollPosition = this.getScrollTop();
+-				Virtualizer.__STOP = true;
+-			}
+-		};
+ 		for (const [container, instance] of this.connectQueue.entries()) this.connect(container, instance);
+ 		this.connectQueue.clear();
+ 		this.markDOMDirty();
 diff --git a/dist/editor/editor.js b/dist/editor/editor.js
-index ff78e2a..f9df318 100644
+index ff78e2ae0e20aa83124f758d193e978170c98a87..a5c6ff73d739276bcc365e3af138b50980ff7dff 100644
 --- a/dist/editor/editor.js
 +++ b/dist/editor/editor.js
 @@ -146,14 +146,11 @@ var Editor = class {
@@ -115,7 +277,7 @@ index ff78e2a..f9df318 100644
  			this.#fileInstance?.setSelectedLines(range, {
  				notify: false,
 diff --git a/dist/react/utils/useFileInstance.js b/dist/react/utils/useFileInstance.js
-index e9f62f5..af82a46 100644
+index e9f62f56eed9b634b613d2955647224e5af2b8a2..a33006b0fc00db4b68f1c6cb4c7cdfeac886ad24 100644
 --- a/dist/react/utils/useFileInstance.js
 +++ b/dist/react/utils/useFileInstance.js
 @@ -91,10 +91,7 @@ function mergeFileOptions({ options, controlledSelection, contentEditable, hasCu
@@ -131,7 +293,7 @@ index e9f62f5..af82a46 100644
  	return merged;
  }
 diff --git a/package.json b/package.json
-index ff61c90..1e170e5 100644
+index ff61c904594e4ea4bf101c620ec4b500133014e3..213b06a8161996dd921cbcff164a27aebeedcd8a 100644
 --- a/package.json
 +++ b/package.json
 @@ -55,6 +55,18 @@
@@ -153,24 +315,3 @@ index ff61c90..1e170e5 100644
      }
    },
    "publishConfig": {
-diff --git a/dist/components/Virtualizer.js b/dist/components/Virtualizer.js
---- a/dist/components/Virtualizer.js
-+++ b/dist/components/Virtualizer.js
-@@ -61,17 +61,6 @@
- 		});
- 		if (root instanceof Document) this.setupWindow();
- 		else this.setupElement(contentContainer);
--		window.__INSTANCE = this;
--		window.__TOGGLE = () => {
--			if (Virtualizer.__STOP) {
--				Virtualizer.__STOP = false;
--				(this.getScrollContainerElement() ?? window).scrollTo({ top: Virtualizer.__lastScrollPosition });
--				queueRender(this.computeRenderRangeAndEmit);
--			} else {
--				Virtualizer.__lastScrollPosition = this.getScrollTop();
--				Virtualizer.__STOP = true;
--			}
--		};
- 		for (const [container, instance] of this.connectQueue.entries()) this.connect(container, instance);
- 		this.connectQueue.clear();
- 		this.markDOMDirty();
