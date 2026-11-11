@@ -27,6 +27,7 @@ import {
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
+  liveAnswerPreview,
   liveWorkEntryLabel,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
@@ -5397,5 +5398,138 @@ describe("quieter timeline projections", () => {
       hidden,
     );
     expect(failed.rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe("zen tool call visibility", () => {
+  const runId = RunId.make("turn-1");
+  const at = (second: number) => `2026-01-01T00:00:${String(second).padStart(2, "0")}Z`;
+  const message = (
+    id: string,
+    role: "user" | "assistant",
+    second: number,
+    inputIntent?: "steer",
+  ): TimelineEntry => ({
+    id,
+    kind: "message",
+    createdAt: at(second),
+    message: {
+      id: MessageId.make(id),
+      role,
+      text: id,
+      runId: role === "user" ? null : runId,
+      createdAt: at(second),
+      updatedAt: at(second),
+      streaming: false,
+      ...(inputIntent ? { inputIntent } : {}),
+    },
+  });
+  const work = (
+    id: string,
+    second: number,
+    entry: Partial<WorkLogEntry> & Pick<WorkLogEntry, "itemType">,
+  ): TimelineEntry => ({
+    id,
+    kind: "work",
+    createdAt: at(second),
+    entry: { id, createdAt: at(second), runId, label: id, tone: "tool", ...entry },
+  });
+  const command = (id: string, status: "completed" | "failed", second: number) =>
+    work(id, second, { itemType: "command_execution", toolLifecycleStatus: status });
+  const [user, step, passed, failed, final] = [
+    message("user", "user", 0),
+    message("step", "assistant", 5),
+    command("passed", "completed", 8),
+    command("failed", "failed", 9),
+    message("final", "assistant", 20),
+  ];
+  const turn = [user, step, passed, failed, final];
+  const running = { runId, status: "running" as const, startedAt: at(0), completedAt: null };
+  const ended = { ...running, turnEnded: true };
+  const rows = (
+    timelineEntries: ReadonlyArray<TimelineEntry>,
+    toolCallVisibility: "hideSuccessful" | "hideAll" | "zen",
+    latestRun?: typeof ended | typeof running,
+    revealedMessageId?: MessageId,
+  ) =>
+    deriveMessagesTimelineRows({
+      timelineEntries,
+      expandedRunIds: new Set([runId]),
+      isWorking: latestRun !== undefined,
+      ...(latestRun ? { latestRun } : {}),
+      turnDiffSummaries: [],
+      toolCallVisibility,
+      ...(revealedMessageId ? { revealedMessageId } : {}),
+    }).map((row) => row.id);
+
+  it("shows only the user's messages and final answers", () => {
+    expect(rows(turn, "zen")).toEqual(["user", "final"]);
+    expect(rows(turn, "zen", ended)).toEqual(["user", "final"]);
+    // Hide all keeps failed calls in Test Rig; Zen does not.
+    expect(rows([user, failed, final], "hideAll")).toEqual([
+      "user",
+      "turn-fold:turn-1",
+      "failed",
+      "final",
+    ]);
+  });
+
+  it("keeps the reply to a steer", () => {
+    const [steer, answer] = [
+      message("steer", "user", 4, "steer"),
+      message("answer", "assistant", 7),
+    ];
+    expect(rows([user, steer, answer, final], "zen")).toEqual(["user", "steer", "answer", "final"]);
+    expect(rows([user, steer, step, passed, final], "zen")).toEqual(["user", "steer", "final"]);
+    expect(rows([user, steer, answer, step], "zen", running)).toEqual([
+      "user",
+      "working-indicator-row",
+      "steer",
+      "answer",
+      "live-activity-row",
+    ]);
+  });
+
+  it("previews the latest line while the agent works and hides the draft answer", () => {
+    expect(rows([user, step, passed], "zen", running)).toEqual([
+      "user",
+      "working-indicator-row",
+      "live-activity-row",
+    ]);
+    expect(liveAnswerPreview([user, step, passed])).toBe("step");
+    expect(liveAnswerPreview([user, passed])).toBeNull();
+  });
+
+  it("stops showing work once the final answer lands, and starts again for a follow-up", () => {
+    const followUp = message("follow-up", "user", 30);
+    expect(rows([...turn, followUp], "zen", ended)).toEqual([
+      "user",
+      "final",
+      "follow-up",
+      "working-indicator-row",
+    ]);
+  });
+
+  it("keeps automatic wakes, errors, and revealed messages", () => {
+    const wake = work("wake", 30, {
+      runId: RunId.make("wake"),
+      tone: "info",
+      itemType: "notification",
+    });
+    expect(rows([user, final, wake], "zen", { ...running, runId: RunId.make("wake") })).toEqual([
+      "user",
+      "final",
+      "wake",
+      "working-indicator-row",
+      "live-activity-row",
+    ]);
+    // Approvals wait in the composer; their timeline items are history Zen hides.
+    const approved = work("approved", 11, {
+      itemType: "approval_request",
+      toolLifecycleStatus: "completed",
+    });
+    const error = work("error", 12, { itemType: "error", tone: "error" });
+    expect(rows([user, step, approved, error, final], "zen")).toEqual(["user", "error", "final"]);
+    expect(rows(turn, "zen", undefined, MessageId.make("step"))).toEqual(["user", "step", "final"]);
   });
 });

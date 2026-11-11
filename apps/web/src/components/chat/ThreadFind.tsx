@@ -37,6 +37,8 @@ interface ThreadFindProps {
   onManualNavigation: () => void;
   onClose: () => void;
   onSearchHistory: (thread: OrchestrationV2ThreadProjection | null) => void;
+  /** Reports while the find bar is open, so the timeline can show what it searches. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function ThreadFind({
@@ -50,8 +52,14 @@ export function ThreadFind({
   onManualNavigation,
   onClose,
   onSearchHistory,
+  onOpenChange,
 }: ThreadFindProps) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    onOpenChange?.(true);
+    return () => onOpenChange?.(false);
+  }, [open, onOpenChange]);
   const [query, setQuery] = useState("");
   const [settledQuery, setSettledQuery] = useState("");
   const [matches, setMatches] = useState<readonly ThreadFindMatch[]>([]);

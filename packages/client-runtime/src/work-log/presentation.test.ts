@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   contextCompactionLabel,
+  liveThoughtLine,
   workEntryHiddenByToolCallVisibility,
   type WorkLogPresentationEntry,
 } from "./presentation.ts";
@@ -54,12 +55,14 @@ describe("tool call visibility", () => {
         "hideSuccessful",
       ),
     ).toBe(false);
-    expect(
-      workEntryHiddenByToolCallVisibility(
-        { ...command, toolLifecycleStatus: "inProgress" },
-        "hideAll",
-      ),
-    ).toBe(true);
+    for (const visibility of ["hideAll", "zen"] as const) {
+      expect(
+        workEntryHiddenByToolCallVisibility(
+          { ...command, toolLifecycleStatus: "inProgress" },
+          visibility,
+        ),
+      ).toBe(true);
+    }
   });
   it.each(["hideSuccessful", "hideAll"] as const)(
     "keeps errors and interaction items in %s",
@@ -85,4 +88,17 @@ describe("tool call visibility", () => {
       }
     },
   );
+});
+
+describe("liveThoughtLine", () => {
+  it("prefers a bold heading, otherwise the first sentence, without markup", () => {
+    expect(liveThoughtLine("**Checking the tests**\nThen more.")).toBe("Checking the tests");
+    expect(liveThoughtLine("Reading `src/app.ts` now. Next I will edit it.")).toBe(
+      "Reading src/app.ts now.",
+    );
+    expect(liveThoughtLine("- See [the docs](https://example.com) for *details*")).toBe(
+      "See the docs for details",
+    );
+    expect(liveThoughtLine("   ")).toBe("");
+  });
 });
