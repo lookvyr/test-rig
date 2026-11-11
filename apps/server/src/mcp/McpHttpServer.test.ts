@@ -341,7 +341,7 @@ it.effect("registers annotated tools and preserves authenticated request context
         routedRequests
           .filter(({ operation }) => operation === "snapshot")
           .map(({ input }) => input),
-      ).toEqual([{}, {}, { fullScreenshot: true }]);
+      ).toEqual([{}, {}, { fullScreenshot: true, screenshotOnly: true }]);
 
       const evaluateTool = server.tools.find(({ tool }) => tool.name === "preview_evaluate");
       expect(evaluateTool?.tool.outputSchema).toMatchObject({ type: "object" });

@@ -166,7 +166,7 @@ export const PreviewTypeSecretTool = browserTool(
 export const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Run JavaScript in the chosen tab; top-level await works. It can change page state. Returns `{value}`, up to 64 KB, null for undefined.",
+      "Run JavaScript in the chosen tab; top-level await works, so await the last expression too. It can change page state. Returns `{value}`, up to 64 KB, null for undefined.",
     parameters: PreviewAutomationEvaluateInput,
     success: Schema.Struct({ value: Schema.Unknown }),
     failure: PreviewAutomationError,

@@ -253,6 +253,23 @@ describe("server browser element refs", () => {
     expect((await takeSnapshot()).url).toBe("data:text/html,…");
   });
 
+  it("keeps refs for controls whose names Playwright quotes in the compact tree", async () => {
+    await page.setContent(`
+      <h1>Issues: open</h1>
+      <a href="/b">Fix crash on load #123</a>
+      <button>Save {draft}</button>
+      <select aria-label="Pick: one"><option>A: 1</option></select>`);
+    const tree = String((await takeSnapshot()).accessibilityTree);
+    expect(tree).toContain('heading "Issues: open"');
+    for (const control of [
+      'link "Fix crash on load #123"',
+      'button "Save {draft}"',
+      'combobox "Pick: one"',
+    ]) {
+      expect(tree).toMatch(new RegExp(`- ${control.replace(/[{}]/g, "\\$&")} \\[ref=t3-`));
+    }
+  });
+
   it("rejects refs from another tab", async () => {
     await page.setContent("<button>same label</button>");
     const locator = buttonLocator((await takeSnapshot()).accessibilityTree, "same label");

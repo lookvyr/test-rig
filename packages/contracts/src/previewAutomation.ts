@@ -574,6 +574,8 @@ export type PreviewAutomationSnapshot = typeof PreviewAutomationSnapshot.Type;
 export const PreviewAutomationSnapshotInput = Schema.Struct({
   fullScreenshot: Schema.optional(Schema.Boolean),
   fullTree: Schema.optional(Schema.Boolean),
+  /** Capture only the screenshot: no page state, no ref rotation, no diagnostics consumed. */
+  screenshotOnly: Schema.optional(Schema.Boolean),
 });
 export type PreviewAutomationSnapshotInput = typeof PreviewAutomationSnapshotInput.Type;
 

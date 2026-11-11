@@ -2221,6 +2221,16 @@ const make = Effect.gen(function* () {
         return { tabId: tab.tabId, colorScheme };
       }
       case "snapshot": {
+        const snapshotInput = input as PreviewAutomationSnapshotInput | undefined;
+        if (snapshotInput?.screenshotOnly) {
+          return withScreencastsPaused(tab, () =>
+            ServerBrowserPage.screenshotOnly({
+              ...tab,
+              renderScale: tab.desktop ? "display" : RENDER_SCALE,
+              fullScreenshot: snapshotInput.fullScreenshot,
+            }),
+          );
+        }
         // Agents snapshot after every step; repeating old errors each time costs tokens and adds nothing.
         const unreported = <T extends object>(entries: ReadonlyArray<T>) =>
           entries.filter((entry) => !tab.reportedDiagnostics.has(entry));
@@ -2234,8 +2244,8 @@ const make = Effect.gen(function* () {
             networkEntries,
             actionTimeline,
             renderScale: tab.desktop ? "display" : RENDER_SCALE,
-            fullScreenshot: (input as PreviewAutomationSnapshotInput | undefined)?.fullScreenshot,
-            fullTree: (input as PreviewAutomationSnapshotInput | undefined)?.fullTree,
+            fullScreenshot: snapshotInput?.fullScreenshot,
+            fullTree: snapshotInput?.fullTree,
           }),
         );
         for (const entry of [...consoleEntries, ...networkEntries]) {

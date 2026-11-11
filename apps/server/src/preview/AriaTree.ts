@@ -32,6 +32,9 @@ const TRANSPARENT_ROLES = new Set(["cell", "none", "paragraph", "presentation", 
 /** Wrappers that only mean something when named. */
 const UNNAMED_TRANSPARENT_ROLES = new Set(["generic", "group"]);
 
+/** Named containers that frame what is inside them, kept even around a single control. */
+const KEEP_NAMED_ROLES = new Set(["alertdialog", "dialog"]);
+
 const MAX_LABEL_CHARS = 80;
 /** Container names are usually their content run together. */
 const MAX_CONTAINER_NAME_CHARS = 60;
@@ -81,6 +84,23 @@ const parseNode = (body: string): Node => {
   };
 };
 
+/**
+ * Playwright single-quotes a whole key whose name YAML would misread (`: `, ` #`, braces,
+ * backticks), as in `- 'link "Fix #123" [ref=e5]':`. Unwrap it so the role and ref parse.
+ */
+const unquoteKey = (body: string) => {
+  if (!body.startsWith("'")) return body;
+  let key = "";
+  for (let i = 1; i < body.length; i++) {
+    if (body[i] !== "'") key += body[i];
+    else if (body[i + 1] === "'") {
+      key += "'";
+      i++;
+    } else return key + body.slice(i + 1);
+  }
+  return body;
+};
+
 const parse = (tree: string): Node[] => {
   const roots: Node[] = [];
   const stack: Array<{ depth: number; node: Node }> = [];
@@ -88,7 +108,7 @@ const parse = (tree: string): Node[] => {
     const match = /^( *)- (.*)$/.exec(line);
     if (!match) continue;
     const depth = match[1]!.length;
-    const body = match[2]!;
+    const body = unquoteKey(match[2]!);
     while (stack.length > 0 && stack.at(-1)!.depth >= depth) stack.pop();
     const parent = stack.at(-1)?.node;
     if (body.startsWith("/")) {
@@ -159,6 +179,12 @@ const compactNode = (
       : [];
   }
   if (children.length === 0) return [];
+  // A named row, item, or dialog is the only label an unnamed control inside it has.
+  const labelsOnlyChild =
+    node.named &&
+    children.length === 1 &&
+    (KEEP_NAMED_ROLES.has(node.role) || /^\S+ \[/.test(children[0]!.line));
+  if (labelsOnlyChild) return [{ line: render(node, false), children }];
   if (
     children.length === 1 ||
     TRANSPARENT_ROLES.has(node.role) ||
