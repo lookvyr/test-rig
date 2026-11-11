@@ -218,7 +218,7 @@ function makeContext(onClose?: (context: BrowserContext) => void) {
       interactiveElements: [],
     })),
     ariaSnapshot: vi.fn(async () => '- button "delete" [ref=e1]'),
-    locator: vi.fn(() => {
+    locator: vi.fn((): unknown => {
       throw new Error("Unexpected locator action");
     }),
     isClosed: () => closed,
@@ -855,6 +855,39 @@ it.live("human input waits for the running agent action and expires its snapshot
   ).pipe(Effect.provide(layer)),
 );
 
+it.live(
+  "reports a valid CSS selector that matches several elements as ambiguous, not invalid",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { broker, tabId } = yield* ready;
+        const strict = new Error(
+          "locator.scrollIntoViewIfNeeded: Error: strict mode violation: locator('button[aria-label=\\'Permissions: Full access\\']') resolved to 2 elements:",
+        );
+        contexts[0]!.page.locator.mockImplementation(
+          () =>
+            new Proxy(
+              {},
+              {
+                get: () => async () => {
+                  throw strict;
+                },
+              },
+            ),
+        );
+        const failure = yield* broker
+          .invoke<void>({
+            scope,
+            tabId,
+            operation: "click",
+            input: { selector: "button[aria-label='Permissions: Full access']", timeoutMs: 1_000 },
+          })
+          .pipe(Effect.flip);
+        expect(failure.message).not.toMatch(/invalid selector/);
+        expect(failure.message).toMatch(/2 elements/);
+      }),
+    ).pipe(Effect.provide(layer)),
+);
 it.live("reports a pending dialog without evaluating the page and resolves it explicitly", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -1271,6 +1304,45 @@ it.live.each([false, true])(
         }
       }),
     ).pipe(Effect.provide(layer)),
+);
+
+it.effect("a tab showing a data: page reports its URL without the content", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const sibling = yield* broker.invoke<PreviewAutomationStatus>({
+        scope: asSession("agent-b"),
+        operation: "open",
+        input: { reuseExistingTab: false, show: false },
+      });
+      yield* Effect.promise(() => contexts[1]!.page.goto("data:text/html,<p>SIBLING-SECRET</p>"));
+      const manager = yield* Manager.PreviewManager;
+      const events = yield* manager.subscribeEvents;
+      yield* Effect.promise(() => contexts[0]!.page.goto("data:text/html,<p>SECRET-KEY</p>"));
+      let event = yield* PubSub.take(events);
+      while (
+        event.type !== "navigated" ||
+        event.tabId !== tabId ||
+        event.snapshot.navStatus._tag !== "Success"
+      ) {
+        event = yield* PubSub.take(events);
+      }
+      const status = yield* broker.invoke<PreviewAutomationStatus>({
+        scope,
+        tabId,
+        operation: "status",
+        input: {},
+      });
+      expect(event.snapshot.navStatus).toMatchObject({ url: "data:text/html,…" });
+      expect(status.url).toBe("data:text/html,…");
+      expect(status.tabs?.find((entry) => entry.tabId === tabId)?.url).toBe("data:text/html,…");
+      expect(status.tabs?.find((entry) => entry.tabId === sibling.tabId)?.url).toBe(
+        "data:text/html,…",
+      );
+      expect(JSON.stringify([event, status])).not.toContain("SECRET-KEY");
+      expect(JSON.stringify([event, status])).not.toContain("SIBLING-SECRET");
+    }),
+  ).pipe(Effect.provide(layer)),
 );
 
 it.live.each(["save failed", "oversized"])(

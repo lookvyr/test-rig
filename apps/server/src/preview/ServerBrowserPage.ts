@@ -33,8 +33,8 @@ export class ServerBrowserOperationError extends Error {
   readonly tag: string;
   readonly detail: unknown;
 
-  constructor(tag: string, message: string, detail?: unknown) {
-    super(message);
+  constructor(tag: string, message: string, detail?: unknown, options?: ErrorOptions) {
+    super(message, options);
     this.tag = tag;
     this.detail = detail;
   }
@@ -60,9 +60,7 @@ export const toOperationError = (
       timeoutMs === undefined ? undefined : { timeoutMs },
     );
   }
-  if (
-    /while parsing selector|Unknown engine|Unexpected token|strict mode violation/i.test(message)
-  ) {
+  if (/while parsing selector|Unknown engine|Unexpected token/i.test(message)) {
     return new ServerBrowserOperationError("PreviewAutomationInvalidSelectorError", firstLine);
   }
   if (/not an <input>|not editable|not an editable/i.test(message)) {
@@ -72,6 +70,8 @@ export const toOperationError = (
 };
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+const TARGET_COUNT_MS = 250;
+const MAX_TARGET_CHARS = 200;
 
 const pageRefs = new WeakMap<Page, { generation: string; refs: Map<string, string> }>();
 // A compact runtime namespace prevents old refs from aliasing after a server restart.
@@ -583,6 +583,7 @@ const capture = async (
     });
   return {
     ...page,
+    url: withoutDataPayload(page.url),
     // Mask text before truncating so a value crossing the cut cannot leak its prefix.
     visibleText: mask(page.visibleText).slice(0, MAX_VISIBLE_TEXT_LENGTH),
     accessibilityTree,
@@ -633,6 +634,58 @@ export const click = async (
 ): Promise<{ readonly x: number; readonly y: number }> => {
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
+  try {
+    return await clickTarget(page, locator, input, timeout, pointer);
+  } catch (cause) {
+    throw locator === null ? cause : await namedTargetTimeout(locator, input, cause);
+  }
+};
+
+/**
+ * Playwright's timeout names neither the target nor why it waited. Counting only after the
+ * wait failed keeps auto-wait intact, but the count describes the page after the timeout, not
+ * what the click did: Playwright can dispatch the click and then time out waiting for the
+ * navigation it started.
+ */
+const namedTargetTimeout = async (
+  locator: Locator,
+  input: { readonly locator?: string | undefined; readonly selector?: string | undefined },
+  cause: unknown,
+) => {
+  if (!(cause instanceof Error && cause.name === "TimeoutError")) return cause;
+  const selector = JSON.stringify(input.locator ?? input.selector);
+  // The warning leads and the target is capped, so a reply cut short still carries the warning.
+  const target =
+    selector.length > MAX_TARGET_CHARS ? `${selector.slice(0, MAX_TARGET_CHARS)}...` : selector;
+  // The host's reply must still beat the broker's short grace after the operation timeout.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const matches = await Promise.race([
+    locator.count().catch(() => undefined),
+    new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), TARGET_COUNT_MS);
+    }),
+  ]).finally(() => clearTimeout(timer));
+  const reason =
+    matches === undefined
+      ? `The click may have happened; check the page before retrying. Whether ${target} still matches an element is unknown.`
+      : matches === 0
+        ? `The click may have happened and removed its target or navigated; check the page before retrying. No element matches ${target} after the timeout; take a fresh snapshot and use its locator.`
+        : `The click may have happened; check the page before retrying. ${target} still matches an element after the timeout.`;
+  return new ServerBrowserOperationError(
+    "PreviewAutomationTimeoutError",
+    reason,
+    { reason },
+    { cause },
+  );
+};
+
+const clickTarget = async (
+  page: Page,
+  locator: Locator | null,
+  input: PreviewAutomationClickInput,
+  timeout: number,
+  pointer: PointerReporter,
+) => {
   const point = await targetPoint(page, locator, input, timeout);
   await pointer(point, "click");
   const options = { button: input.button ?? "left", clickCount: input.clickCount ?? 1 } as const;
@@ -812,8 +865,10 @@ export const evaluate = async (
   timeoutMs: number,
 ) => {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   const expired = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
+      timedOut = true;
       // Stops a busy script; an awaited promise is abandoned and settles unread.
       void cdp.send("Runtime.terminateExecution").catch(constVoid);
       reject(
@@ -824,10 +879,23 @@ export const evaluate = async (
       );
     }, timeoutMs);
   });
-  const evaluation = cdp.send("Runtime.evaluate", {
+  const params = {
     expression: input.expression,
     awaitPromise: input.awaitPromise ?? true,
-    returnByValue: input.returnByValue ?? true,
+    returnByValue: true,
+  };
+  // The devtools console's replMode allows top-level await but returns a trailing promise unawaited,
+  // so it only retries what the page's parser rejected. A parse error has a scriptId but no stack and
+  // ran nothing; a browser-internal rejection has neither.
+  const evaluation = cdp.send("Runtime.evaluate", params).then((classic) => {
+    const failure = classic.exceptionDetails;
+    const unparsed =
+      failure?.exception?.className === "SyntaxError" &&
+      failure.scriptId !== undefined &&
+      failure.stackTrace === undefined;
+    return unparsed && !timedOut && input.expression.includes("await")
+      ? cdp.send("Runtime.evaluate", { ...params, replMode: true })
+      : classic;
   });
   void evaluation.catch(constVoid);
   const result = await Promise.race([evaluation, expired]).finally(() => clearTimeout(timer));
