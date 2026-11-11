@@ -802,5 +802,23 @@ export function workEntryHiddenByToolCallVisibility(
 ): boolean {
   if (visibility === "showAll" || !HIDEABLE_TOOL_CALL_ITEM_TYPES.has(entry.itemType)) return false;
   if (entry.tone === "error" || workEntryDisplayIndicatesToolFailure(entry)) return false;
-  return visibility === "hideAll" || entry.toolLifecycleStatus === "completed";
+  return visibility !== "hideSuccessful" || entry.toolLifecycleStatus === "completed";
+}
+
+/**
+ * One line for a live activity row from an agent's markdown: a leading bold
+ * heading when there is one, otherwise the first sentence, without markup.
+ */
+export function liveThoughtLine(markdown: string): string {
+  const heading = /^\s*\*\*([^*\r\n]+)\*\*[ \t]*\r?(?:\n|$)/.exec(markdown)?.[1];
+  const text = (heading ?? markdown)
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^[ \t]*(?:#{1,6}|[-*+]|\d+\.)[ \t]+/gm, "")
+    .replace(/`+|\*\*|~~/g, "")
+    .replace(/(^|[^\w*])[*_]([^*_\n]+)[*_](?![\w*])/g, "$1$2")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (heading !== undefined) return text;
+  const end = /[.?!]["'”’)]?(?=\s)/.exec(text);
+  return end ? text.slice(0, end.index + end[0].length) : text;
 }

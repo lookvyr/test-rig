@@ -190,6 +190,7 @@ import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssis
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
+  liveAnswerPreview,
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
   resolveAssistantMessageCopyState,
@@ -344,6 +345,8 @@ interface TimelineRowActivityState {
    * list itself has already left the timeline.
    */
   backgroundWorktreeSetup: WorktreeSetupSnapshot | null;
+  /** Zen hides the agent's in-between messages; the live row shows their latest line instead. */
+  liveAnswerPreview: string | null;
 }
 
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
@@ -751,7 +754,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     });
   }, [latestRun]);
 
-  const toolCallVisibility = useClientSettings((settings) => settings.toolCallVisibility);
+  const [findActive, setFindActive] = useState(false);
+  const preferredToolCallVisibility = useClientSettings((settings) => settings.toolCallVisibility);
+  // Find searches the in-between messages Zen hides, so they show while it is open.
+  const toolCallVisibility =
+    findActive && preferredToolCallVisibility === "zen" ? "hideAll" : preferredToolCallVisibility;
+  const revealedMessageId = citationRequest?.citation.messageId ?? null;
   const rowsProjectionRef = useRef<{
     readonly threadKey: string;
     readonly workspaceRoot: string | undefined;
@@ -762,6 +770,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const projection = deriveMessagesTimelineRowsWithState(
       {
         toolCallVisibility,
+        revealedMessageId,
         timelineEntries,
         latestRun,
         runningRunId,
@@ -782,6 +791,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return projection.rows;
   }, [
     toolCallVisibility,
+    revealedMessageId,
     rowsProjectionRef,
     listIdentityKey,
     workspaceRoot,
@@ -1276,6 +1286,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     latestRun?.startedAt != null
       ? worktreeSetup
       : null;
+  const zenLiveAnswerPreview =
+    isWorking && toolCallVisibility === "zen" ? liveAnswerPreview(timelineEntries) : null;
   const activityState = useMemo<TimelineRowActivityState>(
     () => ({
       isWorking,
@@ -1284,8 +1296,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeTurnInProgress,
       isPreparingWorktree,
       latestRunId: latestRun?.runId ?? null,
+      liveAnswerPreview: zenLiveAnswerPreview,
     }),
     [
+      zenLiveAnswerPreview,
       compactionAwaitingRow,
       backgroundWorktreeSetup,
       activeTurnInProgress,
@@ -1392,6 +1406,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               onSelectMessage={setSearchMessageId}
               onManualNavigation={onManualNavigation}
               onClose={() => onFindClose?.()}
+              onOpenChange={setFindActive}
             />
           )}
           {onCiteAssistantText && citationThreadRef ? (
@@ -3574,12 +3589,16 @@ function CompactingLabel({ createdAt }: { createdAt: string | null }) {
 }
 
 function ThinkingTimelineRow() {
-  const { isCompacting, isPreparingWorktree } = use(TimelineRowActivityCtx);
+  const {
+    isCompacting,
+    isPreparingWorktree,
+    liveAnswerPreview: answerPreview,
+  } = use(TimelineRowActivityCtx);
   // Reserve the activity row during setup so the handoff keeps the same height.
   return isPreparingWorktree || isCompacting ? (
     <WorkLogRow label="" />
   ) : (
-    <LiveActivityRow label="Thinking" iconName="brain" active shimmer />
+    <LiveActivityRow label={answerPreview ?? "Thinking"} iconName="brain" active shimmer />
   );
 }
 

@@ -28,6 +28,12 @@ function Combobox<Value, Multiple extends boolean | undefined = false>(
   );
 }
 
+// Set inside ComboboxPopup. An input rendered there must not render its own
+// trigger: Base UI would take that inner button as the combobox's trigger, so
+// the popup would anchor to a button inside itself and land in a different,
+// unrelated spot each time it opens.
+const ComboboxInsidePopupContext = React.createContext(false);
+
 function ComboboxChipsInput({
   className,
   size,
@@ -56,7 +62,7 @@ function ComboboxChipsInput({
 function ComboboxInput({
   className,
   inputClassName,
-  showTrigger = true,
+  showTrigger: showTriggerProp,
   showClear = false,
   startAddon,
   size,
@@ -72,6 +78,8 @@ function ComboboxInput({
   ref?: React.Ref<HTMLInputElement>;
 }) {
   const sizeValue = (size ?? "default") as "sm" | "default" | "lg" | number;
+  const insidePopup = React.use(ComboboxInsidePopupContext);
+  const showTrigger = !insidePopup && (showTriggerProp ?? true);
 
   return (
     <div className="relative not-has-[>*.w-full]:w-fit w-full text-foreground has-disabled:opacity-64">
@@ -179,7 +187,7 @@ function ComboboxPopup({
             data-slot="combobox-popup"
             {...props}
           >
-            {children}
+            <ComboboxInsidePopupContext value={true}>{children}</ComboboxInsidePopupContext>
           </ComboboxPrimitive.Popup>
         </span>
       </ComboboxPrimitive.Positioner>

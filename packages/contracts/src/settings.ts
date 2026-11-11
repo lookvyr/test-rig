@@ -204,7 +204,7 @@ export const BrowserCustomSearchUrl = Schema.String.check(
   Schema.isMaxLength(BROWSER_CUSTOM_SEARCH_URL_MAX_LENGTH),
 );
 
-export const ToolCallVisibility = Schema.Literals(["showAll", "hideSuccessful", "hideAll"]);
+export const ToolCallVisibility = Schema.Literals(["showAll", "hideSuccessful", "hideAll", "zen"]);
 export type ToolCallVisibility = typeof ToolCallVisibility.Type;
 
 export const ClientSettingsSchema = Schema.Struct({
