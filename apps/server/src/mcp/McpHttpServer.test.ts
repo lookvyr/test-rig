@@ -201,7 +201,7 @@ it.effect("registers annotated tools and preserves authenticated request context
                   loading: false,
                   visibleText: "Example",
                   interactiveElements: [],
-                  accessibilityTree: {},
+                  accessibilityTree: '- button "Go" [ref=t3-test-e1]',
                   consoleEntries: [],
                   networkEntries: [],
                   actionTimeline: [],
@@ -275,24 +275,34 @@ it.effect("registers annotated tools and preserves authenticated request context
           Effect.provideService(McpSchema.McpServerClient, client),
         );
       expect(snapshot.isError).toBe(false);
-      expect(snapshot.content.some((content) => content.type === "image")).toBe(true);
-      expect(snapshot.structuredContent).toMatchObject({
+      // Images are opt-in, and empty lists are left out.
+      expect(snapshot.content).toHaveLength(1);
+      expect(snapshot.structuredContent).toEqual({
+        url: "http://example.test/",
+        title: "Example",
+        loading: false,
         screenshot: { mimeType: "image/png", width: 10, height: 5 },
+        visibleText: "Example",
+        accessibilityTree: '- button "Go" [ref=t3-test-e1]',
       });
-      expect(snapshot.structuredContent).not.toHaveProperty("accessibilityTree");
-      expect(snapshot.structuredContent).not.toHaveProperty("screenshotPath");
+      const snapshotText = snapshot.content[0];
+      expect(snapshotText?.type === "text" ? decodeJsonText(snapshotText.text) : undefined).toEqual(
+        snapshot.structuredContent,
+      );
       const fileSystem = yield* FileSystem.FileSystem;
       const config = yield* ServerConfig.ServerConfig;
       expect(yield* fileSystem.exists(config.browserArtifactsDir)).toBe(false);
 
-      const textOnly = yield* server
-        .callTool({ name: "preview_snapshot", arguments: { includeImage: false } })
+      const withImage = yield* server
+        .callTool({ name: "preview_snapshot", arguments: { includeImage: true } })
         .pipe(
           Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
           Effect.provideService(McpSchema.McpServerClient, client),
         );
-      expect(textOnly.isError).toBe(false);
-      expect(textOnly.content.every(({ type }) => type === "text")).toBe(true);
+      expect(withImage.isError).toBe(false);
+      expect(withImage.content.map(({ type }) => type)).toEqual(["text", "image"]);
+      // Codex drops an image that sits beside structuredContent.
+      expect(withImage.structuredContent).toBeUndefined();
       expect(yield* fileSystem.exists(config.browserArtifactsDir)).toBe(false);
       const saved = yield* server
         .callTool({
@@ -309,6 +319,11 @@ it.effect("registers annotated tools and preserves authenticated request context
         screenshotPath: string;
         screenshotMarkdown: string;
       };
+      expect(Object.keys(metadata).toSorted()).toEqual([
+        "screenshotMarkdown",
+        "screenshotPath",
+        "url",
+      ]);
       const path = yield* Path.Path;
       expect(metadata.screenshotMarkdown).toBe(
         `![Browser screenshot](/browser-artifacts/${path.basename(metadata.screenshotPath)})`,
@@ -321,14 +336,12 @@ it.effect("registers annotated tools and preserves authenticated request context
       expect(firstText?.type === "text" ? decodeJsonText(firstText.text) : undefined).toEqual(
         saved.structuredContent,
       );
+      // Only a save asks the browser for the full-size capture.
       expect(
         routedRequests
           .filter(({ operation }) => operation === "snapshot")
-          .every(
-            ({ input }) =>
-              input !== null && typeof input === "object" && Object.keys(input).length === 0,
-          ),
-      ).toBe(true);
+          .map(({ input }) => input),
+      ).toEqual([{}, {}, { fullScreenshot: true }]);
 
       const evaluateTool = server.tools.find(({ tool }) => tool.name === "preview_evaluate");
       expect(evaluateTool?.tool.outputSchema).toMatchObject({ type: "object" });

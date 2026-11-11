@@ -41,7 +41,7 @@ import type { PreviewAutomationSnapshot } from "@t3tools/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
 import type * as ServerConfig from "../config.ts";
-import { saveScreenshot, snapshotMetadata } from "./PreviewSnapshot.ts";
+import { saveScreenshot, savedScreenshotMetadata, snapshotMetadata } from "./PreviewSnapshot.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
@@ -200,27 +200,43 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
           Effect.flatMap(({ encodedResult }) =>
             Effect.gen(function* () {
               const snapshot = encodedResult as PreviewAutomationSnapshot;
-              const png =
-                payload?.includeImage === false && payload?.save !== true
-                  ? undefined
-                  : new Uint8Array(Buffer.from(snapshot.screenshot.data, "base64"));
+              const decode = (data: string) => new Uint8Array(Buffer.from(data, "base64"));
               const screenshotPath =
-                payload?.save === true ? yield* saveScreenshot(snapshot.url, png!) : undefined;
+                payload?.save === true
+                  ? yield* saveScreenshot(
+                      snapshot.url,
+                      decode((snapshot.fullScreenshot ?? snapshot.screenshot).data),
+                    )
+                  : undefined;
+              // Images cost ~1.5K tokens and providers replay them on later requests; send them only when asked.
+              const includeImage = payload?.includeImage === true;
+              if (screenshotPath !== undefined && !includeImage) {
+                const saved = savedScreenshotMetadata(snapshot.url, screenshotPath);
+                return new McpSchema.CallToolResult({
+                  isError: false,
+                  structuredContent: saved,
+                  content: [{ type: "text", text: encodeJsonText(saved) }],
+                });
+              }
               const metadata = snapshotMetadata(snapshot, screenshotPath);
+              const text = { type: "text" as const, text: encodeJsonText(metadata) };
+              if (!includeImage) {
+                return new McpSchema.CallToolResult({
+                  isError: false,
+                  structuredContent: metadata,
+                  content: [text],
+                });
+              }
+              // Codex reads only structuredContent when it is present and drops the image beside it.
               return new McpSchema.CallToolResult({
                 isError: false,
-                structuredContent: metadata,
                 content: [
-                  { type: "text", text: encodeJsonText(metadata) },
-                  ...(payload?.includeImage === false
-                    ? []
-                    : [
-                        {
-                          type: "image" as const,
-                          data: png!,
-                          mimeType: snapshot.screenshot.mimeType,
-                        },
-                      ]),
+                  text,
+                  {
+                    type: "image" as const,
+                    data: decode(snapshot.screenshot.data),
+                    mimeType: snapshot.screenshot.mimeType,
+                  },
                 ],
               });
             }),

@@ -198,8 +198,21 @@ const handlers = {
 
   preview_dialog: (input) => invokeTargeted<PreviewAutomationStatus>("dialog", input),
   preview_status: (input) => invokeTargeted<PreviewAutomationStatus>("status", input ?? {}),
-  preview_open: (input) =>
-    invokeTargeted<PreviewAutomationStatus>("open", normalizePreviewOpenInput(input)),
+  // Models often pass a dev server as both `url` and `target`; the target knows the environment.
+  preview_open: ({ target, url, ...input }) =>
+    Effect.gen(function* () {
+      const opened = yield* invokeTargeted<PreviewAutomationStatus>(
+        "open",
+        normalizePreviewOpenInput(
+          target === undefined && url !== undefined ? { ...input, url } : input,
+        ),
+      );
+      if (target === undefined || opened.tabId === null) return opened;
+      return yield* invokeTargeted<PreviewAutomationStatus>("navigate", {
+        target,
+        tabId: opened.tabId,
+      });
+    }),
   preview_navigate: (input) =>
     invokeTargeted<PreviewAutomationStatus>("navigate", input, input.timeoutMs),
   preview_resize: (input) =>
@@ -207,9 +220,13 @@ const handlers = {
   preview_set_appearance: (input) =>
     invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
   preview_snapshot: (input) => {
-    // Saving and response selection belong to MCP; the desktop captures the full snapshot.
-    const { includeImage: _includeImage, save: _save, ...target } = input ?? {};
-    return invokeTargeted<PreviewAutomationSnapshot>("snapshot", target);
+    // Saving and response selection belong to MCP; the browser captures the snapshot.
+    const { includeImage: _includeImage, save, ...target } = input ?? {};
+    // The saved file is for people, so it keeps the resolution the agent's image is capped below.
+    return invokeTargeted<PreviewAutomationSnapshot>("snapshot", {
+      ...target,
+      ...(save === true ? { fullScreenshot: true } : {}),
+    });
   },
   preview_act: ({ action, ...input }) =>
     decodeActInput[action](input).pipe(

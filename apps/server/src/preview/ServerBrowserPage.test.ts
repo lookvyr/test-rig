@@ -43,11 +43,12 @@ describe("server browser element refs", () => {
     await context.close();
   });
 
-  const takeSnapshot = () =>
+  const takeSnapshot = (options: { readonly fullTree?: boolean } = {}) =>
     ServerBrowserPage.snapshot({
       page,
       cdp,
       renderScale: 1,
+      ...options,
       consoleEntries: [],
       networkEntries: [],
       actionTimeline: [],
@@ -176,7 +177,8 @@ describe("server browser element refs", () => {
       </script>`);
     await page.frameLocator("iframe[srcdoc]").getByRole("textbox").waitFor();
     await ServerBrowserPage.type(page, { locator: "#pw", text: "typed-pass" });
-    const result = await takeSnapshot();
+    // Masking runs before compaction, so the full tree shows every place a value could appear.
+    const result = await takeSnapshot({ fullTree: true });
     const tree = String(result.accessibilityTree);
     expect(tree).toContain('textbox "blank"');
     expect(tree).not.toMatch(
@@ -228,7 +230,7 @@ describe("server browser element refs", () => {
         controlled.href = "\\x01data:text/plain,PAYLOAD";
         escaped.href = "\\x02da\\tta:text/plain,PAYLOAD";
       </script>`);
-    const tree = String((await takeSnapshot()).accessibilityTree);
+    const tree = String((await takeSnapshot({ fullTree: true })).accessibilityTree);
     expect(tree.match(/\/url: data:text\/plain,…$/gm)).toHaveLength(8);
     expect(tree).toContain("/url: data:,…");
     expect(tree).toContain("/url: https://example.com/data:report,2026");
@@ -241,7 +243,7 @@ describe("server browser element refs", () => {
     await page.setContent(`
       <input type="password" aria-label="Scheme" value="data">
       <a download href="data:text/plain,PAYLOAD">Key</a>`);
-    const tree = String((await takeSnapshot()).accessibilityTree);
+    const tree = String((await takeSnapshot({ fullTree: true })).accessibilityTree);
     expect(tree).toContain("/url: ••••••••:text/plain,…");
     expect(tree).not.toContain("PAYLOAD");
   });
