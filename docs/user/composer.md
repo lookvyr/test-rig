@@ -158,8 +158,11 @@ provider's settings can override it:
   last request: usually 1 hour on a subscription and 5 minutes with an API key,
   or whatever your Claude prompt cache TTL setting chose. The thread shows one
   compaction status with its reason, followed by the result when it finishes.
-  There is no extra `/compact` message bubble or duplicate working row.
-  Failures show their reason in the compaction status. It is skipped when the
+  There is no extra `/compact` message bubble or duplicate working row. The
+  thread list keeps showing your last turn: the thread does not switch to
+  Working, become unread or send a notification, and **Mark unread** still
+  works. Failures show their reason in the compaction status and surface like
+  any failed turn. It is skipped when the
   thread is waiting on a question, approval, background work or a pending
   merge-back, and when the cache has already expired, for example after the
   computer slept. Waiting compactions do not survive a restart.

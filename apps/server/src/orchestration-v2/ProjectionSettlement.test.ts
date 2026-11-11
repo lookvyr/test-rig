@@ -397,7 +397,8 @@ it.effect(
       );
       assert.isTrue(queries.every(([query]) => !query.includes("COUNT(")));
       const pendingQuery = queries.find(([query]) =>
-        query.includes("FROM orchestration_v2_projection_turn_items"),
+        // The candidate query also checks turn items to skip idle compactions.
+        query.includes("FROM orchestration_v2_projection_turn_items i"),
       );
       assert.isDefined(pendingQuery);
       const metadata = yield* store.getThread(threadId);
