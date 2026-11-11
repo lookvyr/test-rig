@@ -117,7 +117,7 @@ export const PreviewSetAppearanceTool = safeBrowserTool(
 export const PreviewSnapshotTool = readonlyBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect before interacting: page text, `accessibilityTree` of controls with refs, and console and network errors. Target an element with `locator='aria-ref=<ref>'`; refs die on navigation or a new snapshot. Text caps near 20 KB; `omitted` notes guide targeted preview_evaluate reads. To show a screenshot when asked: `save=true`, then include `screenshotMarkdown` verbatim.",
+      "Inspect before interacting: page text, `accessibilityTree` of controls with refs, and console and network errors since the last snapshot. Target an element with `locator='aria-ref=<ref>'`; refs die on navigation or a new snapshot. Text caps near 20 KB; `omitted` notes guide targeted preview_evaluate reads. To show a screenshot when asked: `save=true`, then include `screenshotMarkdown` verbatim.",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(Schema.Boolean).annotate({
