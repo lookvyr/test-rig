@@ -153,9 +153,15 @@ compacts about 33,000 tokens before the number you set.
 idle Claude thread with at least 200,000 tokens of context. Each Claude
 provider's settings can override it:
 
-- **When you return** (the default) leaves it to Claude: when you come back to a
-  long session after a while, Claude asks whether to compact it or keep the full
-  history.
+- **When you return** (the default) offers to compact when you come back after
+  Claude's prompt cache has expired. A **Compact** chip with the thread's token
+  count shows next to the send button. While it is on, sending summarizes the
+  history first, then sends your message; the working row reads "Compacting
+  for 12s" and the result is titled "Context compacted before sending". Click
+  the chip to switch it to **Keep** and send with the full history. Answering
+  "Don't ask again" to Claude's own compact question hides the chip too. The
+  cache lasts about an hour on a Claude subscription and 5 minutes with an API
+  key, Bedrock or Vertex.
 - **Before the cache expires (beta)** compacts the thread shortly before its
   prompt cache expires, so coming back does not reprocess the whole
   conversation. The timing follows the cache lifetime Claude reports for the
@@ -169,7 +175,8 @@ provider's settings can override it:
   any failed turn. It is skipped when the
   thread is waiting on a question, approval, background work or a pending
   merge-back, and when the cache has already expired, for example after the
-  computer slept. Waiting compactions do not survive a restart.
+  computer slept. Waiting compactions do not survive a restart. When the
+  window is missed, the **Compact** chip from **When you return** shows instead.
 - **Never** skips idle compaction and Claude's question when you return. Claude
   still compacts automatically when the context fills, and you can still
   compact by hand.

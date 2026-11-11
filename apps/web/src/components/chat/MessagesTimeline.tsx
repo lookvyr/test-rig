@@ -2224,7 +2224,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           )}
         </p>
       ) : null}
-      {row.message.inputIntent && row.message.inputIntent !== "turn_start" ? (
+      {row.message.inputIntent &&
+      row.message.inputIntent !== "turn_start" &&
+      !row.sentAfterCompaction ? (
         <UserMessageIntentMarker intent={row.message.inputIntent} />
       ) : null}
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground [&_[data-context-chip]]:[--context-chip-ink:var(--context-chip-message,var(--context-chip-accent))]">

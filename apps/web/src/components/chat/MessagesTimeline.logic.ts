@@ -586,6 +586,8 @@ type MessagesTimelineRowContent =
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
+      /** Queued only behind the compaction "Compact and send" ran, so it shows no "Queued". */
+      sentAfterCompaction?: true;
     }
   | {
       kind: "assistant-meta";
@@ -1424,13 +1426,24 @@ export function deriveMessagesTimelineRows(input: {
   const compactedRunIds = new Set<RunId>();
   const pendingResumeCompactionAgeByRunId = new Map<RunId, string>();
   const resumeCompactionAgeByEntryId = new Map<string, string>();
+  // "Compact and send" queues the message behind its compaction; it was not the user's choice
+  // to queue, so the message does not say "Queued".
+  const sentAfterCompactionMessageIds = new Set<string>();
+  let followsReturnCompaction = false;
   for (const entry of timelineEntries) {
     if (
       entry.kind === "message" &&
       entry.message.runId !== null &&
       isCompactionCommandMessage(entry.message)
     ) {
-      compactionRuns.set(entry.message.runId, idleCompactionOf(entry.message));
+      const reason = idleCompactionOf(entry.message);
+      compactionRuns.set(entry.message.runId, reason);
+      followsReturnCompaction = reason === "onReturn";
+    } else if (entry.kind === "message" && entry.message.role === "user") {
+      if (followsReturnCompaction && entry.message.inputIntent === "queued_turn") {
+        sentAfterCompactionMessageIds.add(entry.message.id);
+      }
+      followsReturnCompaction = false;
     } else if (entry.kind === "work" && entry.entry.runId) {
       if (timelineEntryIsCompaction(entry)) {
         compactedRunIds.add(entry.entry.runId);
@@ -1858,6 +1871,9 @@ export function deriveMessagesTimelineRows(input: {
       id: timelineEntry.id,
       createdAt: timelineEntry.createdAt,
       message: timelineEntry.message,
+      ...(sentAfterCompactionMessageIds.has(timelineEntry.message.id)
+        ? { sentAfterCompaction: true as const }
+        : {}),
       ...(timelineEntry.projectedItem === undefined
         ? {}
         : { projectedItem: timelineEntry.projectedItem }),
@@ -2255,6 +2271,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       const bm = b as typeof a;
       return (
         a.message === bm.message &&
+        a.sentAfterCompaction === bm.sentAfterCompaction &&
         a.projectedItem === bm.projectedItem &&
         a.durationStart === bm.durationStart &&
         a.showAssistantMeta === bm.showAssistantMeta &&

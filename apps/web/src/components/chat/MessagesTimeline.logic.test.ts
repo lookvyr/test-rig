@@ -1402,6 +1402,62 @@ describe("deriveMessagesTimelineRows", () => {
     );
   });
 
+  it("does not mark the message Compact and send queued as Queued", () => {
+    const fixture = makeStreamingTimelineFixture();
+    const [history0, history1, history2, liveUser, , liveAssistant] = fixture.visibleTurnItems;
+    if (liveUser?.item.type !== "user_message" || liveAssistant?.item.type !== "assistant_message")
+      throw new Error("Expected live fixture items");
+    const queuedMessageId = MessageId.make("queued-after-compaction");
+    const userItem = liveUser.item;
+    const compaction = {
+      ...liveAssistant,
+      item: {
+        ...liveAssistant.item,
+        type: "compaction" as const,
+        driver: null,
+        status: "completed" as const,
+        beforeTokenCount: 210_000,
+        afterTokenCount: 4_200,
+      },
+    };
+    const queuedUser = {
+      ...liveUser,
+      item: {
+        ...userItem,
+        id: TurnItemId.make("queued-user-item"),
+        messageId: queuedMessageId,
+        runId: RunId.make("run-queued"),
+        text: "Draft the changelog",
+        inputIntent: "queued_turn" as const,
+      },
+    };
+    const rowsFor = (idleCompaction: "beforeCacheExpires" | "onReturn") =>
+      deriveMessagesTimelineRows({
+        timelineEntries: deriveTimelineEntriesFromVisibleTurnItems({
+          visibleTurnItems: [
+            history0!,
+            history1!,
+            history2!,
+            { ...liveUser, item: { ...userItem, text: "/compact", idleCompaction } },
+            compaction,
+            queuedUser,
+          ],
+          optimisticMessages: [],
+        }),
+        isWorking: false,
+        runningRunId: null,
+        activeTurnStartedAt: null,
+        turnDiffSummaries: [],
+      });
+    const queuedRow = (idleCompaction: "beforeCacheExpires" | "onReturn") =>
+      rowsFor(idleCompaction).find(
+        (row) => row.kind === "message" && row.message.id === queuedMessageId,
+      );
+    expect(queuedRow("onReturn")).toMatchObject({ sentAfterCompaction: true });
+    // A message the user queued behind a background compaction keeps its marker.
+    expect(queuedRow("beforeCacheExpires")).not.toHaveProperty("sentAfterCompaction");
+  });
+
   it("shows a skipped compaction as stopped, without a separate interrupted divider", () => {
     const fixture = makeStreamingTimelineFixture();
     const [history0, history1, history2, liveUser, , liveAssistant] = fixture.visibleTurnItems;
