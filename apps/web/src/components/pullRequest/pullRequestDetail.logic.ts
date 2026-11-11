@@ -19,11 +19,13 @@ import {
   type PullRequestContextMetadata,
   type PullRequestDetailView,
   type PullRequestMergeability,
+  type PullRequestMergeReadiness,
   type PullRequestReaction,
   type PullRequestMergeMethod,
   type PullRequestRef,
   type RepositoryIdentity,
   type PullRequestReviewThread,
+  type PullRequestReviewDecision,
   type PullRequestState,
   type PullRequestUpdateMethod,
   SourceControlProviderKind,
@@ -74,38 +76,96 @@ type PullRequestPrimaryControl =
   | "resolve"
   | "ready"
   | "merge"
+  /** Merge, shown but not pressable: something still stands between the PR and merging. */
+  | "merge-not-ready"
   | "enable-auto-merge"
   | "auto-merge-armed"
   | "merged"
   | "closed"
   | null;
 
-export function resolvePullRequestPrimaryControl(input: {
-  readonly state: PullRequestState;
-  readonly isDraft: boolean;
+type PullRequestMergeReadinessInput = {
   readonly mergeability: PullRequestMergeability;
   readonly checksState: ContractPullRequestChecksState | null;
-  readonly autoMergeEnabled: boolean | undefined;
-  readonly hasMergeMethod: boolean;
-  readonly canMerge: boolean;
-  readonly canMarkReady: boolean;
-  readonly canEnableAutoMerge: boolean;
-}): PullRequestPrimaryControl {
+  readonly mergeReadiness?: PullRequestMergeReadiness | undefined;
+  readonly approvalDecision?: PullRequestReviewDecision | null | undefined;
+  readonly baseComparison?: PullRequestBaseComparison | undefined;
+};
+
+/**
+ * Why an open, non-draft, conflict-free PR is not ready to merge yet, or null when nothing stands
+ * in the way. Stricter than the host on purpose: a host without branch rules will merge over red
+ * or running checks, but the primary Merge button waits for them. Drafts and conflicts are
+ * answered by their own controls before this is asked.
+ */
+export function pullRequestMergeBlocker(input: PullRequestMergeReadinessInput): string | null {
+  const readiness = input.mergeReadiness?.status;
+  if (readiness === "queued") return "Already in the merge queue";
+  if (input.approvalDecision === "changes-requested") return "Changes were requested";
+  if (input.checksState === "failing") return "Checks are failing";
+  if (input.checksState === "pending") return "Checks are still running";
+  if (input.approvalDecision === "review-required") return "Waiting on a required review";
+  if (readiness === "blocked") {
+    return input.baseComparison === "behind"
+      ? "Branch is behind its base and needs updating"
+      : "Blocked by the repository's merge rules";
+  }
+  // Only a host that evaluates readiness reports mergeability as still being computed.
+  if (input.mergeReadiness !== undefined && input.mergeability === "unknown") {
+    return "Still checking whether this can merge";
+  }
+  return null;
+}
+
+/**
+ * Whether the host would refuse a direct merge outright. Where it would not, a merge is allowed
+ * from the overflow menu even while `pullRequestMergeBlocker` keeps the primary button disabled.
+ */
+function hostRefusesMerge(mergeReadiness: PullRequestMergeReadiness | undefined): boolean {
+  return mergeReadiness?.status === "blocked" || mergeReadiness?.status === "queued";
+}
+
+/**
+ * Whether arming auto-merge would actually wait. GitHub merges on the spot when its merge state
+ * is already clean or merely unstable, so offering "Enable auto-merge" there would merge a PR
+ * whose checks are red. Hosts that report no readiness keep the checks-based guess.
+ */
+function autoMergeWouldWait(input: PullRequestMergeReadinessInput): boolean {
+  if (input.mergeReadiness !== undefined) {
+    return (
+      input.mergeReadiness.status === "blocked" || input.mergeReadiness.status === "queue-required"
+    );
+  }
+  return input.checksState !== null && input.checksState !== "passing";
+}
+
+export function resolvePullRequestPrimaryControl(
+  input: PullRequestMergeReadinessInput & {
+    readonly state: PullRequestState;
+    readonly isDraft: boolean;
+    readonly autoMergeEnabled: boolean | undefined;
+    readonly hasMergeMethod: boolean;
+    readonly canMerge: boolean;
+    readonly canMarkReady: boolean;
+    readonly canEnableAutoMerge: boolean;
+  },
+): PullRequestPrimaryControl {
   if (input.state === "merged") return "merged";
   if (input.state === "closed") return "closed";
   if (input.mergeability === "conflicting") return "resolve";
   if (input.isDraft) return input.canMarkReady ? "ready" : null;
   if (input.autoMergeEnabled) return "auto-merge-armed";
   if (!input.hasMergeMethod) return null;
+  if (pullRequestMergeBlocker(input) === null) return input.canMerge ? "merge" : null;
   if (
     input.autoMergeEnabled === false &&
-    input.checksState !== null &&
-    input.checksState !== "passing" &&
-    input.canEnableAutoMerge
+    input.canEnableAutoMerge &&
+    input.mergeReadiness?.status !== "queued" &&
+    autoMergeWouldWait(input)
   ) {
     return "enable-auto-merge";
   }
-  return input.canMerge ? "merge" : null;
+  return input.canMerge ? "merge-not-ready" : null;
 }
 
 export function pullRequestCheckoutCommand(
@@ -314,6 +374,7 @@ export function isPullRequestActionAvailable(
     | "mergeability"
     | "baseComparison"
     | "workflowApprovalsRequired"
+    | "mergeReadiness"
   >,
   singleMerge: boolean,
   hasMergeMethod: boolean,
@@ -327,9 +388,16 @@ export function isPullRequestActionAvailable(
     singleMerge;
   switch (action) {
     case "merge":
-      return mergeable;
+      return mergeable && !hostRefusesMerge(detail.mergeReadiness);
     case "enable-auto-merge":
-      return mergeable && detail.autoMergeEnabled === false;
+      return (
+        mergeable &&
+        detail.autoMergeEnabled === false &&
+        detail.mergeReadiness?.status !== "queued" &&
+        // Without a check rollup here, only a host-reported readiness can say it would wait.
+        (detail.mergeReadiness === undefined ||
+          autoMergeWouldWait({ ...detail, checksState: null }))
+      );
     case "disable-auto-merge":
       return open && detail.autoMergeEnabled === true && singleMerge;
     case "ready":

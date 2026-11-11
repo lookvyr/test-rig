@@ -29,8 +29,10 @@ import {
   allowsSinglePullRequestMerge,
   isPullRequestActionAvailable,
   PULL_REQUEST_MERGE_METHOD_LABELS,
+  pullRequestMergeBlocker,
   resolvePullRequestPrimaryControl,
 } from "./pullRequestDetail.logic";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { pullRequestChecksState } from "./pullRequestPresentation";
 
 const labels: Record<PullRequestAction, string> = {
@@ -91,10 +93,12 @@ export function PullRequestManagement({
     stackPending,
     stackError,
   });
+  const checksState = pullRequestChecksState(detail.checks);
+  const mergeBlocker = pullRequestMergeBlocker({ ...detail, checksState });
   const primary = resolvePullRequestPrimaryControl({
     ...detail,
     autoMergeEnabled: detail.autoMergeEnabled,
-    checksState: pullRequestChecksState(detail.checks),
+    checksState,
     hasMergeMethod: methods.length > 0,
     canMerge: can("merge") && singleMerge,
     canMarkReady: can("ready"),
@@ -134,6 +138,19 @@ export function PullRequestManagement({
             ? PULL_REQUEST_MERGE_METHOD_LABELS[mergeMethod]
             : labels[primaryAction]}
         </Button>
+      ) : primary === "merge-not-ready" ? (
+        <Tooltip>
+          {/* A disabled button takes no pointer events, so the wrapper carries the hover. */}
+          <TooltipTrigger
+            render={<span className="inline-flex" tabIndex={0} />}
+            aria-label={`${PULL_REQUEST_MERGE_METHOD_LABELS[mergeMethod]} unavailable: ${mergeBlocker ?? "not ready to merge"}`}
+          >
+            <Button size="xs" disabled aria-hidden>
+              {PULL_REQUEST_MERGE_METHOD_LABELS[mergeMethod]}
+            </Button>
+          </TooltipTrigger>
+          <TooltipPopup>{mergeBlocker ?? "Not ready to merge"}</TooltipPopup>
+        </Tooltip>
       ) : primary === "auto-merge-armed" ? (
         <span className="text-xs text-muted-foreground">Auto-merge enabled</span>
       ) : null}
@@ -170,7 +187,9 @@ export function PullRequestManagement({
           {available.length > 0 && <MenuSeparator />}
           {available.map((action) => (
             <MenuItem key={action} disabled={pending} onClick={() => setConfirmation({ action })}>
-              {labels[action]}
+              {action === "merge" && mergeBlocker !== null
+                ? "Merge without waiting"
+                : labels[action]}
             </MenuItem>
           ))}
         </MenuPopup>
@@ -192,6 +211,9 @@ export function PullRequestManagement({
                 ? ` using ${PULL_REQUEST_MERGE_METHOD_LABELS[mergeMethod].toLowerCase()}`
                 : ""}
               .
+              {confirmation?.action === "merge" && mergeBlocker !== null
+                ? ` It is not ready yet: ${mergeBlocker.toLowerCase()}.`
+                : ""}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
