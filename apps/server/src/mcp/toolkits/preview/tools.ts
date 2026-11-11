@@ -166,7 +166,7 @@ export const PreviewTypeSecretTool = browserTool(
 export const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Returns {value} with a serializable result up to 64 KB, or null for undefined. The expression may mutate page state.",
+      "Run JavaScript in the chosen tab; top-level await works. It can change page state. Returns `{value}`, up to 64 KB, null for undefined.",
     parameters: PreviewAutomationEvaluateInput,
     success: Schema.Struct({ value: Schema.Unknown }),
     failure: PreviewAutomationError,
@@ -188,7 +188,7 @@ export const PreviewWaitForTool = readonlyBrowserTool(
 export const PreviewRecordingStartTool = safeBrowserTool(
   Tool.make("preview_recording_start", {
     description:
-      "Start recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted. For a desktop walkthrough, first use preview_resize with a fixed desktop viewport so the recording does not inherit a narrow side panel. Preserve an intentional mobile or responsive-test viewport. Recordings capture the browser without sound.",
+      "Start recording the chosen tab, without sound. For a desktop walkthrough, first `preview_resize` to a fixed desktop viewport; keep an intentional mobile one.",
     parameters: PreviewAutomationTabTargetInput,
     success: PreviewAutomationRecordingStatus,
     failure: PreviewAutomationError,
@@ -199,7 +199,7 @@ export const PreviewRecordingStartTool = safeBrowserTool(
 export const PreviewRecordingStopTool = safeBrowserTool(
   Tool.make("preview_recording_stop", {
     description:
-      "Stop recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted. Save the recording in the agent environment and return its absolute path and recordingMarkdown. Include recordingMarkdown verbatim in your reply so the user can play the video in chat. Recordings must be at most 50 MiB; make shorter clips for longer workflows.",
+      "Stop recording the chosen tab. Returns a local path (max 50 MiB) and `recordingMarkdown`; include it verbatim so the user can play the video in chat.",
     parameters: PreviewAutomationTabTargetInput,
     success: Schema.Struct({
       ...PreviewAutomationRecordingArtifact.fields,
@@ -213,7 +213,7 @@ export const PreviewRecordingStopTool = safeBrowserTool(
 const PreviewDialogTool = browserTool(
   Tool.make("preview_dialog", {
     description:
-      "Accept or dismiss the server browser dialog reported by preview_status. For a prompt, supply promptText when accepting. Requires this agent to own the tab. Desktop hosts may not support this operation.",
+      "Accept or dismiss the dialog `preview_status` reports. Pass `promptText` to accept a prompt. Needs your own tab. Desktop hosts may not support this.",
     parameters: PreviewAutomationDialogInput,
     success: PreviewAutomationStatus,
     failure: PreviewAutomationError,

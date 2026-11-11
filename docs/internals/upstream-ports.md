@@ -186,15 +186,55 @@ frame. A later Test Rig change routes desktop popup links into new integrated
 browser tabs; the original context-menu port did not include that behavior.
 
 [#10501](https://github.com/pingdotgg/t3code/pull/10501) adapts browser snapshots
-for agent use. MCP text and structured metadata share a 60 KB encoded JSON cap,
-exclude the full accessibility tree, shorten labels and diagnostics, and preserve
-complete selectors while reporting omissions. The desktop snapshot contract is
-unchanged. `includeImage=false` omits the image response; `save=true` writes a PNG
-under the environment's `browser-artifacts` directory and returns `screenshotPath`
-and `screenshotMarkdown`. Test Rig displays those saved screenshots through its
+for agent use. Since the November 11 catch-up below, the bounding follows
+upstream's current `boundSnapshotMetadata`. `save=true` writes a PNG under the
+environment's `browser-artifacts` directory and returns `screenshotPath` and
+`screenshotMarkdown`. Test Rig displays those saved screenshots through its
 existing signed asset API, scoped to generated PNG names and the connected
 message environment. `preview_evaluate` returns an object containing `value` so
 arrays, scalars, objects, and null are valid MCP structured results.
+
+### November 11 browser tool catch-up
+
+The server-owned browser port moved element refs into the ARIA tree, which the
+older #10501 layer dropped, so `preview_snapshot` returned no refs. This catch-up
+ports the agent-facing browser changes upstream made through November 10:
+snapshot bounding (20 KB, tree passed through, page text kept beside large trees
+[#33745](https://github.com/pingdotgg/t3code/pull/33745), emoji-safe cuts
+[#29600](https://github.com/pingdotgg/t3code/pull/29600)), screenshots off by
+default, full-resolution saved screenshots
+([#28255](https://github.com/pingdotgg/t3code/pull/28255)), `preview_open`
+`target` ([#28027](https://github.com/pingdotgg/t3code/pull/28027)), top-level
+await and by-value results in `preview_evaluate`
+([#31925](https://github.com/pingdotgg/t3code/pull/31925),
+[#22948](https://github.com/pingdotgg/t3code/pull/22948)), click timeouts that
+name the target ([#23489](https://github.com/pingdotgg/t3code/pull/23489)),
+invalid URL and locator guidance
+([#23396](https://github.com/pingdotgg/t3code/pull/23396)), ambiguous selectors
+([#34205](https://github.com/pingdotgg/t3code/pull/34205)), no `data:` URL echo
+([#22302](https://github.com/pingdotgg/t3code/pull/22302)), and upstream's
+shorter browser instructions and tool descriptions.
+
+Test Rig differs from upstream here:
+
+- **Compact tree.** `AriaTree.compactAriaTree` keeps controls with refs,
+  headings, grouping containers, and the text beside unnamed controls; it drops
+  prose (already in `visibleText`), link URLs, structural refs, and
+  `[cursor=pointer]`. `fullTree=true` returns the whole tree. Bounding boxes are
+  not requested.
+- **Logs.** Snapshots list console errors and warnings, failed or 4xx/5xx
+  requests, and actions that did not succeed. Empty lists are left out.
+- **Images.** With `includeImage=true` the result has no `structuredContent`,
+  because Codex reads only `structuredContent` when present and drops the image.
+- **Saved screenshots** return `url`, `screenshotPath`, and `screenshotMarkdown`
+  only.
+- `PreviewSnapshotBudget.test.ts` pins the size of a typical app snapshot and of
+  the browser tool definitions.
+
+Not ported: WebMCP page tools
+([#26570](https://github.com/pingdotgg/t3code/pull/26570)); Test Rig has no page
+tools. Desktop and panel browser fixes outside the agent tools stay for a later
+browser port.
 
 [#10689](https://github.com/pingdotgg/t3code/pull/10689) gives provider sessions a
 full inactivity window after a turn settles. Cleanup uses the newer of the
