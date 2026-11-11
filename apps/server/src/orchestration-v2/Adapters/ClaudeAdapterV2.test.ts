@@ -944,6 +944,27 @@ describe("ClaudeAdapterV2 context usage", () => {
     });
   });
 
+  it("reports Claude's auto-compact point only below the model's window", () => {
+    const usage = (autoCompactWindow: string, contextWindow?: "200k" | "1m") =>
+      ClaudeAdapterV2.claudeProviderTurnTokenUsage(
+        { input_tokens: 1, output_tokens: 1 },
+        {
+          ...CLAUDE_TEST_MODEL_SELECTION,
+          model: "claude-sonnet-4-6",
+          options:
+            contextWindow === undefined ? [] : [{ id: "contextWindow", value: contextWindow }],
+        },
+        "2026-08-29T00:00:00.000Z",
+        undefined,
+        autoCompactWindow,
+      ).autoCompactThreshold;
+    assert.strictEqual(usage("150000", "200k"), 117_000);
+    assert.isUndefined(usage("200000", "200k"));
+    assert.isUndefined(usage("300000", "200k"));
+    assert.strictEqual(usage("300000", "1m"), 267_000);
+    assert.isUndefined(usage("", "1m"));
+  });
+
   it("dates cache expiry from the request start, not the response end", () => {
     const usage = ClaudeAdapterV2.claudeProviderTurnTokenUsage(
       {
@@ -3883,6 +3904,111 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         harness.events.some(
           (event) => event.type === "turn_item.updated" && event.turnItem.type === "error",
         ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("reports where Claude auto-compacts from our setting or Claude's settings files", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-claude-auto-compact-",
+      });
+      const reportedThreshold = (input: {
+        readonly settingsJson: string;
+        readonly autoCompactWindow?: string;
+        readonly launchArgs?: string;
+      }) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            yield* fileSystem.writeFileString(path.join(home, "settings.json"), input.settingsJson);
+            const harness = yield* makeWakeHarnessWithOptions({
+              environment: { CLAUDE_CONFIG_DIR: home },
+              settings: {
+                ...DEFAULT_CLAUDE_SETTINGS,
+                autoCompactWindow: input.autoCompactWindow ?? "",
+                launchArgs: input.launchArgs ?? DEFAULT_CLAUDE_SETTINGS.launchArgs,
+              },
+            });
+            const compact = harness.runtime.compactThread;
+            assert.isDefined(compact);
+            if (compact === undefined) return undefined;
+            yield* compact(
+              makeClaudeTestTurnInput({
+                threadId: harness.threadId,
+                providerThread: harness.providerThread,
+                now: yield* DateTime.now,
+                attemptId: RunAttemptId.make("claude-auto-compact-threshold-attempt"),
+                modelSelection: { ...CLAUDE_TEST_MODEL_SELECTION, model: "claude-opus-5-5" },
+                text: "/compact",
+                attachments: [],
+              }),
+            );
+            yield* Queue.offer(
+              harness.sdkMessages,
+              claudeSdkFrame({
+                type: "system",
+                subtype: "compact_boundary",
+                compact_metadata: { trigger: "manual", pre_tokens: 1500, post_tokens: 400 },
+                uuid: "00000000-0000-4000-8000-000000000211",
+                session_id: WAKE_NATIVE_SESSION,
+              }),
+            );
+            yield* Queue.offer(
+              harness.sdkMessages,
+              makeResultFrame({
+                uuid: "00000000-0000-4000-8000-000000000212",
+                result: "Compacted conversation.",
+              }),
+            );
+            yield* Queue.take(harness.terminalReceipts);
+            const watermark = harness.events.find(
+              (event) =>
+                event.type === "provider_turn.updated" &&
+                event.providerTurn.tokenUsage?.usedTokens === 400,
+            );
+            return watermark?.type === "provider_turn.updated"
+              ? watermark.providerTurn.tokenUsage?.autoCompactThreshold
+              : undefined;
+          }),
+        );
+
+      assert.isUndefined(yield* reportedThreshold({ settingsJson: "{}" }));
+      assert.equal(
+        yield* reportedThreshold({ settingsJson: "{}", autoCompactWindow: "300000" }),
+        267_000,
+      );
+      assert.equal(
+        yield* reportedThreshold({
+          settingsJson: '{"autoCompactWindow":150000}',
+          autoCompactWindow: "300000",
+        }),
+        267_000,
+      );
+      assert.equal(
+        yield* reportedThreshold({ settingsJson: '{"autoCompactWindow":150000}' }),
+        117_000,
+      );
+      assert.equal(
+        yield* reportedThreshold({
+          settingsJson:
+            '{"autoCompactWindow":150000,"modelSettings":{"claude-opus-5-5":{"autoCompactWindow":400000}}}',
+        }),
+        367_000,
+      );
+      assert.isUndefined(
+        yield* reportedThreshold({
+          settingsJson:
+            '{"autoCompactWindow":150000,"modelSettings":{"claude-opus-5-5":{"autoCompactWindow":"auto"}}}',
+        }),
+      );
+      assert.isUndefined(yield* reportedThreshold({ settingsJson: '{"autoCompactWindow":50000}' }));
+      assert.isUndefined(
+        yield* reportedThreshold({
+          settingsJson: '{"autoCompactWindow":150000}',
+          launchArgs: "--settings /custom/settings.json",
+        }),
       );
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, IdAllocator.layer))),
   );

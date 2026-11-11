@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind, TurnItemId, type OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { v2Now, v2ThreadId } from "../test/threadFixtures";
+import { formatContextWindowCompactionMessage } from "../components/chat/ContextWindowMeter";
 import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "./contextWindow";
 
 const compaction = (afterTokenCount: number | undefined): OrchestrationV2TurnItem => ({
@@ -52,6 +53,33 @@ describe("contextWindow", () => {
       totalProcessedTokens: 748_126,
       maxTokens: 258_400,
     });
+  });
+
+  it("shows where the provider auto-compacts when it reports that point", () => {
+    const snapshot = deriveLatestContextWindowSnapshot([], {
+      usedTokens: 42_000,
+      maxTokens: 200_000,
+      autoCompactThreshold: 117_000,
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    });
+    expect(snapshot?.autoCompactThreshold).toBe(117_000);
+    expect(
+      formatContextWindowCompactionMessage({
+        providerDisplayName: "Claude",
+        autoCompactThreshold: snapshot?.autoCompactThreshold,
+      }),
+    ).toBe("Compacts automatically at about 117,000 tokens.");
+    const unreported = deriveLatestContextWindowSnapshot([], {
+      usedTokens: 42_000,
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    });
+    expect(unreported?.autoCompactThreshold).toBeNull();
+    expect(
+      formatContextWindowCompactionMessage({
+        providerDisplayName: "Claude",
+        autoCompactThreshold: unreported?.autoCompactThreshold,
+      }),
+    ).toBe("Claude automatically compacts its context when needed.");
   });
 
   it("ignores compactions without valid token counts", () => {

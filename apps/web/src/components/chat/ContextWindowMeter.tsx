@@ -15,6 +15,17 @@ function formatPercentage(value: number | null): string | null {
   return `${Math.round(value)}%`;
 }
 
+export function formatContextWindowCompactionMessage(input: {
+  readonly providerDisplayName?: string | null | undefined;
+  readonly autoCompactThreshold?: number | null | undefined;
+}): string {
+  const threshold = input.autoCompactThreshold;
+  if (typeof threshold === "number" && threshold > 0) {
+    return `Compacts automatically at about ${threshold.toLocaleString("en-US")} tokens.`;
+  }
+  return `${input.providerDisplayName ?? "It"} automatically compacts its context when needed.`;
+}
+
 export function ContextWindowMeter(props: {
   usage: ContextWindowSnapshot;
   providerDisplayName?: string | null;
@@ -31,6 +42,13 @@ export function ContextWindowMeter(props: {
   const totalProcessedTokens = usage.totalProcessedTokens ?? null;
   const showTotalProcessed = totalProcessedTokens !== null && totalProcessedTokens > 0;
   const isOverloaded = normalizedPercentage > 90;
+  const threshold = usage.autoCompactThreshold ?? null;
+  // The tick marks where the provider compacts on its own.
+  const maxTokens = usage.maxTokens ?? null;
+  const compactionTick =
+    maxTokens !== null && threshold !== null && threshold > 0 && threshold < maxTokens
+      ? (threshold / maxTokens) * 100
+      : null;
   const usageColor = isOverloaded
     ? "var(--color-error)"
     : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
@@ -114,7 +132,7 @@ export function ContextWindowMeter(props: {
           </div>
           {usage.maxTokens !== null ? (
             <div
-              className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
+              className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={100}
@@ -125,6 +143,14 @@ export function ContextWindowMeter(props: {
                 className="h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none"
                 style={{ width: `${normalizedPercentage}%`, backgroundColor: usageColor }}
               />
+              {compactionTick !== null ? (
+                <div
+                  aria-hidden="true"
+                  data-testid="context-window-compaction-tick"
+                  className="absolute inset-y-0 w-px bg-foreground/60"
+                  style={{ left: `${compactionTick}%` }}
+                />
+              ) : null}
             </div>
           ) : null}
           {showTotalProcessed ? (
@@ -137,7 +163,10 @@ export function ContextWindowMeter(props: {
           ) : null}
           {usage.compactsAutomatically ? (
             <div className="mt-1 text-pretty text-secondary-label text-[11px] font-medium">
-              {providerDisplayName ?? "It"} automatically compacts its context when needed.
+              {formatContextWindowCompactionMessage({
+                providerDisplayName,
+                autoCompactThreshold: threshold,
+              })}
             </div>
           ) : null}
           {props.onCompact ? (

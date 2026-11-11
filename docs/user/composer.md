@@ -137,6 +137,14 @@ For a provider that supports compaction, choose **Compact context** in that
 indicator, or select **/compact** from the command suggestions. The indicator
 action keeps your unsent draft and attachments in place while compaction runs.
 
+Claude compacts on its own as its context fills. Set **Auto-compact after** in a
+Claude provider's settings to a number between `100000` and `1000000` to choose
+when, for example `300000`. Leave it empty to use Claude's default, or the
+`autoCompactWindow` in Claude's own settings files, including a model's
+`modelSettings` entry. When that point is known, the context-window indicator
+says "Compacts automatically at about N tokens" and marks it on the bar. Claude
+compacts about 33,000 tokens before the number you set.
+
 **Compact idle threads** in **Settings > General** decides what happens to an
 idle Claude thread with at least 200,000 tokens of context. Each Claude
 provider's settings can override it:
