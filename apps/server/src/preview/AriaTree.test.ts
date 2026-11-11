@@ -89,4 +89,56 @@ describe("compactAriaTree", () => {
   it("returns nothing for a page without controls", () => {
     expect(compactAriaTree(`- paragraph [ref=e1]: Only text`)).toBe("");
   });
+
+  it("parses keys Playwright quotes because the name has YAML syntax in it", () => {
+    expect(
+      compactAriaTree(`- 'heading "Issues: open" [level=1] [ref=e2]'
+- 'navigation "Main: nav" [ref=e3]':
+  - link "Home" [ref=e4] [cursor=pointer]:
+    - /url: /a
+  - 'link "Fix crash on load #123" [ref=e5] [cursor=pointer]':
+    - /url: /b
+- list [ref=e6]:
+  - listitem [ref=e13]:
+    - 'button "Save {draft}" [ref=e14]'
+  - listitem [ref=e15]:
+    - 'button "It''s \`npm test\`" [ref=e16]'
+  - listitem [ref=e36]:
+    - 'combobox "Pick: one" [ref=e37]':
+      - 'option "A: 1" [selected]'
+      - option "B"`),
+    ).toBe(`- heading "Issues: open" [level=1]
+- navigation "Main: nav":
+  - link "Home" [ref=e4]
+  - link "Fix crash on load #123" [ref=e5]
+- list:
+  - button "Save {draft}" [ref=e14]
+  - button "It's \`npm test\`" [ref=e16]
+  - combobox "Pick: one" [ref=e37]:
+    - option "A: 1" [selected]
+    - option "B"`);
+  });
+
+  it("keeps the named row or dialog around a lone unnamed control", () => {
+    expect(
+      compactAriaTree(`- table [ref=e1]:
+  - rowgroup [ref=e2]:
+    - row "Alice alice@x.com" [ref=e9]:
+      - cell [ref=e10]:
+        - checkbox [ref=e11]
+      - cell "Alice" [ref=e12]
+    - row "Bob bob@x.com" [ref=e14]:
+      - cell [ref=e15]:
+        - checkbox [ref=e16]
+      - cell "Bob" [ref=e17]
+- dialog "Delete item?" [ref=e20]:
+  - button "Delete" [ref=e21]`),
+    ).toBe(`- table:
+  - row "Alice alice@x.com":
+    - checkbox [ref=e11]
+  - row "Bob bob@x.com":
+    - checkbox [ref=e16]
+- dialog "Delete item?":
+  - button "Delete" [ref=e21]`);
+  });
 });

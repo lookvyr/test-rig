@@ -221,11 +221,13 @@ const handlers = {
     invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
   preview_snapshot: (input) => {
     // Saving and response selection belong to MCP; the browser captures the snapshot.
-    const { includeImage: _includeImage, save, ...target } = input ?? {};
+    const { includeImage, save, ...target } = input ?? {};
     // The saved file is for people, so it keeps the resolution the agent's image is capped below.
+    // A save without an image returns only the path, so the page state is not read at all.
     return invokeTargeted<PreviewAutomationSnapshot>("snapshot", {
       ...target,
       ...(save === true ? { fullScreenshot: true } : {}),
+      ...(save === true && includeImage !== true ? { screenshotOnly: true } : {}),
     });
   },
   preview_act: ({ action, ...input }) =>

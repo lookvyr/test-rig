@@ -144,6 +144,14 @@ it("keeps page text beside a large tree", () => {
   expect(result.accessibilityTree?.length).toBeGreaterThanOrEqual(2_000);
 });
 
+it("cuts the tree between lines, so no ref is left half written", () => {
+  const lines = Array.from({ length: 3_000 }, (_, i) => `- link "item" [ref=t3-abc-1-e${i + 1}]`);
+  const result = snapshotMetadata({ ...snapshot, accessibilityTree: lines.join("\n") });
+  const kept = String(result.accessibilityTree).split("\n");
+  expect(kept.at(-1)).toBe("…");
+  expect(kept.slice(0, -1)).toEqual(lines.slice(0, kept.length - 1));
+});
+
 it("never cuts an emoji in half", () => {
   const result = snapshotMetadata({
     ...snapshot,

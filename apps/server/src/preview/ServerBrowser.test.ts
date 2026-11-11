@@ -905,6 +905,17 @@ it.live("each snapshot reports only diagnostics that arrived since the last one"
       expect(yield* snapshotUrls()).toEqual(["http://localhost:5173/missing"]);
       expect(yield* snapshotUrls()).toEqual([]);
       contexts[0]!.page.emit("response", response("/broken", 500));
+      // A save-only capture returns no diagnostics, so it must not consume them or read the tree.
+      const trees = contexts[0]!.page.ariaSnapshot.mock.calls.length;
+      const saved = yield* broker.invoke<PreviewAutomationSnapshot>({
+        scope,
+        tabId,
+        operation: "snapshot",
+        input: { screenshotOnly: true, fullScreenshot: true },
+      });
+      expect(saved.networkEntries).toEqual([]);
+      expect(saved.screenshot.mimeType).toBe("image/png");
+      expect(contexts[0]!.page.ariaSnapshot.mock.calls.length).toBe(trees);
       expect(yield* snapshotUrls()).toEqual(["http://localhost:5173/broken"]);
     }),
   ).pipe(Effect.provide(layer)),

@@ -637,6 +637,44 @@ export const snapshot = async (input: SnapshotInput): Promise<PreviewAutomationS
   }
 };
 
+/**
+ * Only the screenshot, for a save whose result is just the file path. It reads no tree, so the
+ * agent's refs stay valid, and the caller reports no diagnostics it did not return.
+ */
+export const screenshotOnly = async (input: SnapshotInput): Promise<PreviewAutomationSnapshot> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(tooBusy()), SNAPSHOT_TIMEOUT_MS);
+  });
+  const captured = (async (): Promise<PreviewAutomationSnapshot> => {
+    const { renderScale, viewport } = await renderingOf(input);
+    const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * renderScale));
+    const full = await captureViewport(input.cdp, { format: "png" });
+    const data = scale < 1 ? await shrinkPng(input.cdp, full, scale) : full;
+    return {
+      url: withoutDataPayload(input.page.url()),
+      title: await input.page.title(),
+      loading: false,
+      visibleText: "",
+      interactiveElements: [],
+      accessibilityTree: "",
+      consoleEntries: [],
+      networkEntries: [],
+      actionTimeline: [],
+      screenshot: { mimeType: "image/png", data, ...pngSize(data) },
+      ...(scale < 1 && input.fullScreenshot
+        ? { fullScreenshot: { data: full, ...pngSize(full) } }
+        : {}),
+    };
+  })();
+  void captured.catch(constVoid);
+  try {
+    return await Promise.race([captured, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /** Return when a dialog opens; waiting for the action to finish would block until dialog resolution. */
 export const click = async (
   page: Page,

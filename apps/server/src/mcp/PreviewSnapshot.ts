@@ -28,6 +28,13 @@ const cutText = (text: string, max: number) => {
   return `${text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max)}…`;
 };
 
+/** A cut inside a ref's digits would leave a live ref for another element, so cut between lines. */
+const cutTree = (tree: string, max: number) => {
+  if (tree.length <= max) return tree;
+  const end = tree.lastIndexOf("\n", max);
+  return end <= 0 ? "" : `${tree.slice(0, end)}\n…`;
+};
+
 const halveToFloor = (chars: number) =>
   chars > TEXT_FLOOR_CHARS
     ? Math.max(TEXT_FLOOR_CHARS, Math.floor(chars / 2))
@@ -124,7 +131,7 @@ export function snapshotMetadata(snapshot: PreviewAutomationSnapshot, screenshot
     visibleText: cutText(snapshot.visibleText, visibleTextChars),
     ...(tree === undefined || treeChars === 0
       ? {}
-      : { accessibilityTree: cutText(tree, treeChars) }),
+      : { accessibilityTree: cutTree(tree, treeChars) }),
     ...nonEmpty("interactiveElements"),
     ...nonEmpty("consoleEntries"),
     ...nonEmpty("networkEntries"),

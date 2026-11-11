@@ -73,13 +73,18 @@ The agent cursor shows where the agent is interacting with the page, without
 control badges. Clicking or typing in the browser does not interrupt agent
 actions. Use the chat’s Stop control when you want to stop the agent.
 
-Ask the agent to inspect a page in Test Rig's integrated browser. Its snapshot
-includes page text, interactive elements, recent diagnostics, and an image.
-Large snapshots report which details were omitted so the agent can inspect a
-specific part of the page next.
+Agents use the integrated browser when you ask for browser work, such as
+checking a page or a flow. They don't open it on their own to check an edit, and
+they close tabs they opened before replying unless you're using them.
 
-The agent can request text-only snapshots when it does not need an image, or save
-a screenshot as evidence. Saved screenshots can appear directly in the reply and
+A snapshot gives the agent the page text and the page's controls, each with a
+reference it can click or type into. It also lists console errors and failed
+requests that happened since the agent's previous snapshot. Large snapshots
+report which details were omitted so the agent can inspect a specific part of
+the page next.
+
+Snapshots don't include an image unless the agent asks to see the page. The agent
+can also save a full-size screenshot as evidence. Saved screenshots can appear directly in the reply and
 remain available after the browser navigates or closes. They stay in Test Rig's
 local data directory; saving them does not add files to your repository.
 
