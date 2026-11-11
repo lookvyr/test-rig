@@ -888,6 +888,28 @@ it.live(
       }),
     ).pipe(Effect.provide(layer)),
 );
+it.live("each snapshot reports only diagnostics that arrived since the last one", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const response = (path: string, status: number) => ({
+        url: () => `http://localhost:5173${path}`,
+        request: () => ({ method: () => "GET" }),
+        status: () => status,
+      });
+      const snapshotUrls = () =>
+        broker
+          .invoke<PreviewAutomationSnapshot>({ scope, tabId, operation: "snapshot", input: {} })
+          .pipe(Effect.map(({ networkEntries }) => networkEntries.map(({ url }) => url)));
+      contexts[0]!.page.emit("response", response("/missing", 404));
+      expect(yield* snapshotUrls()).toEqual(["http://localhost:5173/missing"]);
+      expect(yield* snapshotUrls()).toEqual([]);
+      contexts[0]!.page.emit("response", response("/broken", 500));
+      expect(yield* snapshotUrls()).toEqual(["http://localhost:5173/broken"]);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.live("reports a pending dialog without evaluating the page and resolves it explicitly", () =>
   Effect.scoped(
     Effect.gen(function* () {

@@ -301,6 +301,8 @@ interface ServerTab {
   readonly consoleEntries: Array<PreviewAutomationConsoleEntry>;
   readonly networkEntries: Array<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: Array<PreviewAutomationActionEvent>;
+  /** Diagnostics an earlier snapshot already returned, so each snapshot reports only new ones. */
+  readonly reportedDiagnostics: WeakSet<object>;
   readonly control: SessionControl;
   agentOperating: boolean;
   fileChooserIntercepted: boolean;
@@ -873,6 +875,7 @@ const make = Effect.gen(function* () {
       consoleEntries: [],
       networkEntries: [],
       actionTimeline: [],
+      reportedDiagnostics: new WeakSet(),
       control,
       agentOperating: false,
       fileChooserIntercepted: false,
@@ -2218,14 +2221,31 @@ const make = Effect.gen(function* () {
         return { tabId: tab.tabId, colorScheme };
       }
       case "snapshot": {
-        return withScreencastsPaused(tab, () =>
+        // Agents snapshot after every step; repeating old errors each time costs tokens and adds nothing.
+        const unreported = <T extends object>(entries: ReadonlyArray<T>) =>
+          entries.filter((entry) => !tab.reportedDiagnostics.has(entry));
+        const consoleEntries = unreported(tab.consoleEntries);
+        const networkEntries = unreported(tab.networkEntries);
+        const actionTimeline = unreported(tab.actionTimeline);
+        const snapshot = await withScreencastsPaused(tab, () =>
           ServerBrowserPage.snapshot({
             ...tab,
+            consoleEntries,
+            networkEntries,
+            actionTimeline,
             renderScale: tab.desktop ? "display" : RENDER_SCALE,
             fullScreenshot: (input as PreviewAutomationSnapshotInput | undefined)?.fullScreenshot,
             fullTree: (input as PreviewAutomationSnapshotInput | undefined)?.fullTree,
           }),
         );
+        for (const entry of [...consoleEntries, ...networkEntries]) {
+          tab.reportedDiagnostics.add(entry);
+        }
+        // A running action is reported again once it finishes.
+        for (const entry of actionTimeline) {
+          if (entry.status !== "running") tab.reportedDiagnostics.add(entry);
+        }
+        return snapshot;
       }
       case "click": {
         const clickInput = input as PreviewAutomationClickInput;

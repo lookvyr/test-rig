@@ -223,7 +223,8 @@ Test Rig differs from upstream here:
   `[cursor=pointer]`. `fullTree=true` returns the whole tree. Bounding boxes are
   not requested.
 - **Logs.** Snapshots list console errors and warnings, failed or 4xx/5xx
-  requests, and actions that did not succeed. Empty lists are left out.
+  requests, and actions that did not succeed, each only once: a tab remembers
+  what an earlier snapshot returned. Empty lists are left out.
 - **Images.** With `includeImage=true` the result has no `structuredContent`,
   because Codex reads only `structuredContent` when present and drops the image.
 - **Saved screenshots** return `url`, `screenshotPath`, and `screenshotMarkdown`
