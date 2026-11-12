@@ -19,8 +19,7 @@ elsewhere, do the same in both web and desktop.
 
 The bottom of the sidebar has icon buttons for **Settings** and **Pull
 requests**. A provider update notice appears to their right when one is
-available. On the Pull requests page, the icons give way to **Back**, which
-returns to the thread or draft you were on.
+available.
 
 ## Sections
 

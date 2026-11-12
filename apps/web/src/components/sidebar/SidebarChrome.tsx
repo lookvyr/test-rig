@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { ArrowLeftIcon, ArrowRightIcon, SettingsIcon } from "lucide-react";
 import { memo, type ReactNode } from "react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 
 import { APP_BASE_NAME } from "../../branding";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
@@ -32,7 +32,6 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 
 // White glyphs and hover wash for controls drawn over the stage backdrop.
@@ -179,12 +178,8 @@ function SidebarUtilityItem({
 
 const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
-  const navigateToMainApp = useNavigateToMainApp();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMobile, setOpenMobile } = useSidebar();
-  const isOnUtilityPage = useLocation({
-    select: (location) => isSidebarUtilityPage(location.pathname),
-  });
   const pullRequestsShortcutLabel = shortcutLabelForCommand(keybindings, "pullRequest.open");
   const closeMobileSidebar = () => {
     if (isMobile) setOpenMobile(false);
@@ -192,43 +187,27 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 
   return (
     <SidebarMenu className="flex-row items-center">
-      {isOnUtilityPage ? (
-        <SidebarMenuItem className="min-w-0 flex-1">
-          <SidebarMenuButton
-            onClick={() => {
-              closeMobileSidebar();
-              void navigateToMainApp();
-            }}
-          >
-            <ArrowLeftIcon />
-            <span>Back</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ) : (
-        <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label="Settings"
-            aria-haspopup="dialog"
-            onClick={() => {
-              closeMobileSidebar();
-              void navigate({ to: "/settings" });
-            }}
-          />
-          <SidebarUtilityItem
-            icon={<PullRequestGlyph.pullRequest />}
-            label={
-              pullRequestsShortcutLabel
-                ? `Pull requests (${pullRequestsShortcutLabel})`
-                : "Pull requests"
-            }
-            onClick={() => {
-              closeMobileSidebar();
-              void navigate({ to: "/pull-requests" });
-            }}
-          />
-        </>
-      )}
+      <SidebarUtilityItem
+        icon={<SettingsIcon />}
+        label="Settings"
+        aria-haspopup="dialog"
+        onClick={() => {
+          closeMobileSidebar();
+          void navigate({ to: "/settings" });
+        }}
+      />
+      <SidebarUtilityItem
+        icon={<PullRequestGlyph.pullRequest />}
+        label={
+          pullRequestsShortcutLabel
+            ? `Pull requests (${pullRequestsShortcutLabel})`
+            : "Pull requests"
+        }
+        onClick={() => {
+          closeMobileSidebar();
+          void navigate({ to: "/pull-requests" });
+        }}
+      />
       <SidebarMenuItem className="ml-auto flex min-w-0 flex-1">
         <SidebarProviderUpdatePill />
       </SidebarMenuItem>

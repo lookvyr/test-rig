@@ -3,8 +3,8 @@
 Select the **Pull requests** icon next to Settings at the bottom of the sidebar
 to browse pull requests for your saved projects. You can also choose **Open pull
 requests** in the command palette. Your thread list stays available while you
-review. While this view is open, the sidebar footer shows **Back**, which returns
-to the thread or draft you were on.
+review. To leave, select a thread or go back (the arrow next to the app name in
+the desktop app, or **Command–[**).
 
 Press **Command–Option–P** to open this view. While here, hold **Command–Option**
 to show shortcut badges on the first nine pull requests in the filtered list.
