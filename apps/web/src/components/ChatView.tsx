@@ -6938,6 +6938,7 @@ function ChatViewContent(props: ChatViewProps) {
                 keybindings={keybindings}
                 availableEditors={availableEditors}
                 isDraft={Boolean(branchToolbarProps.draftId)}
+                branchToolbar={branchToolbarProps}
                 onOpenChanges={() => {
                   useThreadDetailsStore.getState().setPopoverOpen(activeThreadRef, false);
                   if (initialDiffPanelGitScope === "branch") {

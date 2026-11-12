@@ -27,6 +27,7 @@ import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadPullRequestWatches, useWatchedThreadPullRequests } from "./ThreadPullRequestWatches";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { ThreadServersPanel } from "./ThreadServersPanel";
+import { BranchToolbar, type BranchToolbarProps } from "../BranchToolbar";
 
 export function ThreadDetailsPanel(props: {
   threadRef: ScopedThreadRef;
@@ -39,6 +40,8 @@ export function ThreadDetailsPanel(props: {
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   isDraft: boolean;
+  /** The composer strip's workspace and branch controls, shown here as rows. */
+  branchToolbar: Omit<BranchToolbarProps, "layout" | "panelSection" | "trailing">;
   onOpenChanges: () => void;
   onShowPullRequest?: (() => void) | undefined;
   onRunScript: (script: ProjectScript) => void;
@@ -66,6 +69,8 @@ export function ThreadDetailsPanel(props: {
   const serverCount = useThreadDiscoveredPorts(props.threadRef).length;
   const watchedPullRequests = useWatchedThreadPullRequests(props.threadRef);
   const shortcutLabel = shortcutLabelForCommand(props.keybindings, "threadPanel.toggle");
+  // The workspace row names the folder, so the heading only covers threads without git.
+  const showBranchRows = props.branchToolbar.showGitControls && props.gitCwd !== null;
   const workspaceTitle =
     (props.openInCwd ? fileBasename(props.openInCwd) : null) || props.projectName || "Workspace";
   return (
@@ -73,21 +78,30 @@ export function ThreadDetailsPanel(props: {
       threadRef={props.threadRef}
       toggleContainer={props.toggleContainer}
       {...(shortcutLabel ? { shortcutLabel } : {})}
-      contentKey={`${Boolean(props.gitCwd)}:${props.scripts?.map((script) => script.id).join(",")}:${fileScripts.map((script) => script.name).join(",")}:${props.availableEditors.length}:${props.isDraft ? 0 : serverCount}`}
+      contentKey={`${showBranchRows}:${Boolean(props.gitCwd)}:${props.scripts?.map((script) => script.id).join(",")}:${fileScripts.map((script) => script.name).join(",")}:${props.availableEditors.length}:${props.isDraft ? 0 : serverCount}`}
     >
-      <h2
-        className="flex min-w-0 items-center gap-2 px-4.5 pt-3 pb-1 text-xs font-medium text-muted-foreground"
-        title={props.openInCwd ?? props.projectName}
-      >
-        <FolderIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
-        <span className="truncate">{workspaceTitle}</span>
-      </h2>
+      {showBranchRows ? null : (
+        <h2
+          className="flex min-w-0 items-center gap-2 px-4.5 pt-3 pb-1 text-xs font-medium text-muted-foreground"
+          title={props.openInCwd ?? props.projectName}
+        >
+          <FolderIcon aria-hidden className="size-3.5 shrink-0 opacity-70" />
+          <span className="truncate">{workspaceTitle}</span>
+        </h2>
+      )}
       <ThreadDetailsSection
         title="Workspace"
         headingId="thread-details-workspace"
         separated={false}
         showHeading={false}
       >
+        {/* Always mounted: a remote environment still shows its row without git. */}
+        <BranchToolbar
+          {...props.branchToolbar}
+          showGitControls={showBranchRows}
+          layout="panel"
+          panelSection="workspace"
+        />
         {shouldShowOpenInPicker({
           activeProjectName: props.projectName,
           activeThreadEnvironmentId: props.threadRef.environmentId,
@@ -123,6 +137,9 @@ export function ThreadDetailsPanel(props: {
           headingId="thread-details-git"
           showHeading={false}
         >
+          {showBranchRows ? (
+            <BranchToolbar {...props.branchToolbar} layout="panel" panelSection="branch" />
+          ) : null}
           {(!redesign ||
             !props.isDraft ||
             !changesTotals ||
