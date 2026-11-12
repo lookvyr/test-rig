@@ -704,6 +704,19 @@ describe("resolveSidebarV2Status", () => {
     expect(resolveSidebarV2Status({ ...idle, runtime: null })).toBe("ready");
   });
 
+  it("waits while a running turn is blocked only on another thread", () => {
+    expect(resolveSidebarV2Status({ ...idle, runtime, blockedOnThreadWait: true })).toBe("waiting");
+    // Its own requests still outrank the wait.
+    expect(
+      resolveSidebarV2Status({
+        ...idle,
+        hasPendingApprovals: true,
+        runtime,
+        blockedOnThreadWait: true,
+      }),
+    ).toBe("approval");
+  });
+
   it("waits on held background work but not on a dev server left running", () => {
     expect(
       resolveSidebarV2Status({
@@ -1071,6 +1084,13 @@ describe("resolveThreadStatusPill", () => {
         },
       }),
     ).toMatchObject({ label: "Pending Approval", pulse: false });
+  });
+
+  it("shows Waiting, not Working, for a turn blocked only on another thread", () => {
+    expect(
+      resolveThreadStatusPill({ thread: { ...baseThread, blockedOnThreadWait: true } }),
+    ).toMatchObject({ label: "Waiting", pulse: false });
+    expect(resolveThreadStatusPill({ thread: baseThread })).toMatchObject({ label: "Working" });
   });
 
   it("shows Waiting only for background work the agent waits on", () => {

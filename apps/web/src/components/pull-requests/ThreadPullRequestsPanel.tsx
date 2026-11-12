@@ -147,11 +147,10 @@ function PullRequestRow({
             </span>
             {open && watching && (
               <span
-                className="inline-flex items-center gap-1"
-                title="The agent wakes on PR updates"
+                className="inline-flex shrink-0"
+                title="Watching: the agent wakes when checks finish, someone comments, the branch conflicts, or approval or merge readiness changes"
               >
-                <EyeIcon className="size-3" />
-                Watching
+                <EyeIcon role="img" aria-label="Watching" className="size-3" />
               </span>
             )}
             {open && snapshot?.checksState && (

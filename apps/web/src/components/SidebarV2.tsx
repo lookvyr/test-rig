@@ -41,6 +41,7 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
+  CircleDotDashedIcon,
   ClockIcon,
   CopyIcon,
   FolderIcon,
@@ -48,11 +49,13 @@ import {
   GitBranchIcon,
   ListFilterIcon,
   EllipsisIcon,
+  MessageCircleQuestionIcon,
   MessageSquareIcon,
   PinIcon,
   PlusIcon,
   SearchIcon,
   ServerIcon,
+  ShieldQuestionIcon,
   SplitIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -119,6 +122,7 @@ import {
 } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useNowMinute } from "../hooks/useNowMinute";
+import { useNowSecond } from "../hooks/useNowSecond";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
@@ -247,21 +251,34 @@ function threadTimeTimestamp(thread: SidebarThreadSummary): string {
   return thread.latestUserMessageAt ?? thread.updatedAt;
 }
 
-// Self-ticking so only this span re-renders each second, not the whole row.
 function WorkingDuration(props: { startedAt: string | null }) {
   const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (Number.isNaN(startedMs)) return;
-    const id = window.setInterval(() => setTick((tick) => tick + 1), 1_000);
-    return () => window.clearInterval(id);
-  }, [startedMs]);
   if (Number.isNaN(startedMs)) return null;
+  return <WorkingDurationLabel startedMs={startedMs} />;
+}
+
+// Self-ticking so only this span re-renders each second, not the whole row;
+// the shared tick lands every working row's update in the same frame.
+function WorkingDurationLabel(props: { startedMs: number }) {
+  const nowMs = useNowSecond();
   return (
-    <span className="font-mono tabular-nums">
-      {formatWorkingDurationLabel(Date.now() - startedMs)}
-    </span>
+    <span className="tabular-nums">{formatWorkingDurationLabel(nowMs - props.startedMs)}</span>
   );
+}
+
+const TOP_STATUS_ICONS = {
+  working: CircleDashedIcon,
+  waiting: CircleDotDashedIcon,
+  input: MessageCircleQuestionIcon,
+  approval: ShieldQuestionIcon,
+  failed: CircleAlertIcon,
+  done: CircleCheckIcon,
+  woke: AlarmClockIcon,
+} as const;
+
+function TopStatusIcon(props: { icon: keyof typeof TOP_STATUS_ICONS }) {
+  const Icon = TOP_STATUS_ICONS[props.icon];
+  return <Icon aria-hidden className="size-4 shrink-0" />;
 }
 
 function terminalProcessLabel(count: number): string {
@@ -592,9 +609,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     !isWoke &&
     !props.isActive &&
     !isSelected;
-  // Status hues follow the system-wide convention set by sidebar v1 and the
-  // status surfaces (amber approval, indigo input, sky working)
-  // so a thread reads the same color everywhere it surfaces.
+  // Every state carries an icon and a theme status color, so a thread reads
+  // the same way at a glance whether or not its label fits.
   const topStatus =
     status === "working"
       ? {
@@ -603,48 +619,45 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
           icon: "working" as const,
           // No shimmer: a label that animates forever is noise in a sidebar
           // full of them (and repaints every vsync on high-refresh displays).
-          // Working is a background state, so it rests at the dim end of what
-          // the old pulse cycled through; only the thread you have open gets
-          // the label at full strength.
-          className: cn("text-sky-600 dark:text-sky-400", !props.isActive && "opacity-75"),
+          className: "text-info-foreground",
         }
       : status === "waiting"
         ? {
             // Waiting on work the agent will resume from is calm background
             // presence, not active progress.
             label: "Waiting",
-            icon: null,
-            className: "text-sidebar-muted-foreground",
+            icon: "waiting" as const,
+            className: "text-muted-foreground",
           }
         : status === "approval"
           ? {
               label: "Approval",
-              icon: null,
-              className: "text-amber-700 dark:text-amber-300",
+              icon: "approval" as const,
+              className: "text-warning-foreground",
             }
           : status === "input"
             ? {
                 label: "Input",
-                icon: null,
+                icon: "input" as const,
                 className: "text-indigo-600 dark:text-indigo-300",
               }
             : status === "failed"
               ? {
                   label: "Failed",
-                  icon: null,
-                  className: "text-red-700 dark:text-red-300",
+                  icon: "failed" as const,
+                  className: "text-error-foreground",
                 }
               : isWoke
                 ? {
                     label: "Woke",
                     icon: "woke" as const,
-                    className: "text-amber-700 dark:text-amber-300",
+                    className: "text-warning-foreground",
                   }
                 : isUnread
                   ? {
                       label: "Done",
                       icon: "done" as const,
-                      className: "text-emerald-700 dark:text-emerald-300",
+                      className: "text-success-foreground",
                     }
                   : null;
   const isWokeStatus = topStatus?.icon === "woke";
@@ -845,7 +858,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         : shouldRecede
           ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
           : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
-    isBackgroundWorking &&
+    status === "working" &&
       shouldRecede &&
       "opacity-70 transition-opacity hover:opacity-100 focus-within:opacity-100 motion-reduce:transition-none",
   );
@@ -1198,11 +1211,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                           topStatus.className,
                         )}
                       >
-                        {topStatus.icon === "working" ? (
-                          <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
-                        ) : topStatus.icon === "done" ? (
-                          <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
-                        ) : null}
+                        <TopStatusIcon icon={topStatus.icon} />
                         {/* The label alone is the live region: a role="status"
                             wrapper around the ticking duration would make
                             screen readers announce every second. */}
@@ -1210,6 +1219,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                         {status === "working" ? (
                           <span aria-hidden>
                             <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                          </span>
+                        ) : status === "waiting" ? (
+                          <span aria-hidden>
+                            <WorkingDuration startedAt={thread.latestRun?.completedAt ?? null} />
                           </span>
                         ) : null}
                       </span>

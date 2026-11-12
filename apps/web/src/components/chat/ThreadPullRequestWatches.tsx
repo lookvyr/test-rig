@@ -8,19 +8,39 @@ import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
-import { THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS } from "./threadDetailsPanelStyles";
+import {
+  THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
+  THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
+} from "./threadDetailsPanelStyles";
 
-/** Shows active PR monitors from the thread shell; stopping a watch never unlinks its PR. */
-export function ThreadPullRequestWatches({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
+/** The thread's watched open PRs, which wake the agent when they change. */
+export function useWatchedThreadPullRequests(
+  threadRef: ScopedThreadRef,
+): ReadonlyArray<ThreadPullRequestLink> {
   const thread = useThreadShell(threadRef);
+  const settled = thread?.settledOverride === "settled" || thread?.settledAt != null;
+  return visibleThreadPullRequests(thread?.pullRequests ?? []).filter(
+    (link) => !settled && link.watch != null && (link.snapshot?.state ?? "open") === "open",
+  );
+}
+
+/**
+ * One row per watched PR: the row opens PR details (or the PR itself when the
+ * thread has no details panel) and the eye stops watching without unlinking.
+ */
+export function ThreadPullRequestWatches({
+  threadRef,
+  links,
+  onShowPullRequest,
+}: {
+  readonly threadRef: ScopedThreadRef;
+  readonly links: ReadonlyArray<ThreadPullRequestLink>;
+  readonly onShowPullRequest: (() => void) | undefined;
+}) {
   const watch = useAtomCommand(threadEnvironment.watchPullRequest, { reportFailure: true });
   const openPrLink = useOpenPrLink();
   const [pending, setPending] = useState(false);
   const inFlight = useRef(false);
-  const settled = thread?.settledOverride === "settled" || thread?.settledAt != null;
-  const links = visibleThreadPullRequests(thread?.pullRequests ?? []).filter(
-    (link) => !settled && link.watch != null && (link.snapshot?.state ?? "open") === "open",
-  );
   async function stopWatching(link: ThreadPullRequestLink) {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -48,8 +68,10 @@ export function ThreadPullRequestWatches({ threadRef }: { readonly threadRef: Sc
         <ThreadDetailsControl
           part="primary"
           className="min-w-0"
-          aria-label={link.url}
-          onClick={(event) => openPrLink(event, link.url)}
+          aria-label={`Open PR #${link.number}`}
+          onClick={(event) =>
+            onShowPullRequest ? onShowPullRequest() : openPrLink(event, link.url)
+          }
         >
           <GitPullRequestIcon />
           <span className="truncate">
@@ -57,6 +79,7 @@ export function ThreadPullRequestWatches({ threadRef }: { readonly threadRef: Sc
             {link.snapshot ? `: ${link.snapshot.title}` : ""}
           </span>
         </ThreadDetailsControl>
+        <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
         <Tooltip>
           <TooltipTrigger
             render={
@@ -74,7 +97,7 @@ export function ThreadPullRequestWatches({ threadRef }: { readonly threadRef: Sc
           </TooltipTrigger>
           <TooltipPopup>
             Watching: the agent wakes when checks finish, someone comments, the branch conflicts, or
-            approval or merge readiness changes.
+            approval or merge readiness changes. Click to stop.
           </TooltipPopup>
         </Tooltip>
       </div>

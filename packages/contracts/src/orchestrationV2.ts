@@ -946,6 +946,12 @@ function kindUnionWithFallback<
 
 const PendingBackgroundTaskFields = {
   taskId: TrimmedNonEmptyString,
+  /** The command line that started this work, when the provider reported one. */
+  command: Schema.optional(Schema.String),
+  /** The turn item of the tool call that started this work. */
+  itemId: Schema.optional(TurnItemId),
+  /** The thread that owns `itemId`. */
+  sourceThreadId: Schema.optional(ThreadId),
   /** The subagent task that started this work and waits on it. */
   parentTaskId: Schema.optional(TrimmedNonEmptyString),
   /** The work's name: a subagent's title, a command's description, a monitor's. */
@@ -2037,6 +2043,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   activityRunStatus: Schema.optional(
     Schema.NullOr(Schema.Literals(["preparing", "starting", "running", "waiting"])),
   ),
+  /** The running turn is blocked only on T3 thread waits; clients show Waiting, not Working. */
+  blockedOnThreadWait: Schema.optional(Schema.Boolean),
   status: OrchestrationV2ShellThreadStatus,
   lastError: Schema.optional(Schema.NullOr(Schema.String)),
   lastErrorClass: Schema.optional(Schema.NullOr(OrchestrationV2ProviderFailureClass)),

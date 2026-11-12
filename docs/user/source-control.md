@@ -19,7 +19,8 @@ Stop button to interrupt an app-owned child. Forks and parent conversations are
 not included in this section. The full Agents panel remains available.
 
 **Open PR details** appears when the conversation has a linked PR and opens the
-existing PR sidebar. Active PR watches retain their indicator and Stop control.
+existing PR sidebar. A watched PR takes its place as its own row: click it to
+open PR details, or click its eye to stop watching.
 
 **Changes** shows uncommitted addition
 and deletion totals, including untracked files. When the checkout is clean, it

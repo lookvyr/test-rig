@@ -34,8 +34,8 @@ The new design is on by default. It uses quieter read titles, clearer status
 colors, and shorter cards for threads without a branch. Turn off **New design**
 in **Settings → Beta** to return to the classic layout.
 
-Working threads and threads waiting on background work are dimmer than ready threads. Hover
-or focus a row to brighten it. The open thread, selected threads, unread results,
+Working threads are dimmer than ready threads, and threads waiting on background
+work use quieter titles. Hover or focus a row to brighten it. The open thread, selected threads, unread results,
 and threads needing an approval or answer stay prominent.
 
 New threads in a repository show their branch even if you never open **Changes**.
@@ -75,9 +75,10 @@ Threads return to the top of the main list when they finish, fail, or need an
 approval, answer, or plan review, including requests from delegated children.
 Background agents, PR watches, and background commands or monitors the agent
 says it is waiting on stay in Working while they need no attention. They show
-**Waiting** instead of **Working**. A dev server or other process an agent
+**Waiting** instead of **Working**, with how long they have waited. A thread
+whose agent is waiting on another conversation also shows **Waiting**. A dev server or other process an agent
 leaves running does not keep a thread there; the thread finishes as usual, and
-the open thread shows the process as **Running** with a **Stop** button. Pinned threads stay pinned; snoozed and
+the open thread shows the process as **Running** with **Stop** below its last message. Pinned threads stay pinned; snoozed and
 settled threads keep their own sections. This changes only sidebar presentation
 and does not stop, snooze, or settle any work.
 

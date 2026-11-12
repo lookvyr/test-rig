@@ -24,7 +24,7 @@ import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
-import { ThreadPullRequestWatches } from "./ThreadPullRequestWatches";
+import { ThreadPullRequestWatches, useWatchedThreadPullRequests } from "./ThreadPullRequestWatches";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { ThreadServersPanel } from "./ThreadServersPanel";
 
@@ -64,6 +64,7 @@ export function ThreadDetailsPanel(props: {
     props.scripts ? props.openInCwd : null,
   );
   const serverCount = useThreadDiscoveredPorts(props.threadRef).length;
+  const watchedPullRequests = useWatchedThreadPullRequests(props.threadRef);
   const shortcutLabel = shortcutLabelForCommand(props.keybindings, "threadPanel.toggle");
   const workspaceTitle =
     (props.openInCwd ? fileBasename(props.openInCwd) : null) || props.projectName || "Workspace";
@@ -141,13 +142,19 @@ export function ThreadDetailsPanel(props: {
               </span>
             </ThreadDetailsControl>
           )}
-          {props.onShowPullRequest ? (
+          {/* A watched PR is its own row, so it stands in for the generic one. */}
+          {watchedPullRequests.length > 0 ? (
+            <ThreadPullRequestWatches
+              threadRef={props.threadRef}
+              links={watchedPullRequests}
+              onShowPullRequest={props.onShowPullRequest}
+            />
+          ) : props.onShowPullRequest ? (
             <ThreadDetailsControl onClick={props.onShowPullRequest}>
               <GitPullRequestIcon />
               Open PR details
             </ThreadDetailsControl>
           ) : null}
-          <ThreadPullRequestWatches threadRef={props.threadRef} />
         </ThreadDetailsSection>
       ) : null}
       {!props.isDraft ? (

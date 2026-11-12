@@ -170,6 +170,7 @@ type ThreadStatusInput = Pick<
   | "latestRun"
   | "runtime"
   | "pendingBackgroundTasks"
+  | "blockedOnThreadWait"
 > & {
   lastVisitedAt?: string | undefined;
 };
@@ -451,7 +452,11 @@ export type SidebarV2Status = "approval" | "input" | "working" | "waiting" | "fa
 
 type SidebarV2StatusInput = Pick<
   SidebarThreadSummary,
-  "hasPendingApprovals" | "hasPendingUserInput" | "runtime" | "pendingBackgroundTasks"
+  | "hasPendingApprovals"
+  | "hasPendingUserInput"
+  | "runtime"
+  | "pendingBackgroundTasks"
+  | "blockedOnThreadWait"
 >;
 
 export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2Status {
@@ -460,6 +465,10 @@ export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2S
   }
   if (thread.hasPendingUserInput) {
     return "input";
+  }
+  // A turn blocked only on another thread is waiting on that thread, not working.
+  if (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true) {
+    return "waiting";
   }
   if (threadRuntimeIsActive(thread.runtime)) {
     return "working";
@@ -736,7 +745,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.runtime?.status === "running") {
+  if (thread.runtime?.status === "running" && thread.blockedOnThreadWait !== true) {
     return {
       label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",
@@ -773,7 +782,10 @@ export function resolveThreadStatusPill(input: {
   // The turn can settle while background work runs on. Work the agent waits on
   // (subagents, PR watches, marked commands) reads as a quiet Waiting; a dev
   // server it left running shows nothing here.
-  if (backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks)) {
+  if (
+    (thread.runtime?.status === "running" && thread.blockedOnThreadWait === true) ||
+    backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks)
+  ) {
     return {
       label: "Waiting",
       colorClass: "text-sidebar-muted-foreground",

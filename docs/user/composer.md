@@ -192,11 +192,11 @@ provider's settings can override it:
 With Codex and Claude, send `/goal` followed by what "done" means, for example
 `/goal all tests in packages/api pass`. The agent keeps working across turns
 until it judges the goal met. The sidebar shows **Goal** while it works, and a
-row above the composer shows the goal and its progress.
+line at the end of the conversation shows the goal and its progress.
 
 - `/goal` alone shows the current goal. `/goal clear` removes it.
 - Codex also supports `/goal pause` and `/goal resume`. Stopping a Codex goal
-  pauses it; the row then offers **Resume** and **Clear**.
+  pauses it; the line then offers **Resume** and **Clear**.
 - Stopping Claude ends the current turn, but the goal stays set. Claude checks it
   again at the end of your next message.
 - A goal command runs as its own turn. Wait for the active turn to finish
@@ -345,6 +345,24 @@ A fork is a durable chat, separate from a temporary `/side` conversation.
 Forking a conversation does not create a Git worktree or isolate file changes.
 Test Rig does not rewind conversations or edit sent messages; use a fork to try
 another direction. Checkpoint diffs remain available for reviewing file changes.
+
+## What the thread is doing now
+
+Below the last message, quiet one-line notes show what the conversation is
+doing between turns. Notices that need you, such as errors, a changed branch,
+or a usage limit, stay above the composer.
+
+- **Background work.** Subagents, PR watches, and commands the agent is waiting
+  on read **Waiting**, for example `Waiting · Watching pull request #42`. A dev
+  server or other process the agent left running reads **Running**. A subagent
+  shows its latest activity. **Details** lists each task with its command and
+  live output, **Open** opens a lone subagent's conversation, and **Stop** ends
+  all of the background work.
+- **Syncing.** While messages load or catch up, a line says so.
+- **Goal.** An active `/goal` and its progress.
+- **Snoozed, settled, or woke.** For example `Snoozed, 2h left · Wake now`,
+  `Settled 3h ago · Un-settle`, or `Woke from snooze · Dismiss`. Sending a
+  message also wakes or un-settles the conversation.
 
 ## Recovering from provider limits
 

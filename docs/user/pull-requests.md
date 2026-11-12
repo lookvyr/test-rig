@@ -163,12 +163,15 @@ active. These details describe that call; the current watch controls are in the
 conversation’s details panel.
 
 When an agent starts watching a linked pull request, the conversation's details
-panel shows an eye beside it. Choose **Stop watching** to stop that monitor.
-The pull request stays linked to the conversation.
+panel lists that pull request with an eye beside it, and the PR panel marks it
+with an eye. Click the row to open PR details, or click the eye to stop that
+monitor. The pull request stays linked to the conversation. While the watch
+runs, the end of the conversation reads `Waiting · Watching pull request #42`
+with **Stop**.
 Settling or archiving the conversation ends its watches. Restoring the conversation
 does not restart them; start a new watch explicitly. Subagents report PR work to
 their parent conversation, which owns the watch. While a watch is active, the
-conversation stays in Working between updates. Stop watching when handing the
+conversation stays in Working between updates and shows **Waiting**. Stop watching when handing the
 work back so it returns to your inbox.
 
 Snoozing the conversation keeps its watch active, including when a watch update

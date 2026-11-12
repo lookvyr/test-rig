@@ -60,7 +60,13 @@ import {
   connectionStatusTitle,
   type EnvironmentConnectionPresentation,
 } from "@t3tools/client-runtime/connection";
-import { effectiveSnoozed, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  effectiveSnoozed,
+  snoozeWakeLabel,
+  threadWokeAt,
+} from "@t3tools/client-runtime/state/thread-settled";
+import { useNowMinute } from "../hooks/useNowMinute";
+import { formatRelativeTimeLabel } from "../timestampFormat";
 import {
   parseScopedThreadKey,
   scopedThreadKey,
@@ -115,8 +121,6 @@ import {
   derivePhase,
   selectThreadMessages,
   deriveActiveWorkStartedAt,
-  deriveActivePlanState,
-  selectComposerTasksPlan,
   findLatestProposedPlan,
   hasActionableProposedPlan,
   hasCompletedSideChatContext,
@@ -192,13 +196,9 @@ import {
   AlarmClockIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
-  CircleDashedIcon,
   GitBranchIcon,
-  TerminalIcon,
   WifiOffIcon,
 } from "lucide-react";
-import * as DateTime from "effect/DateTime";
-import { AgentElapsed } from "./chat/AgentElapsed";
 import { cn } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
@@ -298,10 +298,9 @@ import {
 } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
-import { ComposerTasksBadge, composerTasksProgress } from "./chat/ComposerTasksBadge";
-import { ComposerGoalRow } from "./chat/ComposerGoalRow";
+import { ThreadNow, ThreadStatusLine } from "./chat/ThreadNow";
+import { backgroundWorkNowItem, goalNowItem } from "./chat/ThreadNowItems";
 import { presentProviderGoal } from "@t3tools/client-runtime/state/thread-execution";
-import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
   DRAFT_HERO_TRANSITION_DURATION_MS,
@@ -2257,37 +2256,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
     return findLatestProposedPlan(threadProjection, activeLatestRun?.runId ?? null);
   }, [activeLatestRun?.runId, threadProjection, latestRunSettled]);
-  const activePlan = useMemo(
-    () => deriveActivePlanState(threadProjection, activeLatestRun?.runId ?? undefined),
-    [activeLatestRun?.runId, threadProjection],
-  );
-  const composerTasksPlan = useMemo(
-    () =>
-      selectComposerTasksPlan(
-        threadProjection,
-        activePlan,
-        activeLatestRun?.runId ?? null,
-        latestRunSettled,
-      ),
-    [activeLatestRun?.runId, activePlan, latestRunSettled, threadProjection],
-  );
-  const composerTasks = useMemo(() => {
-    if (composerTasksPlan === null) return null;
-    const live = !latestRunSettled && composerTasksPlan.runId === activeLatestRun?.runId;
-    const progress = composerTasksProgress(composerTasksPlan.steps, live);
-    return progress === null ? null : { progress, steps: composerTasksPlan.steps };
-  }, [activeLatestRun?.runId, composerTasksPlan, latestRunSettled]);
-  // The view is reused across threads, so the open list belongs to one thread.
-  const [expandedTasksThreadKey, setExpandedTasksThreadKey] = useState<string | null>(null);
-  const composerTasksExpanded =
-    activeThreadKey !== null && expandedTasksThreadKey === activeThreadKey;
-  const toggleComposerTasks = useCallback(
-    () =>
-      setExpandedTasksThreadKey((current) =>
-        current !== null && current === activeThreadKey ? null : activeThreadKey,
-      ),
-    [activeThreadKey],
-  );
   const composerHasAttachments = useComposerDraftStore(
     (store) => (store.getComposerDraft(composerDraftTarget)?.images.length ?? 0) > 0,
   );
@@ -4478,134 +4446,70 @@ function ChatViewContent(props: ChatViewProps) {
       }
     }
   }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
-  // Codex commands are turn items keyed by their native id, so a lone one can show its uptime.
-  // Kept apart from the banner so streamed command output does not rebuild it.
-  const backgroundWorkStartedAt = useMemo(() => {
-    const [only] = activeBackgroundWork?.items.length === 1 ? activeBackgroundWork.items : [];
-    if (only === undefined) return null;
-    const item = threadProjection?.turnItems.findLast(
-      (candidate) => (candidate.nativeItemRef?.nativeId || candidate.id) === only.taskId,
-    );
-    return item?.startedAt ? DateTime.formatIso(item.startedAt) : null;
-  }, [activeBackgroundWork, threadProjection?.turnItems]);
-  const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    if (activeBackgroundWork === null || !activeThread) {
-      return null;
-    }
-    const { items } = activeBackgroundWork;
-    return {
-      id: `background-liveness:${activeThread.id}`,
-      variant: "default",
-      icon: items.every((item) => item.kind !== "subagent") ? (
-        <TerminalIcon aria-hidden="true" />
-      ) : (
-        <CircleDashedIcon aria-hidden="true" />
-      ),
-      // Labels are raw command lines, which can be whole scripts.
-      title: <span className="line-clamp-1 break-all">{activeBackgroundWork.title}</span>,
-      ...(items.length > 1
-        ? {
-            description: (
-              <span className="line-clamp-2 break-all">
-                {items.map((item) => item.label).join(", ")}
-              </span>
-            ),
-          }
-        : {}),
-      actions: (
-        <>
-          {backgroundWorkStartedAt === null ? null : (
-            <span className="text-muted-foreground text-xs">
-              <AgentElapsed
-                agent={{ status: "running", startedAt: backgroundWorkStartedAt, completedAt: null }}
-              />
-            </span>
-          )}
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={isStoppingBackgroundWork}
-            onClick={() => void handleStopBackgroundWork()}
-          >
-            {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
-          </Button>
-        </>
-      ),
-    };
-  }, [
-    activeBackgroundWork,
-    activeThread,
-    backgroundWorkStartedAt,
-    handleStopBackgroundWork,
-    isStoppingBackgroundWork,
-  ]);
-  // A woken thread announces itself in the open view, not just the sidebar
-  // pill. Dismissing marks the wake as seen (same acknowledgment as the
-  // pill); sending a message clears it as a side effect of the send path.
-  const wokeThreadBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    if (!activeThreadWokeVisible) {
-      return null;
-    }
-    return {
-      id: `thread-woke:${activeThread?.id ?? "unknown"}`,
-      variant: "info",
-      icon: <AlarmClockIcon />,
-      title: "This thread woke from snooze",
-      description: "Dismiss to clear the Woke indicator, or send a message to keep going.",
-      dismissLabel: "Dismiss Woke notification",
-      onDismiss: acknowledgeActiveThreadWoke,
-    };
-  }, [acknowledgeActiveThreadWoke, activeThread?.id, activeThreadWokeVisible]);
-  // The stack renders items[0] front-most and tucks the rest behind hover, so
-  // ordering is priority: urgent system banners (error/warning variants plus
-  // calm-styled live states flagged `urgent`, like update progress), then
-  // background liveness — its Stop button is the only stop affordance for
-  // settled turns, so a passive "update available" notice must not cover it —
-  // then calm system banners, the woke and branch-mismatch notices, and the
-  // informational parked-thread banner last — it must never cover another.
-  const parkedThreadBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    if (!activeThreadSnoozed && !activeThreadSettled) {
-      return null;
-    }
-    const isSnoozed = activeThreadSnoozed;
-    return {
-      id: `thread-${isSnoozed ? "snoozed" : "settled"}:${activeThread?.id ?? "unknown"}`,
-      variant: "info",
-      icon: isSnoozed ? <AlarmClockIcon /> : <CheckCircle2Icon />,
-      title: `This thread is ${isSnoozed ? "snoozed" : "settled"}`,
-      description: isSnoozed
-        ? "Sending a message wakes it and moves it back to Active in the sidebar."
-        : (activeThreadShell?.worktreeCleanup?.reason ??
-          "Sending a message moves it back to Active in the sidebar."),
-      actions: (
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={isSnoozed ? isUnsnoozing : isUnsettling}
-          onClick={() =>
-            void (isSnoozed ? handleUnsnoozeActiveThread() : handleUnsettleActiveThread())
-          }
-        >
-          {isSnoozed
-            ? isUnsnoozing
-              ? "Waking..."
-              : "Wake now"
-            : isUnsettling
-              ? "Un-settling..."
-              : "Un-settle"}
-        </Button>
-      ),
-    };
-  }, [
-    activeThread?.id,
-    activeThreadSettled,
-    activeThreadSnoozed,
-    activeThreadShell?.worktreeCleanup?.reason,
-    handleUnsnoozeActiveThread,
-    handleUnsettleActiveThread,
-    isUnsnoozing,
-    isUnsettling,
-  ]);
+  const backgroundWorkNow = useMemo(
+    () =>
+      activeBackgroundWork === null || !activeThread
+        ? null
+        : backgroundWorkNowItem({
+            environmentId,
+            threadId: activeThread.id,
+            tasks: activeThreadShell?.pendingBackgroundTasks ?? [],
+            turnItems: threadProjection?.turnItems ?? [],
+            stopDisabled: isStoppingBackgroundWork,
+            stopping: isStoppingBackgroundWork,
+            onStop: () => void handleStopBackgroundWork(),
+            onOpenThread: onOpenRelatedThread,
+          }),
+    [
+      activeBackgroundWork,
+      activeThread,
+      activeThreadShell?.pendingBackgroundTasks,
+      environmentId,
+      handleStopBackgroundWork,
+      isStoppingBackgroundWork,
+      onOpenRelatedThread,
+      threadProjection?.turnItems,
+    ],
+  );
+  // The thread's lifecycle state, at the end of the timeline with its way out.
+  // The relative times read the minute clock, so they stay current.
+  const nowMinute = useNowMinute();
+  const threadStatusLine = activeThreadSnoozed ? (
+    <ThreadStatusLine
+      icon={<AlarmClockIcon />}
+      announcement="This thread is snoozed"
+      label={(() => {
+        const wake = activeThreadShell?.snoozedUntil
+          ? snoozeWakeLabel(activeThreadShell.snoozedUntil, { now: `${nowMinute}:00.000Z` })
+          : null;
+        return wake && wake !== "now" ? `Snoozed, ${wake} left` : "Snoozed";
+      })()}
+      actionLabel={isUnsnoozing ? "Waking..." : "Wake now"}
+      actionDisabled={isUnsnoozing}
+      onAction={() => void handleUnsnoozeActiveThread()}
+    />
+  ) : activeThreadSettled ? (
+    <ThreadStatusLine
+      icon={<CheckCircle2Icon />}
+      announcement="This thread is settled"
+      label={
+        activeThreadShell?.settledAt
+          ? `Settled ${formatRelativeTimeLabel(activeThreadShell.settledAt, Date.parse(`${nowMinute}:00.000Z`))}`
+          : "Settled"
+      }
+      actionLabel={isUnsettling ? "Un-settling..." : "Un-settle"}
+      actionDisabled={isUnsettling}
+      onAction={() => void handleUnsettleActiveThread()}
+    />
+  ) : activeThreadWokeVisible ? (
+    <ThreadStatusLine
+      icon={<AlarmClockIcon />}
+      announcement="This thread woke from snooze"
+      label="Woke from snooze"
+      actionLabel="Dismiss"
+      onAction={acknowledgeActiveThreadWoke}
+    />
+  ) : null;
   const handleRestoreThreadBranch = useCallback(() => {
     if (gitStatusQuery.data?.hasWorkingTreeChanges) {
       setBranchRestoreConfirmOpen(true);
@@ -4614,11 +4518,11 @@ function ChatViewContent(props: ChatViewProps) {
     void handleSwitchCheckoutToThread();
   }, [gitStatusQuery.data?.hasWorkingTreeChanges, handleSwitchCheckoutToThread]);
   const worktreeCleanupBanner = useMemo<ComposerBannerStackItem[]>(() => {
-    const status = parkedThreadBannerItem ? null : activeThreadShell?.worktreeCleanup;
+    const status = activeThreadShell?.worktreeCleanup;
     return status
       ? [{ id: "worktree-cleanup", variant: "info", icon: <GitBranchIcon />, title: status.reason }]
       : [];
-  }, [activeThreadShell?.worktreeCleanup, parkedThreadBannerItem]);
+  }, [activeThreadShell?.worktreeCleanup]);
   const limitRecoveryBanner =
     activeRuntime?.status === "failed" &&
     activeRuntime.lastErrorClass === "usage_limit" &&
@@ -4646,27 +4550,18 @@ function ChatViewContent(props: ChatViewProps) {
       item.urgent === true || item.variant === "error" || item.variant === "warning";
     const urgentSystemItems = systemComposerBannerItems.filter(isUrgentSystemItem);
     const calmSystemItems = systemComposerBannerItems.filter((item) => !isUrgentSystemItem(item));
-    const backgroundLivenessItems =
-      backgroundLivenessBannerItem === null ? [] : [backgroundLivenessBannerItem];
-    const wokeThreadItems = wokeThreadBannerItem === null ? [] : [wokeThreadBannerItem];
-    const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
       return [
         ...limitRecoveryItems,
         ...urgentSystemItems,
-        ...backgroundLivenessItems,
         ...calmSystemItems,
-        ...wokeThreadItems,
-        ...parkedThreadItems,
         ...worktreeCleanupBanner,
       ];
     }
     return [
       ...limitRecoveryItems,
       ...urgentSystemItems,
-      ...backgroundLivenessItems,
       ...calmSystemItems,
-      ...wokeThreadItems,
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
         variant: "info",
@@ -4706,20 +4601,16 @@ function ChatViewContent(props: ChatViewProps) {
           setBranchMismatchDismissTick((tick) => tick + 1);
         },
       },
-      ...parkedThreadItems,
       ...worktreeCleanupBanner,
     ];
   }, [
     activeBranchMismatchKey,
-    backgroundLivenessBannerItem,
     limitRecoveryBanner,
     handleRestoreThreadBranch,
     isRestoringThreadBranch,
     localCheckoutBranchMismatch,
-    parkedThreadBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
-    wokeThreadBannerItem,
     worktreeCleanupBanner,
   ]);
 
@@ -5258,6 +5149,33 @@ function ChatViewContent(props: ChatViewProps) {
     }
   };
   const onCompactContext = () => void sendStandaloneCommand("/compact");
+  // What the thread is doing now sits at the end of the timeline, not stacked
+  // on the composer: background work, sync status, the goal, then lifecycle.
+  const goalNow =
+    activeThread && activeGoalPresentation !== null && !isDraftHeroState
+      ? goalNowItem({
+          threadId: activeThread.id,
+          presentation: activeGoalPresentation,
+          working: isWorking,
+          disabled: standaloneCommandBlocked,
+          onResume: () => void sendStandaloneCommand("/goal resume"),
+          onClear: () => void sendStandaloneCommand("/goal clear"),
+        })
+      : null;
+  const shownThreadSyncPhase = activeEnvironmentUnavailable ? null : threadSyncPhase;
+  const timelineFooter =
+    backgroundWorkNow === null &&
+    shownThreadSyncPhase === null &&
+    goalNow === null &&
+    threadStatusLine === null ? null : (
+      <ThreadNow
+        key={routeThreadKey}
+        work={backgroundWorkNow}
+        syncPhase={shownThreadSyncPhase}
+        goal={goalNow}
+        status={threadStatusLine}
+      />
+    );
   const onResume = () => {
     if (resumableRunId !== null)
       void sendStandaloneCommand("Continue where you left off.", resumableRunId);
@@ -6736,6 +6654,7 @@ function ChatViewContent(props: ChatViewProps) {
                       respondingRequestIds,
                       onRespondToApproval,
                       onFooterGrow: onTimelineFooterGrow,
+                      footer: timelineFooter,
                     })}
               />
 
@@ -6825,23 +6744,6 @@ function ChatViewContent(props: ChatViewProps) {
                       ) : (
                         <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                       )}
-                      {activeGoalPresentation !== null && !isDraftHeroState ? (
-                        <ComposerGoalRow
-                          presentation={activeGoalPresentation}
-                          working={isWorking}
-                          disabled={standaloneCommandBlocked}
-                          onResume={() => void sendStandaloneCommand("/goal resume")}
-                          onClear={() => void sendStandaloneCommand("/goal clear")}
-                        />
-                      ) : null}
-                      {composerTasks !== null && !isDraftHeroState ? (
-                        <ComposerTasksBadge
-                          expanded={composerTasksExpanded}
-                          onToggle={toggleComposerTasks}
-                          progress={composerTasks.progress}
-                          steps={composerTasks.steps}
-                        />
-                      ) : null}
                       {nonBlockingUserInputs.length > 0 && (
                         <AsyncUserInputPanel
                           key={activeThreadKey}
@@ -6870,9 +6772,6 @@ function ChatViewContent(props: ChatViewProps) {
                         </div>
                       )}
                       <ChildThreadApprovals threadRef={activeThreadRef} />
-                      {threadSyncPhase && !activeEnvironmentUnavailable ? (
-                        <ThreadSyncStatusPill phase={threadSyncPhase} />
-                      ) : null}
                       <div
                         className="relative"
                         style={

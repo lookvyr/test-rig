@@ -533,6 +533,8 @@ interface MessagesTimelineProps {
   onRespondToApproval?: ApprovalResponder;
   /** The footer's content grew, such as an approval with no request row. */
   onFooterGrow?: () => void;
+  /** What the thread is doing now, shown after the last turn. */
+  footer?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -603,6 +605,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   respondingRequestIds = EMPTY_REQUEST_IDS,
   onRespondToApproval,
   onFooterGrow,
+  footer,
 }: MessagesTimelineProps) {
   const [searchMessageId, setSearchMessageId] = useState<MessageId | null>(null);
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
@@ -1130,9 +1133,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             </div>
           </div>
         ) : null}
+        {footer}
       </TimelineListFooter>
     ),
-    [anchoredEndSpace, contentInsetEndAdjustment, onFooterGrow, unmatchedPendingApprovals],
+    [anchoredEndSpace, contentInsetEndAdjustment, footer, onFooterGrow, unmatchedPendingApprovals],
   );
 
   const measureContentOverflow = useCallback(
@@ -1465,8 +1469,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [],
   );
 
+  // Loading and empty panes have no list, so the footer sits just above the composer instead.
+  const paneFooter = footer ? (
+    <div
+      className="absolute inset-x-0 bottom-0"
+      style={{ paddingBottom: contentInsetEndAdjustment }}
+    >
+      <div className="pb-3 sm:pb-4">{footer}</div>
+    </div>
+  ) : null;
+
   if (isLoading) {
-    return <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />;
+    return (
+      <div className="relative h-full min-h-0 bg-background" data-timeline-loading="true">
+        {paneFooter}
+      </div>
+    );
   }
 
   if (
@@ -1480,13 +1498,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (hideEmptyPlaceholder) {
       // Occupy the pane with the theme surface so a thread switch cannot
       // punch a hole through to the window chrome (white in light mode).
-      return <div className="h-full min-h-0 bg-background" data-timeline-loading="true" />;
+      return (
+        <div className="relative h-full min-h-0 bg-background" data-timeline-loading="true">
+          {paneFooter}
+        </div>
+      );
     }
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="relative flex h-full items-center justify-center">
         <p className="text-sm text-muted-foreground/30">
           Send a message to start the conversation.
         </p>
+        {paneFooter}
       </div>
     );
   }

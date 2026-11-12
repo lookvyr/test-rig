@@ -2,7 +2,7 @@ import { EnvironmentId, ThreadId, type ThreadPullRequestLink } from "@t3tools/co
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { visitElements } from "../../test/reactElementTree";
 import { reactHookHarness as hooks } from "../../test/reactHookHarness";
-import { ThreadPullRequestWatches } from "./ThreadPullRequestWatches";
+import { ThreadPullRequestWatches, useWatchedThreadPullRequests } from "./ThreadPullRequestWatches";
 
 const mocks = vi.hoisted(() => ({
   links: [] as ThreadPullRequestLink[],
@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   settledAt: null as string | null,
   stop: vi.fn(),
   open: vi.fn(),
+  showDetails: undefined as (() => void) | undefined,
 }));
 vi.mock("react", async (original) => {
   const actual = await original<typeof import("react")>();
@@ -57,7 +58,11 @@ const link: ThreadPullRequestLink = {
 };
 function render() {
   hooks.beginRender();
-  return ThreadPullRequestWatches({ threadRef });
+  return ThreadPullRequestWatches({
+    threadRef,
+    links: useWatchedThreadPullRequests(threadRef),
+    onShowPullRequest: mocks.showDetails,
+  });
 }
 describe("thread PR watch controls", () => {
   beforeEach(() => {
@@ -66,6 +71,19 @@ describe("thread PR watch controls", () => {
     mocks.settledOverride = null;
     mocks.settledAt = null;
     mocks.stop.mockReset().mockResolvedValue({ _tag: "Success" });
+    mocks.open.mockReset();
+    mocks.showDetails = undefined;
+  });
+  it("opens PR details from the row, or the PR itself without a details panel", () => {
+    const row = () =>
+      visitElements(render(), (element) => element.props["aria-label"] === "Open PR #7");
+    (row()?.props.onClick as (event: unknown) => void)({});
+    expect(mocks.open).toHaveBeenCalledOnce();
+    const showDetails = vi.fn();
+    mocks.showDetails = showDetails;
+    (row()?.props.onClick as (event: unknown) => void)({});
+    expect(showDetails).toHaveBeenCalledOnce();
+    expect(mocks.open).toHaveBeenCalledOnce();
   });
   it("stops only the selected PR's watch without unlinking it", async () => {
     const control = visitElements(
