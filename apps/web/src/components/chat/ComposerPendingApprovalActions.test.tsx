@@ -62,4 +62,25 @@ describe("provider approval choices", () => {
     );
     expect(markup).toContain("More approval options");
   });
+
+  it("renders inline text actions for the timeline row and honors disabled", () => {
+    const markup = renderToStaticMarkup(
+      <ComposerPendingApprovalActions
+        presentation="inline"
+        requestId={RuntimeRequestId.make("inline")}
+        isResponding={false}
+        canRespond
+        disabled
+        options={[
+          { decision: "decline", label: "Decline" },
+          { decision: "acceptForSession", label: "Always allow this session" },
+          { decision: "accept", label: "Approve" },
+        ]}
+        onRespondToApproval={async () => {}}
+      />,
+    );
+    expect(markup).toContain('data-slot="inline-button"');
+    expect(markup).toContain(">More<");
+    expect(markup).not.toMatch(/<button(?![^>]*disabled)[^>]*>/);
+  });
 });

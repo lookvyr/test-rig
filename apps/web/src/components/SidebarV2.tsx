@@ -38,7 +38,6 @@ import {
   AlarmClockIcon,
   AlarmClockOffIcon,
   CheckIcon,
-  ChevronDownIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
@@ -47,6 +46,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
+  ListFilterIcon,
   EllipsisIcon,
   MessageSquareIcon,
   PinIcon,
@@ -147,6 +147,7 @@ import {
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   resolveAdjacentThreadId,
+  resolveFirstSidebarShelf,
   resolveSettledTimestamp,
   resolveSidebarV2Status,
   searchSidebarThreadsByTitle,
@@ -193,14 +194,34 @@ import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./u
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SidebarSectionHeader } from "./sidebar/SidebarSectionHeader";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { useLocalStorage } from "../hooks/useLocalStorage";
+import * as Schema from "effect/Schema";
 
 // Settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more.
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
+// Section collapse state survives reloads; every section starts collapsed.
+const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
+const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
+const WORKING_SHELF_EXPANDED_KEY = "t3code:sidebar:working-expanded";
+const SIDEBAR_HEADER_ICON_BUTTON_CLASS =
+  "relative size-7 shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar";
+
+// Widens a header icon button's hit area on touch screens.
+function SidebarHeaderTouchTarget() {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
+    />
+  );
+}
+
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
   repository_path: "Group by repository path",
@@ -1429,7 +1450,6 @@ const inboxReturns = createInboxReturnTracker();
 
 export default function SidebarV2() {
   const modalPage = useLocation({ select: (location) => isAppModalPage(location.pathname) });
-  const redesign = useClientSettings((s) => s.redesignEnabled);
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
@@ -1986,8 +2006,15 @@ export default function SidebarV2() {
     lastSettledResetKeyRef.current = settledResetKey;
     setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
   }
-  const [settledShelfExpanded, setSettledShelfExpanded] = useState(true);
-  const toggleSettledShelf = useCallback(() => setSettledShelfExpanded((value) => !value), []);
+  const [settledShelfExpanded, setSettledShelfExpanded] = useLocalStorage(
+    SETTLED_SHELF_EXPANDED_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const toggleSettledShelf = useCallback(
+    () => setSettledShelfExpanded((value) => !value),
+    [setSettledShelfExpanded],
+  );
   const olderSettledShelf = useOlderSettledShelf({
     scopes: [...serverConfigs.keys()].flatMap<OlderSettledScope>((environmentId) => {
       if (scopedProjectKeys === null) return [{ environmentId, projectIds: null }];
@@ -2035,8 +2062,15 @@ export default function SidebarV2() {
   // The snoozed shelf is collapsed by default: out of the way, never gone.
   // Collapsed threads don't render (and so don't participate in jump
   // shortcuts or multi-select), matching the settled tail's paging model.
-  const [snoozedShelfExpanded, setSnoozedShelfExpanded] = useState(false);
-  const toggleSnoozedShelf = useCallback(() => setSnoozedShelfExpanded((value) => !value), []);
+  const [snoozedShelfExpanded, setSnoozedShelfExpanded] = useLocalStorage(
+    SNOOZED_SHELF_EXPANDED_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const toggleSnoozedShelf = useCallback(
+    () => setSnoozedShelfExpanded((value) => !value),
+    [setSnoozedShelfExpanded],
+  );
   const visibleSnoozedThreads = useMemo(() => {
     if (snoozedShelfExpanded) return snoozedThreads;
     // The open thread must never vanish behind the collapsed shelf: a
@@ -2051,8 +2085,15 @@ export default function SidebarV2() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
-  const [workingShelfExpanded, setWorkingShelfExpanded] = useState(false);
-  const toggleWorkingShelf = useCallback(() => setWorkingShelfExpanded((value) => !value), []);
+  const [workingShelfExpanded, setWorkingShelfExpanded] = useLocalStorage(
+    WORKING_SHELF_EXPANDED_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const toggleWorkingShelf = useCallback(
+    () => setWorkingShelfExpanded((value) => !value),
+    [setWorkingShelfExpanded],
+  );
   const visibleWorkingThreads = useMemo(() => {
     if (workingShelfExpanded) return workingThreads;
     const routeThread = workingThreads.find(
@@ -3074,15 +3115,21 @@ export default function SidebarV2() {
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.new") ??
     shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const sidebarListItemCount =
+    pinnedThreads.length +
+    activeThreads.length +
+    workingThreads.length +
+    snoozedThreads.length +
+    settledCount;
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
       <SidebarContent
-        className="gap-0"
+        className="min-h-full gap-0"
         fixedHeader={
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
-          <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)]">
+          <SidebarGroup className="relative z-[1] p-[var(--sidebar-content-inset)]">
             <div className="flex items-center gap-1">
               <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
                 <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
@@ -3130,14 +3177,123 @@ export default function SidebarV2() {
                   </Button>
                 ) : null}
               </div>
-              <div className="shrink-0">
+              <div className="flex shrink-0 items-center">
+                {projectGroups.length > 0 ? (
+                  <>
+                    <Menu open={projectScopeMenuOpen} onOpenChange={setProjectScopeMenuOpen}>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <MenuTrigger
+                              render={
+                                <SidebarMenuButton
+                                  size="icon"
+                                  type="button"
+                                  isActive={scopedProjectGroup !== null}
+                                  aria-label={
+                                    scopedProjectGroup
+                                      ? `Filter threads by project: ${scopedProjectGroup.displayName}`
+                                      : "Filter threads by project"
+                                  }
+                                  className={SIDEBAR_HEADER_ICON_BUTTON_CLASS}
+                                />
+                              }
+                            />
+                          }
+                        >
+                          {scopedProjectGroup ? (
+                            <ProjectFavicon
+                              environmentId={scopedProjectGroup.environmentId}
+                              cwd={scopedProjectGroup.workspaceRoot}
+                              className="size-4 shrink-0"
+                            />
+                          ) : (
+                            <ListFilterIcon />
+                          )}
+                          <SidebarHeaderTouchTarget />
+                        </TooltipTrigger>
+                        <TooltipPopup side="top">
+                          {scopedProjectGroup
+                            ? `Filtered to ${scopedProjectGroup.displayName}`
+                            : "Filter by project"}
+                        </TooltipPopup>
+                      </Tooltip>
+                      <MenuPopup align="start" className="w-[min(18rem,var(--available-width))]">
+                        <MenuRadioGroup
+                          value={projectScopeKey ?? "all"}
+                          onValueChange={(value) =>
+                            setProjectScopeKey(value === "all" ? null : (value as string))
+                          }
+                        >
+                          <MenuRadioItem
+                            value="all"
+                            closeOnClick
+                            className="h-8 min-h-8 px-1 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
+                          >
+                            <FolderIcon className="size-4 shrink-0" />
+                            <span className="min-w-0 truncate text-sm">All projects</span>
+                          </MenuRadioItem>
+                          {projectGroups.map((project) => {
+                            const scopeKey = project.projectKey;
+                            return (
+                              <MenuRadioItem
+                                key={scopeKey}
+                                value={scopeKey}
+                                closeOnClick
+                                className="h-8 min-h-8 px-1 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
+                              >
+                                <ProjectFavicon
+                                  environmentId={project.environmentId}
+                                  cwd={project.workspaceRoot}
+                                  className="size-4 shrink-0"
+                                />
+                                <span className="min-w-0 truncate text-sm">
+                                  {project.displayName}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-label={`Project actions for ${project.displayName}`}
+                                  title={`Project actions for ${project.displayName}`}
+                                  className="ml-auto inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-icon-muted outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  onClick={(event) => {
+                                    void handleProjectActions(event, project);
+                                  }}
+                                >
+                                  <EllipsisIcon className="size-3.5" />
+                                </button>
+                              </MenuRadioItem>
+                            );
+                          })}
+                        </MenuRadioGroup>
+                      </MenuPopup>
+                    </Menu>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <SidebarMenuButton
+                            size="icon"
+                            type="button"
+                            className={SIDEBAR_HEADER_ICON_BUTTON_CLASS}
+                            onClick={openNewProjectCommandPalette}
+                            aria-label="New project"
+                          />
+                        }
+                      >
+                        <FolderPlusIcon />
+                        <SidebarHeaderTouchTarget />
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">New project</TooltipPopup>
+                    </Tooltip>
+                  </>
+                ) : null}
                 <Tooltip>
                   <TooltipTrigger
                     render={
                       <SidebarMenuButton
                         size="icon"
                         type="button"
-                        className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                        className={SIDEBAR_HEADER_ICON_BUTTON_CLASS}
                         onClick={handleNewThreadClick}
                         disabled={projects.length === 0}
                         aria-label="New thread"
@@ -3145,12 +3301,9 @@ export default function SidebarV2() {
                     }
                   >
                     <SquarePenIcon />
-                    <span
-                      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-                      aria-hidden="true"
-                    />
+                    <SidebarHeaderTouchTarget />
                   </TooltipTrigger>
-                  <TooltipPopup side="right">
+                  <TooltipPopup side="top">
                     {newThreadShortcutLabel
                       ? `New thread (${newThreadShortcutLabel})`
                       : "New thread"}
@@ -3158,105 +3311,10 @@ export default function SidebarV2() {
                 </Tooltip>
               </div>
             </div>
-            {projectGroups.length > 0 ? (
-              <div className="flex items-center gap-1">
-                <Menu open={projectScopeMenuOpen} onOpenChange={setProjectScopeMenuOpen}>
-                  <MenuTrigger
-                    render={
-                      <SidebarMenuButton
-                        aria-label="Filter threads by project"
-                        className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                      />
-                    }
-                  >
-                    {scopedProjectGroup ? (
-                      <ProjectFavicon
-                        environmentId={scopedProjectGroup.environmentId}
-                        cwd={scopedProjectGroup.workspaceRoot}
-                        className="size-4 shrink-0"
-                      />
-                    ) : (
-                      <FolderIcon className="size-4 shrink-0" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate">
-                      {scopedProjectGroup?.displayName ?? "All projects"}
-                    </span>
-                    <ChevronDownIcon className="-mr-px size-4 shrink-0" />
-                  </MenuTrigger>
-                  <MenuPopup align="start" className="w-(--anchor-width)">
-                    <MenuRadioGroup
-                      value={projectScopeKey ?? "all"}
-                      onValueChange={(value) =>
-                        setProjectScopeKey(value === "all" ? null : (value as string))
-                      }
-                    >
-                      <MenuRadioItem
-                        value="all"
-                        closeOnClick
-                        className="h-8 min-h-8 px-1 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
-                      >
-                        <FolderIcon className="size-4 shrink-0" />
-                        <span className="min-w-0 truncate text-sm">All projects</span>
-                      </MenuRadioItem>
-                      {projectGroups.map((project) => {
-                        const scopeKey = project.projectKey;
-                        return (
-                          <MenuRadioItem
-                            key={scopeKey}
-                            value={scopeKey}
-                            closeOnClick
-                            className="h-8 min-h-8 px-1 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
-                          >
-                            <ProjectFavicon
-                              environmentId={project.environmentId}
-                              cwd={project.workspaceRoot}
-                              className="size-4 shrink-0"
-                            />
-                            <span className="min-w-0 truncate text-sm">{project.displayName}</span>
-                            <button
-                              type="button"
-                              aria-label={`Project actions for ${project.displayName}`}
-                              title={`Project actions for ${project.displayName}`}
-                              className="ml-auto inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-icon-muted outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                              onPointerDown={(event) => event.stopPropagation()}
-                              onClick={(event) => {
-                                void handleProjectActions(event, project);
-                              }}
-                            >
-                              <EllipsisIcon className="size-3.5" />
-                            </button>
-                          </MenuRadioItem>
-                        );
-                      })}
-                    </MenuRadioGroup>
-                  </MenuPopup>
-                </Menu>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        size="icon"
-                        className="relative shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        onClick={openNewProjectCommandPalette}
-                        type="button"
-                        aria-label="New project"
-                      />
-                    }
-                  >
-                    <FolderPlusIcon />
-                    <span
-                      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-                      aria-hidden="true"
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup side="right">New project</TooltipPopup>
-                </Tooltip>
-              </div>
-            ) : null}
           </SidebarGroup>
         }
       >
-        <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
+        <SidebarGroup className="flex-1 ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
           {isSearchingThreads ? (
             threadSearchResults.length > 0 ? (
               <TooltipProvider
@@ -3318,7 +3376,11 @@ export default function SidebarV2() {
               closeDelay={0}
               timeout={400}
             >
-              <ul ref={attachListAutoAnimateRef} role="list" className="flex flex-col gap-px">
+              <ul
+                ref={attachListAutoAnimateRef}
+                role="list"
+                className={cn("flex flex-col gap-px", sidebarListItemCount > 0 && "flex-1")}
+              >
                 {(() => {
                   const renderThreadRow = (
                     thread: EnvironmentThreadShell,
@@ -3431,40 +3493,24 @@ export default function SidebarV2() {
                   for (const thread of activeThreads) {
                     items.push(renderThreadRow(thread, "active"));
                   }
+                  // The first section header takes the free space above it,
+                  // so on a short list the sections sit at the bottom.
+                  const firstShelf = resolveFirstSidebarShelf({
+                    working: workingThreads.length,
+                    snoozed: snoozedThreads.length,
+                    settled: settledCount,
+                  });
                   if (workingThreads.length > 0) {
                     items.push(
-                      <li
+                      <SidebarSectionHeader
                         key="working-shelf-header"
-                        data-thread-selection-safe
-                        className="list-none"
-                      >
-                        <button
-                          type="button"
-                          onClick={toggleWorkingShelf}
-                          aria-expanded={workingShelfExpanded}
-                          data-testid="sidebar-v2-working-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left redesign:gap-1.5 redesign:text-secondary-label"
-                        >
-                          <span className="text-xs font-medium text-sidebar-muted-foreground redesign:text-secondary-label">
-                            {redesign
-                              ? "Working"
-                              : workingShelfExpanded
-                                ? "Working"
-                                : `Working (${workingThreads.length})`}
-                          </span>
-                          <span className="hidden text-xs tabular-nums redesign:inline">
-                            {workingThreads.length}
-                          </span>
-                          <span className="h-px flex-1 redesign:hidden bg-sidebar-border/60" />
-                          <ChevronDownIcon
-                            aria-hidden
-                            className={cn(
-                              "size-3 text-sidebar-muted-foreground transition-transform",
-                              workingShelfExpanded && "rotate-180",
-                            )}
-                          />
-                        </button>
-                      </li>,
+                        section="working"
+                        label="Working"
+                        count={workingThreads.length}
+                        expanded={workingShelfExpanded}
+                        onToggle={toggleWorkingShelf}
+                        className={cn(firstShelf === "working" && "mt-auto")}
+                      />,
                     );
                     for (const thread of visibleWorkingThreads) {
                       items.push(renderThreadRow(thread, "working"));
@@ -3477,38 +3523,15 @@ export default function SidebarV2() {
                   // count 0.
                   if (snoozedThreads.length > 0) {
                     items.push(
-                      <li
+                      <SidebarSectionHeader
                         key="snoozed-shelf-header"
-                        data-thread-selection-safe
-                        className="list-none"
-                      >
-                        <button
-                          type="button"
-                          onClick={toggleSnoozedShelf}
-                          aria-expanded={snoozedShelfExpanded}
-                          data-testid="sidebar-v2-snoozed-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left redesign:gap-1.5 redesign:text-secondary-label"
-                        >
-                          <span className="text-xs font-medium text-blue-600 dark:text-blue-400 redesign:text-secondary-label">
-                            {redesign
-                              ? "Snoozed"
-                              : snoozedShelfExpanded
-                                ? "Snoozed"
-                                : `Snoozed (${snoozedThreads.length})`}
-                          </span>
-                          <span className="hidden text-xs tabular-nums redesign:inline">
-                            {snoozedThreads.length}
-                          </span>
-                          <span className="h-px flex-1 redesign:hidden bg-blue-500/20 dark:bg-blue-400/15" />
-                          <ChevronDownIcon
-                            aria-hidden
-                            className={cn(
-                              "size-3 text-blue-600 transition-transform dark:text-blue-400 redesign:text-secondary-label",
-                              snoozedShelfExpanded && "rotate-180",
-                            )}
-                          />
-                        </button>
-                      </li>,
+                        section="snoozed"
+                        label="Snoozed"
+                        count={snoozedThreads.length}
+                        expanded={snoozedShelfExpanded}
+                        onToggle={toggleSnoozedShelf}
+                        className={cn(firstShelf === "snoozed" && "mt-auto")}
+                      />,
                     );
                     for (const thread of visibleSnoozedThreads) {
                       items.push(renderThreadRow(thread, "snoozed"));
@@ -3516,38 +3539,15 @@ export default function SidebarV2() {
                   }
                   if (settledCount > 0) {
                     items.push(
-                      <li
+                      <SidebarSectionHeader
                         key="settled-shelf-header"
-                        data-thread-selection-safe
-                        className="list-none"
-                      >
-                        <button
-                          type="button"
-                          onClick={toggleSettledShelf}
-                          aria-expanded={settledShelfExpanded}
-                          data-testid="sidebar-v2-settled-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left redesign:gap-1.5 redesign:text-secondary-label"
-                        >
-                          <span className="text-xs font-medium text-muted-foreground/50 redesign:text-secondary-label">
-                            {redesign
-                              ? "Settled"
-                              : settledShelfExpanded
-                                ? "Settled"
-                                : `Settled (${settledCount})`}
-                          </span>
-                          <span className="hidden text-xs tabular-nums redesign:inline">
-                            {settledCount}
-                          </span>
-                          <span className="h-px flex-1 redesign:hidden bg-sidebar-border/60" />
-                          <ChevronDownIcon
-                            aria-hidden
-                            className={cn(
-                              "size-3 text-muted-foreground/50 transition-transform",
-                              settledShelfExpanded && "rotate-180",
-                            )}
-                          />
-                        </button>
-                      </li>,
+                        section="settled"
+                        label="Settled"
+                        count={settledCount}
+                        expanded={settledShelfExpanded}
+                        onToggle={toggleSettledShelf}
+                        className={cn(firstShelf === "settled" && "mt-auto")}
+                      />,
                     );
                   }
                   for (const thread of renderedSettledThreads) {
@@ -3578,13 +3578,7 @@ export default function SidebarV2() {
               </ul>
             </TooltipProvider>
           ) : null}
-          {!isSearchingThreads &&
-          pinnedThreads.length +
-            activeThreads.length +
-            workingThreads.length +
-            snoozedThreads.length +
-            settledCount ===
-            0 ? (
+          {!isSearchingThreads && sidebarListItemCount === 0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               {projects.length === 0 ? (
                 <>

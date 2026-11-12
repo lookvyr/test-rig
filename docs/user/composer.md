@@ -104,13 +104,19 @@ the live conversation.
 
 A new approval or blocking question waits while you are typing in the focused
 composer. It appears after 1.5 seconds without a draft edit, when you move focus
-away, or after you send. Your unsent draft returns after you answer or approve.
-A request that has already appeared is not hidden again when you resume typing.
-This also applies to temporary side chats.
+away, or after you send. Your unsent draft returns after you answer. A request
+that has already appeared is not hidden again when you resume typing. This also
+applies to temporary side chats.
 
 While a request is held, Send keeps its normal meaning: it steers the active
 turn when steering is available. It does not submit your draft as a question
-answer. Nonblocking questions keep their separate answer controls.
+answer or decline a held approval. Nonblocking questions keep their separate
+answer controls.
+
+Approvals appear in the conversation rather than in the composer, and the
+composer stays usable while one waits. Once an approval has appeared, sending a
+message declines it and redirects the agent, or delivers your text as feedback
+when the approval supports it. See Permission modes for details.
 
 ## Plans and attachments
 
@@ -256,9 +262,12 @@ remain read-only.
 
 ## Effort and speed
 
-The effort menu closes after you select any option, including effort level or
-speed. Reopen it to change another option. This also applies to model options in
-Settings.
+The model button names the model and its effort, such as **Opus 5.5 High**. Open
+it to choose a model on the left and its effort level and other options on the
+right; speed and permissions sit at the bottom. The picker stays open while you
+change options, and after you pick a model focus moves to that model's levels.
+Press Escape or click outside to close it. Model options in Settings use a menu
+that closes after each selection.
 
 ## Drafts and stashes
 

@@ -91,6 +91,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onRequestClose?: () => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  /** Sits beside an effort column inside the owning popup, which then draws the surface. */
+  docked?: boolean;
+  /** Right Arrow at the end of the search moves focus to the docked effort column. */
+  onFocusEffort?: () => void;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -601,7 +605,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   return (
     <TooltipProvider delay={0}>
       <div
-        className="dropdown-glass model-picker-surface relative flex h-screen max-h-86.5 w-screen max-w-90 flex-row overflow-hidden rounded-lg text-popover-foreground [clip-path:inset(0_round_var(--radius-lg))]"
+        className={cn(
+          "relative flex w-screen max-w-90 flex-row overflow-hidden",
+          props.docked
+            ? "max-sm:h-56 max-sm:w-full max-sm:max-w-none"
+            : "dropdown-glass model-picker-surface h-screen max-h-86.5 rounded-lg text-popover-foreground [clip-path:inset(0_round_var(--radius-lg))]",
+        )}
         data-model-picker-content="true"
       >
         {/* Sidebar */}
@@ -680,6 +689,20 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                       e.preventDefault();
                       e.stopPropagation();
                       props.onRequestClose?.();
+                      return;
+                    }
+                    if (
+                      props.onFocusEffort &&
+                      e.key === "ArrowRight" &&
+                      !e.altKey &&
+                      !e.ctrlKey &&
+                      !e.metaKey &&
+                      !e.shiftKey &&
+                      e.currentTarget.selectionStart === searchQuery.length
+                    ) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      props.onFocusEffort();
                       return;
                     }
                     if (e.key === "Enter" && highlightedModelKeyRef.current) {

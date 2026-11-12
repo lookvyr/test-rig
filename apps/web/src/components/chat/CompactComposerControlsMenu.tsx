@@ -1,5 +1,5 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
-import { memo, type ReactNode } from "react";
+import { memo } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -10,12 +10,16 @@ import {
   MenuSeparator as MenuDivider,
   MenuTrigger,
 } from "../ui/menu";
+import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
 
+/**
+ * The narrow footer's overflow: plan mode and permissions. Effort and the model's other traits
+ * live in the model picker at every width.
+ */
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   showInteractionModeToggle: boolean;
-  traitsMenuContent?: ReactNode;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
@@ -33,13 +37,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
       >
         <EllipsisIcon aria-hidden="true" className="size-4" />
       </MenuTrigger>
-      <MenuPopup align="start">
-        {props.traitsMenuContent ? (
-          <>
-            {props.traitsMenuContent}
-            <MenuDivider />
-          </>
-        ) : null}
+      <MenuPopup align="end">
         {props.showInteractionModeToggle ? (
           <>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
@@ -56,7 +54,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuDivider />
           </>
         ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
+        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Permissions</div>
         <MenuRadioGroup
           value={props.runtimeMode}
           onValueChange={(value) => {
@@ -64,10 +62,11 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             props.onRuntimeModeChange(value as RuntimeMode);
           }}
         >
-          <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-          <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
-          <MenuRadioItem value="auto">Auto</MenuRadioItem>
-          <MenuRadioItem value="full-access">Full access</MenuRadioItem>
+          {runtimeModeOptions.map((mode) => (
+            <MenuRadioItem key={mode} value={mode}>
+              {runtimeModeConfig[mode].label}
+            </MenuRadioItem>
+          ))}
         </MenuRadioGroup>
       </MenuPopup>
     </Menu>

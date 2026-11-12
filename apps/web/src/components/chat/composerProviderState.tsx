@@ -12,7 +12,7 @@ import {
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
 } from "@t3tools/shared/model";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import type { DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
@@ -41,6 +41,8 @@ export type ComposerProviderState = {
   composerSurfaceClassName?: string;
   modelPickerIconClassName?: string;
 };
+
+export type ComposerTraitsInput = ComponentProps<typeof TraitsMenuContent>;
 
 type TraitsRenderInput = {
   provider: ProviderDriverKind;
@@ -130,6 +132,36 @@ export function getComposerReasoningStep(input: {
     prompt: step.prompt,
     cursor: Math.min(step.prompt.length, Math.max(keptStart, cursor + offset)),
     ...modelOptions,
+  };
+}
+
+/** The traits props for the composer's model, or null when there is nothing to set or persist. */
+export function resolveComposerTraitsInput(input: TraitsRenderInput): ComposerTraitsInput | null {
+  const {
+    provider,
+    instanceId,
+    threadRef,
+    draftId,
+    model,
+    models,
+    modelOptions,
+    reportedModelSelection,
+    prompt,
+    onPromptChange,
+  } = input;
+  if (threadRef === undefined && draftId === undefined) return null;
+  if (!shouldRenderTraitsControls({ provider, models, model, modelOptions, prompt })) return null;
+  return {
+    provider,
+    ...(instanceId ? { instanceId } : {}),
+    models,
+    ...(threadRef ? { threadRef } : {}),
+    ...(draftId ? { draftId } : {}),
+    model,
+    modelOptions,
+    reportedModelSelection,
+    prompt,
+    onPromptChange,
   };
 }
 

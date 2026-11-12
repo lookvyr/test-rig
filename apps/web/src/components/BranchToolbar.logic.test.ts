@@ -425,10 +425,51 @@ describe("shouldShowEnvironmentIndicator", () => {
 });
 
 describe("shouldShowComposerContextStrip", () => {
+  const startedThread = {
+    isNewThread: false,
+    persistInActiveThreads: true,
+    hasActiveProject: true,
+  };
+
+  it("always shows on a new thread, even outside Git, since it names the permissions", () => {
+    expect(
+      shouldShowComposerContextStrip({
+        isNewThread: true,
+        persistInActiveThreads: false,
+        hasActiveProject: true,
+        isGitRepo: false,
+        showEnvironmentIndicator: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("hides on a started thread unless the user keeps it", () => {
+    expect(
+      shouldShowComposerContextStrip({
+        ...startedThread,
+        persistInActiveThreads: false,
+        isGitRepo: true,
+        showEnvironmentIndicator: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides without an active project", () => {
+    expect(
+      shouldShowComposerContextStrip({
+        isNewThread: true,
+        persistInActiveThreads: true,
+        hasActiveProject: false,
+        isGitRepo: true,
+        showEnvironmentIndicator: true,
+      }),
+    ).toBe(false);
+  });
+
   it("keeps the environment indicator visible for a non-Git project", () => {
     expect(
       shouldShowComposerContextStrip({
-        hasActiveProject: true,
+        ...startedThread,
         isGitRepo: false,
         showEnvironmentIndicator: true,
       }),
@@ -438,7 +479,7 @@ describe("shouldShowComposerContextStrip", () => {
   it("hides the strip when a non-Git project has no environment indicator", () => {
     expect(
       shouldShowComposerContextStrip({
-        hasActiveProject: true,
+        ...startedThread,
         isGitRepo: false,
         showEnvironmentIndicator: false,
       }),
@@ -448,7 +489,7 @@ describe("shouldShowComposerContextStrip", () => {
   it("shows Git controls without requiring an environment indicator", () => {
     expect(
       shouldShowComposerContextStrip({
-        hasActiveProject: true,
+        ...startedThread,
         isGitRepo: true,
         showEnvironmentIndicator: false,
       }),

@@ -2,7 +2,9 @@
 
 Use **Thread details** in the chat header for editor or Finder access, project
 actions, Changes, linked PR details, PR watches, and subagents. Branch, worktree,
-and linked PR context remain below the composer. On wide windows, details sit
+and linked PR context appear below the composer of a new thread. To keep them
+there after the first message, turn on **Settings** → **Appearance** →
+**Composer context**. On wide windows, details sit
 beside the conversation. On narrower windows, the same controls open in a
 popover. Hiding the wide details card is remembered for that conversation.
 

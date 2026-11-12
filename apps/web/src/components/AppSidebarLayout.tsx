@@ -13,6 +13,8 @@ import { isElectron } from "../env";
 import { getLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { cn, isMacPlatform } from "../lib/utils";
+import { isTerminalFocused } from "../lib/terminalFocus";
+import { navigateHistory } from "../navigationHistory";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentIdentificationMode } from "../hooks/useSettings";
 import { isAppModalPage, MainAppLocationTracker } from "./sidebar/mainAppLocation";
@@ -89,6 +91,28 @@ function SidebarControl() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings, modalOpen, toggleSidebar]);
+
+  // Back and forward through visited pages, like the header's history buttons.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("[data-keybinding-capture]")
+      ) {
+        return;
+      }
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: { terminalFocus: isTerminalFocused() },
+      });
+      if (command !== "navigation.back" && command !== "navigation.forward") return;
+      event.preventDefault();
+      event.stopPropagation();
+      navigateHistory(command === "navigation.back" ? "back" : "forward");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [keybindings]);
 
   return (
     <div

@@ -3,8 +3,9 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderOptionDescriptor,
+  type ServerProviderModel,
 } from "@t3tools/contracts";
-import { buildTraitsTriggerDisplay } from "./TraitsPicker";
+import { buildTraitsTriggerDisplay, getComposerEffortSummary } from "./TraitsPicker";
 
 function selectDescriptor(
   id: string,
@@ -157,4 +158,62 @@ it("shows the native default effort without persisting it as an explicit choice"
       reportedModelSelection: { ...selection, options: [{ id: "effort", value: "default" }] },
     }).label,
   ).toBe("Default");
+});
+
+describe("getComposerEffortSummary", () => {
+  const MODEL = "test-model";
+  function models(
+    descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+  ): ReadonlyArray<ServerProviderModel> {
+    return [
+      {
+        slug: MODEL,
+        name: MODEL,
+        isCustom: false,
+        capabilities: { optionDescriptors: descriptors },
+      },
+    ];
+  }
+  function summary(descriptors: ReadonlyArray<ProviderOptionDescriptor>, prompt = "") {
+    return getComposerEffortSummary({
+      provider: CODEX,
+      models: models(descriptors),
+      model: MODEL,
+      prompt,
+      modelOptions: undefined,
+    });
+  }
+
+  it("is null for a model without traits", () => {
+    expect(summary([])).toBeNull();
+  });
+
+  it("names the effort level and context window, with every trait in the detail", () => {
+    expect(summary([EFFORT, fastModeDescriptor(false), CONTEXT_WINDOW])).toEqual({
+      word: "High",
+      contextWindow: "1M",
+      fast: false,
+      detail: "High · 1M",
+    });
+  });
+
+  it("flags fast mode for the bolt", () => {
+    expect(summary([EFFORT, fastModeDescriptor(true)])?.fast).toBe(true);
+    expect(summary([fastModeDescriptor(true)])).toMatchObject({ word: null, fast: true });
+  });
+
+  it("finds the reasoning control even when it is not the first select", () => {
+    expect(summary([CONTEXT_WINDOW, EFFORT])?.word).toBe("High");
+  });
+
+  it("names a thinking switch when the model has no levels", () => {
+    expect(
+      summary([{ id: "thinking", label: "Thinking", type: "boolean", currentValue: true }])?.word,
+    ).toBe("Thinking On");
+  });
+
+  it("names Ultrathink while the prompt controls the level", () => {
+    const effort = { ...EFFORT, promptInjectedValues: ["ultrathink"] };
+    expect(summary([effort], "Ultrathink:\nfix it")?.word).toBe("Ultrathink");
+  });
 });

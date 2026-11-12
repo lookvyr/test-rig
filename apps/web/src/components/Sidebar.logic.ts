@@ -25,6 +25,21 @@ export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
 // it small; cold opens still render instantly from the cached snapshot.
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 3;
 
+export type SidebarShelf = "working" | "snoozed" | "settled";
+
+/**
+ * The first section header shown below the active cards. It takes the free
+ * space above it, so a short list sinks every section header to the bottom.
+ */
+export function resolveFirstSidebarShelf(
+  counts: Record<SidebarShelf, number>,
+): SidebarShelf | null {
+  if (counts.working > 0) return "working";
+  if (counts.snoozed > 0) return "snoozed";
+  if (counts.settled > 0) return "settled";
+  return null;
+}
+
 type SidebarProject = {
   id: string;
   title: string;

@@ -36,6 +36,7 @@ import {
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
   shouldPreserveAssistantLineBreaks,
+  unmatchedPendingApprovals,
   type MessagesTimelineRow,
   resolveTimelineToolPresentation,
   workEntryDisplayLabel,
@@ -5637,7 +5638,7 @@ describe("zen tool call visibility", () => {
       "working-indicator-row",
       "live-activity-row",
     ]);
-    // Approvals wait in the composer; their timeline items are history Zen hides.
+    // A settled approval is history Zen hides; a pending one stays (see pending approvals).
     const approved = work("approved", 11, {
       itemType: "approval_request",
       toolLifecycleStatus: "completed",
@@ -5645,5 +5646,124 @@ describe("zen tool call visibility", () => {
     const error = work("error", 12, { itemType: "error", tone: "error" });
     expect(rows([user, step, approved, error, final], "zen")).toEqual(["user", "error", "final"]);
     expect(rows(turn, "zen", undefined, MessageId.make("step"))).toEqual(["user", "step", "final"]);
+  });
+});
+
+describe("pending approvals in the timeline", () => {
+  const fixture = makeStreamingTimelineFixture();
+  const source = fixture.visibleTurnItems[0]!;
+  const common = {
+    ...source.item,
+    threadId: fixture.threadId,
+    runId: fixture.runId,
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+  };
+  const approvalRequestId = RuntimeRequestId.make("approval-request");
+  const items: OrchestrationV2ProjectedTurnItem["item"][] = [
+    {
+      ...common,
+      id: TurnItemId.make("listing"),
+      status: "completed",
+      type: "command_execution",
+      input: "ls",
+      output: "a\n",
+    },
+    {
+      ...common,
+      id: TurnItemId.make("command"),
+      status: "running",
+      type: "command_execution",
+      input: "rm -rf build",
+      output: "",
+    },
+    {
+      ...common,
+      id: TurnItemId.make("approval"),
+      status: "waiting",
+      type: "approval_request",
+      requestId: approvalRequestId,
+      requestKind: "command",
+      prompt: "rm -rf build",
+    },
+  ];
+  const entries = deriveTimelineEntriesFromVisibleTurnItems({
+    visibleTurnItems: items.map((item, position) => ({
+      ...source,
+      item,
+      position,
+      sourceItemId: item.id,
+    })),
+    optimisticMessages: [],
+  });
+  const approval = {
+    requestId: approvalRequestId,
+    requestKind: "command" as const,
+    createdAt: fixture.time(3),
+    detail: "rm -rf build",
+    responseCapability: "live" as const,
+  };
+  const rowsFor = (
+    pendingApprovalRequestIds: ReadonlySet<RuntimeRequestId> | undefined,
+    toolCallVisibility?: "zen",
+  ) =>
+    deriveMessagesTimelineRows({
+      timelineEntries: entries,
+      isWorking: true,
+      latestRun: {
+        runId: fixture.runId,
+        status: "running",
+        startedAt: fixture.time(0),
+        completedAt: null,
+      },
+      runningRunId: fixture.runId,
+      activeTurnStartedAt: fixture.time(0),
+      turnDiffSummaries: [],
+      ...(pendingApprovalRequestIds ? { pendingApprovalRequestIds } : {}),
+      ...(toolCallVisibility ? { toolCallVisibility } : {}),
+    });
+  const approvalRowIndex = (rows: ReadonlyArray<MessagesTimelineRow>) =>
+    rows.findIndex(
+      (row) =>
+        row.kind === "work" &&
+        row.groupedEntries.length === 1 &&
+        row.groupedEntries[0]!.itemType === "approval_request",
+    );
+
+  it("gives the pending request its own row right after the tool it gates", () => {
+    const rows = rowsFor(new Set([approvalRequestId]));
+    const index = approvalRowIndex(rows);
+    expect(index).toBeGreaterThan(0);
+    // The gated command sits directly above the approval, and nothing claims the agent is busy.
+    const before = rows[index - 1]!;
+    expect(
+      before.kind === "work-live"
+        ? before.groupedEntries.map((entry) => entry.itemType)
+        : before.kind === "work"
+          ? before.groupedEntries.map((entry) => entry.itemType)
+          : [],
+    ).toContain("command_execution");
+    expect(rows.slice(index + 1).some((row) => row.kind === "thinking")).toBe(false);
+    expect(unmatchedPendingApprovals(rows, [approval])).toEqual([]);
+  });
+
+  it("keeps the request inside the live group when no approval is shown for it", () => {
+    const rows = rowsFor(undefined);
+    expect(approvalRowIndex(rows)).toBe(-1);
+  });
+
+  it("keeps the pending approval in Zen, which hides other tool calls", () => {
+    const rows = rowsFor(new Set([approvalRequestId]), "zen");
+    expect(approvalRowIndex(rows)).toBeGreaterThanOrEqual(0);
+  });
+
+  it("collects approvals without a request row so they render at the end", () => {
+    const child = { ...approval, requestId: RuntimeRequestId.make("child-request") };
+    const rows = rowsFor(new Set([approvalRequestId, child.requestId]));
+    expect(unmatchedPendingApprovals(rows, [approval, child])).toEqual([child]);
+    expect(unmatchedPendingApprovals([], [approval])).toEqual([approval]);
   });
 });

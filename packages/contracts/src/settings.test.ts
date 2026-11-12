@@ -18,8 +18,8 @@ const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
 describe("ClientSettings Working shelf", () => {
-  it("defaults off for existing installs and accepts a reversible preference", () => {
-    expect(decodeClientSettings({}).sidebarWorkingShelfEnabled).toBe(false);
+  it("defaults on and accepts a reversible preference", () => {
+    expect(decodeClientSettings({}).sidebarWorkingShelfEnabled).toBe(true);
     for (const enabled of [true, false]) {
       const patch = decodeClientSettingsPatch({ sidebarWorkingShelfEnabled: enabled });
       expect(decodeClientSettings(patch).sidebarWorkingShelfEnabled).toBe(enabled);

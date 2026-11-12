@@ -99,6 +99,14 @@ export function BetaSettingsPanel() {
         <SettingsRow
           {...searchableSetting("sidebar-working-shelf")}
           description="Move busy threads into a collapsed Working section. They return to the top when they finish or need your attention. Pinned threads stay visible."
+          resetAction={
+            !workingShelfEnabled ? (
+              <SettingResetButton
+                label="Working section"
+                onClick={() => updateSettings({ sidebarWorkingShelfEnabled: true })}
+              />
+            ) : null
+          }
           control={
             <Switch
               checked={workingShelfEnabled}

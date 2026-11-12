@@ -51,10 +51,10 @@ Examples: `mod+j`, `mod+shift+d`, `ctrl+l`, `cmd+k`.
 
 Bind `composer.increaseEffort` (**Composer: Increase Effort**) and
 `composer.decreaseEffort` (**Composer: Decrease Effort**) to step through the
-selected model's reasoning levels without opening its traits menu. Both are
+selected model's reasoning levels without opening the model picker. Both are
 unbound by default and available in the command palette. Increase wraps from
 the highest level to the lowest; decrease wraps from the lowest to the highest.
-Changes are saved like selections in the traits menu. Models without reasoning
+Changes are saved like selections in the model picker. Models without reasoning
 levels do nothing.
 
 Commands are IDs like `terminal.toggle`, `commandPalette.toggle`, `preview.refresh`, and
@@ -147,6 +147,10 @@ same shortcut opens project search. Customize **Right Panel: Toggle Full View**
 These defaults yield to terminal focus: `mod+w` closes the focused terminal, and the thread shortcuts are inactive. Pin and settle apply to saved threads in environments that support those actions.
 
 `mod+alt+arrowleft` / `mod+alt+arrowright` (`rightPanel.previous` / `rightPanel.next`) cycle through the open right-panel tabs in their displayed order, wrapping at either end. On macOS, use **Command–Option–Left/Right Arrow**; on Windows/Linux, use **Ctrl–Alt–Left/Right Arrow**. These work while the sidebar, main chat, or panel is focused, including browser pages and terminals. A hidden panel or fewer than two tabs is left unchanged. Customize them in **Settings** → **Keybindings**.
+
+`navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
+through the pages you have visited, like a browser's back and forward buttons.
+They are inactive while a terminal has focus.
 
 `mod+alt+p` (`pullRequest.open`) opens the Pull Requests workspace. In that view,
 `mod+alt+1` through `mod+alt+9` (`pullRequest.jump.1` through `pullRequest.jump.9`)

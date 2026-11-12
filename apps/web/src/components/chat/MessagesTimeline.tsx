@@ -23,6 +23,7 @@ import {
   type TimelineMinimapItem,
 } from "./timelineMinimapItems";
 import {
+  AuthOrchestrationOperateScope,
   COMPOSER_CONTEXT_KINDS,
   type AssistantCitation,
   type EnvironmentId,
@@ -33,9 +34,14 @@ import {
   type ServerProvider,
   type ServerProviderSkill,
   type RunId,
+  type RuntimeRequestId,
   type ThreadId,
   type ToolActivityIcon,
 } from "@t3tools/contracts";
+import type { ApprovalResponder } from "@t3tools/client-runtime/state/thread-requests";
+import { useEnvironmentScope } from "../../state/session";
+import { observeResize } from "../../lib/observeResize";
+import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
 import { environmentThreadDetails } from "../../state/threads";
@@ -93,7 +99,9 @@ import {
 import { FileDiff } from "@pierre/diffs/react";
 import { DiffWorkerPoolProvider } from "../DiffWorkerPoolProvider";
 import {
+  type PendingApproval,
   type TimelineEntry,
+  type WorkLogEntry,
   providerErrorPresentation,
   createMessageAttachmentPreviewProjector,
   selectMessageImageResources,
@@ -139,6 +147,7 @@ import {
   Redo2Icon,
   Minimize2Icon,
   SearchIcon,
+  ShieldIcon,
   SmartphoneIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -207,6 +216,7 @@ import {
   shouldFollowWorkGroupAppend,
   shouldPreserveAssistantLineBreaks,
   toolGroupAction,
+  unmatchedPendingApprovals as deriveUnmatchedPendingApprovals,
   workEntryDisplayLabel,
   workEntryReadOutput,
   workEntryIsVisibleInGroup,
@@ -294,6 +304,10 @@ import {
 // ---------------------------------------------------------------------------
 
 interface TimelineRowSharedState {
+  /** Approvals answerable from the timeline, keyed by request id. Held approvals are absent. */
+  pendingApprovals: ReadonlyMap<string, PendingApproval>;
+  respondingRequestIds: ReadonlyArray<string>;
+  onRespondToApproval: ApprovalResponder | undefined;
   searchMessageId: MessageId | null;
   citationRequest: AssistantCitationTarget | null;
   listRef: React.RefObject<LegendListRef | null>;
@@ -365,14 +379,37 @@ const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FADE_HEADER = (
   <div className="h-[var(--workspace-titlebar-scroll-fade-height)]" />
 );
-function TimelineListFooter({ composerInset }: { readonly composerInset: number }) {
+function TimelineListFooter({
+  composerInset,
+  onGrow,
+  children,
+}: {
+  readonly composerInset: number;
+  readonly onGrow: (() => void) | undefined;
+  readonly children?: ReactNode;
+}) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  // The list does not follow footer layout; report growth so a following reader keeps the end.
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content || !onGrow) return;
+    let height = content.offsetHeight;
+    return observeResize(content, () => {
+      const next = content.offsetHeight;
+      if (next > height) onGrow();
+      height = next;
+    });
+  }, [onGrow]);
   return (
-    <div aria-hidden>
-      <div style={{ height: composerInset }} />
-      <div className="h-3 sm:h-4" />
+    <div>
+      <div ref={contentRef}>{children}</div>
+      <div aria-hidden style={{ height: composerInset }} />
+      <div aria-hidden className="h-3 sm:h-4" />
     </div>
   );
 }
+const EMPTY_PENDING_APPROVALS: ReadonlyArray<PendingApproval> = [];
+const EMPTY_REQUEST_IDS: ReadonlyArray<string> = [];
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 const TIMELINE_MAINTAIN_SCROLL_AT_END = {
   animated: false,
@@ -488,6 +525,14 @@ interface MessagesTimelineProps {
   historyControls?: MessagesTimelineHistoryControls;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: CitationHistoryPage | null;
+  /** Pending approvals render as timeline rows, next to their request item or at the end. */
+  pendingApprovals?: ReadonlyArray<PendingApproval>;
+  /** Approvals that arrived mid-typing; the composer holds them back until typing pauses. */
+  heldApprovalRequestIds?: ReadonlySet<string> | undefined;
+  respondingRequestIds?: ReadonlyArray<string>;
+  onRespondToApproval?: ApprovalResponder;
+  /** The footer's content grew, such as an approval with no request row. */
+  onFooterGrow?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +598,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   historyControls,
   loadEarlier = null,
+  pendingApprovals: pendingApprovalsProp = EMPTY_PENDING_APPROVALS,
+  heldApprovalRequestIds,
+  respondingRequestIds = EMPTY_REQUEST_IDS,
+  onRespondToApproval,
+  onFooterGrow,
 }: MessagesTimelineProps) {
   const [searchMessageId, setSearchMessageId] = useState<MessageId | null>(null);
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
@@ -760,6 +810,27 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const toolCallVisibility =
     findActive && preferredToolCallVisibility === "zen" ? "hideAll" : preferredToolCallVisibility;
   const revealedMessageId = citationRequest?.citation.messageId ?? null;
+  // A held approval stays out of the timeline until the composer releases it.
+  const shownPendingApprovals = useMemo(
+    () =>
+      heldApprovalRequestIds && heldApprovalRequestIds.size > 0
+        ? pendingApprovalsProp.filter((approval) => !heldApprovalRequestIds.has(approval.requestId))
+        : pendingApprovalsProp,
+    [heldApprovalRequestIds, pendingApprovalsProp],
+  );
+  // Keyed by content: the projection re-derives pending approvals on every event.
+  const pendingApprovalRequestIdsKey = shownPendingApprovals
+    .map((approval) => approval.requestId)
+    .join("\0");
+  const pendingApprovalRequestIds = useMemo(
+    () =>
+      new Set(
+        pendingApprovalRequestIdsKey === ""
+          ? []
+          : (pendingApprovalRequestIdsKey.split("\0") as RuntimeRequestId[]),
+      ),
+    [pendingApprovalRequestIdsKey],
+  );
   const rowsProjectionRef = useRef<{
     readonly threadKey: string;
     readonly workspaceRoot: string | undefined;
@@ -772,6 +843,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         toolCallVisibility,
         revealedMessageId,
         timelineEntries,
+        pendingApprovalRequestIds,
         latestRun,
         runningRunId,
         expandedRunIds,
@@ -796,6 +868,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     listIdentityKey,
     workspaceRoot,
     timelineEntries,
+    pendingApprovalRequestIds,
     latestRun,
     runningRunId,
     expandedRunIds,
@@ -808,6 +881,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     worktreeSetup,
   ]);
   const rows = useStableRows(rawRows, listIdentityKey);
+  const unmatchedPendingApprovals = useMemo(
+    () => deriveUnmatchedPendingApprovals(rows, shownPendingApprovals),
+    [rows, shownPendingApprovals],
+  );
+  const pendingApprovalsByRequestId = useMemo(
+    () => new Map(shownPendingApprovals.map((approval) => [approval.requestId, approval])),
+    [shownPendingApprovals],
+  );
   // Run status/timestamps churn on every stream event; the shared row context
   // must not change with them or every timeline row re-renders per event.
   const runs = useStableHandoffRuns(runsProp);
@@ -1033,8 +1114,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [shouldRestoreVisibleContentPosition],
   );
   const timelineListFooter = useMemo(
-    () => <TimelineListFooter composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment} />,
-    [anchoredEndSpace, contentInsetEndAdjustment],
+    () => (
+      <TimelineListFooter
+        composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment}
+        onGrow={onFooterGrow}
+      >
+        {unmatchedPendingApprovals.length > 0 ? (
+          <div className="messages-timeline-row-frame">
+            <div className="chat-content-lane overflow-x-clip" data-timeline-root="true">
+              <WorkLogBlock>
+                {unmatchedPendingApprovals.map((approval) => (
+                  <TimelinePendingApprovalRow key={approval.requestId} approval={approval} />
+                ))}
+              </WorkLogBlock>
+            </div>
+          </div>
+        ) : null}
+      </TimelineListFooter>
+    ),
+    [anchoredEndSpace, contentInsetEndAdjustment, onFooterGrow, unmatchedPendingApprovals],
   );
 
   const measureContentOverflow = useCallback(
@@ -1205,6 +1303,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
+      pendingApprovals: pendingApprovalsByRequestId,
+      respondingRequestIds,
+      onRespondToApproval,
       searchMessageId,
       citationRequest: readyCitationRequest,
       listRef,
@@ -1239,6 +1340,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
     }),
     [
+      pendingApprovalsByRequestId,
+      respondingRequestIds,
+      onRespondToApproval,
       searchMessageId,
       readyCitationRequest,
       listRef,
@@ -1368,6 +1472,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   if (
     findRequest === 0 &&
     rows.length === 0 &&
+    unmatchedPendingApprovals.length === 0 &&
     !isWorking &&
     parentThreadLink === null &&
     historyControls === undefined
@@ -3226,14 +3331,20 @@ const WorkGroupSection = memo(function WorkGroupSection({
   isExpandedToolGroup: boolean;
   displayLabel?: string | undefined;
 }) {
-  const { workspaceRoot, routeThreadKey, onToggleWorkEntry } = use(TimelineRowCtx);
+  const { workspaceRoot, routeThreadKey, onToggleWorkEntry, pendingApprovals } =
+    use(TimelineRowCtx);
   const onToggleStandaloneEntry = useCallback(
     (collapsed: boolean) => onToggleWorkEntry(disclosureAnchorKey, collapsed),
     [disclosureAnchorKey, onToggleWorkEntry],
   );
   const nonEmptyEntries = useMemo(
-    () => groupedEntries.filter((entry) => workEntryIsVisibleInGroup(entry, isExpandedToolGroup)),
-    [groupedEntries, isExpandedToolGroup],
+    () =>
+      groupedEntries.filter(
+        (entry) =>
+          pendingApprovalForEntry(entry, pendingApprovals) !== undefined ||
+          workEntryIsVisibleInGroup(entry, isExpandedToolGroup),
+      ),
+    [groupedEntries, isExpandedToolGroup, pendingApprovals],
   );
 
   if (nonEmptyEntries.length === 0) return null;
@@ -3254,16 +3365,126 @@ const WorkGroupSection = memo(function WorkGroupSection({
 
   return (
     <section aria-label="Activity">
-      {nonEmptyEntries.map((workEntry) => (
-        <SimpleWorkEntryRow
-          key={workEntry.id}
-          workEntry={workEntry}
-          workspaceRoot={workspaceRoot}
-          displayLabel={displayLabel}
-          onToggleEntry={onToggleStandaloneEntry}
-        />
-      ))}
+      {nonEmptyEntries.map((workEntry) => {
+        const pendingApproval = pendingApprovalForEntry(workEntry, pendingApprovals);
+        return pendingApproval ? (
+          <TimelinePendingApprovalRow key={workEntry.id} approval={pendingApproval} />
+        ) : (
+          <SimpleWorkEntryRow
+            key={workEntry.id}
+            workEntry={workEntry}
+            workspaceRoot={workspaceRoot}
+            displayLabel={displayLabel}
+            onToggleEntry={onToggleStandaloneEntry}
+          />
+        );
+      })}
     </section>
+  );
+});
+
+function pendingApprovalForEntry(
+  entry: WorkLogEntry,
+  pendingApprovals: ReadonlyMap<string, PendingApproval>,
+): PendingApproval | undefined {
+  const item = entry.projectedItem?.item;
+  return item?.type === "approval_request" ? pendingApprovals.get(item.requestId) : undefined;
+}
+
+const APPROVAL_PRESENTATION = {
+  command: { icon: "terminal", label: "Command approval", detailLabel: "Command" },
+  "file-change": { icon: "square-pen", label: "File change approval", detailLabel: "File change" },
+  "file-read": { icon: "eye", label: "File read approval", detailLabel: "File to read" },
+  permission: {
+    icon: "wrench",
+    label: "App permission approval",
+    detailLabel: "Permission request",
+  },
+  "mcp-elicitation": {
+    icon: "hammer",
+    label: "App access approval",
+    detailLabel: "App access request",
+  },
+} satisfies Record<
+  PendingApproval["requestKind"],
+  { icon: WorkEntryIconName; label: string; detailLabel: string }
+>;
+
+/** A pending approval as a work log row: what the agent wants to do, and the choices. */
+const TimelinePendingApprovalRow = memo(function TimelinePendingApprovalRow({
+  approval,
+}: {
+  approval: PendingApproval;
+}) {
+  const { respondingRequestIds, onRespondToApproval, activeThreadEnvironmentId } =
+    use(TimelineRowCtx);
+  const canOperateThread = useEnvironmentScope(
+    activeThreadEnvironmentId,
+    AuthOrchestrationOperateScope,
+  );
+  const presentation = APPROVAL_PRESENTATION[approval.requestKind];
+  const canRespond = approval.responseCapability === "live";
+  return (
+    <WorkLogRow
+      role="group"
+      aria-label={presentation.label}
+      data-v2-item-type="approval_request"
+      wrapLabel
+      icon={
+        <ToolActivityIconView
+          icon={undefined}
+          fallbackName={presentation.icon}
+          className="block size-4 shrink-0 stroke-2 text-icon-muted"
+          muted
+        />
+      }
+      label={
+        <code
+          aria-label={presentation.detailLabel}
+          className="block max-h-40 min-w-0 overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-foreground select-text! wrap-anywhere [scrollbar-width:thin] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+          data-approval-detail="complete"
+          tabIndex={0}
+        >
+          {approval.detail || presentation.label}
+        </code>
+      }
+    >
+      <div className="ms-7.5 flex min-w-0 flex-col gap-1 pb-1 text-xs">
+        {approval.appName ? (
+          <span className="text-muted-foreground wrap-anywhere">{approval.appName}</span>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {canRespond ? (
+            <>
+              <span className="inline-flex items-center gap-1 text-warning">
+                <ShieldIcon aria-hidden className="size-3 shrink-0" />
+                Waiting for approval
+              </span>
+              {onRespondToApproval ? (
+                <>
+                  <span aria-hidden className="text-muted-foreground">
+                    ·
+                  </span>
+                  <ComposerPendingApprovalActions
+                    presentation="inline"
+                    requestId={approval.requestId}
+                    disabled={!canOperateThread}
+                    isResponding={respondingRequestIds.includes(approval.requestId)}
+                    canRespond={canRespond}
+                    options={approval.options}
+                    onRespondToApproval={onRespondToApproval}
+                  />
+                </>
+              ) : null}
+            </>
+          ) : (
+            <span className="text-warning">
+              Provider process is gone. Interrupt or restart the run to respond.
+            </span>
+          )}
+        </div>
+      </div>
+    </WorkLogRow>
   );
 });
 
@@ -3702,6 +3923,8 @@ function LiveActivityContent({
 
 function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "work-live" }> }) {
   const ctx = use(TimelineRowCtx);
+  const pendingApproval = pendingApprovalForEntry(row.entry, ctx.pendingApprovals);
+  if (pendingApproval) return <TimelinePendingApprovalRow approval={pendingApproval} />;
   const questionHeading = row.entry.questionAnswer
     ? getQuestionTextPreview(row.entry.questionAnswer)
     : "";

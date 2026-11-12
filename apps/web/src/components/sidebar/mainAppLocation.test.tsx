@@ -1,7 +1,13 @@
 import { useEffect } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import { MainAppLocationTracker, isAppModalPage, useCloseAppModal } from "./mainAppLocation";
+import {
+  MainAppLocationTracker,
+  isAppModalPage,
+  isSidebarUtilityPage,
+  useCloseAppModal,
+  useNavigateToMainApp,
+} from "./mainAppLocation";
 
 const state = vi.hoisted(() => ({
   location: { pathname: "/", href: "/" },
@@ -15,11 +21,14 @@ vi.mock("@tanstack/react-router", () => ({
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let renderer: ReactTestRenderer | undefined;
 let close: ReturnType<typeof useCloseAppModal>;
+let back: ReturnType<typeof useNavigateToMainApp>;
 function Harness() {
   const closeModal = useCloseAppModal();
+  const backToMainApp = useNavigateToMainApp();
   useEffect(() => {
     close = closeModal;
-  }, [closeModal]);
+    back = backToMainApp;
+  }, [closeModal, backToMainApp]);
   return <MainAppLocationTracker />;
 }
 async function visit(pathname: string, href = pathname) {
@@ -61,5 +70,30 @@ describe("settings modal navigation", () => {
     expect(isAppModalPage("/settings/providers")).toBe(true);
     expect(isAppModalPage("/settings-backup")).toBe(false);
     expect(isAppModalPage("/usage")).toBe(false);
+  });
+});
+
+describe("sidebar utility page navigation", () => {
+  it("treats only the pull requests workspace as a utility page", () => {
+    expect(isSidebarUtilityPage("/pull-requests")).toBe(true);
+    expect(isSidebarUtilityPage("/pull-requests-old")).toBe(false);
+    expect(isSidebarUtilityPage("/settings")).toBe(false);
+    expect(isSidebarUtilityPage("/")).toBe(false);
+    expect(isSidebarUtilityPage("/env/thread")).toBe(false);
+  });
+  it("goes back to the last thread past pull requests and settings", async () => {
+    await visit("/env/thread", "/env/thread?diff=working");
+    await visit("/pull-requests", "/pull-requests?state=open");
+    await visit("/settings/general");
+    await visit("/pull-requests");
+    await back();
+    expect(state.navigate).toHaveBeenCalledWith({ href: "/env/thread?diff=working" });
+  });
+  it("still closes settings to the utility page that opened it", async () => {
+    await visit("/draft/local");
+    await visit("/pull-requests");
+    await visit("/settings/providers");
+    await close();
+    expect(state.navigate).toHaveBeenCalledWith({ href: "/pull-requests" });
   });
 });

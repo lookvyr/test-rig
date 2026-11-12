@@ -1,10 +1,19 @@
-import { GitPullRequestIcon, SettingsIcon } from "lucide-react";
-import { memo, useCallback } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { ArrowLeftIcon, ArrowRightIcon, SettingsIcon } from "lucide-react";
+import { memo, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { APP_BASE_NAME } from "../../branding";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import { shortcutLabelForCommand } from "../../keybindings";
 import { cn } from "../../lib/utils";
+import {
+  navigateHistory,
+  useCanNavigateHistory,
+  type HistoryDirection,
+} from "../../navigationHistory";
+import { primaryServerKeybindingsAtom } from "../../state/server";
+import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -12,6 +21,7 @@ import {
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import {
   SidebarFooter,
   SidebarHeader,
@@ -21,7 +31,13 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
+
+// White glyphs and hover wash for controls drawn over the stage backdrop.
+const BACKDROP_CONTROL_CLASS =
+  "[:hover,[data-pressed]]:bg-white/15 focus-visible:ring-white/90 focus-visible:ring-offset-blue-700 [&_svg]:stroke-white/90! [&_svg]:opacity-100! [&_svg]:hover:stroke-white!";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -48,13 +64,17 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     >
       {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
       <SidebarTrigger
-        className={cn(
-          "relative z-10 md:hidden",
-          backdropVariant &&
-            "[:hover,[data-pressed]]:bg-white/15 focus-visible:ring-white/90 focus-visible:ring-offset-blue-700 [&_svg]:stroke-white/90! [&_svg]:opacity-100! [&_svg]:hover:stroke-white!",
-        )}
+        className={cn("relative z-10 md:hidden", backdropVariant && BACKDROP_CONTROL_CLASS)}
       />
-      <SidebarBrand onBackdrop={backdropVariant !== null} />
+      <div className="relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden min-w-0 items-center gap-1 md:flex">
+        <SidebarBrand onBackdrop={backdropVariant !== null} />
+        {isElectron ? (
+          <div className="flex shrink-0 items-center">
+            <HistoryNavigationButton direction="back" onBackdrop={backdropVariant !== null} />
+            <HistoryNavigationButton direction="forward" onBackdrop={backdropVariant !== null} />
+          </div>
+        ) : null}
+      </div>
       {pillLabel ? (
         <Badge
           className="relative z-10 ml-1 rounded-full px-1.5 text-muted-foreground"
@@ -69,12 +89,51 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   );
 });
 
+function HistoryNavigationButton({
+  direction,
+  onBackdrop,
+}: {
+  direction: HistoryDirection;
+  onBackdrop: boolean;
+}) {
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
+  const enabled = useCanNavigateHistory(direction);
+  const label = direction === "back" ? "Go back" : "Go forward";
+  const shortcutLabel = shortcutLabelForCommand(
+    keybindings,
+    direction === "back" ? "navigation.back" : "navigation.forward",
+  );
+  const Icon = direction === "back" ? ArrowLeftIcon : ArrowRightIcon;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            aria-label={label}
+            className={cn("[-webkit-app-region:no-drag]", onBackdrop && BACKDROP_CONTROL_CLASS)}
+            disabled={!enabled}
+            onClick={() => navigateHistory(direction)}
+            size="icon-sm"
+            variant="ghost"
+          />
+        }
+      >
+        <Icon className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">
+        {label}
+        {shortcutLabel ? ` (${shortcutLabel})` : ""}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
 function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   return (
     <Link
       aria-label="Go to threads"
       className={cn(
-        "sidebar-brand relative z-10 ml-[var(--workspace-titlebar-content-left)] h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2",
+        "sidebar-brand relative z-10 h-7 w-fit min-w-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2",
         onBackdrop ? "text-white" : "text-foreground",
       )}
       to="/"
@@ -91,48 +150,96 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
   );
 }
 
-export function PullRequestsSidebarItem() {
-  const navigate = useNavigate();
-  const active = useLocation({ select: (location) => location.pathname === "/pull-requests" });
-  const { isMobile, setOpenMobile } = useSidebar();
+function SidebarUtilityItem({
+  icon,
+  label,
+  onClick,
+  ...rest
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  "aria-haspopup"?: "dialog";
+}) {
   return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={active}
-        onClick={() => {
-          if (isMobile) setOpenMobile(false);
-          void navigate({ to: "/pull-requests" });
-        }}
-      >
-        <GitPullRequestIcon />
-        <span>Pull requests</span>
-      </SidebarMenuButton>
+    <SidebarMenuItem className="shrink-0">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon" {...rest}>
+              {icon}
+            </SidebarMenuButton>
+          }
+        />
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
     </SidebarMenuItem>
   );
 }
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
+  const navigateToMainApp = useNavigateToMainApp();
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMobile, setOpenMobile } = useSidebar();
-  const handleSettingsClick = useCallback(() => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-    void navigate({ to: "/settings" });
-  }, [isMobile, navigate, setOpenMobile]);
+  const isOnUtilityPage = useLocation({
+    select: (location) => isSidebarUtilityPage(location.pathname),
+  });
+  const pullRequestsShortcutLabel = shortcutLabelForCommand(keybindings, "pullRequest.open");
+  const closeMobileSidebar = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   return (
-    <SidebarFooter className="p-[var(--sidebar-content-inset)]">
-      <SidebarProviderUpdatePill />
-      <SidebarMenu>
-        <PullRequestsSidebarItem />
-        <SidebarMenuItem>
-          <SidebarMenuButton onClick={handleSettingsClick} aria-haspopup="dialog">
-            <SettingsIcon />
-            <span>Settings</span>
+    <SidebarMenu className="flex-row items-center">
+      {isOnUtilityPage ? (
+        <SidebarMenuItem className="min-w-0 flex-1">
+          <SidebarMenuButton
+            onClick={() => {
+              closeMobileSidebar();
+              void navigateToMainApp();
+            }}
+          >
+            <ArrowLeftIcon />
+            <span>Back</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
-      </SidebarMenu>
+      ) : (
+        <>
+          <SidebarUtilityItem
+            icon={<SettingsIcon />}
+            label="Settings"
+            aria-haspopup="dialog"
+            onClick={() => {
+              closeMobileSidebar();
+              void navigate({ to: "/settings" });
+            }}
+          />
+          <SidebarUtilityItem
+            icon={<PullRequestGlyph.pullRequest />}
+            label={
+              pullRequestsShortcutLabel
+                ? `Pull requests (${pullRequestsShortcutLabel})`
+                : "Pull requests"
+            }
+            onClick={() => {
+              closeMobileSidebar();
+              void navigate({ to: "/pull-requests" });
+            }}
+          />
+        </>
+      )}
+      <SidebarMenuItem className="ml-auto flex min-w-0 flex-1">
+        <SidebarProviderUpdatePill />
+      </SidebarMenuItem>
+    </SidebarMenu>
+  );
+});
+
+export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+  return (
+    <SidebarFooter className="p-[var(--sidebar-content-inset)]">
+      <SidebarUtilityMenu />
     </SidebarFooter>
   );
 });

@@ -17,7 +17,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, ChevronDownIcon, MoreHorizontal } from "lucide-react";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { useComposerDraftStore, type ComposerImageAttachment } from "../../composerDraftStore";
@@ -56,6 +56,11 @@ import type { Thread, TurnDiffSummary } from "../../types";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { MessagesTimeline } from "./MessagesTimeline";
 import { useTimelineScroll } from "./useTimelineScroll";
+import {
+  answerShownApprovalsWithMessage,
+  draftAttachmentLists,
+  draftAttachmentListsChanged,
+} from "./composerApprovalRedirect";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
 import { useLocalDispatchState } from "./useLocalDispatchState";
 import { usePersistThreadSettings } from "./usePersistThreadSettings";
@@ -140,6 +145,17 @@ export function SideChatPanel(props: {
     [projection],
   );
   const pendingApprovals = derivePendingApprovals(pendingRequests.approvals);
+  // The composer holds approvals that arrive mid-typing; the timeline shows them once released.
+  const [heldApprovalRequestIds, setHeldApprovalRequestIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const onHeldRequestIdsChange = useCallback((requestIds: ReadonlySet<string>) => {
+    setHeldApprovalRequestIds((current) =>
+      current.size === requestIds.size && [...requestIds].every((id) => current.has(id))
+        ? current
+        : requestIds,
+    );
+  }, []);
   const allPendingUserInputs = derivePendingUserInputs(pendingRequests.userInputs);
   const pendingUserInputs = allPendingUserInputs.filter(isBlockingUserInput);
   const nonBlockingUserInputs = allPendingUserInputs.filter(
@@ -317,6 +333,50 @@ export function SideChatPanel(props: {
     if (prepared.error) {
       setError(prepared.error);
       return;
+    }
+    // A message sent while approvals are shown answers them: feedback for an approval that
+    // takes it, otherwise a decline that lets the message redirect the agent.
+    const shownApprovals = pendingApprovals.filter((approval) =>
+      context.shownPendingApprovalIds.includes(approval.requestId),
+    );
+    if (shownApprovals.length > 0) {
+      sending.current = true;
+      const readAttachmentLists = () =>
+        draftAttachmentLists(useComposerDraftStore.getState().getComposerDraft(threadRef));
+      const attachmentListsForSend = readAttachmentLists();
+      const draftChanged = () =>
+        promptRef.current !== context.prompt ||
+        draftAttachmentListsChanged(attachmentListsForSend, readAttachmentLists());
+      const outcome = await answerShownApprovalsWithMessage({
+        shownApprovals,
+        text: prepared.text,
+        hasAttachmentsOrContext:
+          context.images.length > 0 ||
+          snapshot.sendableTerminalContexts.length > 0 ||
+          context.elementContexts.length > 0 ||
+          context.previewAnnotations.length > 0 ||
+          context.reviewComments.length > 0 ||
+          prepared.context !== undefined,
+        respondingRequestIds,
+        respond: onRespondToApproval,
+        draftChanged,
+        readShownApprovalIds: () =>
+          composerRef.current?.getSendContext().shownPendingApprovalIds ?? [],
+      });
+      sending.current = false;
+      if (outcome.type === "feedback-sent") {
+        if (!draftChanged()) {
+          useComposerDraftStore.getState().clearComposerContent(threadRef);
+          promptRef.current = "";
+          composerRef.current?.resetCursorState();
+        }
+        return;
+      }
+      if (outcome.type === "stopped") {
+        const message = outcome.error ?? outcome.notice;
+        if (message) setError(message);
+        return;
+      }
     }
     sending.current = true;
     setError(null);
@@ -570,6 +630,13 @@ export function SideChatPanel(props: {
             onIsAtEndChange={scroll.onIsAtEndChange}
             onManualNavigation={scroll.cancelForUserNavigation}
             onScrollElementChange={scroll.onScrollElementChange}
+            pendingApprovals={pendingApprovals}
+            heldApprovalRequestIds={heldApprovalRequestIds}
+            respondingRequestIds={respondingRequestIds}
+            onRespondToApproval={onRespondToApproval}
+            onFooterGrow={() => {
+              if (scroll.modeRef.current === "following-end") scroll.scrollToEnd();
+            }}
             loadEarlier={
               page.history.hasMoreHistory || page.history.error !== null
                 ? {
@@ -685,7 +752,7 @@ export function SideChatPanel(props: {
                   void sendStandaloneCommand("Continue where you left off.", resumableRunId);
               }}
               onImplementPlanInNewThread={() => undefined}
-              onRespondToApproval={onRespondToApproval}
+              onHeldRequestIdsChange={onHeldRequestIdsChange}
               onProviderModelSelect={(instanceId, model) => {
                 if (
                   !getStartedThreadModelChangeBlockReason({

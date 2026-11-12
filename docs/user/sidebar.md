@@ -3,6 +3,33 @@
 The sidebar in web and desktop shows a flat thread list,
 with active work shown as cards and settled threads as compact rows.
 
+## Header and footer
+
+The row under the app name holds thread search, then three buttons: **Filter by
+project**, **New project**, and **New thread**. Choose a project from the filter
+to show only its threads; the button then shows that project's icon and stays
+highlighted. Choose **All projects** in the same menu to clear the filter. Each
+project in the menu has an actions button for its name, grouping rule, and
+removal.
+
+In the desktop app, back and forward arrows next to the app name move through the
+pages you have visited, like a browser. They are dimmed when there is nowhere to
+go. **Command–[** and **Command–]** on macOS, or **Ctrl+[** and **Ctrl+]**
+elsewhere, do the same in both web and desktop.
+
+The bottom of the sidebar has icon buttons for **Settings** and **Pull
+requests**. A provider update notice appears to their right when one is
+available. On the Pull requests page, the icons give way to **Back**, which
+returns to the thread or draft you were on.
+
+## Sections
+
+Below the active cards, the **Working**, **Snoozed**, and **Settled** sections
+each show their thread count. Select a section heading to expand or collapse it.
+Every section starts collapsed, and the sidebar remembers which ones you opened
+on this device. When the list is short, the section headings sit at the bottom of
+the sidebar, leaving active and pinned threads at the top.
+
 The new design is on by default. It uses quieter read titles, clearer status
 colors, and shorter cards for threads without a branch. Turn off **New design**
 in **Settings → Beta** to return to the classic layout.
@@ -40,10 +67,9 @@ supported provider. Clear the override to inherit the default again.
 
 ## Working section
 
-Turn on **Working section** in **Settings → Beta** to fold busy threads into a
-collapsed shelf. Expand **Working** to see them all. The thread you have open
-stays visible even when the shelf is collapsed, and sidebar search still finds
-every thread in it.
+Busy threads fold into the collapsed **Working** section. Expand **Working** to
+see them all. The thread you have open stays visible even when the section is
+collapsed, and sidebar search still finds every thread in it.
 
 Threads return to the top of the main list when they finish, fail, or need an
 approval, answer, or plan review, including requests from delegated children.
@@ -55,8 +81,9 @@ the open thread shows the process as **Running** with a **Stop** button. Pinned 
 settled threads keep their own sections. This changes only sidebar presentation
 and does not stop, snooze, or settle any work.
 
-The toggle is off by default and is saved on this client. Turning it off restores
-the usual sidebar order. It works in both web and desktop.
+The Working section is on by default. To keep busy threads in the main list,
+turn off **Working section** in **Settings → Beta**. The choice is saved on this
+client and works in both web and desktop.
 
 ## Agent conversations
 

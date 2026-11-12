@@ -41,7 +41,7 @@ require a Codex version and model that expose the tool.
 
 ## Connector approvals
 
-Supported connector approval requests appear in the existing approval controls.
+Supported connector approval requests appear in the conversation with the other approvals.
 If Codex resolves a request before you answer, its controls stop being actionable;
 a late response cannot approve it. Requests from a native child agent appear in
 the parent chat, and resolving one request does not dismiss another. Permanent

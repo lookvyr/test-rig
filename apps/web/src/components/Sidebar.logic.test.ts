@@ -12,6 +12,7 @@ import {
   getSidebarThreadIdsToPrewarm,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
+  resolveFirstSidebarShelf,
   getFallbackThreadIdAfterDelete,
   getVisibleThreadsForProject,
   getProjectSortTimestamp,
@@ -41,6 +42,18 @@ import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools
 import { DEFAULT_RUNTIME_MODE, type Project, type Thread } from "../types";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+describe("resolveFirstSidebarShelf", () => {
+  it("picks the first non-empty section in Working, Snoozed, Settled order", () => {
+    expect(resolveFirstSidebarShelf({ working: 2, snoozed: 1, settled: 5 })).toBe("working");
+    expect(resolveFirstSidebarShelf({ working: 0, snoozed: 1, settled: 5 })).toBe("snoozed");
+    expect(resolveFirstSidebarShelf({ working: 0, snoozed: 0, settled: 5 })).toBe("settled");
+  });
+
+  it("returns null when no section header is shown", () => {
+    expect(resolveFirstSidebarShelf({ working: 0, snoozed: 0, settled: 0 })).toBeNull();
+  });
+});
 
 describe("shouldNavigateAfterProjectRemoval", () => {
   const projectThreads = [{ environmentId: "environment-local", id: "thread-1" }];

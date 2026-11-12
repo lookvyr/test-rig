@@ -454,6 +454,38 @@ describe("thread navigation helpers", () => {
   });
 });
 
+describe("history navigation defaults", () => {
+  it("navigates history with mod+[ and mod+] outside the terminal", () => {
+    const back = event({ key: "[", code: "BracketLeft", metaKey: true });
+    const forward = event({ key: "]", code: "BracketRight", ctrlKey: true });
+    assert.strictEqual(
+      resolveShortcutCommand(back, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "MacIntel" }),
+      "navigation.back",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(forward, DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Linux" }),
+      "navigation.forward",
+    );
+    assert.isNull(
+      resolveShortcutCommand(back, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: true },
+      }),
+    );
+  });
+
+  it("leaves mod+shift+[ to previous-thread traversal", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ key: "{", code: "BracketLeft", metaKey: true, shiftKey: true }),
+        DEFAULT_RESOLVED_KEYBINDINGS,
+        { platform: "MacIntel" },
+      ),
+      "thread.previous",
+    );
+  });
+});
+
 describe("model picker navigation helpers", () => {
   it("maps jump commands to visible model indices", () => {
     assert.strictEqual(modelPickerJumpCommandForIndex(0), "modelPicker.jump.1");

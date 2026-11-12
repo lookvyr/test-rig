@@ -36,6 +36,28 @@ export function getDisplayModelName(
   return stripLeadingQualifier(name, model.subProvider);
 }
 
+const MODEL_FAMILY_PREFIXES = ["Claude ", "GPT-", "GPT "] as const;
+const MODEL_VERSION_WORD = /^v?\d+(?:\.\d+)*[a-z]?$/i;
+
+/**
+ * The composer model button's name: the provider icon beside it already says the family, so
+ * "Claude Opus 5.5" reads "Opus 5.5" and "GPT-6-Sol" reads "6 Sol". A name that is only a
+ * version after its family ("GPT-5.5") keeps the family. Mirrors upstream's `modelShortName`.
+ */
+export function getCompactModelName(model: ModelEsque): string {
+  if (model.shortName) return getDisplayModelName(model, { preferShortName: true });
+  const name = getDisplayModelName(model);
+  const prefix = MODEL_FAMILY_PREFIXES.find((candidate) => name.startsWith(candidate));
+  if (!prefix) return name;
+  const rest = name.slice(prefix.length).trim();
+  const namesModel = rest
+    .replace(/\(.*?\)/g, " ")
+    .split(/[\s-]+/)
+    .some((word) => word.length > 0 && !MODEL_VERSION_WORD.test(word));
+  if (!namesModel) return name;
+  return /\s/.test(rest) ? rest : rest.replaceAll("-", " ");
+}
+
 export function getTriggerDisplayModelName(model: ModelEsque): string {
   return getDisplayModelName(model, { preferShortName: true });
 }

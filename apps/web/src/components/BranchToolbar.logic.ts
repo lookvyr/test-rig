@@ -55,12 +55,23 @@ export function shouldShowEnvironmentIndicator(input: {
   return input.activeEnvironment !== null && !input.activeEnvironment.isPrimary;
 }
 
+/**
+ * New threads always show the strip, since it names the permissions the first send uses. Started
+ * threads show it only when the user keeps it (the `persistComposerContextStrip` setting) and it
+ * has something to show.
+ */
 export function shouldShowComposerContextStrip(input: {
+  isNewThread: boolean;
+  persistInActiveThreads: boolean;
   hasActiveProject: boolean;
   isGitRepo: boolean;
   showEnvironmentIndicator: boolean;
 }): boolean {
-  return input.hasActiveProject && (input.isGitRepo || input.showEnvironmentIndicator);
+  return (
+    input.hasActiveProject &&
+    (input.isNewThread ||
+      (input.persistInActiveThreads && (input.isGitRepo || input.showEnvironmentIndicator)))
+  );
 }
 
 export function resolveEnvModeLabel(mode: EnvMode): string {

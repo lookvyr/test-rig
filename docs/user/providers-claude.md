@@ -257,4 +257,4 @@ reports a usage limit, send the message again after that limit resets.
 
 ## Ultracode
 
-On models that support it, **Ultracode** is a separate on/off option in the model traits menu. Choose reasoning effort independently. Earlier saved Ultracode effort selections retain their behavior as Extra High effort with Ultracode enabled, unless you explicitly switch it off. Sonnet 5.5 support requires Claude Code 2.1.284 or later; Haiku 5.5 retains its model-version requirement.
+On models that support it, **Ultracode** is a separate on/off option in the model picker's effort column. Choose reasoning effort independently. Earlier saved Ultracode effort selections retain their behavior as Extra High effort with Ultracode enabled, unless you explicitly switch it off. Sonnet 5.5 support requires Claude Code 2.1.284 or later; Haiku 5.5 retains its model-version requirement.

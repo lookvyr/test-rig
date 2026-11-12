@@ -253,6 +253,10 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Project Grouping"]
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
+      ...(settings.persistComposerContextStrip !==
+      DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip
+        ? ["Composer context"]
+        : []),
       ...(settings.toolCallVisibility !== DEFAULT_UNIFIED_SETTINGS.toolCallVisibility
         ? ["Tool calls in chat"]
         : []),
@@ -346,6 +350,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       settings.wordWrap,
+      settings.persistComposerContextStrip,
       followSystem,
       theme,
     ],
@@ -415,6 +420,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
+      persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
       toolCallVisibility: DEFAULT_UNIFIED_SETTINGS.toolCallVisibility,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
@@ -861,6 +867,34 @@ export function AppearanceSettingsPanel() {
             }
           />
         ) : null}
+
+        <SettingsRow
+          {...searchableSetting("composer-context")}
+          description="Keep branch and worktree controls below the composer after a thread starts."
+          resetAction={
+            settings.persistComposerContextStrip !==
+            DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip ? (
+              <SettingResetButton
+                label="composer context"
+                onClick={() =>
+                  updateSettings({
+                    persistComposerContextStrip:
+                      DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.persistComposerContextStrip}
+              onCheckedChange={(checked) =>
+                updateSettings({ persistComposerContextStrip: Boolean(checked) })
+              }
+              aria-label="Keep composer context visible in active threads"
+            />
+          }
+        />
       </SettingsSection>
 
       <TypographySection />

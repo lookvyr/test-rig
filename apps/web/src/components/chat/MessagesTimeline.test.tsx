@@ -4,7 +4,10 @@ import {
   EnvironmentId,
   MessageId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
+  TurnItemId,
+  type OrchestrationV2ProjectedTurnItem,
 } from "@t3tools/contracts";
 import {
   act,
@@ -830,6 +833,107 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("javascript:");
     expect(markup).not.toContain("globalThis.__t3Xss");
   });
+  describe("pending approvals", () => {
+    const fixture = makeStreamingTimelineFixture();
+    const source = fixture.visibleTurnItems[0]!;
+    const common = {
+      ...source.item,
+      threadId: fixture.threadId,
+      runId: fixture.runId,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+    };
+    const requestId = RuntimeRequestId.make("approval-request");
+    const detail = `bun run release -- ${"long-argument ".repeat(20)}\nsecond line`;
+    const approval = {
+      requestId,
+      requestKind: "command" as const,
+      createdAt: MESSAGE_CREATED_AT,
+      detail,
+      responseCapability: "live" as const,
+    };
+    const items: OrchestrationV2ProjectedTurnItem["item"][] = [
+      {
+        ...common,
+        id: TurnItemId.make("gated-command"),
+        status: "running",
+        type: "command_execution",
+        input: "GATED_COMMAND",
+        output: "",
+      },
+      {
+        ...common,
+        id: TurnItemId.make("approval"),
+        status: "waiting",
+        type: "approval_request",
+        requestId,
+        requestKind: "command",
+        prompt: detail,
+      },
+    ];
+    const timelineEntries = deriveTimelineEntriesFromVisibleTurnItems({
+      visibleTurnItems: items.map((item, position) => ({
+        ...source,
+        item,
+        position,
+        sourceItemId: item.id,
+      })),
+      optimisticMessages: [],
+    });
+
+    it("renders the approval with its full detail and choices beside its request", () => {
+      const markup = renderToStaticMarkup(
+        <MessagesTimeline
+          {...buildProps()}
+          isWorking
+          timelineEntries={timelineEntries}
+          pendingApprovals={[approval]}
+          onRespondToApproval={async () => undefined}
+        />,
+      );
+      expect(markup.match(/data-v2-item-type="approval_request"/g)).toHaveLength(1);
+      expect(markup).toContain('aria-label="Command approval"');
+      expect(markup).toContain('data-approval-detail="complete"');
+      expect(markup).toContain(detail);
+      expect(markup).toContain("Waiting for approval");
+      expect(markup).toContain(">Approve<");
+      expect(markup).toContain(">Decline<");
+      expect(markup.indexOf("GATED_COMMAND")).toBeLessThan(markup.indexOf("Waiting for approval"));
+    });
+
+    it("shows an approval without a request row after the conversation", () => {
+      const child = { ...approval, requestId: RuntimeRequestId.make("child-request") };
+      const markup = renderToStaticMarkup(
+        <MessagesTimeline
+          {...buildProps()}
+          timelineEntries={[buildUserTimelineEntry("Recent activity")]}
+          pendingApprovals={[child]}
+          onRespondToApproval={async () => undefined}
+        />,
+      );
+      expect(markup).toContain("Waiting for approval");
+      expect(markup.indexOf("Recent activity")).toBeLessThan(
+        markup.indexOf("Waiting for approval"),
+      );
+    });
+
+    it("leaves out an approval the composer holds while the user types", () => {
+      const markup = renderToStaticMarkup(
+        <MessagesTimeline
+          {...buildProps()}
+          timelineEntries={[buildUserTimelineEntry("Recent activity")]}
+          pendingApprovals={[approval]}
+          heldApprovalRequestIds={new Set([requestId])}
+          onRespondToApproval={async () => undefined}
+        />,
+      );
+      expect(markup).not.toContain("Waiting for approval");
+    });
+  });
+
   it("renders progressive history controls ahead of the bounded timeline", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

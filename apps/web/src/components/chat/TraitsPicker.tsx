@@ -170,7 +170,7 @@ function getSelectedTraits(
   };
 }
 
-function getTraitsSectionVisibility(input: {
+export function getTraitsSectionVisibility(input: {
   provider: ProviderDriverKind;
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
@@ -313,7 +313,11 @@ export interface TraitsMenuContentProps {
   triggerClassName?: string;
 }
 
-export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
+/**
+ * The traits a model offers and how to change them. The menu, the model picker's effort column,
+ * and its footer all read and write traits through this one hook.
+ */
+export function useTraitsSelection({
   provider,
   instanceId,
   models,
@@ -323,6 +327,8 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   modelOptions,
   reportedModelSelection,
   allowPromptInjectedEffort = true,
+  triggerVariant: _triggerVariant,
+  triggerClassName: _triggerClassName,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
@@ -352,20 +358,21 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     modelOptions,
     allowPromptInjectedEffort,
   });
-  const {
-    descriptors,
-    selectDescriptors,
-    booleanDescriptors,
-    primarySelectDescriptor,
-    ultrathinkPromptControlled,
-    ultrathinkInBodyText,
-    hasAnyControls,
-  } = selected;
-  const updateDescriptors = (nextDescriptors: ReadonlyArray<ProviderOptionDescriptor>) => {
-    updateModelOptions(buildProviderOptionSelectionsFromDescriptors(nextDescriptors));
-  };
-
-  const handleSelectChange = (
+  const selectValue = (descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>) =>
+    selected.ultrathinkPromptControlled && descriptor.id === selected.primarySelectDescriptor?.id
+      ? "ultrathink"
+      : (getDescriptorStringValue(
+          descriptor,
+          model
+            ? {
+                instanceId: instanceId ?? ProviderInstanceId.make(provider),
+                model,
+                ...(modelOptions ? { options: modelOptions } : {}),
+              }
+            : null,
+          reportedModelSelection,
+        ) ?? "");
+  const changeSelect = (
     descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
     value: string,
   ) => {
@@ -374,6 +381,27 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     if (change.prompt !== prompt) onPromptChange(change.prompt);
     if ("modelOptions" in change) updateModelOptions(change.modelOptions);
   };
+  const changeBoolean = (descriptorId: string, value: boolean) => {
+    updateModelOptions(
+      buildProviderOptionSelectionsFromDescriptors(
+        replaceDescriptorCurrentValue(selected.descriptors, descriptorId, value),
+      ),
+    );
+  };
+  return { selected, selectValue, changeSelect, changeBoolean };
+}
+
+export const TraitsMenuContent = memo(function TraitsMenuContentImpl(
+  props: TraitsMenuContentProps & TraitsPersistence,
+) {
+  const { selected, selectValue, changeSelect, changeBoolean } = useTraitsSelection(props);
+  const {
+    selectDescriptors,
+    booleanDescriptors,
+    primarySelectDescriptor,
+    ultrathinkInBodyText,
+    hasAnyControls,
+  } = selected;
 
   if (!hasAnyControls) {
     return null;
@@ -382,20 +410,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   return (
     <>
       {selectDescriptors.map((descriptor, index) => {
-        const selectedValue =
-          ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
-            ? "ultrathink"
-            : (getDescriptorStringValue(
-                descriptor,
-                model
-                  ? {
-                      instanceId: instanceId ?? ProviderInstanceId.make(provider),
-                      model,
-                      ...(modelOptions ? { options: modelOptions } : {}),
-                    }
-                  : null,
-                reportedModelSelection,
-              ) ?? "");
+        const selectedValue = selectValue(descriptor);
 
         return (
           <div key={descriptor.id}>
@@ -412,7 +427,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
               ) : null}
               <MenuRadioGroup
                 value={selectedValue}
-                onValueChange={(value) => handleSelectChange(descriptor, value)}
+                onValueChange={(value) => changeSelect(descriptor, value)}
               >
                 {descriptor.options.map((option) => (
                   <MenuRadioItem
@@ -452,11 +467,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
               </div>
               <MenuRadioGroup
                 value={selectedValue}
-                onValueChange={(value) => {
-                  updateDescriptors(
-                    replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
-                  );
-                }}
+                onValueChange={(value) => changeBoolean(descriptor.id, value === "on")}
               >
                 {(["on", "off"] as const).map((value) => (
                   <MenuRadioItem key={value} value={value} hideIndicator closeOnClick>
@@ -537,6 +548,79 @@ export function buildTraitsTriggerDisplay(input: {
     return { label: fastModeEnabled ? "Fast" : "Normal", showFastModeIcon: false };
   }
   return { label: labels.join(" · "), showFastModeIcon: fastModeEnabled };
+}
+
+/**
+ * The traits a model trigger names after the model: its reasoning level as a word, a bolt for
+ * Fast, and the context window. `detail` names every trait for the tooltip and screen readers.
+ * Null when the model has no traits.
+ */
+export function getComposerEffortSummary(input: {
+  provider: ProviderDriverKind;
+  instanceId?: ProviderInstanceId;
+  models: ReadonlyArray<ServerProviderModel>;
+  model: string | null | undefined;
+  prompt: string;
+  modelOptions?: ProviderOptions | null | undefined;
+  reportedModelSelection?: ModelSelection | null | undefined;
+  allowPromptInjectedEffort?: boolean;
+}): { word: string | null; contextWindow: string | null; fast: boolean; detail: string } | null {
+  const selected = getTraitsSectionVisibility({
+    ...input,
+    modelOptions: input.modelOptions,
+  });
+  if (!selected.hasAnyControls) return null;
+  const modelSelection = input.model
+    ? {
+        instanceId: input.instanceId ?? ProviderInstanceId.make(input.provider),
+        model: input.model,
+        ...(input.modelOptions ? { options: input.modelOptions } : {}),
+      }
+    : null;
+  const display = buildTraitsTriggerDisplay({
+    provider: input.provider,
+    descriptors: selected.descriptors,
+    primarySelectDescriptorId: selected.primarySelectDescriptor?.id ?? null,
+    ultrathinkPromptControlled: selected.ultrathinkPromptControlled,
+    modelSelection,
+    reportedModelSelection: input.reportedModelSelection,
+  });
+  const reasoning = getReasoningDescriptor(selected);
+  const word = !reasoning
+    ? null
+    : reasoning.type === "boolean"
+      ? `${reasoning.label} ${reasoning.currentValue === true ? "On" : "Off"}`
+      : selected.ultrathinkPromptControlled && reasoning.id === selected.primarySelectDescriptor?.id
+        ? "Ultrathink"
+        : (getProviderOptionCurrentLabel(reasoning, modelSelection, input.reportedModelSelection) ??
+          null);
+  const contextWindow = selected.contextWindowDescriptor
+    ? (getProviderOptionCurrentLabel(
+        selected.contextWindowDescriptor,
+        modelSelection,
+        input.reportedModelSelection,
+      ) ?? null)
+    : null;
+  return {
+    word,
+    contextWindow,
+    fast: display.showFastModeIcon || display.label === "Fast",
+    detail: display.label,
+  };
+}
+
+/** The model's reasoning control: a level select, else a thinking switch. */
+export function getReasoningDescriptor(selected: {
+  selectDescriptors: ReadonlyArray<Extract<ProviderOptionDescriptor, { type: "select" }>>;
+  thinkingDescriptor: Extract<ProviderOptionDescriptor, { type: "boolean" }> | null;
+}): ProviderOptionDescriptor | null {
+  return (
+    selected.selectDescriptors.find((descriptor) =>
+      REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id),
+    ) ??
+    selected.thinkingDescriptor ??
+    null
+  );
 }
 
 export const TraitsPicker = memo(function TraitsPicker({

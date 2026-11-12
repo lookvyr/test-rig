@@ -9,7 +9,7 @@ import {
   HistoryIcon,
   MonitorIcon,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useProject, useQuietThreadShell, useThreadShellsForProjectRefs } from "../state/entities";
@@ -59,6 +59,8 @@ export interface BranchToolbarProps {
   onComposerFocusRequest?: () => void;
   availableEnvironments?: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
+  /** Shown at the strip's end, such as the new-thread permissions control. */
+  trailing?: ReactNode;
 }
 
 interface MobileRunContextSelectorProps {
@@ -327,6 +329,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   onComposerFocusRequest,
   availableEnvironments,
   onEnvironmentChange,
+  trailing,
 }: BranchToolbarProps) {
   const threadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
@@ -485,6 +488,7 @@ export const BranchToolbar = memo(function BranchToolbar({
           {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
         />
       ) : null}
+      {layout === "strip" ? trailing : null}
     </div>
   );
 });

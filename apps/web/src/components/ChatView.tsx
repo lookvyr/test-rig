@@ -1,4 +1,9 @@
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
+import {
+  answerShownApprovalsWithMessage,
+  draftAttachmentLists,
+  draftAttachmentListsChanged,
+} from "./chat/composerApprovalRedirect";
 import { isPreviewAvailableFor } from "~/browser/previewRuntime";
 import * as Option from "effect/Option";
 import { BackgroundThreadContext } from "./chat/backgroundThread";
@@ -272,6 +277,7 @@ import {
   prepareComposerMessage,
 } from "./chat/composerMessage";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
+import { ComposerContextPermissions } from "./ComposerContextPermissions";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
@@ -2145,16 +2151,17 @@ function ChatViewContent(props: ChatViewProps) {
     providerStatuses,
     selectedProviderByThreadId ?? threadProvider,
   );
+  const projectDefaultRuntimeMode = resolveProjectSettings(
+    serverConfig?.settings ?? settings,
+    activeThread?.projectId ?? null,
+    activeProject,
+  ).settings.defaultRuntimeMode;
   const runtimeMode = resolveComposerRuntimeMode({
     isLocalDraftThread,
     provider: selectedProvider,
     composerRuntimeMode,
     threadRuntimeMode: activeThread?.runtimeMode,
-    projectRuntimeMode: resolveProjectSettings(
-      serverConfig?.settings ?? settings,
-      activeThread?.projectId ?? null,
-      activeProject,
-    ).settings.defaultRuntimeMode,
+    projectRuntimeMode: projectDefaultRuntimeMode,
   });
   const phase = derivePhase(
     threadProjection ? deriveThreadRuntime(threadProjection) : (activeThread?.runtime ?? null),
@@ -2291,6 +2298,17 @@ function ChatViewContent(props: ChatViewProps) {
     latestRunSettled &&
     hasActionableProposedPlan(activeProposedPlan);
   const activePendingApproval = pendingApprovals[0] ?? null;
+  // The composer holds approvals that arrive mid-typing; the timeline shows them once released.
+  const [heldApprovalRequestIds, setHeldApprovalRequestIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const onHeldRequestIdsChange = useCallback((requestIds: ReadonlySet<string>) => {
+    setHeldApprovalRequestIds((current) =>
+      current.size === requestIds.size && [...requestIds].every((id) => current.has(id))
+        ? current
+        : requestIds,
+    );
+  }, []);
   const {
     beginLocalDispatch,
     resetLocalDispatch,
@@ -2761,6 +2779,8 @@ function ChatViewContent(props: ChatViewProps) {
     activeProject != null && isScratchProject(activeProject, serverConfig?.scratchWorkspaceRoot);
   const isGitRepo = !isScratch && (gitStatusQuery.data?.isRepo ?? true);
   const showComposerContextStrip = shouldShowComposerContextStrip({
+    isNewThread: isDraftHeroState,
+    persistInActiveThreads: settings.persistComposerContextStrip,
     hasActiveProject: activeProject !== null,
     isGitRepo,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
@@ -3936,6 +3956,12 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [clearTimelineAnchorTracking, scrollTimelineToEnd],
   );
+
+  // The list ignores footer layout, so an approval shown there would land under the composer.
+  // Follow it when the reader was following the end.
+  const onTimelineFooterGrow = useCallback(() => {
+    if (timelineScrollModeRef.current === "following-end") scrollTimelineToEnd();
+  }, [scrollTimelineToEnd, timelineScrollModeRef]);
 
   const prepareTimelineForSend = useCallback(
     (messageId: MessageId | null) => {
@@ -5473,6 +5499,62 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
 
+    // A message sent while approvals are shown answers them, only now that every local check
+    // above accepted the send: feedback for an approval that takes it, otherwise a decline that
+    // lets the message redirect the agent.
+    const shownApprovals = pendingApprovals.filter((approval) =>
+      sendCtx.shownPendingApprovalIds.includes(approval.requestId),
+    );
+    if (shownApprovals.length > 0) {
+      sendInFlightRef.current = true;
+      const readAttachmentLists = () =>
+        draftAttachmentLists(
+          useComposerDraftStore.getState().getComposerDraft(composerDraftTarget),
+        );
+      const attachmentListsForSend = readAttachmentLists();
+      const draftChanged = () =>
+        promptRef.current !== promptForSend ||
+        draftAttachmentListsChanged(attachmentListsForSend, readAttachmentLists());
+      const outcome = await answerShownApprovalsWithMessage({
+        shownApprovals,
+        text: preparedMessage.text,
+        hasAttachmentsOrContext:
+          composerImages.length > 0 ||
+          sendableComposerTerminalContexts.length > 0 ||
+          composerElementContexts.length > 0 ||
+          composerPreviewAnnotations.length > 0 ||
+          composerReviewComments.length > 0 ||
+          messageContext !== undefined,
+        respondingRequestIds,
+        respond: onRespondToApproval,
+        draftChanged,
+        readShownApprovalIds: () =>
+          composerRef.current?.getSendContext().shownPendingApprovalIds ?? [],
+      });
+      sendInFlightRef.current = false;
+      if (outcome.type === "feedback-sent") {
+        if (!draftChanged()) {
+          promptRef.current = "";
+          clearComposerDraftContent(composerDraftTarget);
+          composerRef.current?.resetCursorState();
+        }
+        return;
+      }
+      if (outcome.type === "stopped") {
+        if (outcome.error) setThreadError(threadIdForSend, outcome.error);
+        if (outcome.notice) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: outcome.notice,
+              description: "Send again when it's ready.",
+            }),
+          );
+        }
+        return;
+      }
+    }
+
     const messageIdForSend = newMessageId();
     sendInFlightRef.current = true;
     prepareTimelineForSend(messageIdForSend);
@@ -6646,6 +6728,15 @@ function ChatViewContent(props: ChatViewProps) {
                   ? { historyControls: loadEarlierTurns }
                   : {})}
                 loadEarlier={searchHistory ? null : loadEarlierTurns}
+                {...(searchHistory
+                  ? {}
+                  : {
+                      pendingApprovals,
+                      heldApprovalRequestIds,
+                      respondingRequestIds,
+                      onRespondToApproval,
+                      onFooterGrow: onTimelineFooterGrow,
+                    })}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
@@ -6857,6 +6948,10 @@ function ChatViewContent(props: ChatViewProps) {
                                 canResume={resumableRunId !== null && !isWorking}
                                 resolvedTheme={resolvedTheme}
                                 settings={settings}
+                                defaultRuntimeMode={projectDefaultRuntimeMode}
+                                permissionsShownInStrip={
+                                  showComposerContextStrip && !isServerThread
+                                }
                                 keybindings={keybindings}
                                 terminalOpen={Boolean(terminalUiState.terminalOpen)}
                                 gitCwd={gitCwd}
@@ -6872,7 +6967,7 @@ function ChatViewContent(props: ChatViewProps) {
                                 }
                                 onInterrupt={onInterrupt}
                                 onImplementPlanInNewThread={onImplementPlanInNewThread}
-                                onRespondToApproval={onRespondToApproval}
+                                onHeldRequestIdsChange={onHeldRequestIdsChange}
                                 onSelectActivePendingUserInputOption={
                                   onSelectActivePendingUserInputOption
                                 }
@@ -6902,7 +6997,19 @@ function ChatViewContent(props: ChatViewProps) {
                             >
                               {showComposerContextStrip && (
                                 <div className="pointer-events-auto">
-                                  <BranchToolbar {...branchToolbarProps} />
+                                  <BranchToolbar
+                                    {...branchToolbarProps}
+                                    {...(isServerThread
+                                      ? {}
+                                      : {
+                                          trailing: (
+                                            <ComposerContextPermissions
+                                              runtimeMode={runtimeMode}
+                                              onRuntimeModeChange={handleRuntimeModeChange}
+                                            />
+                                          ),
+                                        })}
+                                  />
                                 </div>
                               )}
                             </div>

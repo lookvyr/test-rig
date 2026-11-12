@@ -1,8 +1,10 @@
 # Pull requests
 
-Open **Pull requests** above Settings to browse pull requests for your saved
-projects. You can also choose **Open pull requests** in the command palette.
-Your thread list stays available while you review.
+Select the **Pull requests** icon next to Settings at the bottom of the sidebar
+to browse pull requests for your saved projects. You can also choose **Open pull
+requests** in the command palette. Your thread list stays available while you
+review. While this view is open, the sidebar footer shows **Back**, which returns
+to the thread or draft you were on.
 
 Press **Command–Option–P** to open this view. While here, hold **Command–Option**
 to show shortcut badges on the first nine pull requests in the filtered list.

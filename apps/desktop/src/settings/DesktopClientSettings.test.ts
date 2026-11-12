@@ -42,6 +42,7 @@ const clientSettings: ClientSettings = {
   fontSizeTerminal: 12,
   fontSmoothing: true,
   glassOpacity: 80,
+  persistComposerContextStrip: false,
   planModeEnabled: false,
   providerModelPreferences: {},
   redesignEnabled: true,

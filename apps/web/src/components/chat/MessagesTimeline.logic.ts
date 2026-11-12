@@ -41,6 +41,7 @@ import {
   workEntryIndicatesToolSuccess,
   workEntryIndicatesToolNeutralStatus,
   workLogEntryIsToolLike,
+  type PendingApproval,
   type TimelineEntry,
   type WorkLogEntry,
 } from "../../session-logic";
@@ -54,6 +55,7 @@ import {
   type OrchestrationV2ProjectedTurnItem,
   type RunAttemptId,
   RunId,
+  type RuntimeRequestId,
 } from "@t3tools/contracts";
 import type { ThreadRunSummary } from "@t3tools/client-runtime/state/shell";
 import {
@@ -1270,15 +1272,30 @@ function timelineEntryIsSteer(entry: TimelineEntry): boolean {
   );
 }
 
+/** A pending approval's own timeline item, which renders as its approval row. */
+function workEntryIsPendingApproval(
+  entry: WorkLogEntry,
+  pendingApprovalRequestIds: ReadonlySet<RuntimeRequestId> | undefined,
+): boolean {
+  const item = entry.projectedItem?.item;
+  return (
+    item?.type === "approval_request" && pendingApprovalRequestIds?.has(item.requestId) === true
+  );
+}
+
 /**
- * Zen keeps work that explains the thread: answered questions, compactions, wakes, and errors.
- * Pending approvals wait in the composer, so their timeline items stay hidden.
+ * Zen keeps work that explains the thread: pending approvals, answered questions, compactions,
+ * wakes, and errors.
  */
-function workShownAsFinalAnswerOnly(entry: TimelineEntry): boolean {
+function workShownAsFinalAnswerOnly(
+  entry: TimelineEntry,
+  pendingApprovalRequestIds: ReadonlySet<RuntimeRequestId> | undefined,
+): boolean {
   if (entry.kind === "event") return entry.projectedItem.item.type !== "subagent";
   if (entry.kind !== "work") return true;
   const work = entry.entry;
   return (
+    workEntryIsPendingApproval(work, pendingApprovalRequestIds) ||
     work.questionAnswer !== undefined ||
     timelineEntryIsCompaction(entry) ||
     timelineEntryStartsResponse(entry) ||
@@ -1340,6 +1357,7 @@ function timelineRowEntries(
     | "isWorking"
     | "latestRun"
     | "runningRunId"
+    | "pendingApprovalRequestIds"
   >,
 ) {
   const visibility = input.toolCallVisibility ?? "showAll";
@@ -1354,7 +1372,9 @@ function timelineRowEntries(
     const terminalIds = deriveTerminalAssistantMessageIds(entries);
     const steerAnswerIds = deriveInFlightSteerAnswerIds(entries);
     shown = entries.filter((entry, index) => {
-      if (entry.kind !== "message") return workShownAsFinalAnswerOnly(entry);
+      if (entry.kind !== "message") {
+        return workShownAsFinalAnswerOnly(entry, input.pendingApprovalRequestIds);
+      }
       const { message } = entry;
       return (
         message.role !== "assistant" ||
@@ -1379,6 +1399,8 @@ export function deriveMessagesTimelineRows(input: {
   /** A message Zen would hide that must show anyway, such as a citation's target. */
   revealedMessageId?: MessageId | null;
   timelineEntries: ReadonlyArray<TimelineEntry>;
+  /** Approvals shown in the timeline; their request items become standalone approval rows. */
+  pendingApprovalRequestIds?: ReadonlySet<RuntimeRequestId>;
   latestRun?: TimelineLatestRun | null;
   runningRunId?: RunId | null;
   expandedRunIds?: ReadonlySet<RunId>;
@@ -1398,6 +1420,8 @@ export function deriveMessagesTimelineRows(input: {
   worktreeSetup?: WorktreeSetupSnapshot | null;
 }): MessagesTimelineRow[] {
   const timelineEntries = timelineRowEntries(input);
+  const isPendingApproval = (entry: WorkLogEntry) =>
+    workEntryIsPendingApproval(entry, input.pendingApprovalRequestIds);
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
   for (const summary of input.turnDiffSummaries) {
     if (summary.assistantMessageId) {
@@ -1451,6 +1475,15 @@ export function deriveMessagesTimelineRows(input: {
       }
     }
   }
+  // A pending approval stays answerable even inside a folded turn or superseded attempt.
+  if (input.pendingApprovalRequestIds?.size) {
+    for (const entry of timelineEntries) {
+      if (entry.kind === "work" && isPendingApproval(entry.entry)) {
+        collapsedEntryIds.delete(entry.id);
+        collapsedSupersededEntryIds.delete(entry.id);
+      }
+    }
+  }
   const runIdIsActiveResponse = (runId: RunId | null | undefined) =>
     runId == null ? runlessWorkActive : activeVisualResponseRunIds.has(runId);
   const workEntryIsInActiveRun = (entry: WorkLogEntry) =>
@@ -1479,6 +1512,7 @@ export function deriveMessagesTimelineRows(input: {
         entry.entry.sourceActivityKind === "runtime.error" ||
         entry.entry.itemType === "system_notice" ||
         entry.entry.itemType === "notification" ||
+        isPendingApproval(entry.entry) ||
         !runIdIsActiveResponse(entry.entry.runId) ||
         entry.entry.sourceActivityKind === "context-compaction" ||
         collapsedEntryIds.has(entry.id) ||
@@ -1504,10 +1538,12 @@ export function deriveMessagesTimelineRows(input: {
   const latestRunningToolEntry = visibleActiveToolEntries.findLast((entry) =>
     workEntryIsActiveTurnActivity(entry.entry),
   );
+  // While an approval waits, the agent is not working, so a settled tool stays settled.
   const latestToolKeepsActivityLive =
     latestRunningToolEntry !== undefined ||
     (latestVisibleToolEntry !== undefined &&
-      workEntryIndicatesToolSuccess(latestVisibleToolEntry.entry));
+      workEntryIndicatesToolSuccess(latestVisibleToolEntry.entry) &&
+      !input.pendingApprovalRequestIds?.size);
   const latestToolFailed =
     latestRunningToolEntry === undefined &&
     latestVisibleToolEntry !== undefined &&
@@ -1760,6 +1796,7 @@ export function deriveMessagesTimelineRows(input: {
       )
         continue;
       if (
+        isPendingApproval(timelineEntry.entry) ||
         (timelineEntry.entry.runId != null && failedRunIds.has(timelineEntry.entry.runId)) ||
         (timelineEntry.entry.itemType === "error" &&
           timelineEntry.entry.toolLifecycleStatus === "failed") ||
@@ -1789,6 +1826,7 @@ export function deriveMessagesTimelineRows(input: {
           nextEntry.entry.sourceActivityKind === "runtime.error" ||
           nextEntry.entry.itemType === "system_notice" ||
           nextEntry.entry.itemType === "notification" ||
+          isPendingApproval(nextEntry.entry) ||
           activeWorkEntryIds.has(nextEntry.id) ||
           collapsedEntryIds.has(nextEntry.id) ||
           collapsedSupersededEntryIds.has(nextEntry.id) ||
@@ -2080,7 +2118,8 @@ export function deriveMessagesTimelineRows(input: {
     !setupOwnsWorkingSlot &&
     !hasActiveCompaction &&
     !compactionOnlyRunFinished &&
-    (!hasActivityRow || latestToolFailed)
+    // A pending approval row says what the agent is waiting on; no "Thinking" row beside it.
+    (latestToolFailed || (!hasActivityRow && !input.pendingApprovalRequestIds?.size))
   ) {
     nextRows.push({
       kind: "thinking",
@@ -2191,6 +2230,7 @@ function replaceStreamingMessageRows(
     expandedRunIds: previousExpandedRuns,
     expandedAttemptIds: previousExpandedAttempts,
     expandedWorkGroupIds: previousExpandedGroups,
+    pendingApprovalRequestIds: previousPendingApprovalRequestIds,
     ...previousContext
   } = previous.input;
   const {
@@ -2200,6 +2240,7 @@ function replaceStreamingMessageRows(
     expandedRunIds,
     expandedAttemptIds,
     expandedWorkGroupIds,
+    pendingApprovalRequestIds,
     ...context
   } = input;
   // V2 shell and checkpoint selectors produce fresh summaries for each event.
@@ -2211,6 +2252,7 @@ function replaceStreamingMessageRows(
     !shallow(previousExpandedRuns, expandedRunIds) ||
     !shallow(previousExpandedAttempts, expandedAttemptIds) ||
     !shallow(previousExpandedGroups, expandedWorkGroupIds) ||
+    !shallow(previousPendingApprovalRequestIds, pendingApprovalRequestIds) ||
     !sameCheckpointSummaries(previousCheckpoints, turnDiffSummaries)
   ) {
     return null;
@@ -2256,6 +2298,29 @@ function replaceStreamingMessageRows(
         }
       : row;
   });
+}
+
+/**
+ * Approvals whose request item has no row (a child agent's request, or one the timeline has not
+ * received yet). They render after the last row so every shown approval stays answerable.
+ */
+export function unmatchedPendingApprovals(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  pendingApprovals: ReadonlyArray<PendingApproval>,
+): ReadonlyArray<PendingApproval> {
+  if (pendingApprovals.length === 0) return pendingApprovals;
+  const matched = new Set<string>();
+  for (const row of rows) {
+    const entries =
+      row.kind === "work" ? row.groupedEntries : row.kind === "work-live" ? [row.entry] : [];
+    for (const entry of entries) {
+      const item = entry.projectedItem?.item;
+      if (item?.type === "approval_request") matched.add(item.requestId);
+    }
+  }
+  return matched.size === 0
+    ? pendingApprovals
+    : pendingApprovals.filter((approval) => !matched.has(approval.requestId));
 }
 
 /** Keep one projection per timeline. Reuse rows only when streaming content changes. */
