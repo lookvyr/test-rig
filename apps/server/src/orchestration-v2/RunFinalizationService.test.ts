@@ -163,6 +163,7 @@ it.effect.each(
           getThreadShell: () =>
             Effect.succeed({
               id: threadId,
+              lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
               branch: scenario.branch,
               worktreePath: "/other-repo",
               activeRunId: scenario.activeRun === null ? null : RunId.make(scenario.activeRun),
@@ -179,18 +180,21 @@ it.effect.each(
 });
 
 it.effect.each([
-  { branch: null, otherActive: false, committed: true },
-  { branch: "dev", otherActive: false, committed: true },
-  { branch: "dev", otherActive: true, committed: true },
-  { branch: "dev", otherActive: false, committed: false },
+  { branch: null, otherActive: false, committed: true, sideChat: false },
+  { branch: "dev", otherActive: false, committed: true, sideChat: false },
+  { branch: "dev", otherActive: true, committed: true, sideChat: false },
+  { branch: "dev", otherActive: false, committed: false, sideChat: false },
+  // The thread's own side chat shares its checkout without taking over the branch label.
+  { branch: "dev", otherActive: true, committed: true, sideChat: true },
 ])(
   "adopts local branch metadata (%s) before discovering a PR",
-  ({ branch, otherActive, committed }) => {
+  ({ branch, otherActive, committed, sideChat }) => {
     const threadId = ThreadId.make("local-thread");
     const runId = RunId.make("local-run");
     const thread = {
       id: threadId,
       projectId: "project",
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
       branch,
       worktreePath: null,
       activeRunId: runId,
@@ -202,7 +206,7 @@ it.effect.each([
     return Effect.gen(function* () {
       const observer = yield* RunFinalization.RunFinalizationObserver;
       yield* observer.refresh({ cwd: "/repo", threadId, runId });
-      if (otherActive) {
+      if (otherActive && !sideChat) {
         assert.equal(write.mock.calls.length, 0);
         assert.equal(refreshPullRequestStatus.mock.calls.length, 0);
         return;
@@ -236,6 +240,12 @@ it.effect.each([
                         ...thread,
                         id: ThreadId.make("sibling"),
                         activeRunId: otherActive ? RunId.make("other-run") : null,
+                        lineage: {
+                          parentThreadId: threadId,
+                          relationshipToParent: sideChat ? "fork" : null,
+                          rootThreadId: threadId,
+                          ...(sideChat ? { sideChat: true } : {}),
+                        },
                       },
                     ],
                     archivedThreads: [],
@@ -284,6 +294,11 @@ it.effect(
               getThreadShell: () =>
                 Effect.succeed({
                   id: threadId,
+                  lineage: {
+                    parentThreadId: null,
+                    relationshipToParent: null,
+                    rootThreadId: threadId,
+                  },
                   branch: "feature",
                   activeRunId: null,
                 } as OrchestrationV2ThreadShell),

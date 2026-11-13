@@ -204,7 +204,7 @@ const ThreadForkTool = Tool.make("t3_thread_fork", {
 const ThreadMergeBackTool = Tool.make("t3_thread_merge_back", {
   ...commandTool,
   description:
-    "Merge context from this thread back to a related thread in the same project. Existing lineage and transfer rules apply.",
+    "Merge context from this thread back to a related thread in the same project. The target must be idle with no queued messages. Existing lineage and transfer rules apply.",
   parameters: Schema.Struct({
     targetThreadId: ThreadId,
     sourcePoint: OrchestrationV2ThreadForkSourcePoint,

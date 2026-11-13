@@ -94,7 +94,7 @@ status, with a link back to its parent. Provider-owned child conversations show
 status controls in place of a composer; answer their approvals and questions in
 the parent. Completed agents stay completed when a late completion update arrives.
 
-You can still open temporary side chats from a completed Codex or Claude turn.
+Side chats do not appear in the sidebar; find them under **Side chats** in thread details.
 See [Side chats](./side-chats.md) for how their context and lifetime work.
 
 ## Settle, snooze, and archive

@@ -1,5 +1,6 @@
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestsOf } from "@t3tools/shared/threadPullRequests";
+import { sideChatParentThreadId } from "@t3tools/contracts";
 import type {
   ThreadLinkedPullRequest,
   EnvironmentId,
@@ -99,6 +100,7 @@ export interface EnvironmentThreadShell {
   readonly interactionMode: OrchestrationV2ThreadShell["interactionMode"];
   readonly worktreeCleanup: OrchestrationV2ThreadShell["worktreeCleanup"];
   readonly planProgress: OrchestrationV2ThreadShell["planProgress"];
+  /** The parent of a side chat, or null for any other thread. */
   readonly sideOfThreadId: ThreadId | null;
   readonly pullRequestAutoLink?: boolean | undefined;
   readonly pullRequestAssociation: OrchestrationV2ThreadShell["pullRequestAssociation"];
@@ -250,7 +252,7 @@ export function presentThreadShell(
     interactionMode: thread.interactionMode,
     worktreeCleanup: thread.worktreeCleanup ?? null,
     planProgress: thread.planProgress ?? null,
-    sideOfThreadId: thread.sideOfThreadId ?? null,
+    sideOfThreadId: sideChatParentThreadId(thread.lineage),
     pullRequestAutoLink: thread.pullRequestAutoLink,
     pullRequestAssociation: thread.pullRequestAssociation,
     pendingRuntimeRequestAt: nullableIso(thread.pendingRuntimeRequest?.createdAt ?? null),

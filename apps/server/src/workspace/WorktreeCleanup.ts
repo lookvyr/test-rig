@@ -5,6 +5,7 @@ import { ProviderSessionManagerV2 } from "../orchestration-v2/ProviderSessionMan
 import {
   CommandId,
   type OrchestrationV2ThreadShell,
+  sideChatParentThreadId,
   type TerminalSummary,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -114,8 +115,15 @@ export const make = Effect.gen(function* () {
       status,
     });
   });
-  const settled = (thread: Thread) =>
+  const ownSettled = (thread: Thread) =>
     thread.settledOverride === "settled" || thread.archivedAt !== null;
+  /** A side chat has no settle control of its own, so it follows its parent in `threads`. */
+  const settledIn = (threads: ReadonlyArray<Thread>) => (thread: Thread) => {
+    const parentId = sideChatParentThreadId(thread.lineage);
+    if (parentId === null) return ownSettled(thread);
+    const parent = threads.find((candidate) => candidate.id === parentId);
+    return parent === undefined || ownSettled(parent);
+  };
 
   const clean = Effect.fn("WorktreeCleanup.clean")(function* (checkout: string, initial: Thread[]) {
     const now = DateTime.toEpochMillis(yield* DateTime.now);
@@ -133,39 +141,52 @@ export const make = Effect.gen(function* () {
       if (atCheckout(path.resolve(entry.workspaceRoot), checkout)) return;
     }
     const local = yield* git.statusDetailsLocal(checkout);
-    if (!local.isRepo || initial.some((thread) => !thread.branch || thread.branch !== local.branch))
+    // A side chat keeps the branch it was opened on; the parent's branch is the one that counts.
+    const branchMatches = (thread: Thread) =>
+      thread.lineage.sideChat === true || thread.branch === local.branch;
+    if (
+      !local.isRepo ||
+      initial.some(
+        (thread) => (!thread.branch && thread.lineage.sideChat !== true) || !branchMatches(thread),
+      )
+    )
       return;
     const notice = Effect.fn("WorktreeCleanup.notice")(function* (
       state: Status["state"],
       reason: string,
     ) {
-      for (const thread of (yield* readSnapshot).threads.filter(
+      const { threads } = yield* readSnapshot;
+      const settled = settledIn(threads);
+      for (const thread of threads.filter(
         (entry) => initial.some((original) => original.id === entry.id) && settled(entry),
       ))
         yield* report(thread, { state, reason });
     });
     // Settlement policy belongs to ThreadSettlementService. Cleanup only consumes
     // durable settlement, so it cannot bypass a thread or project preference.
-    if (initial.some((thread) => !settled(thread))) {
+    if (initial.some((thread) => !settledIn(initialSnapshot.threads)(thread))) {
       yield* notice("pending", "Worktree cleanup is waiting for other work using this checkout.");
       return;
     }
     const currentGroup = Effect.gen(function* () {
       const snapshot = yield* readSnapshot;
-      return snapshot.threads.filter(
-        (thread) => thread.worktreePath != null && path.resolve(thread.worktreePath) === checkout,
-      );
+      return {
+        threads: snapshot.threads,
+        group: snapshot.threads.filter(
+          (thread) => thread.worktreePath != null && path.resolve(thread.worktreePath) === checkout,
+        ),
+      };
     });
-    const eligible = (group: Thread[]) =>
+    const eligible = ({ threads, group }: { threads: Thread[]; group: Thread[] }) =>
       group.length === initial.length &&
       group.every(
         (thread) =>
           initial.some((original) => original.id === thread.id) &&
-          settled(thread) &&
+          settledIn(threads)(thread) &&
           !worktreeHasActiveThread(thread, now) &&
           thread.pinnedAt == null &&
           (thread.snoozedUntil == null || DateTime.toEpochMillis(thread.snoozedUntil) <= now) &&
-          thread.branch === local.branch,
+          branchMatches(thread),
       );
     if (!eligible(yield* currentGroup)) {
       yield* notice("pending", "Worktree cleanup is waiting for other work using this checkout.");
@@ -235,6 +256,7 @@ export const make = Effect.gen(function* () {
   const sweep = Effect.gen(function* () {
     const snapshot = yield* readSnapshot;
     const enabled = (yield* settings.getSettings).autoRemoveSettledWorktrees;
+    const settled = settledIn(snapshot.threads);
     for (const thread of snapshot.threads) {
       if (thread.worktreeCleanup != null && (!enabled || !settled(thread)))
         yield* report(thread, null);
@@ -242,7 +264,8 @@ export const make = Effect.gen(function* () {
     if (!enabled) return;
     const groups = new Map<string, Thread[]>();
     for (const thread of snapshot.threads) {
-      if (!thread.worktreePath || !thread.branch) continue;
+      // A side chat keeps the branch label it was opened with, which may be none.
+      if (!thread.worktreePath || (!thread.branch && thread.lineage.sideChat !== true)) continue;
       const checkout = path.resolve(thread.worktreePath);
       if (!inside(path.resolve(config.worktreesDir), checkout)) continue;
       const group = groups.get(checkout) ?? [];
@@ -253,7 +276,7 @@ export const make = Effect.gen(function* () {
       yield* withWorktreeLease(checkout, clean(checkout, group)).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
-            for (const thread of group.filter(settled))
+            for (const thread of group.filter(settledIn(snapshot.threads)))
               yield* report(thread, {
                 state: "retained",
                 reason: "Worktree cleanup could not finish. It will retry automatically.",

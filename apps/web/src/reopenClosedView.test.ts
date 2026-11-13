@@ -129,6 +129,35 @@ describe("reopen closed views", () => {
       })),
     ).toEqual({ drop: [], restore: null });
   });
+  it("reopens a closed side chat tab and drops one that was deleted", async () => {
+    const side = ThreadId.make("side");
+    const surface = {
+      id: `side-chat:${side}` as const,
+      kind: "side-chat" as const,
+      threadId: side,
+    };
+    const store = useClosedViewStore.getState();
+    store.remember({ kind: "panel-tab", threadRef: ref, surface });
+    const owner = {
+      environmentKnown: true,
+      catalogReady: true,
+      ownerExists: true,
+      shellLive: true,
+      panel: { isOpen: false, activeSurfaceId: null, surfaces: [] },
+    };
+    expect(
+      planNextReopen(useClosedViewStore.getState().entries, () => ({ ...owner, viewGone: true })),
+    ).toMatchObject({ drop: [{ surface: { id: surface.id } }], restore: null });
+    const plan = planNextReopen(useClosedViewStore.getState().entries, () => owner);
+    expect(plan.restore).toMatchObject({ surface: { id: surface.id } });
+    const openPreview = vi.fn(async () => AsyncResult.success(snapshot));
+    expect(await reopenClosedView(plan.restore!, { openPreview, workspaceAvailable: true })).toBe(
+      true,
+    );
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref).surfaces,
+    ).toEqual([surface]);
+  });
   it("bounds and deduplicates global history", () => {
     const store = useClosedViewStore.getState();
     for (let i = 0; i < 30; i++)

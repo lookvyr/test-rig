@@ -1,4 +1,8 @@
-import { OrchestrationV2ThreadShell } from "@t3tools/contracts";
+import {
+  isListedThreadLineage,
+  OrchestrationV2ThreadShell,
+  sideChatParentThreadId,
+} from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import type {
   EnvironmentId,
@@ -248,8 +252,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     const next: EnvironmentThreadShell[] = [];
     for (const environmentId of get(input.catalogValueAtom).entries.keys()) {
       for (const thread of get(environmentThreadsAtom(environmentId))) {
-        if (thread.archivedAt !== null || thread.lineage.relationshipToParent === "subagent")
-          continue;
+        if (thread.archivedAt !== null || !isListedThreadLineage(thread.lineage)) continue;
         next.push(scopedThread(environmentId, thread));
       }
     }
@@ -263,7 +266,7 @@ export function createEnvironmentThreadShellAtoms(input: {
       const children = new Map<ThreadId, Array<OrchestrationV2ThreadShell>>();
       for (const child of get(environmentThreadsAtom(environmentId))) {
         const parentId =
-          child.sideOfThreadId ??
+          sideChatParentThreadId(child.lineage) ??
           (child.lineage.relationshipToParent === "subagent" ? child.lineage.parentThreadId : null);
         if (parentId == null) continue;
         const siblings = children.get(parentId);

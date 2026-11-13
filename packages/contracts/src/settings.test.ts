@@ -90,18 +90,6 @@ describe("MCP settings contracts", () => {
   });
 });
 
-describe("ClientSettings side chat discard", () => {
-  it("prompts for existing installations and preserves an explicit opt-out", () => {
-    expect(decodeClientSettings({}).confirmSideChatDiscard).toBe(true);
-    expect(decodeClientSettings({ confirmSideChatDiscard: false }).confirmSideChatDiscard).toBe(
-      false,
-    );
-    expect(decodeClientSettingsPatch({ confirmSideChatDiscard: true })).toEqual({
-      confirmSideChatDiscard: true,
-    });
-  });
-});
-
 describe("ClientSettings word wrap", () => {
   it("defaults word wrap on", () => {
     expect(decodeClientSettings({}).wordWrap).toBe(true);

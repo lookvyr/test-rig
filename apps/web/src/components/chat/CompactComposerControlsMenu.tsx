@@ -1,27 +1,16 @@
-import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type { ProviderInteractionMode } from "@t3tools/contracts";
 import { memo } from "react";
 import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
-import {
-  Menu,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator as MenuDivider,
-  MenuTrigger,
-} from "../ui/menu";
-import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 
 /**
- * The narrow footer's overflow: plan mode and permissions. Effort and the model's other traits
- * live in the model picker at every width.
+ * The narrow footer's overflow, holding the plan mode toggle. Permissions, effort and the model's
+ * other traits live in the model picker at every width.
  */
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
-  runtimeMode: RuntimeMode;
-  showInteractionModeToggle: boolean;
   onToggleInteractionMode: () => void;
-  onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
   return (
     <Menu>
@@ -38,35 +27,16 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         <EllipsisIcon aria-hidden="true" className="size-4" />
       </MenuTrigger>
       <MenuPopup align="end">
-        {props.showInteractionModeToggle ? (
-          <>
-            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
-            <MenuRadioGroup
-              value={props.interactionMode}
-              onValueChange={(value) => {
-                if (!value || value === props.interactionMode) return;
-                props.onToggleInteractionMode();
-              }}
-            >
-              <MenuRadioItem value="default">Chat</MenuRadioItem>
-              <MenuRadioItem value="plan">Plan</MenuRadioItem>
-            </MenuRadioGroup>
-            <MenuDivider />
-          </>
-        ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Permissions</div>
+        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
         <MenuRadioGroup
-          value={props.runtimeMode}
+          value={props.interactionMode}
           onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onRuntimeModeChange(value as RuntimeMode);
+            if (!value || value === props.interactionMode) return;
+            props.onToggleInteractionMode();
           }}
         >
-          {runtimeModeOptions.map((mode) => (
-            <MenuRadioItem key={mode} value={mode}>
-              {runtimeModeConfig[mode].label}
-            </MenuRadioItem>
-          ))}
+          <MenuRadioItem value="default">Chat</MenuRadioItem>
+          <MenuRadioItem value="plan">Plan</MenuRadioItem>
         </MenuRadioGroup>
       </MenuPopup>
     </Menu>

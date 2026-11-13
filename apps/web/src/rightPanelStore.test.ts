@@ -125,7 +125,7 @@ describe("rightPanelStore", () => {
     useComposerDraftStore.getState().clearComposerContent(childRef);
   });
 
-  it("reconciles multiple side chats without reopening a hidden panel or remembering discarded chats", async () => {
+  it("reconciles side chats without reopening closed tabs, and remembers closed chats", async () => {
     const { useClosedViewStore } = await import("./closedViewStore");
     useClosedViewStore.setState({ entries: [] });
     const first = ThreadId.make("side-first");
@@ -139,14 +139,14 @@ describe("rightPanelStore", () => {
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
     ).toBe(false);
     panel.show(refA);
+    // Closing keeps the side chat, so the tab can be reopened from closed-tab history.
     panel.closeSurface(refA, `side-chat:${second}`);
-    panel.reconcileSideChatSurfaces(refA, [first]);
-    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
-      id: `side-chat:${first}`,
-      kind: "side-chat",
-      threadId: first,
-    });
-    expect(useClosedViewStore.getState().entries).toEqual([]);
+    panel.reconcileSideChatSurfaces(refA, [first, second]);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toEqual([{ id: `side-chat:${first}`, kind: "side-chat", threadId: first }]);
+    expect(useClosedViewStore.getState().entries.map((entry) => entry.kind)).toEqual(["panel-tab"]);
+    // A deleted side chat's tab closes.
     panel.reconcileSideChatSurfaces(refA, []);
     expect(
       selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,

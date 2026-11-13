@@ -1,74 +1,62 @@
-# Side-chat orchestration tools
+# Side chats
 
-Side chats use normal V2 threads and MCP credentials. Their `sideOfThreadId`
-controls presentation and lifetime, not the orchestration capability grant.
-Subagents use ordinary `subagent` lineage, with `sideOfThreadId: null`; inheriting
-that field incorrectly made their first turn require native side-chat context.
+Side chats follow upstream T3 Code's model (nightly `v0.1.10-nightly.20261112.4606`,
+introduced in upstream `50c1c5dc53`): a side chat is an ordinary V2 fork whose
+lineage carries `sideChat: true`. Earlier Test Rig side chats were temporary
+threads marked with `sideOfThreadId`; that field remains only so startup can
+delete any left over from before the change.
 
-Closing a side chat deletes its delegated descendants recursively. Independent
-historical forks and threads explicitly created with `create_threads` remain
-independent. Deleted threads reject new messages and MCP reads; their provider
-credentials are revoked during session cleanup. Internal event history remains.
-Temporary descendants share the owning main conversation's dispatch lock so
-new delegation cannot race deletion. Provider sessions shared by several
-threads receive a separate detach effect for each deleted thread.
+## Lifecycle
 
-## Tool audit (October 9, 2026)
+- **Open.** The client dispatches `thread.fork` with `sideChat: true` and
+  `sourcePoint: latest_stable`. A side chat may open before the parent has a
+  stable run; its context is then the parent's whole history as a digest. The
+  fork is refused for an archived or deleted parent, a parent whose worktree is
+  still being prepared, a side chat, or a subagent. Side chats get
+  `forkedFrom: null`, so their timeline shows only their own rows.
+- **First turn.** The pending fork transfer resolves as usual: a native fork
+  when the provider, native reference, and capabilities allow it and the parent
+  has no active run after the fork point (`sourceBusy`), otherwise a portable
+  `full_thread_summary`. `prepareSideChatContext` adds a `manual_context`
+  handoff with upstream's framing note, a digest of parent activity after the
+  fork point (8,000-character cap), and a `t3_thread_read` pointer. It is sent
+  inline with the first prompted turn and marked delivered once accepted. No
+  "Fork context" row is added; the client shows a "Context from" divider.
+- **Close.** Closing the tab dispatches `thread.delete` with `onlyIfUnused`,
+  which deletes only a thread with no runs and no messages and otherwise
+  succeeds without events. Closed side chat tabs enter closed-tab history.
+- **Delete.** Deleting a side chat deletes its subagent descendants. Deleting
+  the parent deletes its side chats and their descendants. A side chat and its
+  subagents share the parent's dispatch lock, and a side chat fork takes the
+  parent's lock, so delegation and side chat commands cannot race the cascade.
+- **Bring back.** The client dispatches `thread.merge_back` from the side
+  chat's latest finished run. The server refuses while the parent has active or
+  queued runs; a newer merge-back replaces a pending one.
 
-The audit covers the orchestrator toolkit and adjacent thread, worktree, and PR
-tools. There is no separate reduced side-chat toolkit. Existing project scope,
-active-run ownership, provider availability, permission modes, and explicit
-user authorization still apply.
+Side chats are hidden from thread lists, search, the command palette, MCP
+thread lists, and lineage graphs. Worktree cleanup treats a side chat as settled
+when its parent is, since side chats have no settle control of their own. Idle
+compaction skips side chats.
 
-| Tools                                                                                                                 | Availability and fit                                                                                                                                                          |
-| --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `orchestrator_capabilities`                                                                                           | Available; discovers the same providers and orchestration features as a main thread.                                                                                          |
-| `delegate_task`, `task_status`, `task_cancel`                                                                         | Available; appropriate for temporary work. Delegated children and further descendants belong to the side chat's cleanup tree.                                                 |
-| `t3_thread_list`, `t3_thread_read`, `t3_thread_search`, `t3_thread_wait`                                              | Available under normal project/attached-context access rules. Deleted chats are not readable through these tools.                                                             |
-| `t3_thread_send`, `t3_thread_interrupt`                                                                               | Available under normal active-caller and permission checks. Already-delivered messages survive closing the sender.                                                            |
-| `t3_thread_update`                                                                                                    | Available for renaming, title regeneration, and PR metadata. Useful for meaningful side-chat tab titles.                                                                      |
-| `request_secret`                                                                                                      | Available with the normal active-run and user approval flow. Closing cancels pending runtime requests.                                                                        |
-| `t3_pending_request_*`, `t3_queue_*`                                                                                  | Available with the normal target, runtime-mode, and request-state checks. They operate on the existing thread runtime.                                                        |
-| `t3_thread_configuration`, `t3_thread_configure`                                                                      | Available. Existing provider-switch restrictions still apply to a side chat; this change does not add provider switching.                                                     |
-| `link_pull_request`, `unlink_pull_request`, `list_thread_pull_requests`, `watch_pull_request`, `unwatch_pull_request` | Available. Deletion removes watches for the side chat and its deleted descendants; late watch wakes cannot restart a deleted chat.                                            |
-| `t3_worktree_status`, `t3_worktree_list`, `t3_worktree_handoff`                                                       | Available under existing worktree capability and lifecycle checks. A handoff is an explicit workspace change, and file changes survive closing.                               |
-| `create_threads`, `t3_thread_fork`, `t3_thread_transfers`                                                             | Available. Creating/forking deliberately produces an independent durable chat; it is not a way to create another temporary tab.                                               |
-| `t3_thread_merge_back`                                                                                                | Not available in practice: it requires the caller to be a fork of the target, and side chats are never forks. A fork merges its findings into the parent's next user message. |
-| `list_scheduled_tasks`, `delete_scheduled_task`, `run_scheduled_task_now`                                             | Available under existing project/permission checks. These act on persistent project schedules, not on temporary chat ownership.                                               |
+## Agent guidance
+
+There is no side-chat instruction block in the provider system prompt. The
+first turn's inline context carries upstream's framing. Side chats use the
+normal MCP credentials and toolkit; `t3_thread_send` and `t3_thread_read` work
+under the usual project and permission checks.
 
 ## Flagged lifecycle mismatches
 
-These remain available; this change does not silently remove general project
-management tools from side chats.
-
-- `schedule_task` defaults to binding persistent recurring work to the current
-  thread. `update_scheduled_task` can bind it there too. Binding a schedule to a
-  side chat or one of its descendants is a poor fit: its target disappears on
-  close/restart. Prefer rejecting such bindings in a follow-up. Explicit
-  schedules that create independent threads are a separate durable action.
-- `t3_thread_organize` can pin, snooze, settle, or archive its target. Pinning and
-  unread state have no useful sidebar presentation for a side chat; archiving
-  one leaves an open temporary tab unusable. Prefer rejecting these actions
-  when the target is temporary while retaining organization of ordinary chats.
+- `schedule_task` can bind recurring work to a side chat, which has no sidebar
+  presence. Prefer rejecting such bindings in a follow-up.
+- `t3_thread_organize` can pin, snooze, settle, or archive a side chat. These have
+  no useful presentation for a side chat.
 
 ## Verification boundaries
 
-`SideChat.test.ts` exercises independent sides, parent deletion, native context
-capture without resuming the parent, nested MCP delegation/status/cancellation,
-recursive deletion, surviving siblings and independent forks, rejected late
-messages, and revoked chat access. Existing side-chat MCP tests cover sending
-and reading other threads, including accepted messages surviving discard.
-`SubagentProjection.test.ts` covers clearing the side marker on subagents.
-`ThreadDeletion.test.ts` covers cancellation, disposed result deliveries, and
-separate cleanup for threads sharing a provider session.
-
-Right-panel tests cover distinct tabs, reconciliation, hidden-panel state,
-legacy singleton migration, and exclusion from closed-tab history. Live Codex
-verification additionally exercised two concurrent chats, native forks, actual MCP delegation, a running child and grandchild disposed on close, successful provider cleanup receipts, a surviving sibling follow-up, and independent drafts across tab switches and panel collapse.
-Live Claude Sonnet verification exercised two native side chats, inherited
-parent context, MCP subagent delegation, reading a main-thread message added
-after the fork, and sending a message back with a verified main-thread reply.
-Closing one side removed its child and grandchild, cancelled the still-active
-grandchild, and completed all three provider-session cleanup receipts. The
-surviving side answered a follow-up, and its sibling's draft survived tab
-switches before disposal.
+`SideChat.test.ts` covers opening before the parent has a stable run, the
+first turn's inline context, `onlyIfUnused` deletion, the parent delete cascade,
+the nested side chat refusal, and the digest cap. `WorktreeCleanup.test.ts`
+covers a side chat following its settled parent. Right-panel and reopen tests
+cover reconciliation that never reopens a closed tab, closed-tab history, and
+skipping deleted side chats.

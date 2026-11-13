@@ -64,6 +64,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   replaceTextRange,
+  parseSideChatCommand,
   prepareComposerChipInsertion,
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
@@ -610,7 +611,8 @@ export interface ChatComposerProps {
   // Callbacks
   onResume?: (() => void) | undefined;
   onSend: (e?: { preventDefault: () => void }) => void;
-  onOpenSideChat?: (() => void) | undefined;
+  /** Offers `/side` in the slash menu. */
+  sideChatAvailable?: boolean | undefined;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   /** Approvals the typing guard holds back; the timeline hides them until typing pauses. */
@@ -702,7 +704,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerTerminalContextsRef,
     composerElementContextsRef,
     onSend,
-    onOpenSideChat,
+    sideChatAvailable,
     onInterrupt,
     onImplementPlanInNewThread,
     onHeldRequestIdsChange,
@@ -744,12 +746,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const pendingUserInputs = holdingUserInput ? [] : incomingPendingUserInputs;
   const activePendingProgress = holdingUserInput ? null : incomingPendingProgress;
   const activePendingIsResponding = !holdingUserInput && incomingPendingIsResponding;
-  const sendDisabledReason =
-    externalSendDisabledReason ??
-    (activePendingProgress === null && !canSendThreadFollowUp(activeThreadProjection)
-      ? "Waiting for the provider to accept steering"
-      : null);
-  const isSendDisabled = sendDisabledReason !== null;
   // Sending while a compaction runs stops it and sends the message next.
   const sendSkipsCompaction = useMemo(
     () =>
@@ -763,6 +759,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   const composerDraft = useComposerThreadDraft(composerDraftTarget);
   const prompt = composerDraft.prompt;
+  // `/side` opens its own thread, so it does not wait for the parent to accept steering.
+  const sendsSideChat = sideChatAvailable === true && parseSideChatCommand(prompt) !== null;
+  const sendDisabledReason =
+    externalSendDisabledReason ??
+    (activePendingProgress === null &&
+    !sendsSideChat &&
+    !canSendThreadFollowUp(activeThreadProjection)
+      ? "Waiting for the provider to accept steering"
+      : null);
+  const isSendDisabled = sendDisabledReason !== null;
   const composerImages = composerDraft.images;
   const composerTerminalContexts = composerDraft.terminalContexts;
   const composerElementContexts = composerDraft.elementContexts;
@@ -1233,14 +1239,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
-        ...(onOpenSideChat
+        ...(sideChatAvailable
           ? ([
               {
                 id: "slash:side",
                 type: "slash-command",
                 command: "side",
                 label: "/side",
-                description: "Open a side chat with this thread’s context",
+                description: "Ask a side question in a new side chat",
               },
             ] as const)
           : []),
@@ -1305,7 +1311,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return [];
   }, [
     composerTrigger,
-    onOpenSideChat,
+    sideChatAvailable,
     planModeUiEnabled,
     selectedProvider,
     selectedProviderStatus,
@@ -1437,7 +1443,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   });
   const providerEffort = describeComposerEffort(providerTraitsInput);
   const { accessDisplay } = resolveComposerControlsOwnership({
-    // Without a known default (side chats), keep the chip so the mode stays visible.
+    // Without a known default, keep the chip so the mode stays visible.
     matchesDefault:
       permissionsShownInStrip ||
       (defaultRuntimeMode !== undefined && runtimeMode === defaultRuntimeMode),
@@ -1940,14 +1946,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       if (item.type === "slash-command") {
         if (item.command === "side") {
-          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+          // The question follows the command; sending `/side` alone opens an empty side chat.
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/side ", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-            focusEditorAfterReplace: false,
           });
-          if (applied) {
-            setComposerHighlightedItemId(null);
-            onOpenSideChat?.();
-          }
+          if (applied) setComposerHighlightedItemId(null);
           return;
         }
         if (item.command === "model") {
@@ -2010,7 +2013,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [
       applyPromptReplacement,
       handleInteractionModeChange,
-      onOpenSideChat,
       resolveActiveComposerTrigger,
       getComposerDraft,
       composerDraftTarget,
@@ -3724,13 +3726,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   onToggleInteractionMode={toggleInteractionMode}
                   onRuntimeModeChange={handleRuntimeModeChange}
                 />
-                {isComposerFooterCompact ? (
+                {/* Only the plan toggle needs a home here; the model picker holds Permissions. */}
+                {isComposerFooterCompact && composerProviderControls.showInteractionModeToggle ? (
                   <CompactComposerControlsMenu
                     interactionMode={interactionMode}
-                    runtimeMode={runtimeMode}
-                    showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                     onToggleInteractionMode={toggleInteractionMode}
-                    onRuntimeModeChange={handleRuntimeModeChange}
                   />
                 ) : null}
               </div>

@@ -421,6 +421,12 @@ describe("omitOlderSettledShells", () => {
       ...overrides,
     });
   const newest = Array.from({ length: 25 }, (_, index) => row(`new-${index}`, index / 10));
+  const sideChatLineage = {
+    parentThreadId: ThreadId.make("new-0"),
+    relationshipToParent: "fork" as const,
+    rootThreadId: ThreadId.make("new-0"),
+    sideChat: true,
+  };
   const omit = (threads: ReadonlyArray<OrchestrationV2ThreadShell>) =>
     omitOlderSettledShells({ threads, snapshotSequence: 7, now });
 
@@ -430,8 +436,8 @@ describe("omitOlderSettledShells", () => {
       row("old", 30),
       row("b-old", 40),
       row("unsettled", null),
-      row("old-side", 40, { sideOfThreadId: ThreadId.make("new-0") }),
-      row("recent-side", 0, { sideOfThreadId: ThreadId.make("new-0") }),
+      row("old-side", 40, { lineage: sideChatLineage }),
+      row("recent-side", 0, { lineage: sideChatLineage }),
     ]);
     expect(result.threads.map((thread) => thread.id)).toEqual([
       ...newest.map((thread) => thread.id),

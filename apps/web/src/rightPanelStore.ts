@@ -87,6 +87,7 @@ interface RightPanelStoreState {
   closeOtherSurfaces: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeSurfacesToRight: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeAllSurfaces: (ref: ScopedThreadRef) => void;
+  /** Closes side chat tabs whose side chat no longer exists; it never opens one. */
   reconcileSideChatSurfaces: (ref: ScopedThreadRef, threadIds: readonly ThreadId[]) => void;
   /** Hidden tabs keep an existing surface but never gain one, so an unrevealed agent tab can float first. */
   reconcileBrowserSurfaces: (
@@ -194,7 +195,6 @@ const closeThread = (
       (a, b) => Number(a.id === current.activeSurfaceId) - Number(b.id === current.activeSurfaceId),
     )) {
       if (
-        surface.kind === "side-chat" ||
         surface.kind === "terminal" ||
         (surface.kind === "preview" && surface.resourceId !== null)
       )
@@ -529,16 +529,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             const surfaces = current.surfaces.filter(
               (surface) => surface.kind !== "side-chat" || ids.has(surface.threadId),
             );
-            for (const threadId of ids) {
-              if (!surfaces.some((surface) => surface.id === `side-chat:${threadId}`)) {
-                surfaces.push({ id: `side-chat:${threadId}`, kind: "side-chat", threadId });
-              }
-            }
-            if (
-              surfaces.length === current.surfaces.length &&
-              surfaces.every((surface, index) => surface === current.surfaces[index])
-            )
-              return current;
+            if (surfaces.length === current.surfaces.length) return current;
             return {
               ...current,
               surfaces,

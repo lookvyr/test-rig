@@ -216,7 +216,15 @@ describe("idleCompactionWindow", () => {
     };
     expect(idleCompactionWindow(subagent, NOW_MS)).toBeNull();
     const sideChat = records(cache);
-    sideChat.thread = { ...sideChat.thread, sideOfThreadId: ThreadId.make("parent") };
+    sideChat.thread = {
+      ...sideChat.thread,
+      lineage: {
+        rootThreadId: ThreadId.make("parent"),
+        parentThreadId: ThreadId.make("parent"),
+        relationshipToParent: "fork",
+        sideChat: true,
+      },
+    };
     expect(idleCompactionWindow(sideChat, NOW_MS)).toBeNull();
   });
 });

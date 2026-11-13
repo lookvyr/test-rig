@@ -28,7 +28,6 @@ const clientSettings: ClientSettings = {
   browserDefaultProfileId: "default",
   confirmThreadArchive: true,
   confirmThreadDelete: false,
-  confirmSideChatDiscard: true,
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
   environmentIdentificationMode: "artwork",

@@ -200,11 +200,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
-    id: "side-chat-discard-confirmation",
-    title: "Side chat discard confirmation",
-    to: "/settings/general",
-  },
-  {
     id: "thread-title-instructions",
     title: "Thread title instructions",
     to: "/settings/general",

@@ -1,5 +1,9 @@
 import { resumableThreadRunId } from "../ChatView.logic";
-import { canSendThreadFollowUp } from "@t3tools/client-runtime/state/thread-workflows";
+import {
+  canSendThreadFollowUp,
+  resolveLatestMergeBackRun,
+} from "@t3tools/client-runtime/state/thread-workflows";
+import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
@@ -17,10 +21,11 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import type { LegendListRef } from "@legendapp/list/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDownIcon, MoreHorizontal } from "lucide-react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { ChevronDownIcon, Trash2Icon, Undo2Icon, XIcon } from "lucide-react";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { useComposerDraftStore, type ComposerImageAttachment } from "../../composerDraftStore";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { useTheme } from "../../hooks/useTheme";
 import { useEnvironment } from "../../state/environments";
@@ -73,16 +78,25 @@ import {
   serializeComposerPrompt,
   prepareComposerMessage,
 } from "./composerMessage";
-import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { parseSideChatCommand } from "../../composer-logic";
+import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const EMPTY_PROVIDERS: ServerProvider[] = [];
+
+/** Side chats opened with `/side <question>`; each sends its seeded draft once it can. */
+const pendingSends = new Set<string>();
+
+export function requestSideChatSend(threadRef: ScopedThreadRef): void {
+  pendingSends.add(scopedThreadKey(threadRef));
+}
 
 export function SideChatPanel(props: {
   threadRef: ScopedThreadRef;
   parentThread: Thread;
   focusRequest: number;
-  onDiscard: () => Promise<boolean>;
+  onDelete: () => void;
+  onClose: () => void;
   onOpenThread: (threadId: ThreadId) => void;
   onForkFromRun: (input: {
     readonly sourceThreadId: ThreadId;
@@ -102,6 +116,12 @@ export function SideChatPanel(props: {
   const environment = useEnvironment(threadRef.environmentId);
   const config = useAtomValue(serverEnvironment.configValueAtom(threadRef.environmentId));
   const settings = useEnvironmentSettings(threadRef.environmentId);
+  // Like the main composer, the permissions chip shows only when it differs from the default.
+  const projectDefaultRuntimeMode = resolveProjectSettings(
+    config?.settings ?? settings,
+    settingsThread.projectId,
+    project,
+  ).settings.defaultRuntimeMode;
   const { resolvedTheme } = useTheme();
   const keybindings = config?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS;
   const providers = config?.providers ?? EMPTY_PROVIDERS;
@@ -113,8 +133,7 @@ export function SideChatPanel(props: {
   const listRef = useRef<LegendListRef | null>(null);
   const sending = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const [actionBusy, setActionBusy] = useState(false);
-  const [showAgents, setShowAgents] = useState(false);
+  const [bringingBack, setBringingBack] = useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<RuntimeRequestId[]>([]);
   const [respondingInputIds, setRespondingInputIds] = useState<RuntimeRequestId[]>([]);
   const scroll = useTimelineScroll({ threadKey: scopedThreadKey(threadRef), listRef });
@@ -193,11 +212,8 @@ export function SideChatPanel(props: {
     activePendingUserInput: pendingUserInputs[0]?.requestId ?? null,
     threadError: error ?? thread?.runtime?.lastError,
   });
-  const providerThread = projection?.providerThreads.find(
-    (provider) => provider.id === thread?.activeProviderThreadId,
-  );
-  const failedFork = providerThread?.status === "error";
-  const preparing = !thread || (!providerThread?.nativeThreadRef && !failedFork);
+  // The side chat's context is captured at its first send, so it is ready once its thread exists.
+  const preparing = !thread || !projection;
   const unavailable = environment?.connection.phase !== "connected";
   const isWorking = phase === "running" || dispatch.isSendBusy;
   const messages = useMessagesWithImages(threadRef.environmentId, selectThreadMessages(projection));
@@ -229,7 +245,6 @@ export function SideChatPanel(props: {
       !thread ||
       !context?.providerAvailable ||
       preparing ||
-      failedFork ||
       unavailable ||
       sending.current ||
       dispatch.isSendBusy ||
@@ -287,7 +302,6 @@ export function SideChatPanel(props: {
       !thread ||
       !context?.providerAvailable ||
       preparing ||
-      failedFork ||
       unavailable ||
       sending.current ||
       dispatch.isSendBusy ||
@@ -309,8 +323,8 @@ export function SideChatPanel(props: {
       context.elementContexts.length === 0 &&
       context.previewAnnotations.length === 0 &&
       context.reviewComments.length === 0;
-    if (hasOnlyText && /^\/side\s*$/i.test(context.prompt.trim())) {
-      setError("Open another side chat from the main conversation.");
+    if (hasOnlyText && parseSideChatCommand(context.prompt) !== null) {
+      setError("Side chats cannot start side chats.");
       return;
     }
     const modeCommand =
@@ -494,15 +508,53 @@ export function SideChatPanel(props: {
       setError(String(squashAtomCommandFailure(result)));
     return result;
   };
-  const runAction = async (action: () => Promise<void>) => {
-    if (actionBusy) return;
-    setActionBusy(true);
-    try {
-      await action();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setActionBusy(false);
+  // Before its first turn a side chat may switch to any provider; after it, the usual rules apply.
+  const hasStartedSession = (projection?.runs.length ?? 0) > 0;
+  // A question from `/side <question>` sends once the side chat and its composer are ready.
+  const sendSeededQuestion = useEffectEvent(() => void send());
+  const threadKey = scopedThreadKey(threadRef);
+  const canAutoSend = !preparing && !unavailable;
+  useEffect(() => {
+    if (!canAutoSend || !pendingSends.has(threadKey)) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (pendingSends.delete(threadKey)) sendSeededQuestion();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [canAutoSend, threadKey]);
+
+  const mergeBack = useAtomCommand(threadEnvironment.mergeBack, { reportFailure: false });
+  const mergeRun = projection ? resolveLatestMergeBackRun(projection) : null;
+  // A pending merge-back waits for the parent's next message, so the server needs it idle.
+  const bringBackBlockedReason = threadRuntimeIsActive(props.parentThread.runtime)
+    ? "Available when the main thread is idle."
+    : mergeRun === null
+      ? "Available after a finished reply."
+      : null;
+  const bringBack = async () => {
+    if (bringBackBlockedReason !== null || mergeRun === null || bringingBack) return;
+    setBringingBack(true);
+    const result = await mergeBack({
+      environmentId: threadRef.environmentId,
+      input: {
+        sourceThreadId: threadRef.threadId,
+        targetThreadId: props.parentThread.id,
+        runId: mergeRun.id,
+      },
+    });
+    setBringingBack(false);
+    if (result._tag === "Success") {
+      toastManager.add({
+        type: "success",
+        title: "Brought back",
+        description: "The main thread gets this side chat with your next message there.",
+      });
+    } else if (!isAtomCommandInterrupted(result)) {
+      const failure = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Could not bring back the side chat",
+        description: failure instanceof Error ? failure.message : String(failure),
+      });
     }
   };
   const cwd = settingsThread.worktreePath ?? project?.workspaceRoot;
@@ -534,53 +586,51 @@ export function SideChatPanel(props: {
         }
       }}
     >
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/50 px-3">
-        <span
-          className="text-xs text-muted-foreground"
-          title="This conversation is temporary. It expires when the backend restarts."
-        >
-          Temporary
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/50 pr-1.5 pl-3">
+        <span className="min-w-0 flex-1 truncate text-xs font-medium" title={thread?.title}>
+          {thread?.title ?? "Side chat"}
         </span>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            aria-label="Side chat agents"
-            aria-expanded={showAgents}
-            onClick={() => setShowAgents((value) => !value)}
-            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-disabled={bringBackBlockedReason !== null || bringingBack}
+                onClick={() => void bringBack()}
+                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground aria-disabled:cursor-default aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground"
+              />
+            }
           >
-            <Bot className="size-3.5" /> Agents
-          </button>
-          <Menu>
-            <MenuTrigger
-              aria-label="Side chat actions"
-              className="rounded p-1 text-muted-foreground hover:bg-accent"
-              disabled={actionBusy}
-            >
-              <MoreHorizontal className="size-4" />
-            </MenuTrigger>
-            <MenuPopup align="end">
-              <MenuItem
-                onClick={() =>
-                  void runAction(async () => {
-                    await props.onDiscard();
-                  })
-                }
-              >
-                Discard side chat
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-        </div>
+            <Undo2Icon className="size-3.5" /> Bring back
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            {bringBackBlockedReason ?? "Adds this side chat to the main thread's next message."}
+          </TooltipPopup>
+        </Tooltip>
+        <button
+          type="button"
+          aria-label="Delete side chat"
+          title="Delete side chat"
+          onClick={props.onDelete}
+          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Trash2Icon className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          aria-label="Close side chat"
+          title="Close side chat"
+          onClick={props.onClose}
+          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <XIcon className="size-3.5" />
+        </button>
       </div>
-      {showAgents && thread ? (
-        <div className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border/50">
-          <ThreadRelationshipsPanel
-            environmentId={threadRef.environmentId}
-            threadId={threadRef.threadId}
-          />
-        </div>
-      ) : null}
+      <div className="flex shrink-0 items-center gap-2 px-3 pt-2 text-[11px] text-muted-foreground">
+        <span className="h-px flex-1 bg-border/60" />
+        <span className="min-w-0 truncate">Context from {props.parentThread.title}</span>
+        <span className="h-px flex-1 bg-border/60" />
+      </div>
       {shownError ? (
         <div role="alert" className="border-b border-border/50 px-3 py-2 text-xs text-destructive">
           {shownError}
@@ -589,9 +639,9 @@ export function SideChatPanel(props: {
       <div className="relative flex min-h-0 flex-1 flex-col">
         {timelineEntries.length === 0 ? (
           <div className="flex min-h-24 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
-            <p className="text-sm">Explore a side question</p>
+            <p className="text-sm">Ask a side question</p>
             <p className="max-w-xs text-xs text-muted-foreground">
-              Starts with the parent’s context from when you opened it.
+              It starts with what the main thread knows, and the main thread keeps working.
             </p>
           </div>
         ) : (
@@ -694,13 +744,7 @@ export function SideChatPanel(props: {
               phase={phase}
               isConnecting={false}
               isSendBusy={dispatch.isSendBusy}
-              sendDisabledReason={
-                failedFork
-                  ? "The side chat could not open. Discard it and try again."
-                  : preparing
-                    ? "Side chat is opening"
-                    : null
-              }
+              sendDisabledReason={preparing ? "Side chat is opening" : null}
               isPreparingWorktree={false}
               environmentUnavailable={
                 unavailable && environment
@@ -719,6 +763,7 @@ export function SideChatPanel(props: {
               showPlanFollowUpPrompt={false}
               activeProposedPlan={null}
               runtimeMode={runtimeMode}
+              defaultRuntimeMode={projectDefaultRuntimeMode}
               interactionMode={interactionMode}
               lockedProvider={
                 settingsThread.runtime?.providerName
@@ -756,7 +801,7 @@ export function SideChatPanel(props: {
                 if (
                   !getStartedThreadModelChangeBlockReason({
                     providers,
-                    hasStartedSession: true,
+                    hasStartedSession,
                     currentModelSelection: settingsThread.modelSelection,
                     currentProviderInstanceId: settingsThread.runtime?.providerInstanceId ?? null,
                     nextModelSelection: { instanceId, model },
@@ -769,7 +814,7 @@ export function SideChatPanel(props: {
               getModelDisabledReason={(instanceId, model) =>
                 getStartedThreadModelChangeBlockReason({
                   providers,
-                  hasStartedSession: true,
+                  hasStartedSession,
                   currentModelSelection: settingsThread.modelSelection,
                   currentProviderInstanceId: settingsThread.runtime?.providerInstanceId ?? null,
                   nextModelSelection: { instanceId, model },

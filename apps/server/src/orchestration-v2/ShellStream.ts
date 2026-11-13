@@ -44,7 +44,7 @@ export function buildActiveShellSnapshot(input: {
 
 type ShellTrimRow = Pick<
   OrchestrationV2ThreadShell,
-  "id" | "projectId" | "lineage" | "sideOfThreadId" | "settledOverride" | "settledAt"
+  "id" | "projectId" | "lineage" | "settledOverride" | "settledAt"
 >;
 
 /**
@@ -74,7 +74,7 @@ function shellTrimFacts(
       if (row.lineage.parentThreadId) subagentParentIds.add(row.lineage.parentThreadId);
     } else if (
       includeOlderSettled &&
-      row.sideOfThreadId == null &&
+      row.lineage.sideChat !== true &&
       row.settledOverride === "settled" &&
       row.settledAt !== null
     ) {

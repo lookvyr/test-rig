@@ -10,6 +10,7 @@ export const THREAD_DETAILS_ITEMS = [
   { id: "servers", label: "Servers", defaultVisible: true },
   { id: "automations", label: "Automations", defaultVisible: true },
   { id: "lineage", label: "Lineage", defaultVisible: true },
+  { id: "sideChats", label: "Side chats", defaultVisible: true },
   { id: "context", label: "Context window", defaultVisible: true },
 ] as const;
 

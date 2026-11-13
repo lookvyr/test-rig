@@ -24,6 +24,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 export const OrchestrationEffectRequestV2 = Schema.Union([
+  /** Retired with temporary side chats. Kept so old outbox rows still decode. */
   Schema.Struct({
     type: Schema.Literal("thread.side.open"),
     parentThreadId: ThreadId,

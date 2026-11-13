@@ -3,11 +3,13 @@ import { projectComposerContextForProvider } from "@t3tools/shared/composerConte
 import {
   CommandId,
   latestProviderTurnForAttempt,
+  type OrchestrationV2ContextHandoff,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2Run,
   type OrchestrationV2RunAttempt,
+  type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
   RunId,
   ThreadId,
@@ -68,6 +70,56 @@ const isProviderTurnStartError = Schema.is(ProviderTurnStartError);
 const refusedBeforePrompt = (error: unknown): boolean =>
   Predicate.isTagged(error, "ClaudeBackgroundWorkBlocksQueryReplacementError") ||
   (Predicate.hasProperty(error, "cause") && refusedBeforePrompt(error.cause));
+
+type SideChatContextProjection = Pick<
+  OrchestrationV2ThreadProjection,
+  "thread" | "contextTransfers" | "contextHandoffs" | "runs" | "messages"
+>;
+
+/** A side chat's opening context: parent activity after the fork point, sent inline. */
+function isSideChatContextHandoff(
+  projection: Pick<SideChatContextProjection, "thread" | "contextTransfers">,
+  handoff: OrchestrationV2ContextHandoff,
+): boolean {
+  return (
+    projection.thread.lineage.sideChat === true &&
+    handoff.strategy === "manual_context" &&
+    projection.contextTransfers.some(
+      (transfer) => transfer.type === "fork" && transfer.id === handoff.transferId,
+    )
+  );
+}
+
+/**
+ * The side chat context `run` should send ahead of its prompt. It is carried forward until a
+ * provider turn accepts it: past a run that failed, stopped, or sent no prompt (`/compact`, `/goal`).
+ */
+export function pendingSideChatContext(
+  projection: SideChatContextProjection,
+  run: Pick<OrchestrationV2Run, "id">,
+): OrchestrationV2ContextHandoff | undefined {
+  return projection.contextHandoffs.find(
+    (handoff) =>
+      isSideChatContextHandoff(projection, handoff) &&
+      handoff.status === "ready" &&
+      handoff.delivery === undefined &&
+      (handoff.targetRunId === run.id ||
+        projection.runs.some(
+          (source) =>
+            source.id === handoff.targetRunId &&
+            (source.status === "failed" ||
+              source.status === "interrupted" ||
+              source.status === "cancelled" ||
+              (source.status === "completed" &&
+                projection.messages.some(
+                  (message) =>
+                    message.id === source.userMessageId &&
+                    message.attachments.length === 0 &&
+                    /^\/(?:compact\s*$|goal(?:\s|$))/iu.test(message.text.trim()),
+                ))),
+        )),
+  );
+}
 
 export interface ProviderTurnStartServiceV2Shape {
   /**
@@ -308,8 +360,12 @@ export const layer: Layer.Layer<
       const checkpointScope = projection.checkpointScopes.find(
         (candidate) => candidate.id === rootNode?.checkpointScopeId,
       );
+      const isSideChatHandoff = (handoff: OrchestrationV2ContextHandoff) =>
+        isSideChatContextHandoff(projection, handoff);
+      const sideChatHandoff = pendingSideChatContext(projection, run);
       const handoffs = projection.contextHandoffs.filter(
         (handoff) =>
+          !isSideChatHandoff(handoff) &&
           handoff.status === "ready" &&
           (handoff.targetRunId === run.id ||
             (handoff.toProviderThreadId === run.providerThreadId &&
@@ -653,24 +709,6 @@ export const layer: Layer.Layer<
             }),
           );
         }
-        if (
-          projection.thread.sideOfThreadId != null &&
-          (providerThread.nativeThreadRef?.strength !== "strong" ||
-            providerThread.status === "error")
-        ) {
-          return yield* loadFromProvider(
-            Effect.fail(
-              new ProviderAdapterTurnStartError({
-                driver: session.driver,
-                threadId: projection.thread.id,
-                providerThreadId: providerThread.id,
-                runId,
-                cause:
-                  "The side chat's native context is unavailable. Discard it and open a new side chat.",
-              }),
-            ),
-          );
-        }
         if (providerThread.nativeThreadRef === null) {
           // Hand the run's provider thread to the adapter so it adopts this
           // row's identity when attaching native state. An adapter that mints
@@ -714,9 +752,6 @@ export const layer: Layer.Layer<
           return resumed.success;
         }
 
-        if (projection.thread.sideOfThreadId != null) {
-          return yield* loadFromProvider(Effect.fail(resumed.failure));
-        }
         yield* Effect.logWarning("Provider resume failed; attempting a fresh native session", {
           driver: session.driver,
           providerThreadId: providerThread.id,
@@ -1164,6 +1199,25 @@ export const layer: Layer.Layer<
           // unless the provider takes it out of band.
           const goalCommand =
             message.attachments.length === 0 && /^\/goal(?:\s|$)/u.test(userText.trim());
+          const persistHandoff = (handoff: OrchestrationV2ContextHandoff) =>
+            Effect.gen(function* () {
+              const updatedAt = yield* DateTime.now;
+              yield* eventSink.write({
+                events: [
+                  {
+                    id: yield* idAllocator.allocate.event({
+                      threadId: projection.thread.id,
+                    }),
+                    type: "context-handoff.updated",
+                    threadId: projection.thread.id,
+                    runId: run.id,
+                    providerInstanceId: run.providerInstanceId,
+                    occurredAt: updatedAt,
+                    payload: { ...handoff, updatedAt },
+                  },
+                ],
+              });
+            });
           const delivery = yield* deliverContextHandoffs({
             handoffs: [...effectiveHandoffs, ...retryHandoff],
             deferInline: compact || goalCommand,
@@ -1192,31 +1246,20 @@ export const layer: Layer.Layer<
                       ...history,
                     }),
                 }),
-            persist: (handoff) =>
-              Effect.gen(function* () {
-                const updatedAt = yield* DateTime.now;
-                yield* eventSink.write({
-                  events: [
-                    {
-                      id: yield* idAllocator.allocate.event({
-                        threadId: projection.thread.id,
-                      }),
-                      type: "context-handoff.updated",
-                      threadId: projection.thread.id,
-                      runId: run.id,
-                      providerInstanceId: run.providerInstanceId,
-                      occurredAt: updatedAt,
-                      payload: { ...handoff, updatedAt },
-                    },
-                  ],
-                });
-              }),
+            persist: persistHandoff,
           });
           if (!(yield* isCurrentAttemptInStatus("running"))) return;
           const start = compact ? session.compactThread! : session.startTurn;
+          // Like history, the side chat context waits for a turn that sends a prompt.
+          const sideChatContext =
+            sideChatHandoff === undefined || compact || goalCommand
+              ? ""
+              : sideChatHandoff.summaryText;
           const context = goalCommand
             ? ""
-            : [delivery.context, restartNote].filter((part) => part !== "").join("\n\n");
+            : [delivery.context, sideChatContext, restartNote]
+                .filter((part) => part !== "")
+                .join("\n\n");
           // A note continuation has no turn to resume; its text is the prompt.
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;
           yield* start({
@@ -1242,13 +1285,30 @@ export const layer: Layer.Layer<
           );
           // The provider already accepted the turn. A stale pending marker
           // can force a fresh thread later, but must not stop live ingestion.
-          yield* delivery.delivered.pipe(
-            Effect.catchCause(() =>
-              Effect.logWarning("Failed to record accepted context handoff delivery", {
-                runId: run.id,
-                deliveryStatus: "pending",
-              }),
-            ),
+          const nativeThreadId = runningProviderThread.nativeThreadRef?.nativeId;
+          yield* Effect.forEach(
+            [
+              delivery.delivered,
+              ...(sideChatContext === "" || sideChatHandoff === undefined || nativeThreadId == null
+                ? []
+                : [
+                    persistHandoff({
+                      ...sideChatHandoff,
+                      toProviderThreadId: runningProviderThread.id,
+                      delivery: { nativeThreadId, status: "inline" as const, itemIds: [] },
+                    }),
+                  ]),
+            ],
+            (record) =>
+              record.pipe(
+                Effect.catchCause(() =>
+                  Effect.logWarning("Failed to record accepted context handoff delivery", {
+                    runId: run.id,
+                    deliveryStatus: "pending",
+                  }),
+                ),
+              ),
+            { discard: true },
           );
         }).pipe(
           Effect.mapError((cause) =>
@@ -1266,6 +1326,7 @@ export const layer: Layer.Layer<
       const deliverySession =
         effectiveHandoffs.length === 0 &&
         missedItems.length === 0 &&
+        sideChatHandoff === undefined &&
         restartNote === "" &&
         !noteContinuation
           ? session

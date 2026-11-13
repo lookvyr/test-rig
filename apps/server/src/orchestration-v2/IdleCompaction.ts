@@ -67,8 +67,8 @@ export function idleCompactionWindow(
   if (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs)
     return null;
   if (thread.lineage.relationshipToParent === "subagent") return null;
-  // Side chats are temporary and end when closed; they never come back to a cold cache.
-  if (thread.sideOfThreadId != null) return null;
+  // Side chats are short asides; keeping their cache warm is not worth a compaction.
+  if (thread.lineage.sideChat === true) return null;
   const latestRun = latestStartedRun(runs);
   if (latestRun?.status !== "completed" || latestRun.completedAt === null) return null;
   const message = messages.find((candidate) => candidate.id === latestRun.userMessageId);

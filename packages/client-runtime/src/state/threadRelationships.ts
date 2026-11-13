@@ -79,7 +79,10 @@ export function deriveThreadRelationshipGraph(input: {
     );
   };
 
+  // Side chats are listed in their parent's own Side chats section, not as lineage.
+  const isSideChat = (threadId: ThreadId) => threadsById.get(threadId)?.lineage.sideChat === true;
   for (const thread of threads) {
+    if (thread.lineage.sideChat === true) continue;
     const parentThreadId =
       thread.forkedFrom?.type === "run"
         ? thread.forkedFrom.threadId
@@ -107,7 +110,12 @@ export function deriveThreadRelationshipGraph(input: {
       });
     }
     for (const transfer of input.projection.contextTransfers) {
-      if (transfer.sourceThreadId === transfer.targetThreadId) continue;
+      if (
+        transfer.sourceThreadId === transfer.targetThreadId ||
+        isSideChat(transfer.sourceThreadId) ||
+        isSideChat(transfer.targetThreadId)
+      )
+        continue;
       addEdge({
         sourceThreadId: transfer.sourceThreadId,
         targetThreadId: transfer.targetThreadId,

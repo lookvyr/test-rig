@@ -19,8 +19,8 @@ work. Switching back to the old engine therefore cannot retain that later work.
 
 The old orchestration reactor and provider event pump are not started alongside
 the native runtime. Restart recovery records interrupted/background work without
-automatically prompting providers to continue it. Temporary side chats expire at
-startup; their parent conversations remain intact.
+automatically prompting providers to continue it. Side chats from before saved side
+chats (marked `sideOfThreadId`) are deleted at startup; their parents remain intact.
 
 ## Transport and client
 
@@ -46,9 +46,8 @@ not prevent the first provider turn. Worktree provisioning failure fails the hel
 run. Archive cancels queued/preparing/not-yet-started runs; late preparation cannot
 release them or restore a removed worktree path.
 
-Codex and Claude side chats capture the parent's native context immediately and
-start with an empty visible transcript. They are temporary and support discard,
-not conversion into a durable fork. Explicit linked/unlinked PR choices, worktree
+Side chats were temporary at cutover; they are now saved forks (see
+[side-chat-tools.md](./side-chat-tools.md)). Explicit linked/unlinked PR choices, worktree
 cleanup guards, pending approvals/questions, subagent presentation, settlement,
 and snooze behavior use the native projection and effect boundaries.
 

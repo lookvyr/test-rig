@@ -280,6 +280,12 @@ export function parseStandaloneComposerSlashCommand(text: string): "plan" | "def
   return "default";
 }
 
+/** `/side [question]`, or its alias `/btw [question]`, as the whole message. */
+export function parseSideChatCommand(text: string): { readonly prompt: string } | null {
+  const match = /^\/(?:side|btw)(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  return match ? { prompt: match[1]?.trim() ?? "" } : null;
+}
+
 export function replaceTextRange(
   text: string,
   rangeStart: number,

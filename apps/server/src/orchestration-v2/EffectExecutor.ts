@@ -1,5 +1,3 @@
-import { openSideChat } from "./SideChat.ts";
-import { RuntimePolicyV2 } from "./RuntimePolicy.ts";
 import { CommandId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -33,7 +31,6 @@ export const executorLayer: Layer.Layer<
   | RuntimeRequestService.RuntimeRequestServiceV2
   | ThreadTitleRegenerationService.ThreadTitleRegenerationService
   | ThreadManagementService.ThreadManagementService
-  | RuntimePolicyV2
   | ServerSettings.ServerSettingsService
 > = Layer.effect(
   OrchestrationEffectExecutorV2,
@@ -48,33 +45,14 @@ export const executorLayer: Layer.Layer<
     const threadTitleRegeneration =
       yield* ThreadTitleRegenerationService.ThreadTitleRegenerationService;
     const threads = yield* ThreadManagementService.ThreadManagementService;
-    const runtimePolicy = yield* RuntimePolicyV2;
     const settings = yield* ServerSettings.ServerSettingsService;
     return OrchestrationEffectExecutorV2.of({
       execute: (effect, options) => {
         const willRetry = options?.willRetry ?? false;
         switch (effect.request.type) {
+          // Retired with temporary side chats; an old outbox row has nothing left to do.
           case "thread.side.open":
-            return openSideChat({
-              commandId: effect.commandId,
-              parentThreadId: effect.request.parentThreadId,
-              sideThreadId: effect.threadId,
-            }).pipe(
-              Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
-              Effect.provideService(
-                ProviderSessionManager.ProviderSessionManagerV2,
-                providerSessions,
-              ),
-              Effect.provideService(RuntimePolicyV2, runtimePolicy),
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationEffectExecutionError({
-                    effectId: effect.id,
-                    effectType: effect.request.type,
-                    cause,
-                  }),
-              ),
-            );
+            return Effect.void;
           case "provider-runtime.continue":
             return continueRestartedRun({
               threadId: effect.threadId,

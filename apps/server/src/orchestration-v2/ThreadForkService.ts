@@ -56,12 +56,14 @@ export function forkableSourceRunStatusError(
 export interface ThreadForkServiceV2Shape {
   readonly plan: (input: {
     readonly sourceProjection: Pick<OrchestrationV2ThreadProjection, "thread">;
-    readonly sourceRun: OrchestrationV2Run;
+    /** Null only for a side chat whose parent has no stable run yet. */
+    readonly sourceRun: OrchestrationV2Run | null;
     readonly sourceProviderThread: OrchestrationV2ProviderThread | undefined;
     readonly canonicalSourcePoint: OrchestrationV2ContextSourcePoint;
     readonly transferId: ContextTransferId;
     readonly targetThreadId: ThreadId;
     readonly title?: string;
+    readonly sideChat?: boolean;
     readonly createdBy: OrchestrationV2Actor;
     readonly creationSource: OrchestrationV2CreationSource;
     readonly createdAt: DateTime.Utc;
@@ -78,31 +80,53 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
   ThreadForkServiceV2.of({
     plan: (input) =>
       Effect.gen(function* () {
-        if (!isForkableSourceRunStatus(input.sourceRun.status)) {
+        const { sourceRun } = input;
+        const sourceLineage = input.sourceProjection.thread.lineage;
+        if (
+          input.sideChat === true &&
+          (sourceLineage.sideChat === true || sourceLineage.relationshipToParent === "subagent")
+        ) {
           return yield* new ThreadForkPlanError({
             sourceThreadId: input.sourceProjection.thread.id,
             targetThreadId: input.targetThreadId,
-            cause: forkableSourceRunStatusError(input.sourceRun),
+            cause:
+              sourceLineage.sideChat === true
+                ? "A side chat cannot start another side chat."
+                : "A subagent cannot start a side chat.",
+          });
+        }
+        if (sourceRun !== null && !isForkableSourceRunStatus(sourceRun.status)) {
+          return yield* new ThreadForkPlanError({
+            sourceThreadId: input.sourceProjection.thread.id,
+            targetThreadId: input.targetThreadId,
+            cause: forkableSourceRunStatusError(sourceRun),
           });
         }
         const targetThread: OrchestrationV2AppThread = {
           ...input.sourceProjection.thread,
+          // PR context follows the conversation; watching remains the source thread's job.
+          pullRequests: input.sourceProjection.thread.pullRequests?.map(
+            ({ watch: _watch, ...link }) => link,
+          ),
           createdBy: input.createdBy,
           creationSource: input.creationSource,
           id: input.targetThreadId,
           title: input.title ?? `${input.sourceProjection.thread.title} fork`,
+          // The source's title job completes only on the source thread.
+          titleRegeneration: null,
           activeProviderThreadId: null,
           sideOfThreadId: null,
           lineage: {
             parentThreadId: input.sourceProjection.thread.id,
             relationshipToParent: "fork",
             rootThreadId: input.sourceProjection.thread.lineage.rootThreadId,
+            ...(input.sideChat === true ? { sideChat: true } : {}),
           },
-          forkedFrom: {
-            type: "run",
-            threadId: input.sourceProjection.thread.id,
-            runId: input.sourceRun.id,
-          },
+          // Side chats show only their own rows; the fork transfer carries the parent's context.
+          forkedFrom:
+            sourceRun === null || input.sideChat === true
+              ? null
+              : { type: "run", threadId: input.sourceProjection.thread.id, runId: sourceRun.id },
           createdAt: input.createdAt,
           updatedAt: input.createdAt,
           archivedAt: null,
@@ -110,6 +134,9 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           settledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
+          pinnedAt: null,
+          pinOrderKey: null,
+          activeOrderKey: null,
           lastVisitedAt: null,
           // A fork is a new thread; its source's open history is not its own.
           opens: null,
@@ -122,7 +149,8 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           targetThreadId: input.targetThreadId,
           sourcePoint: input.canonicalSourcePoint,
           basePoint: null,
-          sourceProviderInstanceId: input.sourceRun.providerInstanceId,
+          sourceProviderInstanceId:
+            sourceRun?.providerInstanceId ?? input.sourceProjection.thread.providerInstanceId,
           targetProviderInstanceId: null,
           targetRunId: null,
           status: "pending",

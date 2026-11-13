@@ -66,41 +66,11 @@ Provider output comes back as internal commands such as `thread.message.assistan
 
 ## Side chats
 
-`thread.side.open` creates one hidden child with `sideOfThreadId` pointing to its parent.
-It inherits the parent's current model, permission mode, and checkout. The provider command
-reactor opens a separate runtime without starting a turn or continuing a goal. Codex uses native
-`thread/fork`; Claude uses the Agent SDK's `forkSession`, then resumes the persisted child.
-Native history supplies context; the child starts with an empty visible timeline.
-
-Claude's session helpers read `CLAUDE_CONFIG_DIR` from the process environment, so the fork runs
-in a short-lived subprocess with the selected provider instance's environment. The adapter tracks
-the current top-level native message UUID and forks through that exact boundary. Missing or
-incomplete boundaries fail without substituting older history. Compaction invalidates the boundary
-until a subsequent top-level message establishes it again. The latest submitted prompt UUID must
-also appear at or before the fork boundary, so an older in-flight response cannot hide a queued
-follow-up. Claude saves queued prompts as attachments with a separate UUID. The SDK's transcript
-import API supplies temporary in-memory metadata to resolve that UUID and verify ancestry within
-the retained prefix for both ordinary and queued requests. It does not retain prompt
-or tool contents. If compaction removes the request from that ancestry, another parent exchange
-is needed before forking. Stopped sessions and idle resumed sessions select the saved
-tail: persisted cursors can predate the last response and are not trusted as current boundaries.
-There is no transcript polling or replay of
-normalized messages. The child is persisted before opening completes, so Keep also works before
-the first side-chat message.
-
-Side chats use the ordinary thread commands, subscriptions, approvals, and checkpoints. Their
-native resume cursor is strict: a missing or rejected cursor must never fall back to a fresh
-conversation, including after Keep. Claude confirms native resumption before reporting the child
-ready. Per-turn side-chat instructions stop applying after Keep.
-The checkout is shared, so file changes and diffs are not isolated by conversation. Automatic
-branch naming skips shared worktrees. Checkpoint restore is unsupported for all
-conversations, including side chats and their parents.
-
-Closing the panel preserves the child. `thread.side.keep` clears the relationship on the same
-record; conditional `thread.delete` discards only a still-temporary child. Parent deletion
-cascades to temporary children. The deletion reactor expires remaining temporary children
-once at backend startup, before other reactors and client commands start. Hidden children
-remain in backing state for ownership checks but are excluded from navigation and search.
+The native (V2) runtime implements side chats as forks with `lineage.sideChat`; see
+[side-chat-tools.md](./side-chat-tools.md). Each provider sees an ordinary fork: a native fork
+(Codex `thread/fork`, Claude `forkSession`) when the source allows it, otherwise a portable summary,
+plus an inline context note on the first turn. Adapters add no side-chat instructions. The older
+`thread.side.open` path in the legacy engine is not started alongside the native runtime.
 
 ## Native goals
 

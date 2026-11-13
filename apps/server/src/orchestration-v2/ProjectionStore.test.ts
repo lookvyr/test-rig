@@ -2612,7 +2612,12 @@ it.layer(TestLayer)("ProjectionStoreV2", (it) => {
         lineage: { parentThreadId: root, relationshipToParent: "subagent", rootThreadId: root },
       });
       yield* createThread(ThreadId.make("thread:index-side"), {
-        sideOfThreadId: root,
+        lineage: {
+          parentThreadId: root,
+          relationshipToParent: "fork",
+          rootThreadId: root,
+          sideChat: true,
+        },
         settledOverride: "settled",
         settledAt: DateTime.makeUnsafe(0),
       });
@@ -6375,12 +6380,19 @@ it.effect.each([
           branch: null,
           worktreePath: null,
           activeProviderThreadId: null,
-          lineage: {
-            parentThreadId: input.subagent === true ? id("b") : null,
-            relationshipToParent: input.subagent === true ? "subagent" : null,
-            rootThreadId: input.subagent === true ? id("b") : id(input.name),
-          },
-          sideOfThreadId: input.sideChat === true ? id("b") : null,
+          lineage:
+            input.sideChat === true
+              ? {
+                  parentThreadId: id("b"),
+                  relationshipToParent: "fork",
+                  rootThreadId: id("b"),
+                  sideChat: true,
+                }
+              : {
+                  parentThreadId: input.subagent === true ? id("b") : null,
+                  relationshipToParent: input.subagent === true ? "subagent" : null,
+                  rootThreadId: input.subagent === true ? id("b") : id(input.name),
+                },
           forkedFrom: null,
           createdAt: now,
           updatedAt: now,

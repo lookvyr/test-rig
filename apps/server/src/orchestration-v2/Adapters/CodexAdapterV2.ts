@@ -735,7 +735,6 @@ export function buildCodexTurnStartParams(input: {
   readonly modelSelection: ModelSelection;
   readonly hasT3Mcp?: boolean;
   readonly skillCatalogue?: string;
-  readonly sideChat?: boolean;
   readonly browserToolsAvailable?: boolean;
   readonly deviceToolsAvailable?: boolean;
   /** ChatGPT token sharing does not accept service tiers. */
@@ -766,14 +765,13 @@ export function buildCodexTurnStartParams(input: {
         ? undefined
         : buildCodexDeveloperInstructions(input.runtimePolicy.interactionMode);
     const builtInContext =
-      input.hasT3Mcp === true || input.sideChat === true
+      input.hasT3Mcp === true
         ? buildCodexAdditionalContext(
             { model: input.modelSelection.model, reasoningEffort: effort ?? "medium" },
             {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
             },
-            input.sideChat,
           )
         : undefined;
     const additionalContext =
@@ -6202,7 +6200,6 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               ...(mcpSession?.skillCatalogue === undefined
                 ? {}
                 : { skillCatalogue: mcpSession.skillCatalogue }),
-              sideChat: turnInput.appThread.sideOfThreadId != null,
               browserToolsAvailable: mcpSession?.browserToolsAvailable ?? true,
               deviceToolsAvailable: mcpSession?.capabilities?.has("device") ?? false,
             });

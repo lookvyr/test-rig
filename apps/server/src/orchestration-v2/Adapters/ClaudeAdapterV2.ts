@@ -11,7 +11,6 @@ import {
   readWorkflowAgentTranscript,
   type WorkflowAgentTranscriptCursor,
 } from "../workflowAgentTranscript.ts";
-import { SIDE_CHAT_INSTRUCTIONS } from "../../provider/SideChatInstructions.ts";
 import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
 
@@ -1009,7 +1008,6 @@ To wait for a background command or Monitor you started (tests, a build), call \
 `;
 
 export function makeClaudeQueryOptions(input: {
-  readonly sideChat?: boolean;
   readonly modelSelection: ModelSelection;
   readonly modelCatalog?: ClaudeModelCatalog;
   readonly nativeThreadId: string;
@@ -1132,7 +1130,6 @@ export function makeClaudeQueryOptions(input: {
         (input.mcpServers === undefined
           ? ""
           : T3_CODE_ORCHESTRATION_INSTRUCTIONS + CLAUDE_BACKGROUND_WAIT_INSTRUCTIONS) +
-        (input.sideChat === true ? `\n\n${SIDE_CHAT_INSTRUCTIONS}` : "") +
         (input.skillCatalogue === undefined ? "" : `\n\n${input.skillCatalogue}`),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
@@ -8908,7 +8905,6 @@ export function makeClaudeAdapterV2(
               threadId: turnInput.threadId,
               providerSessionId: input.providerSessionId,
               options: makeClaudeQueryOptions({
-                sideChat: turnInput.appThread.sideOfThreadId != null,
                 skillCatalogue: McpProviderSession.readMcpProviderSession(turnInput.threadId)
                   ?.skillCatalogue,
                 modelSelection: turnInput.modelSelection,

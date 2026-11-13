@@ -110,7 +110,7 @@ export const make = Effect.gen(function* () {
       WHERE threads.deleted_at IS NULL AND threads.archived_at IS NULL
         AND projects.deleted_at IS NULL
         AND json_extract(threads.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
-        AND json_extract(threads.payload_json, '$.sideOfThreadId') IS NULL
+        AND json_extract(threads.payload_json, '$.lineage.sideChat') IS NOT 1
         AND json_extract(threads.payload_json, '$.settledOverride') = 'settled'
         AND json_extract(threads.payload_json, '$.settledAt') < ${before}
         AND (${projectIds} IS NULL OR threads.project_id IN (SELECT value FROM json_each(${projectIds})))
@@ -141,7 +141,7 @@ export const make = Effect.gen(function* () {
       INNER JOIN projection_projects AS projects ON projects.project_id = threads.project_id
       WHERE threads.deleted_at IS NULL AND threads.archived_at IS NULL AND projects.deleted_at IS NULL
         AND json_extract(threads.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
-        AND json_extract(threads.payload_json, '$.sideOfThreadId') IS NULL
+        AND json_extract(threads.payload_json, '$.lineage.sideChat') IS NOT 1
         AND ${indexedMessageCondition(sql)}
         AND NOT EXISTS (SELECT 1 FROM json_each(${substrings}) AS token
           WHERE instr(lower(replace(replace(json_extract(messages.payload_json, '$.text'), '’', ''''), '‘', '''')), token.value) = 0)

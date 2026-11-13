@@ -295,10 +295,17 @@ export function useThreadActions() {
               }),
             )
           : undefined;
-      const survivingThreads =
-        deletedIds && deletedIds.size > 0
-          ? threads.filter((entry) => entry.id === threadRef.threadId || !deletedIds.has(entry.id))
-          : threads;
+      // Side chats share their parent's worktree and are deleted with it.
+      const sideChatIds = new Set(
+        threads
+          .filter((entry) => entry.sideOfThreadId === threadRef.threadId)
+          .map((entry) => entry.id),
+      );
+      const survivingThreads = threads.filter(
+        (entry) =>
+          !sideChatIds.has(entry.id) &&
+          (entry.id === threadRef.threadId || deletedIds?.has(entry.id) !== true),
+      );
       let orphanedWorktreePath = getOrphanedWorktreePathForThread(
         survivingThreads,
         threadRef.threadId,
@@ -316,7 +323,8 @@ export function useThreadActions() {
         if (
           occupants._tag !== "Success" ||
           occupants.value.threadIds.some(
-            (id) => id !== threadRef.threadId && deletedIds?.has(id) !== true,
+            (id) =>
+              id !== threadRef.threadId && !sideChatIds.has(id) && deletedIds?.has(id) !== true,
           )
         )
           orphanedWorktreePath = null;
@@ -383,6 +391,9 @@ export function useThreadActions() {
       }
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
       clearComposerDraftForThread(threadRef);
+      for (const sideChatId of sideChatIds) {
+        clearComposerDraftForThread(scopeThreadRef(threadRef.environmentId, sideChatId));
+      }
       clearProjectDraftThreadById(
         scopeProjectRef(threadRef.environmentId, thread.projectId),
         threadRef,

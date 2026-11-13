@@ -31,6 +31,7 @@ import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadPullRequestWatches, useWatchedThreadPullRequests } from "./ThreadPullRequestWatches";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { ThreadServersPanel } from "./ThreadServersPanel";
+import { ThreadSideChatsPanel } from "./ThreadSideChatsPanel";
 import { resolveThreadDetailsVisibility, THREAD_DETAILS_ITEMS } from "./threadDetailsItems";
 import { BranchToolbar, type BranchToolbarProps } from "../BranchToolbar";
 import { shouldShowEnvironmentIndicator } from "../BranchToolbar.logic";
@@ -244,6 +245,9 @@ export function ThreadDetailsPanel(props: {
                   threadId={props.threadRef.threadId}
                   hideWhenEmpty
                 />
+              ) : null}
+              {density === "full" && !props.isDraft && visible.sideChats ? (
+                <ThreadSideChatsPanel threadRef={props.threadRef} />
               ) : null}
               {visible.context && props.contextWindow ? (
                 <ThreadDetailsContext usage={props.contextWindow} />

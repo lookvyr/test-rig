@@ -106,7 +106,7 @@ A new approval or blocking question waits while you are typing in the focused
 composer. It appears after 1.5 seconds without a draft edit, when you move focus
 away, or after you send. Your unsent draft returns after you answer. A request
 that has already appeared is not hidden again when you resume typing. This also
-applies to temporary side chats.
+applies to side chats.
 
 While a request is held, Send keeps its normal meaning: it steers the active
 turn when steering is available. It does not submit your draft as a question
@@ -256,8 +256,8 @@ items from the initial handoff; the agent can retrieve them from the thread's
 history. Switching back reuses the provider's conversation when possible and
 supplies the intervening context.
 
-Side chats keep their original provider, and provider-native child conversations
-remain read-only.
+A side chat can use any provider for its first message, then keeps that provider.
+Provider-native child conversations remain read-only.
 
 ## Effort and speed
 
@@ -340,7 +340,7 @@ stay in its checkout. Merging again before you send that next message, from
 the same fork or another one, replaces the earlier summary. Messages Test Rig or
 an agent sends to the original conversation leave the summary waiting for yours.
 
-A fork is a durable chat, separate from a temporary `/side` conversation.
+A fork is a separate chat in the sidebar; a `/side` conversation stays inside its parent.
 Forking a conversation does not create a Git worktree or isolate file changes.
 Test Rig does not rewind conversations or edit sent messages; use a fork to try
 another direction. Checkpoint diffs remain available for reviewing file changes.

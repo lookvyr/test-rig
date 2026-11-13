@@ -1,29 +1,43 @@
 # Side chats
 
-A side chat lets you explore a question using the current conversation’s context without adding the exchange to that conversation.
+A side chat lets you ask a question about a conversation without adding to it. It starts with what the conversation knows, and the conversation keeps working while you ask.
 
-After the first Codex or Claude turn finishes, enter `/side`, or open the right panel and choose **Side chat** from its **+** menu. These options appear once a completed turn is available. Every invocation opens a new temporary side chat in its own tab. Side chats and their subagents do not appear as top-level conversations in the left sidebar.
+## Start a side chat
 
-You can start typing as soon as the side chat opens. Send becomes available when its context is ready.
+Start a message with `/side` or `/btw`, then your question, and send it. The side chat opens as a tab in the right panel and sends your question right away. The question must be text only; remove images, files, and other context first.
 
-The side chat receives a snapshot of the parent’s context when it opens. If the parent is working on another turn, the snapshot ends at the previous completed turn. Its visible conversation starts empty. You can send follow-up messages and images, run tools, delegate to subagents, answer questions, and stop its work independently. Open **Agents** within the side chat to inspect or stop its subagents. Each tab gets a title from its conversation and shows when it is working or needs attention. It starts with the parent’s model and permission settings; side chats do not introduce additional approval requirements.
+Send `/side` on its own, or choose **Side chat** from the right panel's **+** menu, to open an empty side chat.
 
-Side chats use the same checkout as their parent. Both can work at the same time, and both see file changes made by either conversation. Their later messages are separate.
+Side chats are available after the conversation's first message, including while it is still working. A side chat cannot start another side chat.
 
-New replies stay in view as they arrive. Scroll up to read earlier messages without being pulled back down. Returning to the bottom or choosing **Scroll to end** resumes following the conversation. Sending within 300 pixels of the content end also resumes following; sending while further up preserves your reading position.
+## What a side chat knows
 
-- Switching tabs, changing the main conversation, or hiding the right panel preserves each conversation and draft. Reopen the panel and select the existing tab to return to it; `/side` creates another chat.
-- Closing the Side chat tab with its **×**, the close-tab shortcut (**Ctrl+W** on Windows/Linux, **Cmd+W** on macOS), or a tab menu close action discards it. The shortcut closes the active right-panel tab when the panel is open; a focused terminal retains its own close shortcut.
-- **Discard side chat** in the side-chat actions menu does the same thing. Discarding stops the side chat and its entire subagent tree, ends their PR watches, and removes those conversations and drafts from the app. Discarded chats cannot be reopened through closed-tab history. File changes, messages already delivered to other chats, and explicitly created independent threads or historical forks remain. Stored history is retained internally. Other side chats and the main conversation are unaffected.
+A side chat starts with the conversation's context, plus a summary of what the conversation has done since its last finished turn. You can ask it to look up the conversation's latest state at any time.
 
-The first discard asks for confirmation. Select **Don’t ask again** when confirming to skip future prompts across side chats in this app. Cancel leaves the conversation and that preference unchanged. You can turn confirmation back on in **Settings → General → Side chat discard confirmation**. Bulk tab-close actions also ask before discarding a side chat unless you disabled confirmation.
+It starts with the model, reasoning level, and permissions shown in the conversation's composer, and its first reply uses them. Before you send its first message, you can pick any model or provider for it. Later changes in the conversation do not change existing side chats.
 
-If opening fails, discard the side chat and try again.
+A side chat works in the same folder as its conversation. Both can work at the same time, and both see file changes made by either one.
 
-Claude must save a complete conversation snapshot before it can open a side chat. Opening can fail briefly while a response is being saved, or while context compaction is incomplete. After compaction, you may need to send another message in the parent first. Discard the failed side chat and open another when the parent is ready. Test Rig does not start an empty conversation when a snapshot is unavailable.
+## Find a side chat again
 
-Temporary side chats and their subagents expire when Test Rig’s backend restarts. Deleting the main conversation also discards its side chats. Closing a browser tab or reconnecting does not discard them.
+Side chats do not appear in the sidebar. Every side chat a conversation has is listed under **Side chats** in thread details, with a count of the ones still working. Choose one to open its tab.
+
+When a side chat needs an approval or an answer, its tab, the conversation, and the conversation's row in the sidebar show it. You can approve from the conversation without switching tabs.
+
+Side chats are saved like any other conversation and remain after Test Rig restarts.
+
+## Bring back what you learned
+
+Choose **Bring back** at the top of a side chat to add the side chat's conversation to your next message in the main conversation. Nothing is sent until you send that message, so you can say what to do with it. Bring back is available when the main conversation is idle and the side chat has a finished reply. Bringing back again, from this or another side chat, replaces the earlier one.
+
+The side chat stays open afterward. You can also ask the side chat's agent to send a message to the main conversation directly.
+
+## Close and delete
+
+Close a side chat tab with its **×**, the close-tab shortcut (**Ctrl+W** on Windows/Linux, **Cmd+W** on macOS) while the right panel is focused or open, or **Close** at the top of the side chat. Closing keeps the side chat; reopen it from thread details or with the reopen-closed-tab shortcut. A side chat you never sent a message in is deleted when you close it.
+
+To delete a side chat you used, choose **Delete** at the top of the side chat. It asks first unless you turned off delete confirmation in **Settings → General**. Deleting a side chat does not undo its file changes or take back messages it already sent to other conversations.
+
+Deleting a conversation also deletes its side chats.
 
 Side chats support Codex and Claude.
-
-Ask the side-chat agent to send findings to the parent or another chat in the same project. You do not need to keep the side chat first. The agent reports whether the message started a turn, steered active work, or was queued until delivery is possible. An accepted message remains in the receiving chat if you discard the side chat afterward. Sending does not mean the receiving agent has finished responding.

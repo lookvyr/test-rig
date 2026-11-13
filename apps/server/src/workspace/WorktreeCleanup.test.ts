@@ -477,6 +477,31 @@ describe("settled worktree cleanup", () => {
       expect(NodeFS.existsSync(f.checkout)).toBe(false);
     }),
   );
+  it.effect("lets a side chat follow its settled parent", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const sideChat = {
+        ...f.thread,
+        id: decodeThreadId("side-chat"),
+        // The branch it was opened on; the parent's branch has moved on since.
+        branch: "opened-on-branch",
+        settledOverride: null,
+        settledAt: null,
+        lineage: {
+          parentThreadId: f.thread.id,
+          relationshipToParent: "fork" as const,
+          rootThreadId: f.thread.id,
+          sideChat: true,
+        },
+      };
+      f.setThreads([{ ...f.thread, settledOverride: "active", settledAt: null }, sideChat]);
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+      f.setThreads([f.thread, sideChat]);
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(false);
+    }),
+  );
   it.effect("leaves a checkout alone while a new user turn awaits provider startup", () =>
     Effect.gen(function* () {
       const f = yield* fixture;

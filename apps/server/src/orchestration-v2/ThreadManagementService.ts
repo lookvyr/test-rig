@@ -9,6 +9,7 @@ import type {
 import {
   type ChatAttachment,
   CommandId,
+  isListedThreadLineage,
   MessageId,
   type ModelSelection,
   type OrchestrationV2Actor,
@@ -56,7 +57,6 @@ export function withCreationProvenance(
   switch (command.type) {
     case "thread.create":
     case "message.dispatch":
-    case "thread.side.open":
     case "thread.fork":
     case "thread.merge_back":
     case "delegated_task.request":
@@ -635,9 +635,11 @@ const make = Effect.gen(function* () {
       ),
       Effect.map((snapshot) =>
         snapshot.threads
-          .filter(
-            (thread) =>
-              input.includeSubagents || thread.lineage.relationshipToParent !== "subagent",
+          .filter((thread) =>
+            // Side chats are never listed; they live inside their parent's view.
+            input.includeSubagents
+              ? thread.lineage.sideChat !== true
+              : isListedThreadLineage(thread.lineage),
           )
           .toSorted(
             (left, right) =>

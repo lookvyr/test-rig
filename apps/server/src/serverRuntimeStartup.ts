@@ -316,6 +316,8 @@ export const make = (options?: StartupOptions) =>
       yield* runStartupPhase("orchestration-v2.legacy-shells", legacyImporter.reconcileShells);
       yield* runStartupPhase(
         "orchestration-v2.expire-side-chats",
+        // Side chats used to be temporary threads marked with `sideOfThreadId`. Saved side chats
+        // are forks, so only that retired kind is deleted here.
         Effect.gen(function* () {
           const threads = yield* ThreadManagement.ThreadManagementService;
           const shell = yield* threads.getShellSnapshot();
@@ -325,7 +327,6 @@ export const make = (options?: StartupOptions) =>
               type: "thread.delete",
               commandId: CommandId.make(`expire-side:${thread.id}`),
               threadId: thread.id,
-              onlyIfSideOfThreadId: thread.sideOfThreadId,
             });
           }
         }),

@@ -6,6 +6,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
+  parseSideChatCommand,
   parseStandaloneComposerSlashCommand,
   prepareComposerChipInsertion,
   replaceTextRange,
@@ -376,6 +377,17 @@ describe("isCollapsedCursorAdjacentToInlineToken", () => {
 
     expect(isCollapsedCursorAdjacentToInlineToken(text, tokenEnd, "left")).toBe(true);
     expect(isCollapsedCursorAdjacentToInlineToken(text, tokenStart, "right")).toBe(true);
+  });
+});
+
+describe("parseSideChatCommand", () => {
+  it("reads /side and /btw with or without a question", () => {
+    expect(parseSideChatCommand("/side")).toEqual({ prompt: "" });
+    expect(parseSideChatCommand(" /BTW why is this slow?\nmore ")).toEqual({
+      prompt: "why is this slow?\nmore",
+    });
+    expect(parseSideChatCommand("/sidebar")).toBeNull();
+    expect(parseSideChatCommand("ask /side later")).toBeNull();
   });
 });
 

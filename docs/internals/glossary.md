@@ -48,9 +48,11 @@ The main durable unit of conversation and workspace history. In [the orchestrati
 
 #### Side chat
 
-A temporary provider-native fork shown in the parent's right panel. It has its own conversation
-and runtime but shares the checkout. Keeping it reveals the same record as an ordinary thread;
-discarding it removes the conversation without reverting file edits. See [providers.md][16].
+A fork marked with `lineage.sideChat`, shown only in its parent's right panel and thread details.
+It has its own conversation and runtime but shares the checkout. Its first turn receives the
+parent's context (native fork or portable summary) plus a digest of parent activity since the fork
+point. Closing an unused one deletes it; deleting the parent deletes it. See
+[side-chat-tools.md](./side-chat-tools.md).
 
 #### Thread opens
 

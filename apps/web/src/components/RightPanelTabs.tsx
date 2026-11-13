@@ -91,7 +91,7 @@ const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the Test Rig desktop app.",
   files: "Files are only available when a project is open.",
   diff: "Review is only available for server threads in Git repositories.",
-  sideChat: "Side chats are available after the first Codex or Claude turn finishes.",
+  sideChat: "Side chats start after the first message.",
 } as const;
 
 type TabContextMenuAction =

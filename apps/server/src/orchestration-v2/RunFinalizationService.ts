@@ -1,4 +1,11 @@
-import { CheckpointScopeId, EventId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  CheckpointScopeId,
+  EventId,
+  ProjectId,
+  RunId,
+  sideChatParentThreadId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
@@ -124,7 +131,8 @@ export const observerLive = Layer.effect(
           if (local.refName === null || local.isDefaultRef) return;
           const thread = yield* projections.getThreadShell(threadId);
           if (!thread || (thread.activeRunId !== null && thread.activeRunId !== runId)) return;
-          if (thread.branch !== local.refName) {
+          // A side chat shares its parent's checkout; the parent owns the branch label.
+          if (thread.branch !== local.refName && thread.lineage.sideChat !== true) {
             if (isTemporaryWorktreeBranch(local.refName)) return;
             const [shell, roots] = yield* Effect.all([
               projections.getShellSnapshot(),
@@ -138,6 +146,7 @@ export const observerLive = Layer.effect(
               shell.threads.some(
                 (other) =>
                   other.id !== threadId &&
+                  sideChatParentThreadId(other.lineage) !== threadId &&
                   workspaceCwd(other) === cwd &&
                   (thread.worktreePath !== null || other.activeRunId !== null),
               )

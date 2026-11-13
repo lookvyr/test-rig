@@ -343,14 +343,7 @@ export interface ProjectionTimelinePage {
 
 export interface ActiveShellIndexEntry extends Pick<
   OrchestrationV2ThreadShell,
-  | "id"
-  | "projectId"
-  | "lineage"
-  | "sideOfThreadId"
-  | "settledOverride"
-  | "settledAt"
-  | "pinnedAt"
-  | "snoozedUntil"
+  "id" | "projectId" | "lineage" | "settledOverride" | "settledAt" | "pinnedAt" | "snoozedUntil"
 > {
   readonly mayBeLive: boolean;
 }
@@ -6084,7 +6077,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       const rows = yield* sql<{
         readonly thread_id: string;
         readonly project_id: string;
-        readonly side_of_thread_id: string | null;
+        readonly side_chat: number | null;
         readonly relationship_to_parent: string | null;
         readonly parent_thread_id: string | null;
         readonly root_thread_id: string;
@@ -6097,7 +6090,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         SELECT
           t.thread_id,
           t.project_id,
-          json_extract(t.payload_json, '$.sideOfThreadId') AS side_of_thread_id,
+          json_extract(t.payload_json, '$.lineage.sideChat') AS side_chat,
           json_extract(t.payload_json, '$.lineage.relationshipToParent') AS relationship_to_parent,
           json_extract(t.payload_json, '$.lineage.parentThreadId') AS parent_thread_id,
           json_extract(t.payload_json, '$.lineage.rootThreadId') AS root_thread_id,
@@ -6142,8 +6135,6 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return rows.map((row): ActiveShellIndexEntry => ({
         id: ThreadId.make(row.thread_id),
         projectId: ProjectId.make(row.project_id),
-        sideOfThreadId:
-          row.side_of_thread_id === null ? null : ThreadId.make(row.side_of_thread_id),
         lineage: {
           parentThreadId:
             row.parent_thread_id === null ? null : ThreadId.make(row.parent_thread_id),
@@ -6152,6 +6143,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ? row.relationship_to_parent
               : null,
           rootThreadId: ThreadId.make(row.root_thread_id),
+          ...(row.side_chat === 1 ? { sideChat: true } : {}),
         },
         settledOverride:
           row.settled_override === "settled" || row.settled_override === "active"
@@ -6188,7 +6180,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         WHERE t.deleted_at IS NULL
           AND json_extract(t.payload_json, '$.archivedAt') IS NULL
           AND json_extract(t.payload_json, '$.lineage.relationshipToParent') IS NOT 'subagent'
-          AND json_extract(t.payload_json, '$.sideOfThreadId') IS NULL
+          AND json_extract(t.payload_json, '$.lineage.sideChat') IS NOT 1
           AND json_extract(t.payload_json, '$.settledOverride') = 'settled'
           AND json_extract(t.payload_json, '$.settledAt') IS NOT NULL${
             projectIds === undefined ? sql`` : sql` AND t.project_id IN ${sql.in(projectIds)}`
@@ -6457,7 +6449,7 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
               thread.deletedAt !== null ||
               thread.archivedAt !== null ||
               thread.lineage.relationshipToParent === "subagent" ||
-              thread.sideOfThreadId != null ||
+              thread.lineage.sideChat === true ||
               thread.settledOverride !== "settled" ||
               thread.settledAt === null ||
               (projectIds !== undefined && !projectIds.includes(thread.projectId))

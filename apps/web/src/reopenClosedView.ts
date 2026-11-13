@@ -14,6 +14,8 @@ export interface ReopenOwnerState {
   catalogReady: boolean;
   ownerExists: boolean;
   shellLive: boolean;
+  /** The view's own subject is gone for good, such as a deleted side chat. */
+  viewGone?: boolean;
   panel: ThreadRightPanelState;
 }
 
@@ -33,6 +35,10 @@ export function planNextReopen(
     if (!owner.ownerExists) {
       if (owner.shellLive) continue;
       break;
+    }
+    if (owner.viewGone === true) {
+      drop.push(entry);
+      continue;
     }
     const alreadyOpen =
       entry.kind === "panel-tab"
@@ -74,7 +80,10 @@ export async function reopenClosedView<E>(
     return true;
   }
   const surface = view.surface;
-  if (surface.kind === "side-chat") return false;
+  if (surface.kind === "side-chat") {
+    panels.openSideChat(view.threadRef, surface.threadId);
+    return true;
+  }
   if (!options.workspaceAvailable && (surface.kind === "file" || surface.kind === "files"))
     return false;
   if (surface.kind === "file")

@@ -172,8 +172,8 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
-    discardSide: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:thread:discard-side",
+    closeSide: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:close-side",
       execute: (input: DeleteThreadInput) => deleteThread(input),
       scheduler,
       concurrency,

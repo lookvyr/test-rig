@@ -113,8 +113,19 @@ export const OrchestrationV2AppThreadLineage = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   rootThreadId: ThreadId,
+  /** A side chat: a fork shown only inside its parent. Set from `thread.fork`. */
+  sideChat: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
+
+/** Subagents and side chats live inside their parent's view, never in thread lists. */
+export const isListedThreadLineage = (lineage: OrchestrationV2AppThreadLineage): boolean =>
+  lineage.relationshipToParent !== "subagent" && lineage.sideChat !== true;
+
+/** The parent of a side chat, or null for any other thread. */
+export const sideChatParentThreadId = (
+  lineage: OrchestrationV2AppThreadLineage,
+): ThreadId | null => (lineage.sideChat === true ? lineage.parentThreadId : null);
 
 export const OrchestrationV2ContextTransferType = Schema.Literals([
   "fork",
@@ -387,6 +398,7 @@ const LenientThreadOpens = Schema.NullOr(OrchestrationV2ThreadOpens).pipe(
 
 export const OrchestrationV2AppThread = Schema.Struct({
   worktreeCleanup: OrchestrationThreadShell.fields.worktreeCleanup,
+  /** Retired temporary side chat marker. Such threads are deleted at startup. */
   sideOfThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   pullRequestAutoLink: Schema.optional(Schema.Boolean),
   pullRequestAssociation: Schema.optional(Schema.NullOr(ThreadPullRequestAssociation)),
@@ -2136,15 +2148,11 @@ export function isLiveSubagentShell(
  * count every such thread, so the server and clients share this one rule.
  */
 export function isOlderSettledThreadShell(
-  thread: Pick<
-    OrchestrationV2ThreadShell,
-    "lineage" | "sideOfThreadId" | "settledOverride" | "settledAt"
-  >,
+  thread: Pick<OrchestrationV2ThreadShell, "lineage" | "settledOverride" | "settledAt">,
   beforeMs: number,
 ): boolean {
   return (
-    thread.lineage.relationshipToParent !== "subagent" &&
-    thread.sideOfThreadId == null &&
+    isListedThreadLineage(thread.lineage) &&
     thread.settledOverride === "settled" &&
     thread.settledAt !== null &&
     DateTime.toEpochMillis(thread.settledAt) < beforeMs
@@ -2892,7 +2900,8 @@ export const OrchestrationV2Command = Schema.Union([
     type: Schema.Literal("thread.delete"),
     commandId: CommandId,
     threadId: ThreadId,
-    onlyIfSideOfThreadId: Schema.optional(ThreadId),
+    /** Delete only a thread with no runs and no messages; otherwise succeed without a change. */
+    onlyIfUnused: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.settle"),
@@ -3230,13 +3239,6 @@ export const OrchestrationV2Command = Schema.Union([
     checkpointId: CheckpointId,
   }),
   Schema.Struct({
-    type: Schema.Literal("thread.side.open"),
-    ...OrchestrationV2CreationFields,
-    commandId: CommandId,
-    threadId: ThreadId,
-    sideThreadId: ThreadId,
-  }),
-  Schema.Struct({
     type: Schema.Literal("thread.fork"),
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
@@ -3244,6 +3246,7 @@ export const OrchestrationV2Command = Schema.Union([
     targetThreadId: ThreadId,
     sourcePoint: OrchestrationV2ThreadForkSourcePoint,
     title: Schema.optional(TrimmedNonEmptyString),
+    sideChat: Schema.optional(Schema.Boolean),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({
@@ -3325,14 +3328,6 @@ const OrchestrationV2InternalCommand = Schema.Union([
     status: Schema.NullOr(
       Schema.Struct({ state: Schema.Literals(["pending", "retained"]), reason: Schema.String }),
     ),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("thread.side.open.complete"),
-    commandId: CommandId,
-    threadId: ThreadId,
-    sideThreadId: ThreadId,
-    providerThread: Schema.optional(OrchestrationV2ProviderThread),
-    error: Schema.optional(Schema.String),
   }),
   /**
    * Records what a pull request watch saw, and wakes the agent in the same transaction when

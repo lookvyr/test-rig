@@ -73,7 +73,8 @@ export interface ThreadCommandInput extends CommandMetadata {
 }
 
 export interface DeleteThreadInput extends ThreadCommandInput {
-  readonly onlyIfSideOfThreadId?: ThreadId;
+  /** Delete only a thread with no runs and no messages, such as a side chat never used. */
+  readonly onlyIfUnused?: boolean;
 }
 export interface OpenSideThreadInput extends ThreadCommandInput {
   readonly sideThreadId: ThreadId;
@@ -412,22 +413,24 @@ export const deleteThread = Effect.fn("EnvironmentCommands.deleteThread")(functi
     type: "thread.delete",
     commandId: yield* allocateCommandId(input),
     threadId: input.threadId,
-    ...(input.onlyIfSideOfThreadId === undefined
-      ? {}
-      : { onlyIfSideOfThreadId: input.onlyIfSideOfThreadId }),
+    ...(input.onlyIfUnused === true ? { onlyIfUnused: true } : {}),
   });
 });
 
+/** Forks `threadId` into a side chat that works while the thread keeps running. */
 export const openSideThread = Effect.fn("EnvironmentCommands.openSideThread")(function* (
   input: OpenSideThreadInput,
 ) {
   return yield* dispatch({
-    type: "thread.side.open",
+    type: "thread.fork",
     commandId: yield* allocateCommandId(input),
-    threadId: input.threadId,
-    sideThreadId: input.sideThreadId,
     createdBy: "user",
     creationSource: "web",
+    sourceThreadId: input.threadId,
+    targetThreadId: input.sideThreadId,
+    sourcePoint: { type: "latest_stable" },
+    title: "Side chat",
+    sideChat: true,
   });
 });
 

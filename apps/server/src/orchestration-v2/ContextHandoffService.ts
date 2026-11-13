@@ -2,6 +2,7 @@ import {
   OrchestrationV2ContextHandoff,
   type OrchestrationV2TurnItem,
   type OrchestrationV2Run,
+  type OrchestrationV2ThreadProjection,
   ProviderInstanceId,
   ProviderThreadId,
   RunId,
@@ -12,6 +13,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import { createOrchestrationV2TurnItemVisibility } from "@t3tools/shared/orchestrationV2Timeline";
 
 import {
   DEFAULT_HANDOFF_TOKEN_CAP,
@@ -86,6 +88,19 @@ export interface ContextHandoffServiceV2Shape {
     readonly items: ReadonlyArray<OrchestrationV2TurnItem>;
     readonly createdAt: DateTime.Utc;
   }) => Effect.Effect<OrchestrationV2ContextHandoff, ContextHandoffServiceV2Error>;
+  /** Parent activity after the fork point, prepended to a side chat's first provider turn. */
+  readonly prepareSideChatContext: (input: {
+    readonly threadId: ThreadId;
+    readonly parentThreadId: ThreadId;
+    readonly targetRunId: RunId;
+    readonly transferId: NonNullable<OrchestrationV2ContextHandoff["transferId"]>;
+    readonly toProviderThreadId: ProviderThreadId;
+    readonly fromProviderInstanceId: ProviderInstanceId;
+    readonly toProviderInstanceId: ProviderInstanceId;
+    readonly coveredRunOrdinals: OrchestrationV2ContextHandoff["coveredRunOrdinals"];
+    readonly parentItems: ReadonlyArray<OrchestrationV2TurnItem>;
+    readonly createdAt: DateTime.Utc;
+  }) => Effect.Effect<OrchestrationV2ContextHandoff, ContextHandoffServiceV2Error>;
 }
 
 export class ContextHandoffServiceV2 extends Context.Service<
@@ -98,7 +113,22 @@ function compactText(text: string, maxLength = 240): string {
   if (compacted.length <= maxLength) {
     return compacted;
   }
-  return `${compacted.slice(0, maxLength - 3)}...`;
+  const end = maxLength - 3;
+  const last = compacted.charCodeAt(end - 1);
+  return `${compacted.slice(0, last >= 0xd800 && last <= 0xdbff ? end - 1 : end)}...`;
+}
+
+/** Drops rolled-back runs and cancelled queued messages, which are not part of the conversation. */
+export function visibleConversationItems(
+  projection: Pick<OrchestrationV2ThreadProjection, "runs" | "attempts">,
+  items: ReadonlyArray<OrchestrationV2TurnItem>,
+): ReadonlyArray<OrchestrationV2TurnItem> {
+  const visible = createOrchestrationV2TurnItemVisibility({
+    runs: projection.runs,
+    attempts: projection.attempts,
+    items,
+  });
+  return items.filter(visible);
 }
 
 function summarizeDeltaItem(item: OrchestrationV2TurnItem): string | null {
@@ -138,6 +168,41 @@ function makeForkDeltaSummary(input: {
     "",
     "Fork delta:",
     ...(itemLines.length === 0 ? ["- No user-visible delta items."] : itemLines),
+  ].join("\n");
+}
+
+const SIDE_CHAT_CONTEXT_MAX_CHARS = 8_000;
+
+/** Oldest first; parent items are summarized only until the context cap is reached. */
+export function makeSideChatContext(input: {
+  readonly parentThreadId: ThreadId;
+  readonly parentItems: ReadonlyArray<OrchestrationV2TurnItem>;
+}): string {
+  const framing =
+    "You are in a side chat beside the main thread. The main thread may still be running in the same worktree. Answer the user's questions; do not continue or redo the main thread's task.";
+  const header = "Main thread activity since this side chat's starting point:";
+  const truncated = "- Earlier items truncated.";
+  const footer = `Use t3_thread_read on thread ${input.parentThreadId} to see the main thread's live state.`;
+  const kept: Array<string> = [];
+  let omitted = false;
+  // The cap covers the whole block, so the fixed lines are reserved before any digest line.
+  let remaining =
+    SIDE_CHAT_CONTEXT_MAX_CHARS - [framing, "", header, truncated, "", footer].join("\n").length;
+  for (let index = input.parentItems.length - 1; index >= 0; index--) {
+    const line = summarizeDeltaItem(input.parentItems[index]!);
+    if (line === null) continue;
+    if (line.length + 1 > remaining) {
+      omitted = true;
+      break;
+    }
+    kept.unshift(line);
+    remaining -= line.length + 1;
+  }
+  return [
+    framing,
+    ...(kept.length === 0 ? [] : ["", header, ...(omitted ? [truncated] : []), ...kept]),
+    "",
+    footer,
   ].join("\n");
 }
 
@@ -485,11 +550,54 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
       } satisfies OrchestrationV2ContextHandoff;
     });
 
+    const prepareSideChatContext = Effect.fn(
+      "orchestrationV2.contextHandoff.prepareSideChatContext",
+    )(function* (input: Parameters<ContextHandoffServiceV2Shape["prepareSideChatContext"]>[0]) {
+      const handoffId = yield* idAllocator.allocate
+        .contextHandoff({
+          threadId: input.threadId,
+          fromProviderInstanceId: input.fromProviderInstanceId,
+          toProviderInstanceId: input.toProviderInstanceId,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ContextHandoffPrepareError({
+                threadId: input.threadId,
+                targetRunId: input.targetRunId,
+                fromProviderThreadIds: [],
+                toProviderThreadId: input.toProviderThreadId,
+                cause,
+              }),
+          ),
+        );
+      return {
+        id: handoffId,
+        transferId: input.transferId,
+        threadId: input.threadId,
+        targetRunId: input.targetRunId,
+        fromProviderThreadIds: [],
+        toProviderThreadId: input.toProviderThreadId,
+        coveredRunOrdinals: input.coveredRunOrdinals,
+        strategy: "manual_context",
+        status: "ready",
+        summaryMessageId: null,
+        summaryText: makeSideChatContext({
+          parentThreadId: input.parentThreadId,
+          parentItems: input.parentItems,
+        }),
+        createdByProviderInstanceId: null,
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      } satisfies OrchestrationV2ContextHandoff;
+    });
+
     return ContextHandoffServiceV2.of({
       prepareLegacyImport,
       prepare,
       prepareForkDelta,
       prepareProviderHandoff,
+      prepareSideChatContext,
     });
   },
 );

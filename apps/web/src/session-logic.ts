@@ -1058,28 +1058,6 @@ export function deriveCanInterruptRunningThread(
 
 export type { TurnDiffSummary };
 
-export function hasCompletedSideChatContext(
-  projection: OrchestrationV2ThreadProjection | null,
-): boolean {
-  if (projection === null) return false;
-  const providerThreadId = projection.thread.activeProviderThreadId;
-  return (
-    providerThreadId != null &&
-    projection.runs.some(
-      (run) =>
-        run.providerThreadId === providerThreadId &&
-        run.status !== "rolled_back" &&
-        (run.status === "completed" ||
-          projection.providerTurns.some(
-            (turn) =>
-              turn.providerThreadId === providerThreadId &&
-              turn.nodeId === run.rootNodeId &&
-              turn.status === "completed",
-          )),
-    )
-  );
-}
-
 export function isBlockingUserInput(request: PendingUserInput): boolean {
   return (
     request.isBlocking !== false &&

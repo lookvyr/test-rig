@@ -8,6 +8,8 @@ export interface ComposerThreadCandidate {
   readonly title: string;
   readonly updatedAt: string;
   readonly archivedAt: string | null;
+  /** Side chats live inside their parent and are not offered. */
+  readonly sideOfThreadId?: ThreadId | null;
 }
 
 export interface ComposerThreadItem {
@@ -37,6 +39,7 @@ export function matchComposerThreadItems(input: {
         shell.environmentId === input.environmentId &&
         shell.id !== input.excludeThreadId &&
         shell.archivedAt === null &&
+        shell.sideOfThreadId == null &&
         shell.title.toLowerCase().includes(query),
     )
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))

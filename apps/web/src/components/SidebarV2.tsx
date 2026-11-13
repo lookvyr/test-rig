@@ -127,7 +127,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments"
 import { useProjects, useThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
-import { threadEnvironment } from "../state/threads";
+import { environmentThreadShells, threadEnvironment } from "../state/threads";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -585,7 +585,17 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   // Same semantics as v1 (never-visited counts as read): flipping the beta
   // flag must not light up every historical thread as unread.
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
-  const status = resolveSidebarV2Status(thread);
+  // A side chat asks its user directly, so its approvals and questions flag the parent's row.
+  const sideChatsNeedingYou = useAtomValue(
+    environmentThreadShells.childThreadInputsAtom(threadRef),
+  ).filter((child) => child.sideOfThreadId === thread.id);
+  const ownStatus = resolveSidebarV2Status(thread);
+  const status =
+    ownStatus === "approval" || ownStatus === "input" || sideChatsNeedingYou.length === 0
+      ? ownStatus
+      : sideChatsNeedingYou.some((child) => child.hasPendingApprovals)
+        ? "approval"
+        : "input";
   // A woken thread reappears at its original position (the sort is
   // deliberately static), so the pill has to carry the weight. Snoozing is
   // an explicit act, so the pill clears only when the user re-engages:
