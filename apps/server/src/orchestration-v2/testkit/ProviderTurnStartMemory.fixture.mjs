@@ -108,6 +108,7 @@ function fixture(index) {
     thread: {
       id: "thread",
       projectId: "project",
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: "thread" },
       branch: null,
       worktreePath: null,
       archivedAt: null,

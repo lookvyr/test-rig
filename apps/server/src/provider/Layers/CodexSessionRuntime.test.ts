@@ -462,7 +462,7 @@ describe("T3 browser additional context", () => {
       NodeAssert.match(instructions, /test_rig/);
       NodeAssert.match(instructions, /preview_status/);
       NodeAssert.match(instructions, /preview_open/);
-      NodeAssert.match(instructions, /Do not switch to global browser skills/);
+      NodeAssert.match(instructions, /Switch browsers only if/);
     }
   });
 });

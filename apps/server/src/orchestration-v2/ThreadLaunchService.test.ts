@@ -877,12 +877,8 @@ it.effect("keeps native maintenance commands out of steering and restart message
           next: "Continue with the parser",
           mode: "steer_active",
         },
-        {
-          name: "steer-compaction",
-          first: "/compact",
-          next: "Continue with the parser",
-          mode: "steer_active",
-        },
+        // Steering into a running /compact stops it and sends the message next; see
+        // SteeringCompletion.integration.test.ts.
       ] as const) {
         const launched = yield* launches.launch(
           launchInput({
