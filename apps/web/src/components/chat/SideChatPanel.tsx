@@ -745,7 +745,6 @@ export function SideChatPanel(props: {
               composerRef={composerRef}
               onSend={(event) => void send(event)}
               onInterrupt={() => void onInterrupt()}
-              onCompactContext={() => void sendStandaloneCommand("/compact")}
               canResume={resumableRunId !== null && phase !== "running" && !dispatch.isSendBusy}
               onResume={() => {
                 if (resumableRunId !== null)

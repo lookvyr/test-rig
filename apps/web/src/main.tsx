@@ -7,6 +7,7 @@ import "./index.css";
 
 import { isElectron } from "./env";
 import { getRouter } from "./router";
+import { startWorkspaceFocus } from "./lib/workspaceFocus";
 import {
   syncDocumentElectronPlatformClasses,
   syncDocumentWindowControlsOverlayClass,
@@ -17,6 +18,7 @@ import { AppRoot } from "./AppRoot";
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);
+startWorkspaceFocus(router);
 
 if (isElectron) {
   syncDocumentElectronPlatformClasses(navigator.platform);

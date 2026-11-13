@@ -36,6 +36,7 @@ import { Input } from "../ui/input";
 import { SidebarInset } from "../ui/sidebar";
 import { RightPanelResizeHandle } from "../preview/RightPanelResizeHandle";
 import { isPullRequestSelectionAvailable } from "./selection";
+import { workspaceAreaProps } from "../../lib/workspaceFocus";
 import { PullRequestInspector } from "./PullRequestInspector";
 import { StartPullRequestThreadButton } from "./StartPullRequestThreadButton";
 import { PullRequestSelect } from "./PullRequestSelect";
@@ -387,6 +388,8 @@ export function PullRequestWorkspace() {
       </header>
       <div ref={workspaceRef} className="relative flex min-h-0 flex-1 overflow-hidden">
         <main
+          {...workspaceAreaProps("pull-requests", 1, "Pull requests")}
+          role="main"
           className={cn(
             "flex min-w-0 flex-1 flex-col",
             panelOpen && selection && "hidden md:flex",

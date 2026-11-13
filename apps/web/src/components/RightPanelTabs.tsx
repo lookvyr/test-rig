@@ -561,8 +561,17 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
     activeTab?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [props.activeSurfaceId]);
 
+  const activeSurface = props.surfaces.find((surface) => surface.id === props.activeSurfaceId);
+
   return (
     <PreviewPanelShell
+      workspaceArea
+      workspaceFocusKey={`panel:${props.activeSurfaceId ?? "empty"}`}
+      workspaceLabel={
+        activeSurface
+          ? `Workspace panel: ${surfaceTitle(activeSurface, props.previewSessions, props.terminalLabelsById, props.sideChatTitles)}`
+          : "Workspace panel"
+      }
       mode={props.mode}
       {...(props.maximized !== undefined ? { maximized: props.maximized } : {})}
     >

@@ -266,6 +266,8 @@ export function buildKeybindingCommandOptions(
 }
 
 export function commandLabel(command: KeybindingCommand): string {
+  if (command === "workspace.focusNext") return "Focus Next Workspace Area";
+  if (command === "workspace.focusPrevious") return "Focus Previous Workspace Area";
   if (command === "rightPanel.toggleMaximized") return "Right Panel: Toggle Full View";
   if (command === "terminal.previousGroup") return "Terminal: Previous Tab";
   if (command === "terminal.nextGroup") return "Terminal: Next Tab";

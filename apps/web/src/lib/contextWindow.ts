@@ -187,3 +187,14 @@ export function deriveThreadContextWindow(
   )?.tokenUsage;
   return deriveLatestContextWindowSnapshot(projection.visibleTurnItems, usage, providerThread);
 }
+
+export function formatContextWindowCompactionMessage(input: {
+  readonly providerDisplayName?: string | null | undefined;
+  readonly autoCompactThreshold?: number | null | undefined;
+}): string {
+  const threshold = input.autoCompactThreshold;
+  if (typeof threshold === "number" && threshold > 0) {
+    return `Compacts automatically at about ${threshold.toLocaleString("en-US")} tokens.`;
+  }
+  return `${input.providerDisplayName ?? "It"} automatically compacts its context when needed.`;
+}

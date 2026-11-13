@@ -136,12 +136,11 @@ conversation before it can compact.
 
 The work log distinguishes compaction in progress, completed compaction, a
 stopped compaction and a failed compaction. Stopping or interrupting compaction
-does not count as successful completion. The context-window indicator shows
-the current context usage, which is separate from cumulative token usage.
+does not count as successful completion. **Context window** in Thread details
+shows the current context usage, which is separate from cumulative token usage.
 
-For a provider that supports compaction, choose **Compact context** in that
-indicator, or select **/compact** from the command suggestions. The indicator
-action keeps your unsent draft and attachments in place while compaction runs.
+For a provider that supports compaction, select **/compact** from the command
+suggestions.
 
 While a compaction runs, you can still send a message: the send button reads
 **Skip compaction and send**. Sending stops the compaction, which shows as
@@ -151,8 +150,8 @@ Claude compacts on its own as its context fills. Set **Auto-compact after** in a
 Claude provider's settings to a number between `100000` and `1000000` to choose
 when, for example `300000`. Leave it empty to use Claude's default, or the
 `autoCompactWindow` in Claude's own settings files, including a model's
-`modelSettings` entry. When that point is known, the context-window indicator
-says "Compacts automatically at about N tokens" and marks it on the bar. Claude
+`modelSettings` entry. When that point is known, **Context window** in Thread
+details says "Compacts automatically at about N tokens" and marks it on the bar. Claude
 compacts about 33,000 tokens before the number you set.
 
 **Compact idle threads** in **Settings > General** decides what happens to an

@@ -33,6 +33,10 @@ interface ChatHeaderProps {
   activeProjectName: string | undefined;
   activeProjectCwd: string | null;
   onNewThreadInProject: () => void;
+  /** A subagent's parent conversation, shown between the project and the title. */
+  parentThreadId?: ThreadId | null;
+  parentThreadTitle?: string | undefined;
+  onOpenThread?: ((threadId: ThreadId) => void) | undefined;
 }
 
 /**
@@ -70,6 +74,9 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectName,
   activeProjectCwd,
   onNewThreadInProject,
+  parentThreadId = null,
+  parentThreadTitle = "Parent thread",
+  onOpenThread,
 }: ChatHeaderProps) {
   const activeThreadRef = useMemo(
     () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
@@ -181,6 +188,28 @@ export const ChatHeader = memo(function ChatHeader({
                 <span className="max-w-40 truncate text-sm font-medium">{activeProjectName}</span>
               </TooltipTrigger>
               <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
+            </Tooltip>
+            <span aria-hidden className="text-icon-muted">
+              /
+            </span>
+          </span>
+        ) : null}
+        {parentThreadId !== null && onOpenThread ? (
+          <span className="inline-flex min-w-0 shrink items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`Open parent thread: ${parentThreadTitle}`}
+                    onClick={() => onOpenThread(parentThreadId)}
+                    className="inline-flex min-w-0 cursor-pointer items-center rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                }
+              >
+                <span className="max-w-40 truncate text-sm font-medium">{parentThreadTitle}</span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">{parentThreadTitle}</TooltipPopup>
             </Tooltip>
             <span aria-hidden className="text-icon-muted">
               /

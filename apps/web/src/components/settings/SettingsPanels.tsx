@@ -130,6 +130,7 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
+import { ThreadDetailsItemsRow } from "./ThreadDetailsItemsRow";
 import { ProjectFavicon } from "../ProjectFavicon";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
@@ -895,6 +896,7 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
+        <ThreadDetailsItemsRow />
       </SettingsSection>
 
       <TypographySection />

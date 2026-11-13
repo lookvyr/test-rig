@@ -10,6 +10,8 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
  */
 const FORWARDED_COMMANDS: ReadonlySet<KeybindingCommand> = new Set<KeybindingCommand>([
   "commandPalette.toggle",
+  "workspace.focusNext",
+  "workspace.focusPrevious",
   "preview.toggle",
   "preview.new",
   "view.reopenClosed",

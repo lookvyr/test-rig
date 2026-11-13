@@ -1449,6 +1449,18 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         );
       if (forwarded && host) {
         event.preventDefault();
+        if (
+          forwarded.command === "workspace.focusNext" ||
+          forwarded.command === "workspace.focusPrevious"
+        ) {
+          // A replayed key would land back in this guest, since the app still focuses its
+          // webview. Take native focus back and name the command; the app moves on from the panel.
+          if (!input.isAutoRepeat) {
+            host.focus();
+            host.send(MENU_ACTION_CHANNEL, forwarded.command);
+          }
+          return;
+        }
         // Replay the chord in the app window so its own keybinding handlers run as if the app
         // had focus; the renderer lists which chords to take from the page.
         host.sendInputEvent({

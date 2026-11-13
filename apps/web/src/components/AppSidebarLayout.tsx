@@ -14,6 +14,7 @@ import { getLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { cn, isMacPlatform } from "../lib/utils";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { moveWorkspaceFocus, workspaceAreaProps } from "../lib/workspaceFocus";
 import { navigateHistory } from "../navigationHistory";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useEnvironmentIdentificationMode } from "../hooks/useSettings";
@@ -92,6 +93,29 @@ function SidebarControl() {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings, modalOpen, toggleSidebar]);
 
+  // Capture phase, so F6 also leaves widgets that swallow keys, such as the terminal.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("[data-keybinding-capture]")
+      ) {
+        return;
+      }
+      const command = resolveShortcutCommand(event, keybindings, {
+        context: { terminalFocus: isTerminalFocused() },
+      });
+      if (command !== "workspace.focusNext" && command !== "workspace.focusPrevious") return;
+      // Inside a dialog the move is refused, but the key is still consumed.
+      event.preventDefault();
+      event.stopPropagation();
+      moveWorkspaceFocus(command === "workspace.focusNext" ? 1 : -1);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [keybindings]);
+
   // Back and forward through visited pages, like the header's history buttons.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -142,6 +166,7 @@ function SidebarControl() {
 }
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
+  const sidebarArea = workspaceAreaProps("sidebar", 0, "Threads");
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
@@ -188,6 +213,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     }
 
     const unsubscribe = onMenuAction((action) => {
+      // A focused desktop browser page forwards F6; the app's own focus still points at it.
+      if (action === "workspace.focusNext" || action === "workspace.focusPrevious") {
+        moveWorkspaceFocus(action === "workspace.focusNext" ? 1 : -1, "panel");
+        return;
+      }
       if (action === "open-settings") {
         const isSettingsRoute = /^\/settings(\/|$)/.test(pathname);
         if (!isSettingsRoute) {
@@ -208,6 +238,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         collapsible="offcanvas"
         data-app-sidebar=""
         data-sidebar-version="v2"
+        {...sidebarArea}
+        role="navigation"
         className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
         resizable={{
           maxWidth: sidebarMaximumWidth,

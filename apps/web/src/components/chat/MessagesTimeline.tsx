@@ -447,6 +447,8 @@ interface MessagesTimelineProps {
   findRequest?: number;
   onFindClose?: () => void;
   onSearchHistory?: (projection: OrchestrationV2ThreadProjection | null) => void;
+  /** Reports while the find bar is open, so the thread details card can move below it. */
+  onFindOpenChange?: (open: boolean) => void;
   showingSearchHistory?: boolean;
   citationRequest?: AssistantCitationRequest | null;
   citationHistoryLoading?: boolean;
@@ -545,6 +547,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   findRequest = 0,
   onFindClose,
   onSearchHistory,
+  onFindOpenChange,
   showingSearchHistory = false,
   citationRequest = null,
   citationHistoryLoading = false,
@@ -808,6 +811,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, [latestRun]);
 
   const [findActive, setFindActive] = useState(false);
+  const handleFindOpenChange = useCallback(
+    (open: boolean) => {
+      setFindActive(open);
+      onFindOpenChange?.(open);
+    },
+    [onFindOpenChange],
+  );
   const preferredToolCallVisibility = useClientSettings((settings) => settings.toolCallVisibility);
   // Find searches the in-between messages Zen hides, so they show while it is open.
   const toolCallVisibility =
@@ -1534,7 +1544,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               onSelectMessage={setSearchMessageId}
               onManualNavigation={onManualNavigation}
               onClose={() => onFindClose?.()}
-              onOpenChange={setFindActive}
+              onOpenChange={handleFindOpenChange}
             />
           )}
           {onCiteAssistantText && citationThreadRef ? (

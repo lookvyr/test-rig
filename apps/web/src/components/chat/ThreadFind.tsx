@@ -349,6 +349,7 @@ export function ThreadFind({
     <div
       role="search"
       aria-label="Find in thread"
+      data-thread-find-bar
       className="absolute top-2 right-3 z-50 flex h-[34px] w-[310px] max-w-[calc(100%-1.5rem)] items-center gap-0.5 rounded-md border border-border bg-popover px-1 pl-2.5 text-popover-foreground shadow-md"
       onKeyDown={(event) => {
         if (event.key === "Escape") {

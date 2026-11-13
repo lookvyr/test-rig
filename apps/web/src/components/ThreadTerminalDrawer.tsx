@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { workspaceAreaProps } from "../lib/workspaceFocus";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -472,6 +473,7 @@ export function TerminalViewport({
       terminal.setTheme(terminalThemeFromApp(mount));
       setupTerminal = terminal;
       terminalRef.current = terminal;
+      terminal.input.setAttribute("data-workspace-focus-default", "");
       // Client settings hydrate asynchronously; a font preference that landed
       // while the surface was loading found terminalRef null, so its setFont
       // was dropped. Re-apply whatever is current once the terminal exists.
@@ -1064,6 +1066,8 @@ export default function ThreadTerminalDrawer({
   terminalLaunchLocationsById,
 }: ThreadTerminalDrawerProps) {
   const isPanel = mode === "panel";
+  // In panel mode the terminal belongs to the panel area instead.
+  const terminalArea = !isPanel && visible ? workspaceAreaProps("terminal", 5, "Terminal") : {};
   const terminalTabsRef = useRef<HTMLDivElement>(null);
   const [advancedTypography] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,
@@ -1377,6 +1381,7 @@ export default function ThreadTerminalDrawer({
   if (normalizedTerminalIds.length === 0) {
     return (
       <aside
+        {...terminalArea}
         data-terminal-owner={isPanel ? "right-panel" : "drawer"}
         className={cn(
           "thread-terminal-drawer relative flex min-w-0 flex-col overflow-hidden bg-background",
@@ -1411,6 +1416,7 @@ export default function ThreadTerminalDrawer({
 
   return (
     <aside
+      {...terminalArea}
       data-terminal-owner={isPanel ? "right-panel" : "drawer"}
       className={cn(
         "thread-terminal-drawer relative flex min-w-0 flex-col overflow-hidden bg-background",

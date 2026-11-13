@@ -13,6 +13,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopClientSettings from "./DesktopClientSettings.ts";
 
 const clientSettings: ClientSettings = {
+  toolCallVisibility: "showAll",
   browserDefaultViewport: { _tag: "fill" },
   browserDefaultZoomFactor: 1,
   browserDefaultAppearance: "system",
@@ -56,6 +57,7 @@ const clientSettings: ClientSettings = {
   sidebarV2Enabled: false,
   sidebarV2ConfiguredByUser: false,
   sidebarWorkingShelfEnabled: false,
+  threadDetailsItems: {},
   timestampFormat: "24-hour",
   wordWrap: true,
 };

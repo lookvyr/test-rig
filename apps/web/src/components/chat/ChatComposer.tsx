@@ -135,7 +135,6 @@ import {
   describeComposerEffort,
 } from "./ComposerModelEffort";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
-import { ContextWindowMeter } from "./ContextWindowMeter";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../pierre-icons";
 import { cn, randomUUID } from "~/lib/utils";
@@ -235,7 +234,7 @@ import {
 } from "lucide-react";
 import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
 import { proposedPlanTitle } from "../../proposedPlan";
-import { getProviderDisplayName, getProviderInteractionModeToggle } from "../../providerModels";
+import { getProviderInteractionModeToggle } from "../../providerModels";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -250,7 +249,6 @@ import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
-import { deriveThreadContextWindow, formatProviderDisplayName } from "../../lib/contextWindow";
 import {
   hasDismissedResumeCompaction,
   resumeCompactionTokens as deriveResumeCompactionTokens,
@@ -409,8 +407,6 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
 const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
   compact: boolean;
-  activeContextWindow: ReturnType<typeof deriveThreadContextWindow>;
-  activeThreadProviderDisplayName: string | null;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -436,23 +432,12 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   onImplementPlanInNewThread: () => void;
   canResume: boolean;
   onResume?: (() => void) | undefined;
-  onCompactContext?: (() => void) | undefined;
-  compactDisabledReason: string | null;
   compactBeforeSendTokens: number | null;
   keepFullHistory: boolean;
   onToggleKeepFullHistory: () => void;
 }) {
   return (
     <>
-      {props.activeContextWindow ? (
-        <ContextWindowMeter
-          usage={props.activeContextWindow}
-          providerDisplayName={props.activeThreadProviderDisplayName}
-          onCompact={props.onCompactContext}
-          compactDisabled={props.compactDisabledReason !== null}
-          compactDisabledReason={props.compactDisabledReason}
-        />
-      ) : null}
       {props.isPreparingWorktree ? (
         <span className="text-secondary-label text-xs">Preparing worktree...</span>
       ) : null}
@@ -623,7 +608,6 @@ export interface ChatComposerProps {
   composerRef: React.RefObject<ChatComposerHandle | null>;
 
   // Callbacks
-  onCompactContext?: (() => void) | undefined;
   onResume?: (() => void) | undefined;
   onSend: (e?: { preventDefault: () => void }) => void;
   onOpenSideChat?: (() => void) | undefined;
@@ -707,7 +691,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     canInterrupt,
     canResume = false,
     onResume,
-    onCompactContext,
     resolvedTheme,
     settings,
     keybindings,
@@ -1037,9 +1020,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             : projectSelectionRequired || noProviderAvailable
               ? "Select an available project and provider before compacting context"
               : null;
-  const compactThreadContext = () => {
-    if (compactDisabledReason === null && compactCommandAvailable) onCompactContext?.();
-  };
 
   // ------------------------------------------------------------------
   // Compact before send
@@ -1103,24 +1083,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [keepFullHistory, keepFullHistoryThreadId, setKeepFullHistory],
   );
   const compactBeforeSend = resumeCompactionTokens !== null && !keepFullHistory;
-
-  // ------------------------------------------------------------------
-  // Context window
-  // ------------------------------------------------------------------
-  const activeContextWindow = useMemo(
-    () => deriveThreadContextWindow(activeThreadProjection),
-    [activeThreadProjection],
-  );
-  const activeThreadProviderDisplayName = useMemo(() => {
-    if (!activeThreadModelSelection) return null;
-    const entry = providerStatuses.find(
-      (p) => p.instanceId === activeThreadModelSelection.instanceId,
-    );
-    if (entry) {
-      return getProviderDisplayName(providerStatuses, entry.driver);
-    }
-    return formatProviderDisplayName(activeThreadModelSelection.instanceId);
-  }, [providerStatuses, activeThreadModelSelection]);
 
   // ------------------------------------------------------------------
   // Composer-local state
@@ -3783,14 +3745,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               >
                 <ComposerFooterPrimaryActions
                   compact={isComposerPrimaryActionsCompact}
-                  activeContextWindow={activeContextWindow}
-                  activeThreadProviderDisplayName={activeThreadProviderDisplayName}
                   canResume={showResumeAction}
                   onResume={onResume}
-                  onCompactContext={
-                    onCompactContext && compactCommandAvailable ? compactThreadContext : undefined
-                  }
-                  compactDisabledReason={compactDisabledReason}
                   compactBeforeSendTokens={resumeCompactionTokens}
                   keepFullHistory={keepFullHistory}
                   onToggleKeepFullHistory={toggleKeepFullHistory}

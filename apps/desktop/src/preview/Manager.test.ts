@@ -599,6 +599,42 @@ describe("PreviewManager", () => {
       ),
   );
 
+  effectIt.effect("hands F6 back to the app as a command, not a replayed key", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeFaviconWebContents();
+        const send = vi.fn();
+        const sendInputEvent = vi.fn();
+        const focus = vi.fn();
+        Object.assign(preview.webContents, {
+          hostWebContents: { isDestroyed: () => false, send, sendInputEvent, focus },
+        });
+        fromId.mockReturnValue(preview.webContents);
+        yield* manager.createTab("tab_f6");
+        yield* manager.registerWebview("tab_f6", 42);
+        yield* manager.setForwardedShortcuts([
+          { command: "workspace.focusNext", shortcut: parseKeybindingShortcut("f6")! },
+        ]);
+        const beforeInput = preview.listeners.get("before-input-event")!;
+        const f6 = { type: "keyDown", key: "F6", code: "F6", meta: false, control: false };
+        const preventDefault = vi.fn();
+        beforeInput({ preventDefault } as never, { ...f6, shift: false, alt: false } as never);
+        expect(preventDefault).toHaveBeenCalledOnce();
+        // A replayed key would go straight back into the focused webview.
+        expect(sendInputEvent).not.toHaveBeenCalled();
+        expect(focus).toHaveBeenCalledOnce();
+        expect(send).toHaveBeenCalledExactlyOnceWith("desktop:menu-action", "workspace.focusNext");
+
+        // Holding the key moves once; repeats are swallowed.
+        beforeInput(
+          { preventDefault: vi.fn() } as never,
+          { ...f6, shift: false, alt: false, isAutoRepeat: true } as never,
+        );
+        expect(send).toHaveBeenCalledOnce();
+      }),
+    ),
+  );
+
   effectIt.effect("keeps editing and forwarded shortcuts in whichever tab holds focus", () =>
     withManager((manager) =>
       Effect.gen(function* () {

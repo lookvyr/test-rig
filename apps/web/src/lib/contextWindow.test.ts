@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind, TurnItemId, type OrchestrationV2TurnItem } from "@t3tools/contracts";
 import { v2Now, v2ThreadId } from "../test/threadFixtures";
-import { formatContextWindowCompactionMessage } from "../components/chat/ContextWindowMeter";
-import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "./contextWindow";
+import {
+  deriveLatestContextWindowSnapshot,
+  formatContextWindowCompactionMessage,
+  formatContextWindowTokens,
+} from "./contextWindow";
 
 const compaction = (afterTokenCount: number | undefined): OrchestrationV2TurnItem => ({
   id: TurnItemId.make("compaction"),

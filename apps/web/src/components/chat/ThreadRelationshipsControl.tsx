@@ -1,7 +1,7 @@
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
-import { CollapsibleSectionHeader, SectionHeaderStatus } from "../ui/collapsible-section-header";
+import { SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -10,6 +10,7 @@ import {
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import { formatSubagentDisplayTitle } from "@t3tools/client-runtime/state/subagent-display";
 import { formatModelSlugName } from "@t3tools/shared/model";
+import { deriveSubagentElapsedMs } from "@t3tools/shared/orchestrationTiming";
 import { getTriggerDisplayModelName } from "./providerIconUtils";
 import {
   deriveThreadRelationshipGraph,
@@ -37,9 +38,9 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowRightIcon,
   BotIcon,
+  ChevronDownIcon,
   CornerLeftUpIcon,
   GitForkIcon,
-  LoaderCircleIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SquareIcon,
@@ -64,10 +65,16 @@ import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadR
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+import { Spinner } from "../ui/spinner";
+import { cn } from "../../lib/utils";
+import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { deriveAgentPanelModel } from "../agentPanelModel";
 import { ThreadLineageWorkflowRow } from "./ThreadLineageWorkflowRow";
 import {
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+  THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_LABEL_CLASS,
   THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
@@ -116,7 +123,7 @@ export function ThreadLineageRowList(props: {
         <button
           type="button"
           onClick={props.onShowMore}
-          className={`flex h-9 w-full cursor-pointer items-center rounded-lg ${THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS} text-sm font-medium text-muted-foreground/70 hover:bg-black/[0.055] hover:text-foreground/80 dark:hover:bg-white/[0.075]`}
+          className={`flex h-8 w-full cursor-pointer items-center rounded-lg ${THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS} text-sm font-medium text-muted-foreground/70 hover:bg-black/[0.055] hover:text-foreground/80 dark:hover:bg-white/[0.075]`}
         >
           <PlusIcon aria-hidden className="size-4 shrink-0" />
           Show {Math.min(props.hiddenCount, THREAD_LINEAGE_PAGE_COUNT)} more
@@ -145,16 +152,26 @@ function ThreadLineageGroup(props: {
   return (
     <div>
       {props.label ? (
-        <CollapsibleSectionHeader
-          expanded={expanded}
-          onClick={() => setExpanded(!expanded)}
-          accessory={
-            failedCount > 0 ? <SectionHeaderStatus>{failedCount} failed</SectionHeaderStatus> : null
-          }
-        >
-          {props.label}
-          {!expanded && ` (${props.rows.length})`}
-        </CollapsibleSectionHeader>
+        <ThreadDetailsControl aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+          <BotIcon aria-hidden className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+          <span className={cn(THREAD_DETAILS_PANEL_LABEL_CLASS, "min-w-0 flex-1 truncate")}>
+            {props.label}
+          </span>
+          {failedCount > 0 ? <SectionHeaderStatus>{failedCount} failed</SectionHeaderStatus> : null}
+          {expanded ? null : (
+            <span className="shrink-0 text-xs font-normal tabular-nums text-muted-foreground">
+              {props.rows.length}
+            </span>
+          )}
+          <ChevronDownIcon
+            aria-hidden
+            className={cn(
+              THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+              "transition-transform",
+              !expanded && "-rotate-90",
+            )}
+          />
+        </ThreadDetailsControl>
       ) : null}
       {expanded ? (
         <ThreadLineageRowList
@@ -189,6 +206,16 @@ function relationshipThreadTitle(input: {
  * The row's timer and hover card follow current child work, including queued
  * follow-ups whose provider turn has not started yet.
  */
+/** The full title, since the row truncates it, with what a click does. */
+function LineageTooltipContent(props: { readonly title: string; readonly hint: string }) {
+  return (
+    <>
+      <span className="block font-medium">{props.title}</span>
+      <span className="block text-muted-foreground">{props.hint}</span>
+    </>
+  );
+}
+
 export function currentSubagent<Agent extends RuntimeSubagent>(
   agent: Agent | undefined,
   childThread: OrchestrationV2ThreadShell | null | undefined,
@@ -234,6 +261,10 @@ export function ThreadRelationshipsPanel(props: {
   // Draft ids do not exist on the server yet; a 404 would cache them as deleted.
   const projection = useThreadDetail(props.isDraft ? null : ref)?.projection ?? null;
   const providers = useServerConfigs().get(props.environmentId)?.providers;
+  const providerEntries = useMemo(
+    () => deriveProviderInstanceEntries(providers ?? []),
+    [providers],
+  );
   // Projections retain task creation order; the last task for each child wins.
   const subagentsByThreadId = useMemo(
     () =>
@@ -415,6 +446,10 @@ export function ThreadRelationshipsPanel(props: {
     <ThreadDetailsSection
       headingId={headingId}
       collapsible={compact}
+      // A lone "Previous agents" row names itself; the heading returns for status or actions.
+      showHeading={
+        compact || runningCount > 0 || canDetach || related.length > 0 || active.length > 0
+      }
       title={`${compact ? "Subagents" : "Lineage"}${runningCount > 0 ? ` · ${runningCount} running` : ""}`}
       data-thread-relationships-panel
       actions={
@@ -480,6 +515,18 @@ export function ThreadRelationshipsPanel(props: {
                   (agent?.providerInstanceId ?? node?.thread?.providerInstanceId),
               );
               const providerDriver = agent?.driver ?? provider?.driver;
+              const workflowGroup =
+                agent === undefined ? undefined : workflowGroupsById.get(agent.id);
+              const failed = status === "failed" || status === "error";
+              const canStopWorkflow =
+                workflowGroup !== undefined &&
+                agent?.status === "running" &&
+                agent.origin === "provider_native" &&
+                providerDriver === "claudeAgent";
+              // The stop button takes the trailing value's place while the row is hovered.
+              const trailingVisibilityClass = (workflowGroup ? canStopWorkflow : canStop)
+                ? "group-hover:opacity-0 group-focus-within:opacity-0 pointer-coarse:opacity-0 [@media(hover:none)]:opacity-0"
+                : "";
               const model = agent ? agent.model : node?.thread?.modelSelection.model;
               const providerModel = provider?.models.find((entry) => entry.slug === model);
               const modelLabel = providerModel
@@ -511,13 +558,14 @@ export function ThreadRelationshipsPanel(props: {
                   childProject={project}
                 />
               ) : (
-                relationshipHint
+                <LineageTooltipContent title={threadTitle} hint={relationshipHint} />
               );
               const relationshipContent = (
                 <>
                   <ThreadRelationshipIcon
                     driver={isSubagent && !isParent ? providerDriver : undefined}
                     provider={provider}
+                    providerEntries={providerEntries}
                     fallbackIcon={RelationshipIcon}
                     status={status}
                   />
@@ -543,25 +591,39 @@ export function ThreadRelationshipsPanel(props: {
                       </span>
                     ) : null}
                   </span>
-                  {!compact &&
-                    (agent ? (
-                      agent.startedAt ? (
-                        <span className="shrink-0 text-2xs font-normal tabular-nums text-muted-foreground">
-                          <AgentElapsed agent={agent} />
-                        </span>
-                      ) : null
-                    ) : (
-                      <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                    ))}
-                  {!compact && !isMergeTarget && (
-                    <span className="shrink-0 text-2xs text-muted-foreground">
+                  {compact ? null : agent ? null : (
+                    <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                  )}
+                  {/* One trailing value: a running or finished agent's time, otherwise its status. */}
+                  {compact ? null : agent &&
+                    !failed &&
+                    (deriveSubagentElapsedMs(agent, 0) !== null || canStopWorkflow) ? (
+                    <span
+                      className={cn(
+                        "shrink-0 text-2xs font-normal tabular-nums text-muted-foreground",
+                        canStopWorkflow && "min-w-6 text-end",
+                        trailingVisibilityClass,
+                      )}
+                    >
+                      <AgentElapsed agent={agent} compact />
+                    </span>
+                  ) : !isMergeTarget ? (
+                    <span
+                      className={
+                        workflowGroup
+                          ? "sr-only"
+                          : cn(
+                              "shrink-0 text-2xs",
+                              failed ? "text-destructive" : "text-muted-foreground",
+                              trailingVisibilityClass,
+                            )
+                      }
+                    >
                       {threadRelationshipStatusLabel(status)}
                     </span>
-                  )}
+                  ) : null}
                 </>
               );
-              const workflowGroup =
-                agent === undefined ? undefined : workflowGroupsById.get(agent.id);
               if (agent !== undefined && workflowGroup !== undefined) {
                 return (
                   <ThreadLineageWorkflowRow
@@ -572,14 +634,9 @@ export function ThreadRelationshipsPanel(props: {
                     providerInstanceId={agent.providerInstanceId}
                     provider={provider}
                     providers={providers}
+                    providerEntries={providerEntries}
                     driver={providerDriver}
-                    onStop={
-                      agent.status === "running" &&
-                      agent.origin === "provider_native" &&
-                      providerDriver === "claudeAgent"
-                        ? () => void stopWorkflow(agent.id)
-                        : undefined
-                    }
+                    onStop={canStopWorkflow ? () => void stopWorkflow(agent.id) : undefined}
                     stopping={stoppingWorkflowId === agent.id}
                     stopDisabled={stoppingWorkflowId !== null}
                     onOpenThread={openThread}
@@ -611,7 +668,7 @@ export function ThreadRelationshipsPanel(props: {
               }
               if (isMergeTarget) {
                 return (
-                  <li key={threadId} className="group relative flex h-9 items-center rounded-lg">
+                  <li key={threadId} className="group relative flex h-8 items-center rounded-lg">
                     <div className={THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS}>
                       <Tooltip>
                         <TooltipTrigger
@@ -652,7 +709,7 @@ export function ThreadRelationshipsPanel(props: {
                               onClick={() => void merge()}
                             >
                               {busyAction === "merge" ? (
-                                <LoaderCircleIcon className="size-3 animate-spin" />
+                                <Spinner className="size-3" />
                               ) : (
                                 <PullRequestGlyph.merged className="size-3" />
                               )}
@@ -677,7 +734,7 @@ export function ThreadRelationshipsPanel(props: {
               return (
                 <li
                   key={threadId}
-                  className={`group relative flex ${compact ? "min-h-12" : "h-9"} items-center rounded-lg`}
+                  className={`group relative flex ${compact ? "min-h-12" : "h-8"} items-center rounded-lg`}
                 >
                   <Tooltip>
                     <TooltipTrigger
@@ -689,7 +746,7 @@ export function ThreadRelationshipsPanel(props: {
                           disabled={node?.missing === true}
                           onClick={() => openThread(threadId)}
                           part="row"
-                          className={`w-auto min-w-0 flex-1 ${compact ? "h-auto min-h-12 py-2" : ""}`}
+                          className={compact ? "h-auto min-h-12 py-2" : undefined}
                         />
                       }
                     >
@@ -698,7 +755,7 @@ export function ThreadRelationshipsPanel(props: {
                     <RelationshipPopup side="left">{relationshipTooltip}</RelationshipPopup>
                   </Tooltip>
                   {canStop && agent ? (
-                    <div className="flex w-7 shrink-0 items-center justify-center">
+                    <div className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
                       <Tooltip>
                         <TooltipTrigger
                           render={
@@ -713,7 +770,11 @@ export function ThreadRelationshipsPanel(props: {
                             />
                           }
                         >
-                          <SquareIcon aria-hidden className="size-3 fill-current" />
+                          {stoppingThreadId === threadId ? (
+                            <Spinner aria-hidden className="size-3" />
+                          ) : (
+                            <SquareIcon aria-hidden className="size-3 fill-current" />
+                          )}
                         </TooltipTrigger>
                         <TooltipPopup side="left">Stop subagent</TooltipPopup>
                       </Tooltip>

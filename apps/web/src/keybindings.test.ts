@@ -924,6 +924,27 @@ describe("plus key parsing", () => {
 
 describe("thread and panel default shortcuts", () => {
   for (const platform of ["MacIntel", "Linux"]) {
+    it(`moves between workspace areas with F6 and mod+F6 on ${platform}`, () => {
+      const mod = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
+      for (const [modifiers, command] of [
+        [{}, "workspace.focusNext"],
+        [{ shiftKey: true }, "workspace.focusPrevious"],
+        [mod, "workspace.focusNext"],
+        [{ ...mod, shiftKey: true }, "workspace.focusPrevious"],
+      ] as const) {
+        for (const context of [{}, { terminalFocus: true }, { previewFocus: true }]) {
+          assert.strictEqual(
+            resolveShortcutCommand(
+              event({ key: "F6", code: "F6", ...modifiers }),
+              DEFAULT_RESOLVED_KEYBINDINGS,
+              { platform, context },
+            ),
+            command,
+          );
+        }
+      }
+    });
+
     it(`cycles terminal groups only with terminal focus on ${platform}`, () => {
       const modifier = platform === "MacIntel" ? { metaKey: true } : { ctrlKey: true };
       for (const [key, command] of [

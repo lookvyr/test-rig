@@ -218,6 +218,8 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { COMPACT_COMMAND_PATTERN } from "../lib/compactBeforeSend";
+import { deriveThreadContextWindow } from "../lib/contextWindow";
+import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { getTerminalFocusOwner, useTerminalFocusStore } from "../lib/terminalFocus";
 import { preventRepeatedTerminalCloseShortcut } from "../lib/terminalCloseShortcut";
@@ -1370,6 +1372,9 @@ function ChatViewContent(props: ChatViewProps) {
   const closeThreadFind = useCallback(() => {
     composerRef.current?.focusAtEnd();
   }, [composerRef]);
+  const conversationArea = workspaceAreaProps("conversation", 1, "Conversation");
+  const composerArea = workspaceAreaProps("composer", 2, "Message input");
+  const [threadFindOpen, setThreadFindOpen] = useState(false);
   const [threadDetailsToggleContainer, setThreadDetailsToggleContainer] =
     useState<HTMLDivElement | null>(null);
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
@@ -1496,6 +1501,10 @@ function ChatViewContent(props: ChatViewProps) {
   const isServerThread = activeServerThread !== null;
   const activeThread = activeServerThread ?? localDraftThread;
   const threadProjection = activeThread?.projection ?? null;
+  const activeContextWindow = useMemo(
+    () => deriveThreadContextWindow(threadProjection),
+    [threadProjection],
+  );
   const activeThreadMessages = selectThreadMessages(threadProjection);
   const threadShells = useThreadShells();
   const sideThreadShells = useMemo(
@@ -5148,7 +5157,6 @@ function ChatViewContent(props: ChatViewProps) {
       sendInFlightRef.current = false;
     }
   };
-  const onCompactContext = () => void sendStandaloneCommand("/compact");
   // What the thread is doing now sits at the end of the timeline, not stacked
   // on the composer: background work, sync status, the goal, then lifecycle.
   const goalNow =
@@ -6281,6 +6289,19 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThreadRef, isServerThread, onDiffPanelOpen],
   );
+  // The thread details toggle leads the panel controls. While the inline right panel owns
+  // the titlebar controls, it stays at the chat header's right edge beside the card.
+  // A right panel sheet covers the chat, so the toggle stays out of the sheet's controls.
+  const threadDetailsToggleSlot = useMemo(
+    () => (
+      <div
+        ref={setThreadDetailsToggleContainer}
+        className="flex shrink-0 items-center [-webkit-app-region:no-drag]"
+        data-thread-details-toggle
+      />
+    ),
+    [],
+  );
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
@@ -6312,6 +6333,7 @@ function ChatViewContent(props: ChatViewProps) {
 
   const panelToggleControls = (
     <PanelLayoutControls
+      leading={rightPanelOpen ? null : threadDetailsToggleSlot}
       terminalAvailable={activeProject !== null}
       terminalOpen={terminalUiState.terminalOpen}
       terminalShortcutLabel={shortcutLabelForCommand(keybindings, "terminal.toggle")}
@@ -6530,11 +6552,11 @@ function ChatViewContent(props: ChatViewProps) {
           )}
         >
           {!rightPanelOpen ? panelLayoutControls : null}
-          <div
-            ref={setThreadDetailsToggleContainer}
-            className="absolute right-20 z-40 flex h-full items-center [-webkit-app-region:no-drag]"
-            data-thread-details-toggle
-          />
+          {inlineRightPanelOwnsTitleBar ? (
+            <div className="absolute top-0 right-3 z-40 flex h-full items-center sm:right-5">
+              {threadDetailsToggleSlot}
+            </div>
+          ) : null}
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
@@ -6544,6 +6566,13 @@ function ChatViewContent(props: ChatViewProps) {
             activeProjectName={resolvedProject?.title}
             activeProjectCwd={activeProject?.workspaceRoot ?? null}
             onNewThreadInProject={handleNewThreadInActiveProject}
+            parentThreadId={
+              providerThreadIdentity?.lineage.relationshipToParent === "subagent"
+                ? parentThreadId
+                : null
+            }
+            parentThreadTitle={parentThreadShell?.title}
+            onOpenThread={onOpenRelatedThread}
           />
         </header>
 
@@ -6563,7 +6592,10 @@ function ChatViewContent(props: ChatViewProps) {
               />
             </div>
             {/* Messages Wrapper */}
-            <div className="relative flex min-h-0 flex-1 flex-col">
+            <div
+              {...conversationArea}
+              className="relative flex min-h-0 flex-1 flex-col outline-none"
+            >
               {/* Messages — LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 onFileOpen={(attachment) => {
@@ -6575,6 +6607,7 @@ function ChatViewContent(props: ChatViewProps) {
                 }
                 onFindClose={closeThreadFind}
                 onSearchHistory={setThreadSearchHistory}
+                onFindOpenChange={setThreadFindOpen}
                 showingSearchHistory={searchHistory !== null}
                 key={activeThread.id}
                 worktreeSetup={searchHistory ? null : worktreeSetup}
@@ -6681,6 +6714,7 @@ function ChatViewContent(props: ChatViewProps) {
             {/* Input bar — centered hero while a draft has no messages, docked at the bottom otherwise */}
             <div
               ref={setComposerOverlayElement}
+              {...composerArea}
               data-chat-composer-overlay="true"
               className={
                 isDraftHeroState
@@ -6694,19 +6728,35 @@ function ChatViewContent(props: ChatViewProps) {
               >
                 <div className="pointer-events-auto relative z-10">
                   {isProviderSubagent ? (
-                    <ProviderSubagentBar
-                      provider={providerSubagentEntry ?? null}
-                      showInstanceBadge={
-                        providerSubagentEntry !== undefined &&
-                        shouldShowInstanceBadge(providerSubagentEntry, providerInstanceEntries)
-                      }
-                      modelLabel={providerSubagentModelLabel}
-                      effortLabel={providerSubagentEffortLabel}
-                      status={providerSubagentStatus}
-                      onOpenParent={
-                        parentThreadId === null ? null : () => onOpenRelatedThread(parentThreadId)
-                      }
-                    />
+                    // The bar takes the composer's place, so it sits in the same card and spacing.
+                    <div className="relative">
+                      <div className="chat-composer-glass-shell @container/composer-surface relative mx-auto w-full max-w-3xl">
+                        <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px] redesign:rounded-2xl">
+                          <ProviderSubagentBar
+                            provider={providerSubagentEntry ?? null}
+                            showInstanceBadge={
+                              providerSubagentEntry !== undefined &&
+                              shouldShowInstanceBadge(
+                                providerSubagentEntry,
+                                providerInstanceEntries,
+                              )
+                            }
+                            modelLabel={providerSubagentModelLabel}
+                            effortLabel={providerSubagentEffortLabel}
+                            status={providerSubagentStatus}
+                            onOpenParent={
+                              parentThreadId === null
+                                ? null
+                                : () => onOpenRelatedThread(parentThreadId)
+                            }
+                          />
+                        </div>
+                      </div>
+                      <div
+                        aria-hidden
+                        className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
+                      />
+                    </div>
                   ) : (
                     <>
                       {isDraftHeroState ? (
@@ -6859,7 +6909,6 @@ function ChatViewContent(props: ChatViewProps) {
                                 composerTerminalContextsRef={composerTerminalContextsRef}
                                 composerElementContextsRef={composerElementContextsRef}
                                 onSend={onSend}
-                                onCompactContext={onCompactContext}
                                 onResume={onResume}
                                 onOpenSideChat={
                                   sideChatAvailable ? () => void addSideChatSurface() : undefined
@@ -6938,6 +6987,8 @@ function ChatViewContent(props: ChatViewProps) {
                 keybindings={keybindings}
                 availableEditors={availableEditors}
                 isDraft={Boolean(branchToolbarProps.draftId)}
+                contextWindow={activeContextWindow}
+                findBarOpen={threadFindOpen}
                 branchToolbar={branchToolbarProps}
                 onOpenChanges={() => {
                   useThreadDetailsStore.getState().setPopoverOpen(activeThreadRef, false);

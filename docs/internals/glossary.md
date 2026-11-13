@@ -32,6 +32,14 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live behind the VCS driver contract in `apps/server/src/vcs/VcsDriver.ts`, implemented by [GitVcsDriverCore.ts][3].
 
+#### Workspace area
+
+A keyboard focus stop in the web client, marked with `workspaceAreaProps(name, order, label)`
+from `apps/web/src/lib/workspaceFocus.ts`. F6 (`workspace.focusNext` / `workspace.focusPrevious`)
+cycles the visible areas by `order` and restores each area's last focused control. Current
+orders: sidebar 0, conversation / home / pull-requests 1, composer 2, details 3, panel 4,
+terminal 5.
+
 ### Thread timeline
 
 #### Thread

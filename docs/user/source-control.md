@@ -1,22 +1,32 @@
 # Source control
 
-Use **Thread details** in the chat header for editor or Finder access, project
-actions, Changes, linked PR details, PR watches, and subagents. Branch, worktree,
+Use **Thread details** in the chat header, next to the terminal and right panel
+buttons, for editor or Finder access, project actions, Changes, linked PR
+details, PR watches, servers, automations, lineage, and the context window.
+Branch, worktree,
 and linked PR context appear below the composer of a new thread. To keep them
 there after the first message, turn on **Settings** → **Appearance** →
 **Composer context**. On wide windows, details sit
 beside the conversation. On narrower windows, the same controls open in a
 popover. Hiding the wide details card is remembered for that conversation.
 
-The title at the top names the workspace directory. Hover over it to see the
-full path.
+To choose what the card shows, right-click it, or open **Settings** →
+**Appearance** → **Thread details**. **Reset to default** brings every item
+back. If you hide everything, the card offers **Choose what to show**.
 
-The **Subagents** section shows each agent's title, model, status, and elapsed
-time. Completed agents stay in place; follow-up work updates the same row.
-Select the **Subagents** heading to collapse or expand the list.
-Select an agent to open its conversation, hover for details, or use its separate
-Stop button to interrupt an app-owned child. Forks and parent conversations are
-not included in this section. The full Agents panel remains available.
+When the window is short, the card first drops the environment row, then the
+editor row, along with servers, automations, and lineage. Long lists such as
+servers, automations, and lineage scroll inside the card instead of pushing
+other rows out. **Servers** shows four servers at a time; use **Show more**
+for the rest.
+
+**Lineage** shows the conversations related to this one: its parent, forks, and
+subagents, with each agent's title, model, status, and elapsed time. Select a
+row to open that conversation, hover for details, or use an agent's Stop button
+to interrupt an app-owned child. The full Agents panel remains available.
+
+**Context window** shows how much of the model's context the conversation uses.
+Hover it for exact token counts and when the provider compacts automatically.
 
 **Open PR details** appears when the conversation has a linked PR and opens the
 existing PR sidebar. A watched PR takes its place as its own row: click it to

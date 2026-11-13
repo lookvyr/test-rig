@@ -4,6 +4,7 @@ import { isElectron } from "~/env";
 import { usePreviewPanelInlineSize } from "~/hooks/usePreviewPanelInlineSize";
 export { getPreviewPanelMaxWidth } from "~/hooks/usePreviewPanelInlineSize";
 import { cn } from "~/lib/utils";
+import { workspaceAreaProps } from "~/lib/workspaceFocus";
 
 import { RightPanelResizeHandle } from "./RightPanelResizeHandle";
 
@@ -15,6 +16,11 @@ export type PreviewPanelMode = "inline" | "sheet" | "sidebar" | "embedded";
  * sheet/sidebar modes the parent owns the size.
  */
 export function PreviewPanelShell(props: {
+  /** Makes the shell the "panel" stop in the F6 cycle. */
+  workspaceArea?: boolean;
+  /** Keeps F6 focus history separate per surface. */
+  workspaceFocusKey?: string;
+  workspaceLabel?: string;
   mode: PreviewPanelMode;
   maximized?: boolean;
   children: ReactNode;
@@ -22,6 +28,7 @@ export function PreviewPanelShell(props: {
   const useDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
   const isInline = props.mode === "inline";
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const panelArea = workspaceAreaProps("panel", 4, props.workspaceLabel ?? "Workspace panel");
   const { width, handlers } = usePreviewPanelInlineSize(hostRef, {
     enabled: isInline && !props.maximized,
   });
@@ -29,6 +36,8 @@ export function PreviewPanelShell(props: {
   return (
     <div
       ref={hostRef}
+      {...(props.workspaceArea ? panelArea : {})}
+      data-workspace-focus-key={props.workspaceFocusKey}
       className={cn(
         "relative flex h-full min-h-0 min-w-0 flex-col self-stretch bg-background",
         isInline

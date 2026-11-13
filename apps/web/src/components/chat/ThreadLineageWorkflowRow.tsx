@@ -7,10 +7,12 @@ import type {
   ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
-import { ChevronDownIcon, LoaderCircleIcon, SquareIcon } from "lucide-react";
+import { ChevronDownIcon, SquareIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
+import type { ProviderInstanceEntry } from "../../providerInstances";
+import { Spinner } from "../ui/spinner";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useEnvironmentQuery } from "../../state/query";
 import type { AgentPanelWorkflowGroup } from "../agentPanelModel";
@@ -59,6 +61,7 @@ type WorkflowProviderProps = {
   readonly providerInstanceId: ProviderInstanceId;
   readonly provider: ServerProvider | undefined;
   readonly providers: ReadonlyArray<ServerProvider> | undefined;
+  readonly providerEntries: ReadonlyArray<ProviderInstanceEntry>;
   readonly driver: ProviderDriverKind | undefined;
   /** Opens a workflow agent's chat. */
   readonly onOpenThread: (threadId: ThreadId) => void;
@@ -74,6 +77,7 @@ function WorkflowMemberRow({
   providerInstanceId,
   provider,
   providers,
+  providerEntries,
   driver,
   onOpenThread,
   isThreadAvailable,
@@ -88,11 +92,9 @@ function WorkflowMemberRow({
           delay={200}
           render={
             <ThreadDetailsControl
-              size="sm"
-              variant="ghost"
               part="row"
               // Not disabled: a row without a chat (an older workflow) keeps its hover card.
-              className="h-8 aria-disabled:opacity-100"
+              className="aria-disabled:opacity-100"
               aria-label={
                 canOpen
                   ? `Open ${member.title} chat, ${statusLabel}`
@@ -105,10 +107,13 @@ function WorkflowMemberRow({
             />
           }
         >
-          <ThreadRelationshipIcon driver={driver} provider={provider} status={member.status} />
-          <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">
-            {member.title}
-          </span>
+          <ThreadRelationshipIcon
+            driver={driver}
+            provider={provider}
+            providerEntries={providerEntries}
+            status={member.status}
+          />
+          <span className="min-w-0 flex-1 truncate">{member.title}</span>
           {member.startedAt ? (
             <span className="shrink-0 text-2xs font-normal tabular-nums text-muted-foreground">
               <AgentElapsed agent={member} />
@@ -202,7 +207,8 @@ export function ThreadLineageWorkflowRow({
       <div className={cn("relative", THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS)}>
         {header}
         {onStop ? (
-          <div className="flex w-7 shrink-0 items-center justify-center">
+          // Shown on hover over the coordinator's elapsed time, which fades out beneath it.
+          <div className="pointer-events-none absolute right-9 top-1/2 -translate-y-1/2 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 pointer-coarse:pointer-events-auto pointer-coarse:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100">
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -218,12 +224,12 @@ export function ThreadLineageWorkflowRow({
                 }
               >
                 {stopping ? (
-                  <LoaderCircleIcon aria-hidden className="size-3 animate-spin" />
+                  <Spinner aria-hidden className="size-3" />
                 ) : (
                   <SquareIcon aria-hidden className="size-3 fill-current" />
                 )}
               </TooltipTrigger>
-              <TooltipPopup side="left">Stop workflow</TooltipPopup>
+              <TooltipPopup side="left">Stop entire workflow</TooltipPopup>
             </Tooltip>
           </div>
         ) : null}
@@ -254,6 +260,7 @@ export function ThreadLineageWorkflowRow({
             return (
               <li key={phase.index}>
                 <CollapsibleSectionHeader
+                  variant="panel"
                   tone={phase.state === "running" ? "emphasized" : "muted"}
                   expanded={open}
                   aria-label={`${open ? "Collapse" : "Expand"} ${phase.title} phase, ${status}`}
@@ -296,6 +303,7 @@ export function ThreadLineageWorkflowRow({
           {scriptPath === undefined ? null : (
             <li>
               <CollapsibleSectionHeader
+                variant="panel"
                 tone="muted"
                 expanded={scriptOpen}
                 aria-label={`${scriptOpen ? "Hide" : "Show"} the workflow script`}

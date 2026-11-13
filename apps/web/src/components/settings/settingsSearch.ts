@@ -109,6 +109,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
   },
   {
+    id: "thread-details-items",
+    title: "Thread details",
+    to: "/settings/appearance",
+  },
+  {
     id: "word-wrap",
     title: "Word wrap",
     to: "/settings/appearance",

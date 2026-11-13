@@ -1,8 +1,9 @@
 import { createPortal } from "react-dom";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useLayoutEffect, useState, type ReactNode } from "react";
-import { NotepadTextIcon } from "lucide-react";
+import { useLayoutEffect, useState, type MouseEventHandler, type ReactNode } from "react";
+import { SquareMenuIcon } from "lucide-react";
+import { requestWorkspaceFocus, workspaceAreaProps } from "../../lib/workspaceFocus";
 import { useThreadDetailsStore } from "../../threadDetailsStore";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { ScrollArea } from "../ui/scroll-area";
@@ -14,6 +15,13 @@ import {
   resolveThreadDetailsCardDensity,
 } from "./threadDetailsCardLayout";
 
+export type ThreadDetailsDensity = "full" | "compact" | "essential";
+
+// Lists that scroll as they grow. Counting them toward density would hide the workspace
+// controls whenever a list gets long, so the fit measurement leaves them out.
+const SCROLLING_LISTS_SELECTOR =
+  "[data-thread-relationships-panel], [data-thread-automations-panel], [data-thread-details-server-overflow], [data-thread-pr-watch]";
+
 /** One persistent controls tree: moving between card and popover must not discard open forms. */
 export function ThreadDetailsCard({
   threadRef,
@@ -21,20 +29,44 @@ export function ThreadDetailsCard({
   children,
   shortcutLabel,
   contentKey,
+  onContextMenu,
+  findBarOpen = false,
 }: {
   threadRef: ScopedThreadRef;
-  children: ReactNode;
+  /** Renders the rows that fit the card's density. */
+  children: (density: ThreadDetailsDensity) => ReactNode;
   toggleContainer: HTMLElement | null;
   shortcutLabel?: string | undefined;
-  contentKey?: string | undefined;
+  /** Changes when the set of rendered items changes, so cached heights are measured again. */
+  contentKey: string;
+  onContextMenu?: MouseEventHandler<HTMLDivElement> | undefined;
+  /** The thread's find bar is open; the card moves below it. */
+  findBarOpen?: boolean;
 }) {
   const canvas = useChatCanvas();
+  // The find bar sits at the top right of the conversation, where the card goes.
+  const [findClearance, setFindClearance] = useState({ inline: 0, popover: 0 });
+  const getContainerRect = canvas?.getContainerRect;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the open find bar's position from the DOM
+  useLayoutEffect(() => {
+    const bar = findBarOpen
+      ? document.querySelector<HTMLElement>("[data-thread-find-bar]")?.getBoundingClientRect()
+      : undefined;
+    const containerTop = getContainerRect?.()?.top;
+    const toggleBottom = toggleContainer?.getBoundingClientRect().bottom;
+    setFindClearance({
+      inline: bar && containerTop !== undefined ? Math.max(0, bar.bottom - containerTop) : 0,
+      popover: bar && toggleBottom !== undefined ? Math.max(0, bar.bottom - toggleBottom) : 0,
+    });
+  }, [findBarOpen, getContainerRect, toggleContainer]);
+  const detailsArea = workspaceAreaProps("details", 3, "Thread details");
   const placement = canvas
     ? resolveThreadDetailsCardLayout({
         container: canvas.container,
         lane: canvas.lane,
         frame: canvas.layout.frame,
         overlapsDetailsCard: canvas.layout.overlapsDetailsCard,
+        topInset: findClearance.inline,
       })
     : null;
   const preferredPlacement = canvas
@@ -42,16 +74,18 @@ export function ThreadDetailsCard({
         container: canvas.container,
         lane: canvas.lane,
         frame: null,
+        topInset: findClearance.inline,
       })
     : null;
-  const [showAll, setShowAll] = useState(false);
-  const inline = placement !== null && !showAll;
-  const measurementKey = `${scopedThreadKey(threadRef)}:${preferredPlacement?.width ?? "popup"}:${contentKey ?? ""}`;
+  const inline = placement !== null;
+  const measurementKey = `${scopedThreadKey(threadRef)}:${preferredPlacement?.width ?? "popup"}:${contentKey}`;
   const [measurements, setMeasurements] = useState({ key: measurementKey, full: 0, compact: 0 });
   const contentHeights =
     measurements.key === measurementKey ? measurements : { full: 0, compact: 0 };
-  const density = inline
-    ? resolveThreadDetailsCardDensity(placement.height, contentHeights)
+  // The popover drops below the header, so it gets the chat height minus the header.
+  const availableHeight = placement?.height ?? Math.max(0, (canvas?.container.height ?? 0) - 52);
+  const density = canvas
+    ? resolveThreadDetailsCardDensity(availableHeight, contentHeights)
     : "full";
   const inlineOpen = useThreadDetailsStore(
     (state) => !state.hiddenByThreadKey[scopedThreadKey(threadRef)],
@@ -59,18 +93,10 @@ export function ThreadDetailsCard({
   const popoverOpen = useThreadDetailsStore(
     (state) => state.popoverOpenByThreadKey[scopedThreadKey(threadRef)] ?? false,
   );
-  const setPopoverOpen = (open: boolean) =>
-    useThreadDetailsStore.getState().setPopoverOpen(threadRef, open);
   useLayoutEffect(() => {
     useThreadDetailsStore.getState().setPresentation(threadRef, inline ? "inline" : "popover");
     if (inline) useThreadDetailsStore.getState().setPopoverOpen(threadRef, false);
   }, [inline, threadRef.environmentId, threadRef.threadId]);
-  useLayoutEffect(() => {
-    if (showAll && !popoverOpen) {
-      setShowAll(false);
-      useThreadDetailsStore.getState().setOpen(threadRef, false);
-    }
-  }, [showAll, popoverOpen, threadRef.environmentId, threadRef.threadId]);
   const [content, setContent] = useState<HTMLDivElement | null>(null);
   const [contentHeight, setContentHeight] = useState(0);
   const reportDetailsCard = canvas?.reportDetailsCard;
@@ -83,25 +109,23 @@ export function ThreadDetailsCard({
     const measure = () => {
       // A closed popover has no layout. Keep the last measured height so hiding it
       // cannot remove the obstacle and oscillate between inline and popover.
-      if (content.offsetHeight > 0) {
-        setContentHeight(content.offsetHeight);
-        if (density !== "essential" && !showAll)
-          setMeasurements((current) => {
-            const base =
-              current.key === measurementKey
-                ? current
-                : { key: measurementKey, full: 0, compact: 0 };
-            return base[density] === content.offsetHeight
-              ? base
-              : { ...base, [density]: content.offsetHeight };
-          });
-      }
+      if (content.offsetHeight === 0) return;
+      setContentHeight(content.offsetHeight);
+      if (density === "essential") return;
+      const lists = content.querySelectorAll<HTMLElement>(SCROLLING_LISTS_SELECTOR);
+      const fittingHeight =
+        content.offsetHeight - Array.from(lists).reduce((sum, list) => sum + list.offsetHeight, 0);
+      setMeasurements((current) => {
+        const base =
+          current.key === measurementKey ? current : { key: measurementKey, full: 0, compact: 0 };
+        return base[density] === fittingHeight ? base : { ...base, [density]: fittingHeight };
+      });
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(content);
     return () => observer.disconnect();
-  }, [content, density, showAll, measurementKey]);
+  }, [content, density, measurementKey]);
   useLayoutEffect(() => {
     reportDetailsCard?.(
       inline &&
@@ -132,6 +156,7 @@ export function ThreadDetailsCard({
           },
         }
       : undefined;
+
   return (
     <Popover
       modal={false}
@@ -140,13 +165,20 @@ export function ThreadDetailsCard({
         if (inline) {
           if (details.reason === "trigger-press")
             useThreadDetailsStore.getState().setOpen(threadRef, next);
-        } else {
-          setPopoverOpen(next);
-          if (!next && showAll) {
-            setShowAll(false);
-            useThreadDetailsStore.getState().setOpen(threadRef, false);
-          }
+          return;
         }
+        // Using the find bar keeps the popover open beside it.
+        const target =
+          details.reason === "focus-out"
+            ? (details.event as FocusEvent).relatedTarget
+            : details.reason === "outside-press"
+              ? details.event.target
+              : null;
+        if (!next && target instanceof Element && target.closest("[data-thread-find-bar]")) {
+          details.cancel();
+          return;
+        }
+        useThreadDetailsStore.getState().setPopoverOpen(threadRef, next);
       }}
     >
       {toggleContainer
@@ -159,17 +191,18 @@ export function ThreadDetailsCard({
                       <Toggle
                         size="sm"
                         variant="ghost"
+                        className="shrink-0 [-webkit-app-region:no-drag]"
                         aria-label="Toggle thread details panel"
                         pressed={open}
                       >
-                        <NotepadTextIcon className="size-3.5" />
+                        <SquareMenuIcon className="size-3.5" />
                       </Toggle>
                     }
                   />
                 }
               />
-              <TooltipPopup>
-                Thread details{shortcutLabel ? ` (${shortcutLabel})` : ""}
+              <TooltipPopup side="bottom">
+                Toggle thread details{shortcutLabel ? ` (${shortcutLabel})` : ""}
               </TooltipPopup>
             </Tooltip>,
             toggleContainer,
@@ -179,48 +212,41 @@ export function ThreadDetailsCard({
         anchor={anchor}
         align={inline ? "start" : "end"}
         side="bottom"
-        sideOffset={inline ? 0 : 8}
+        sideOffset={inline ? 0 : 8 + findClearance.popover}
         collisionAvoidance={inline ? { side: "none", align: "none" } : undefined}
         padding="none"
         className="w-70 rounded-3xl redesign:rounded-xl bg-transparent shadow-none transition-none before:hidden data-starting-style:scale-100 data-starting-style:opacity-100 [backdrop-filter:none]"
         positionerClassName={inline ? "z-20 transition-none" : "z-40 transition-none"}
         role={inline ? "complementary" : "dialog"}
         aria-label="Thread details"
-        initialFocus={false}
-        finalFocus={false}
+        data-workspace-area-host
+        initialFocus={
+          inline
+            ? false
+            : () => {
+                requestWorkspaceFocus({ area: "details" });
+                return false;
+              }
+        }
+        // The popover took focus when it opened, so closing it hands focus back to the toggle.
+        finalFocus={!inline}
         keepMounted
       >
-        <div data-thread-details-panel={inline ? "inline" : "popover"} data-density={density}>
+        <div
+          {...detailsArea}
+          data-workspace-focus-key={`details:${scopedThreadKey(threadRef)}`}
+          data-thread-details-panel={inline ? "inline" : "popover"}
+          data-density={density}
+          className="outline-none"
+        >
           <div
             data-thread-details-card
             className="dropdown-glass isolate contain-paint grid max-h-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-3xl redesign:rounded-xl shadow-none"
             style={{ maxHeight: inline ? placement.height : "min(70dvh, var(--available-height))" }}
+            onContextMenu={onContextMenu}
           >
             <ScrollArea scrollFade className="min-h-0">
-              <div
-                ref={setContent}
-                className={
-                  density === "full"
-                    ? ""
-                    : density === "compact"
-                      ? "[&_[data-details-full]]:hidden"
-                      : "[&_[data-details-full]]:hidden [&_[data-details-secondary]]:hidden"
-                }
-              >
-                {children}
-                {inline && density !== "full" ? (
-                  <button
-                    type="button"
-                    className="w-full px-3 pb-2 text-left text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => {
-                      setShowAll(true);
-                      setPopoverOpen(true);
-                    }}
-                  >
-                    Show all details
-                  </button>
-                ) : null}
-              </div>
+              <div ref={setContent}>{children(density)}</div>
             </ScrollArea>
           </div>
         </div>

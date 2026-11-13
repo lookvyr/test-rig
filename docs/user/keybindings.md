@@ -167,6 +167,20 @@ With the empty right-panel launcher focused outside an editor or dialog, use
 **B**, **T**, **F**, or **D** for Browser, Terminal, Files, or Review. Arrow keys
 and Enter also select a launcher item.
 
+## Move between workspace areas
+
+Press **F6** or **Shift+F6** to move keyboard focus to the next or previous area:
+the Threads sidebar, the conversation, the message input, thread details, the right
+panel, and the bottom terminal. The home and Pull Requests pages are areas too.
+Hidden areas are skipped, navigation wraps around, and each area returns focus to
+the control you last used there. F6 also leaves a focused terminal or embedded browser
+page. While a dialog is open or a menu has focus, F6 does nothing.
+
+In a web browser, plain F6 may move to the browser's own address bar. Use **Cmd+F6** /
+**Cmd+Shift+F6** on macOS or **Ctrl+F6** / **Ctrl+Shift+F6** elsewhere instead. Customize
+**Focus Next Workspace Area** (`workspace.focusNext`) and **Focus Previous Workspace Area**
+(`workspace.focusPrevious`) in **Settings** → **Keybindings**.
+
 ## Copying terminal output
 
 Select terminal output and press `cmd+c` on macOS or `ctrl+shift+c` on Windows/Linux.

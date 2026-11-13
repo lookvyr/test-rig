@@ -76,12 +76,12 @@ delivery does not interrupt its tools. You can still explicitly steer the parent
 while it works.
 
 Open the child from its task row in the conversation, or from the right panel's
-Agents tab. Thread details also has a compact **Subagents** section with the
-agent title, model, status, elapsed time, hover details, and Stop controls. It
-shows up to three agents before **Show more** and leaves forks and parent
-conversations out. Completed agents stay in place in Thread details; the full
-Agents tab groups them under Previous agents. Inside the child,
-use Open parent thread to return to the conversation that delegated the work.
+Agents tab. Thread details also lists agents in **Lineage**, alongside forks and
+the parent conversation, with the agent title, model, status, elapsed time,
+hover details, and Stop controls. Both Lineage and the full Agents tab group
+completed agents under Previous agents. Inside the child,
+use Open parent thread, or the parent's name in the header breadcrumb, to return
+to the conversation that delegated the work.
 
 Working children remain visible after the parent finishes its response, including
 while you send a follow-up. Claude's native background children retain their tool
@@ -165,7 +165,7 @@ expires, new work completes or fails, or a question needs attention.
 ## Claude workflows
 
 When Claude runs a workflow with its Workflow tool, the workflow appears as one
-subagent in **Subagents** and **Lineage**, named after the workflow. Expand it to
+subagent in **Lineage**, named after the workflow. Expand it to
 see each phase with its agents and how long they took; hover an agent for its
 model, status and result. Phases appear as the workflow reaches them, and a
 finished phase stays collapsed to one line until you open it. **Script** shows the workflow script
