@@ -187,6 +187,14 @@ function readPersistedEntries(): ReadonlyArray<PromptStashEntry> | null {
   }
 }
 
+/** Starts each write from storage so entries other tabs stashed or took are not overwritten. */
+function latestEntries(memory: ReadonlyArray<PromptStashEntry>): ReadonlyArray<PromptStashEntry> {
+  const stored = readPersistedEntries();
+  if (!stored) return memory;
+  const memoryById = new Map(memory.map((entry) => [entry.id, entry]));
+  return stored.map((entry) => memoryById.get(entry.id) ?? entry);
+}
+
 interface PromptStashStoreState {
   entries: ReadonlyArray<PromptStashEntry>;
   /**
@@ -228,7 +236,7 @@ interface PromptStashStoreState {
 export const usePromptStashStore = create<PromptStashStoreState>()((set, get) => ({
   entries: [],
   stashEntry: (entry) => {
-    const nextEntries = [entry, ...get().entries];
+    const nextEntries = [entry, ...latestEntries(get().entries)];
     const evicted = nextEntries.length > MAX_STASH_ENTRIES ? (nextEntries.pop() ?? null) : null;
     const { written, durable } = persistEntries(nextEntries);
     // A rejected write must not leave the entry visible either: the caller
@@ -241,7 +249,7 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
     return { evicted, written: true, durable };
   },
   takeEntry: (entryId) => {
-    const entries = get().entries;
+    const entries = latestEntries(get().entries);
     const entry = entries.find((candidate) => candidate.id === entryId) ?? null;
     if (!entry) return { entry: null, durable: true };
     const nextEntries = entries.filter((candidate) => candidate.id !== entryId);
@@ -250,7 +258,7 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
     return { entry, durable };
   },
   finalizeEntryImages: (entryId, images) => {
-    const entries = get().entries;
+    const entries = latestEntries(get().entries);
     const index = entries.findIndex((candidate) => candidate.id === entryId);
     const existing = index === -1 ? undefined : entries[index];
     // Restored or deleted mid-encode: nothing to attach to.
@@ -269,8 +277,9 @@ export const usePromptStashStore = create<PromptStashStoreState>()((set, get) =>
   },
 }));
 
-// Hydrate once at startup. Like the app's other persisted stores, tabs are
-// last-write-wins: no cross-tab merging or storage-event syncing.
+// Hydrate once at startup. Writes re-read storage first (latestEntries), so a
+// second tab's stash or restore is not overwritten; there is no live
+// storage-event syncing, so another tab's change shows on the next write.
 {
   try {
     baseStashStorage.removeItem(LEGACY_PROMPT_STASH_STORAGE_KEY);

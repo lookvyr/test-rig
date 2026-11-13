@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   selectionTouchesMentionBoundary,
   splitPromptIntoComposerSegments,
+  promptEndsWithChip,
 } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
@@ -228,5 +229,15 @@ describe("selectionTouchesMentionBoundary", () => {
         prompt.length,
       ),
     ).toBe(true);
+  });
+});
+
+describe("promptEndsWithChip", () => {
+  it("is true only when a chip is the last thing before trailing whitespace", () => {
+    expect(promptEndsWithChip("check @AGENTS.md ")).toBe(true);
+    expect(promptEndsWithChip("use $review \n")).toBe(true);
+    expect(promptEndsWithChip("check @AGENTS.md please ")).toBe(false);
+    expect(promptEndsWithChip("plain text")).toBe(false);
+    expect(promptEndsWithChip("")).toBe(false);
   });
 });

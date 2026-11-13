@@ -241,3 +241,14 @@ export function splitPromptIntoComposerSegments(
 
   return segments;
 }
+
+/** A chip at the very end only parses with whitespace after it, so callers keep one space. */
+export function promptEndsWithChip(prompt: string): boolean {
+  const segments = splitPromptIntoComposerSegments(prompt);
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const segment = segments[index]!;
+    if (segment.type !== "text") return segment.type !== "terminal-context";
+    if (segment.text.trim().length > 0) return false;
+  }
+  return false;
+}

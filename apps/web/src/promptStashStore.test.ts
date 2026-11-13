@@ -1,6 +1,7 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { threadContextRecord } from "./lib/composerContextRecords";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { createMemoryStorage } from "./lib/storage";
 
 import { removeLocalStorageItem } from "./hooks/useLocalStorage";
 
@@ -216,5 +217,29 @@ describe("promptStashStore", () => {
       }),
     );
     expect(usePromptStashStore.getState().entries).toEqual([]);
+  });
+
+  it("keeps an entry another tab stashed after this tab loaded", async () => {
+    const sharedStorage = createMemoryStorage();
+    vi.stubGlobal("localStorage", sharedStorage);
+    vi.resetModules();
+    try {
+      const thisTab = await import("./promptStashStore");
+      sharedStorage.setItem(
+        PROMPT_STASH_STORAGE_KEY,
+        JSON.stringify({ version: 2, state: { entries: [makeEntry({ id: "other-tab" })] } }),
+      );
+
+      thisTab.usePromptStashStore.getState().stashEntry(makeEntry({ id: "this-tab" }));
+
+      const saved = JSON.parse(sharedStorage.getItem(PROMPT_STASH_STORAGE_KEY) as string);
+      expect(saved.state.entries.map((entry: PromptStashEntry) => entry.id)).toEqual([
+        "this-tab",
+        "other-tab",
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
   });
 });

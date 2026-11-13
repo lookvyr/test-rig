@@ -68,6 +68,7 @@ import {
   prepareComposerChipInsertion,
   shouldSubmitComposerOnEnter,
 } from "../../composer-logic";
+import { promptEndsWithChip } from "../../composer-editor-mentions";
 import { deriveComposerSendState, readFileAsDataUrl } from "../ChatView.logic";
 import { composerStashTargetsOtherEditor } from "./composerStashShortcut";
 import {
@@ -89,12 +90,13 @@ import {
   usePromptStashStore,
   type PromptStashEntry,
 } from "../../promptStashStore";
+import { ComposerBanner } from "./ComposerBanner";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 import { compressImageForStash, compressImageToByteLimit } from "../../lib/imageCompression";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
-import { resolveShortcutCommand } from "../../keybindings";
+import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
 import {
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -145,6 +147,9 @@ type ComposerCommandMenuPosition = {
   left: number;
   maxHeight: number;
   width: number;
+  /** Drawer only: the composer's surface colors, since the portal leaves their CSS scope. */
+  glassSurface?: string;
+  outline?: string;
 };
 
 function composerCommandMenuPositionsEqual(
@@ -152,12 +157,58 @@ function composerCommandMenuPositionsEqual(
   b: ComposerCommandMenuPosition,
 ): boolean {
   return (
-    a.bottom === b.bottom && a.left === b.left && a.maxHeight === b.maxHeight && a.width === b.width
+    a.bottom === b.bottom &&
+    a.left === b.left &&
+    a.maxHeight === b.maxHeight &&
+    a.width === b.width &&
+    a.glassSurface === b.glassSurface &&
+    a.outline === b.outline
   );
 }
 
-function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children: ReactNode }) {
+/**
+ * Portals a menu above the composer. "popover" floats it just above the anchor; "drawer"
+ * tucks it under the composer card's top edge, inset like the banners attached there.
+ */
+function popoverPosition(rect: DOMRect): ComposerCommandMenuPosition {
+  return {
+    bottom: window.innerHeight - rect.top + 8,
+    left: rect.left,
+    maxHeight: Math.max(96, rect.top - 24),
+    width: rect.width,
+  };
+}
+
+function drawerPosition(anchor: HTMLElement): ComposerCommandMenuPosition | null {
+  const form = anchor.closest<HTMLElement>('[data-chat-composer-form="true"]');
+  const surface = form?.querySelector<HTMLElement>('[data-chat-composer-main-surface="true"]');
+  const rect = (surface ?? form ?? anchor).getBoundingClientRect();
+  const rootFontSizePx =
+    Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
+  const formStyle = window.getComputedStyle(form ?? anchor);
+  const insetRem = Number.parseFloat(formStyle.getPropertyValue("--chat-composer-drawer-inset"));
+  const inset = (Number.isFinite(insetRem) ? insetRem : 0) * rootFontSizePx;
+  const width = rect.width - inset * 2;
+  if (width <= 0) return null;
+  // The drawer's bottom 1rem (+1px seam) tucks under the card's top edge.
+  const overlap = rootFontSizePx + 1;
+  return {
+    bottom: window.innerHeight - rect.top - overlap,
+    left: rect.left + inset,
+    maxHeight: Math.max(96, rect.top - 24 + overlap),
+    width,
+    glassSurface: formStyle.getPropertyValue("--chat-composer-glass-surface").trim(),
+    outline: formStyle.getPropertyValue("--chat-composer-outline").trim(),
+  };
+}
+
+function ComposerCommandMenuLayer(props: {
+  anchor: HTMLElement | null;
+  placement?: "popover" | "drawer";
+  children: ReactNode;
+}) {
   const [position, setPosition] = useState<ComposerCommandMenuPosition | null>(null);
+  const placement = props.placement ?? "popover";
 
   useLayoutEffect(() => {
     const anchor = props.anchor;
@@ -167,13 +218,14 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
     }
 
     const updatePosition = () => {
-      const rect = anchor.getBoundingClientRect();
-      const next = {
-        bottom: window.innerHeight - rect.top + 8,
-        left: rect.left,
-        maxHeight: Math.max(96, rect.top - 24),
-        width: rect.width,
-      };
+      const next =
+        placement === "drawer"
+          ? drawerPosition(anchor)
+          : popoverPosition(anchor.getBoundingClientRect());
+      if (!next) {
+        setPosition(null);
+        return;
+      }
       setPosition((current) =>
         current && composerCommandMenuPositionsEqual(current, next) ? current : next,
       );
@@ -201,14 +253,19 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [props.anchor]);
+  }, [placement, props.anchor]);
 
   if (!position) return null;
 
   return createPortal(
     <div
-      className="pointer-events-auto fixed z-[70]"
+      className={cn("pointer-events-auto fixed z-[70]", placement === "drawer" && "flex flex-col")}
+      data-composer-drawer-layer={placement === "drawer" ? "true" : undefined}
       style={{
+        ...(position.glassSurface
+          ? { "--chat-composer-glass-surface": position.glassSurface }
+          : {}),
+        ...(position.outline ? { "--chat-composer-outline": position.outline } : {}),
         bottom: position.bottom,
         left: position.left,
         maxHeight: position.maxHeight,
@@ -1110,10 +1167,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null);
   const [isStashMenuOpen, setIsStashMenuOpen] = useState(false);
-  const [stashPulse, setStashPulse] = useState<{ key: number; active: boolean }>({
-    key: 0,
-    active: false,
-  });
+  // Each stash bumps the key; the badge replays its one-shot CSS pulse per key.
+  const [stashPulseKey, setStashPulseKey] = useState(0);
   const isMobileViewport = useMediaQuery("max-sm");
   const isComposerCollapsedMobile =
     isMobileViewport && !forceExpandedOnMobile && !isComposerFocused;
@@ -1161,8 +1216,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
   const mobileComposerExpandInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
-  const stashPulseKeyRef = useRef(0);
-  const stashPulseTimeoutRef = useRef<number | null>(null);
   /**
    * Snapshots currently being encoded, keyed by target+prompt+image ids.
    * Keyed rather than boolean so a genuinely different prompt (or a different
@@ -2244,29 +2297,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const takeStashEntry = usePromptStashStore((state) => state.takeEntry);
   const finalizeStashEntryImages = usePromptStashStore((state) => state.finalizeEntryImages);
 
-  useEffect(() => {
-    return () => {
-      if (stashPulseTimeoutRef.current !== null) {
-        window.clearTimeout(stashPulseTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  /** Briefly highlight the badge so the save registers without a flourish. */
   const pulseStashBadge = useCallback(() => {
-    stashPulseKeyRef.current += 1;
-    setStashPulse({ key: stashPulseKeyRef.current, active: true });
-    if (stashPulseTimeoutRef.current !== null) {
-      window.clearTimeout(stashPulseTimeoutRef.current);
-    }
-    stashPulseTimeoutRef.current = window.setTimeout(() => {
-      stashPulseTimeoutRef.current = null;
-      setStashPulse((current) => ({ ...current, active: false }));
-    }, 1200);
+    setStashPulseKey((key) => key + 1);
   }, []);
 
   const restoreStashEntry = useCallback(
     (entry: PromptStashEntry) => {
+      // A pending question borrows the editor for its answer; restoring now would merge the
+      // stashed prompt into that answer (and persist a secret one into the draft).
+      if (pendingUserInputs.length > 0 || activePendingProgress !== null) {
+        toastManager.add({
+          type: "info",
+          title: "Answer the question first",
+          description: "Restore stashed prompts once the agent's question is resolved.",
+          data: { hideCopyButton: true },
+        });
+        return;
+      }
       if (entry.threadContexts?.some((record) => record.environmentId !== environmentId)) {
         toastManager.add({
           type: "error",
@@ -2392,12 +2439,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       environmentId,
       getComposerDraft,
       setComposerDraftThreadContexts,
+      pendingUserInputs.length,
+      activePendingProgress,
     ],
   );
 
   const deleteStashEntry = useCallback(
     (entry: PromptStashEntry) => {
       const { durable } = takeStashEntry(entry.id);
+      if (!usePromptStashStore.getState().entries.length) {
+        setIsStashMenuOpen(false);
+      }
       if (!durable) {
         toastManager.add({
           type: "warning",
@@ -2414,7 +2466,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const stashCurrentPrompt = useCallback(async () => {
     // Terminal-context placeholders reference live sessions the stash can't
     // round-trip, so they are stripped from the stashed prompt.
-    const prompt = promptRef.current.split(INLINE_TERMINAL_CONTEXT_PLACEHOLDER).join("").trim();
+    const strippedPrompt = promptRef.current.split(INLINE_TERMINAL_CONTEXT_PLACEHOLDER).join("");
+    const trimmedPrompt = strippedPrompt.trim();
+    // A trailing chip only parses with whitespace after it, so keep one space to restore it.
+    const prompt = promptEndsWithChip(strippedPrompt) ? `${trimmedPrompt} ` : trimmedPrompt;
     const images = [...composerImagesRef.current];
     if (prompt.length === 0 && images.length === 0) {
       const entries = usePromptStashStore.getState().entries;
@@ -2578,8 +2633,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   const toggleStashMenu = useCallback(() => {
+    if (isComposerCollapsedMobile) {
+      expandMobileComposer();
+      setIsStashMenuOpen(true);
+      return;
+    }
     setIsStashMenuOpen((open) => !open);
-  }, []);
+  }, [expandMobileComposer, isComposerCollapsedMobile]);
+  const closeStashMenu = useCallback(() => setIsStashMenuOpen(false), []);
+  const stashShortcutLabel = shortcutLabelForCommand(keybindings, "composer.stash", {
+    context: { terminalFocus: false, terminalOpen, modelPickerOpen: false },
+  });
 
   // Close the stash menu whenever the trigger-driven command menu opens so
   // the two popovers never stack in the same layer, and when the user
@@ -2626,14 +2690,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       // even when the composer is in a state that can't stash.
       event.preventDefault();
       event.stopPropagation();
-      if (
-        isCommandPaletteOpen() ||
-        pendingUserInputs.length > 0 ||
-        projectSelectionRequired ||
-        activePendingProgress !== null
-      ) {
+      if (isCommandPaletteOpen()) return;
+      // A pending question owns the composer; the shortcut still opens the stash to look.
+      if (pendingUserInputs.length > 0) {
+        setIsStashMenuOpen((open) => !open);
         return;
       }
+      if (projectSelectionRequired || activePendingProgress !== null) return;
       void stashCurrentPrompt();
     };
     window.addEventListener("keydown", handler, true);
@@ -3128,9 +3191,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       data-chat-composer-form="true"
       data-composer-model-picker-open={isComposerModelPickerOpen ? "true" : undefined}
     >
+      {/* The form sits inside the composer's glass card, so the shoulder tab hangs above it. */}
+      <ComposerBanner.Dock className="pointer-events-none absolute inset-x-0 bottom-full">
+        <ComposerStashBadge
+          count={stashQueue.length}
+          menuOpen={isStashMenuOpen}
+          pulseKey={stashPulseKey}
+          onToggleMenu={toggleStashMenu}
+        />
+      </ComposerBanner.Dock>
       <div
+        data-chat-composer-main-surface="true"
         className={cn(
-          "group rounded-[22px] redesign:rounded-2xl p-px transition-colors duration-200",
+          "group relative rounded-[22px] redesign:rounded-2xl p-px transition-colors duration-200",
           composerProviderState.composerFrameClassName,
         )}
         onDragEnter={onComposerDragEnter}
@@ -3342,21 +3415,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               isComposerCollapsedMobile && "hidden",
             )}
           >
-            <ComposerStashBadge
-              count={stashQueue.length}
-              pulseKey={stashPulse.key}
-              pulsing={stashPulse.active}
-              menuOpen={isStashMenuOpen}
-              onToggleMenu={toggleStashMenu}
-            />
-
             {isStashMenuOpen && !composerMenuOpen && (
-              <ComposerCommandMenuLayer anchor={composerMenuAnchor}>
+              <ComposerCommandMenuLayer anchor={composerMenuAnchor} placement="drawer">
                 <ComposerStashMenu
+                  composerFormRef={composerFormRef}
                   entries={stashQueue}
+                  stashShortcutLabel={stashShortcutLabel}
                   onRestore={restoreStashEntry}
                   onDelete={deleteStashEntry}
-                  onClose={() => setIsStashMenuOpen(false)}
+                  onClose={closeStashMenu}
                 />
               </ComposerCommandMenuLayer>
             )}

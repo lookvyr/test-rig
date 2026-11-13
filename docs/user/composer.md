@@ -287,9 +287,18 @@ thread as having an unsent draft.
 Press **Cmd+S** on macOS or **Ctrl+S** elsewhere to stash the current prompt and
 images, including chat references. With an empty composer and exactly one ready stashed prompt, press the
 shortcut again to restore it directly. If there are several entries or images
-are still being prepared, the shortcut opens the stash menu. You can always open
-that menu from the stash badge, navigate with the arrow keys, and restore with
-Enter. Custom keybindings for the stash action also use this behavior.
+are still being prepared, the shortcut opens the stash menu. While the agent is
+waiting on your answer to a question, the shortcut opens the stash to look
+without stashing.
+
+Stashed prompts sit behind the **Stash** tab on the composer's top edge, which
+shows the count and briefly highlights when you stash. Select it to open the
+stash above the composer: navigate with the arrow keys, restore with Enter, and
+delete an entry with **Cmd+Backspace** (**Ctrl+Backspace** elsewhere) or its
+**×** button. Escape, the stash header, or a click outside closes it. A prompt that ends
+in a file, skill, or chat chip restores with that chip intact. Stashes made in
+another window are kept when you stash or restore here. Custom keybindings for
+the stash action also use this behavior.
 
 ## Moving between turns
 
