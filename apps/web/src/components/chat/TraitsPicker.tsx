@@ -346,6 +346,7 @@ export function useTraitsSelection({
         ...(instanceId ? { instanceId } : {}),
         model,
         explicit: true,
+        rememberForModel: true,
       });
     },
     [instanceId, model, persistence, provider, setProviderModelOptions],

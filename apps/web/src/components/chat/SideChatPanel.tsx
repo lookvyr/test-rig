@@ -24,7 +24,11 @@ import type { LegendListRef } from "@legendapp/list/react";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { ChevronDownIcon, Trash2Icon, Undo2Icon, XIcon } from "lucide-react";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
-import { useComposerDraftStore, type ComposerImageAttachment } from "../../composerDraftStore";
+import {
+  resolvePickedModelSelection,
+  useComposerDraftStore,
+  type ComposerImageAttachment,
+} from "../../composerDraftStore";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { useTheme } from "../../hooks/useTheme";
@@ -798,18 +802,21 @@ export function SideChatPanel(props: {
               onImplementPlanInNewThread={() => undefined}
               onHeldRequestIdsChange={onHeldRequestIdsChange}
               onProviderModelSelect={(instanceId, model) => {
+                const nextModelSelection = resolvePickedModelSelection(
+                  threadRef,
+                  instanceId,
+                  model,
+                );
                 if (
                   !getStartedThreadModelChangeBlockReason({
                     providers,
                     hasStartedSession,
                     currentModelSelection: settingsThread.modelSelection,
                     currentProviderInstanceId: settingsThread.runtime?.providerInstanceId ?? null,
-                    nextModelSelection: { instanceId, model },
+                    nextModelSelection,
                   })
                 )
-                  useComposerDraftStore
-                    .getState()
-                    .setModelSelection(threadRef, { instanceId, model });
+                  useComposerDraftStore.getState().setModelSelection(threadRef, nextModelSelection);
               }}
               getModelDisabledReason={(instanceId, model) =>
                 getStartedThreadModelChangeBlockReason({

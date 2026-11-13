@@ -71,6 +71,7 @@ import {
   markPromotedDraftThreads,
   markPromotedDraftThreadsByRef,
   type ComposerImageAttachment,
+  resolvePickedModelSelection,
   useComposerDraftStore,
   DraftId,
 } from "./composerDraftStore";
@@ -136,6 +137,7 @@ function resetComposerDraftStore() {
     logicalProjectDraftThreadKeyByLogicalProjectKey: {},
     stickyModelSelectionByProvider: {},
     stickyActiveProvider: null,
+    stickyOptionsByModelByProvider: {},
   });
 }
 
@@ -1769,6 +1771,92 @@ describe("composerDraftStore sticky composer settings", () => {
       modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-5-5", {
         effort: "low",
       }),
+    );
+  });
+
+  it("remembers each model's chosen effort without changing new-thread defaults", () => {
+    const store = useComposerDraftStore.getState();
+    const viewed = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("viewed"));
+    store.setStickyModelSelection(
+      modelSelection(CODEX_DRIVER, "gpt-6-sol", { reasoningEffort: "high" }),
+    );
+    store.setModelSelection(viewed, modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-5-5"), {
+      explicit: true,
+    });
+    store.setProviderModelOptions(
+      viewed,
+      CLAUDE_AGENT_DRIVER,
+      toSelections({ effort: "max", fastMode: true }),
+      { instanceId: CLAUDE_AGENT_INSTANCE, model: "claude-opus-5-5", rememberForModel: true },
+    );
+    const state = useComposerDraftStore.getState();
+    // Speed is never remembered with a model.
+    expect(state.stickyOptionsByModelByProvider[CLAUDE_AGENT_INSTANCE]).toEqual({
+      "claude-opus-5-5": toSelections({ effort: "max" }),
+    });
+    // The launch-based default for new threads is untouched.
+    expect(state.stickyActiveProvider).toBe(CODEX_INSTANCE);
+    expect(state.stickyModelSelectionByProvider[CLAUDE_AGENT_INSTANCE]).toBeUndefined();
+    // Edits without rememberForModel (e.g. from a non-composer surface) leave the memory alone.
+    store.setProviderModelOptions(viewed, CLAUDE_AGENT_DRIVER, toSelections({ effort: "low" }), {
+      instanceId: CLAUDE_AGENT_INSTANCE,
+      model: "claude-opus-5-5",
+    });
+    expect(
+      useComposerDraftStore.getState().stickyOptionsByModelByProvider[CLAUDE_AGENT_INSTANCE],
+    ).toEqual({ "claude-opus-5-5": toSelections({ effort: "max" }) });
+  });
+
+  it("remembers the options a launched thread used for its model", () => {
+    const store = useComposerDraftStore.getState();
+    store.setStickyModelSelection(
+      modelSelection(CODEX_DRIVER, "gpt-6-sol", { reasoningEffort: "low", serviceTier: "fast" }),
+    );
+    expect(useComposerDraftStore.getState().stickyOptionsByModelByProvider[CODEX_INSTANCE]).toEqual(
+      { "gpt-6-sol": toSelections({ reasoningEffort: "low" }) },
+    );
+  });
+
+  it("picks a model with its remembered effort and the draft's own speed", () => {
+    const store = useComposerDraftStore.getState();
+    const draft = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("pick"));
+    store.setProviderModelOptions(draft, CLAUDE_AGENT_DRIVER, toSelections({ effort: "low" }), {
+      instanceId: CLAUDE_AGENT_INSTANCE,
+      model: "claude-sonnet-5-5",
+      rememberForModel: true,
+    });
+    store.setModelSelection(
+      draft,
+      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-5-5", { effort: "high", fastMode: true }),
+      { explicit: true },
+    );
+    expect(resolvePickedModelSelection(draft, CLAUDE_AGENT_INSTANCE, "claude-sonnet-5-5")).toEqual(
+      createModelSelection(
+        CLAUDE_AGENT_INSTANCE,
+        "claude-sonnet-5-5",
+        toSelections({ effort: "low", fastMode: true }),
+      ),
+    );
+    // Nothing remembered: no options, so the draft keeps its current ones.
+    expect(resolvePickedModelSelection(draft, CLAUDE_AGENT_INSTANCE, "claude-haiku-5-5")).toEqual({
+      instanceId: CLAUDE_AGENT_INSTANCE,
+      model: "claude-haiku-5-5",
+    });
+  });
+
+  it("forgets a model's effort when it is reset to the default", () => {
+    const store = useComposerDraftStore.getState();
+    const viewed = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("viewed"));
+    const remember = { instanceId: CODEX_INSTANCE, model: "gpt-6-sol", rememberForModel: true };
+    store.setProviderModelOptions(
+      viewed,
+      CODEX_DRIVER,
+      toSelections({ reasoningEffort: "xhigh" }),
+      remember,
+    );
+    store.setProviderModelOptions(viewed, CODEX_DRIVER, undefined, remember);
+    expect(useComposerDraftStore.getState().stickyOptionsByModelByProvider[CODEX_INSTANCE]).toEqual(
+      {},
     );
   });
 

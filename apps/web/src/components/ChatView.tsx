@@ -233,6 +233,7 @@ import {
   type DraftThreadEnvMode,
   useComposerDraftStore,
   type DraftId,
+  resolvePickedModelSelection,
 } from "../composerDraftStore";
 import {
   formatTerminalContextLabel,
@@ -6285,10 +6286,12 @@ function ChatViewContent(props: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
-      const nextModelSelection: ModelSelection = {
+      // A model picked before comes back with the effort it was last used at.
+      const nextModelSelection = resolvePickedModelSelection(
+        scopeThreadRef(activeThread.environmentId, activeThread.id),
         instanceId,
-        model: resolvedModel,
-      };
+        resolvedModel,
+      );
       const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
         providers: providerStatuses,
         hasStartedSession: activeThread.runtime !== null,

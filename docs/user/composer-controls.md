@@ -2,6 +2,8 @@
 
 New chats start with the provider, model, and reasoning effort from the last chat you started in this browser or desktop profile, including when you switch projects. The remembered choice updates after the first message is accepted; browsing older chats, changing an unsent draft, and sending follow-ups do not change it.
 
+Each model also remembers the effort you last chose for it. Picking that model again, from the list or from **Favorites**, brings back that effort, so switching between Opus at High and Sonnet at Low keeps each at its own level. A model you have not set an effort for keeps the current one. This memory does not change what new chats start with.
+
 Speed starts at **Normal** (or **Standard**) for each new chat. Choose a faster speed in that chat when you want it. Existing chats and choices you explicitly made in an unfinished draft are preserved.
 
 The composer's bottom row has **Attach images** (the paperclip) on the left. On the right, the model button shows the provider, model, and effort, such as **Opus 5.5 High**, followed by Send. Open the model button to change the model, its effort, other model options, speed, and the thread's permission mode. A separate permissions button appears next to it only while the thread's mode differs from your default. On narrow windows, **More composer controls** (…) holds the permission modes and, when enabled, plan mode.

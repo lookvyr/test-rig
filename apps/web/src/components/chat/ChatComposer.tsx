@@ -2993,6 +2993,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               instanceId: selectedInstanceId,
               model: selectedModel,
               explicit: true,
+              rememberForModel: true,
             });
         }
         if (change.prompt !== promptRef.current) {
