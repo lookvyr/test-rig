@@ -61,7 +61,7 @@ from.
 ### Binary discovery
 
 Each provider CLI must be on the server's `PATH`, or have an explicit binary path set in
-**Settings** → the provider instance → **Binary path**. Use the explicit path when a version
+**Settings** → **Providers** → the provider instance → **Runtime** → **Binary path**. Use the explicit path when a version
 manager or a non-standard install location keeps the CLI off the `PATH` of the shell that
 started Test Rig.
 

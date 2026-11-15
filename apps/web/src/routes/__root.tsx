@@ -46,6 +46,7 @@ import {
   primaryServerConfigEventAtom,
   primaryServerWelcomeAtom,
 } from "../state/server";
+import { applyAppearanceContrast } from "../appearanceContrast";
 import { readProject, setActiveEnvironmentId } from "../state/entities";
 import {
   createKeybindingsUpdateToastController,
@@ -127,12 +128,16 @@ function RootRouteView() {
 
 function GlassAppearanceSync() {
   const glassOpacity = useClientSettings((settings) => settings.glassOpacity);
+  const appearanceContrast = useClientSettings((settings) => settings.appearanceContrast);
   const chatWidth = useClientSettings((settings) => settings.chatWidth);
   const diffColorScheme = useClientSettings((settings) => settings.diffColorScheme);
 
   useEffect(() => {
     document.documentElement.style.setProperty("--glass-opacity", `${glassOpacity}%`);
   }, [glassOpacity]);
+  useEffect(() => {
+    applyAppearanceContrast(document.documentElement, appearanceContrast);
+  }, [appearanceContrast]);
   useEffect(() => {
     document.documentElement.dataset.chatWidth = chatWidth;
   }, [chatWidth]);

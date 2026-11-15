@@ -79,6 +79,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 :root {
   --app-scrollbar-width: 6px;
+  /* Settings -> Appearance -> Contrast; see appearanceContrast.ts. */
+  --appearance-contrast-base: 100%;
+  --appearance-contrast-boost: 0%;
+  --appearance-contrast-border-boost: 0%;
+  --appearance-contrast-target: black;
   --app-scrollbar-thumb: rgb(217 217 217);
   --app-scrollbar-thumb-hover: rgb(191 191 191);
   /*
@@ -88,7 +93,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --control-radius: 0.5rem;
   --sidebar-content-inset: 0.5rem;
   --sidebar-control-gap: 0.5rem;
-  --sidebar-icon-color: color-mix(in srgb, var(--sidebar-muted-foreground) 60%, var(--sidebar));
+  --sidebar-icon-color: color-mix(
+    in srgb,
+    var(--contrast-sidebar-muted-foreground) 60%,
+    var(--sidebar)
+  );
   --sidebar-row-content-inset: 0.625rem;
   --command-shell-inset: 0.5rem;
   --command-content-inset: 1rem;
@@ -195,40 +204,40 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --color-info: var(--info);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
+  --color-input: var(--contrast-input);
+  --color-border: var(--contrast-border);
   --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-foreground: var(--contrast-accent-foreground);
   --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
+  --color-muted-foreground: var(--contrast-muted-foreground);
   --color-muted: var(--muted);
-  --color-placeholder: var(--placeholder);
-  --color-secondary-label: var(--secondary-label);
-  --color-icon-muted: var(--icon-muted);
-  --color-secondary-foreground: var(--secondary-foreground);
+  --color-placeholder: var(--contrast-placeholder);
+  --color-secondary-label: var(--contrast-secondary-label);
+  --color-icon-muted: var(--contrast-icon-muted);
+  --color-secondary-foreground: var(--contrast-secondary-foreground);
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
+  --color-popover-foreground: var(--contrast-popover-foreground);
   --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
+  --color-card-foreground: var(--contrast-card-foreground);
   --color-card: var(--card);
-  --color-foreground: var(--foreground);
+  --color-foreground: var(--contrast-foreground);
   --color-background: var(--background);
   --color-surface-raised: var(--surface-raised);
   --color-message: var(--message-surface);
-  --color-message-foreground: var(--message-foreground);
+  --color-message-foreground: var(--contrast-message-foreground);
   --color-message-action: var(--message-action);
   --color-message-action-foreground: var(--message-action-foreground);
   --color-message-action-hover: var(--message-action-hover);
   --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-muted-foreground: var(--sidebar-muted-foreground);
+  --color-sidebar-foreground: var(--contrast-sidebar-foreground);
+  --color-sidebar-muted-foreground: var(--contrast-sidebar-muted-foreground);
   --color-sidebar-control-surface: var(--sidebar-control-surface);
   --color-sidebar-row-hover: var(--sidebar-row-hover);
   --color-sidebar-row-active: var(--sidebar-row-active);
   --color-sidebar-row-selected: var(--sidebar-row-selected);
-  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-border: var(--contrast-sidebar-border);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -768,12 +777,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     );
     -webkit-backdrop-filter: blur(var(--glass-blur));
     backdrop-filter: blur(var(--glass-blur));
-    border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
     box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
   }
 
   .dialog-glass {
-    border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+    border-color: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
     box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
   }
 
@@ -818,17 +827,17 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     background: linear-gradient(
       to right,
       var(--primary) 0 var(--settings-slider-fill-position),
-      color-mix(in srgb, var(--muted-foreground) 22%, transparent)
+      color-mix(in srgb, var(--contrast-muted-foreground) 22%, transparent)
         var(--settings-slider-fill-position) 100%
     );
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--contrast-border) 55%, transparent);
   }
 
   .settings-slider::-moz-range-track {
     height: 0.375rem;
     border-radius: 9999px;
-    background: color-mix(in srgb, var(--muted-foreground) 22%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent);
+    background: color-mix(in srgb, var(--contrast-muted-foreground) 22%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--contrast-border) 55%, transparent);
   }
 
   .settings-slider::-moz-range-progress {
@@ -845,7 +854,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     border: 2px solid var(--primary);
     border-radius: 9999px;
     background: var(--background);
-    box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 12%, transparent);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--contrast-foreground) 12%, transparent);
     transition:
       transform 120ms ease,
       box-shadow 120ms ease;
@@ -857,7 +866,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     border: 2px solid var(--primary);
     border-radius: 9999px;
     background: var(--background);
-    box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 12%, transparent);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--contrast-foreground) 12%, transparent);
     transition:
       transform 120ms ease,
       box-shadow 120ms ease;
@@ -865,12 +874,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
   .settings-slider:hover::-webkit-slider-thumb {
     transform: scale(1.08);
-    box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 20%, transparent);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--contrast-foreground) 20%, transparent);
   }
 
   .settings-slider:hover::-moz-range-thumb {
     transform: scale(1.08);
-    box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 20%, transparent);
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--contrast-foreground) 20%, transparent);
   }
 
   .settings-slider:active::-webkit-slider-thumb {
@@ -1234,9 +1243,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
   --sidebar-control-surface: var(--muted);
-  --sidebar-row-hover: color-mix(in srgb, var(--foreground) 8%, transparent);
-  --sidebar-row-active: color-mix(in srgb, var(--foreground) 11%, transparent);
-  --sidebar-row-selected: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 8%, transparent);
+  --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 11%, transparent);
+  --sidebar-row-selected: color-mix(in srgb, var(--contrast-foreground) 7%, transparent);
   --sidebar-border: var(--border);
   /* The stage-channel header art must ramp to THIS panel's surface, not the
      global chrome background, or the fade shows a seam (same rule as the
@@ -1351,7 +1360,7 @@ html.dark[data-theme-id] {
 
 html[data-theme-id] body {
   background-color: var(--app-chrome-background);
-  color: var(--foreground);
+  color: var(--contrast-foreground);
 }
 
 /* Theme-token dependency probes are restored synchronously, before paint. Keep
@@ -1407,11 +1416,11 @@ html[data-theme-token-probe] *::after {
   max-width: 12rem;
   overflow: hidden;
   padding: 0.2rem 0.45rem;
-  border: 1px solid color-mix(in oklab, var(--ring) 48%, var(--border));
+  border: 1px solid color-mix(in oklab, var(--ring) 48%, var(--contrast-border));
   border-radius: 0.4rem;
   background: var(--popover);
   box-shadow: 0 4px 16px rgb(0 0 0 / 24%);
-  color: var(--popover-foreground);
+  color: var(--contrast-popover-foreground);
   font-size: 0.6875rem;
   font-weight: 600;
   line-height: 1rem;
@@ -1432,16 +1441,16 @@ html[data-theme-token-probe] *::after {
    dark-mode whites while preserving the same theme file across clients. */
 html[data-theme-id] [data-chat-header] {
   background-color: var(--toolbar-background);
-  color: var(--toolbar-foreground);
+  color: var(--contrast-toolbar-foreground);
 }
 
 html[data-theme-id] [data-chat-header] [data-slot="button"],
 html[data-theme-id] [data-chat-header] [data-slot="menu-trigger"],
 html[data-theme-id] [data-chat-header] [data-toolbar-control] {
-  --control-icon-color: var(--toolbar-control-foreground);
+  --control-icon-color: var(--contrast-toolbar-control-foreground);
   background-color: var(--toolbar-control);
-  border-color: var(--toolbar-border);
-  color: var(--toolbar-control-foreground);
+  border-color: var(--contrast-toolbar-border);
+  color: var(--contrast-toolbar-control-foreground);
 }
 
 /* The panel layout toggles stay ghost: they render both inside the header and
@@ -1453,8 +1462,8 @@ html[data-theme-id] [data-panel-layout-controls] [data-slot="toggle"],
 html[data-theme-id] [data-panel-layout-controls] [data-slot="tooltip-trigger"],
 html[data-theme-id] .workspace-titlebar-controls [data-slot="toggle"],
 html[data-theme-id] .workspace-titlebar-controls [data-slot="tooltip-trigger"] {
-  --control-icon-color: var(--toolbar-foreground);
-  color: var(--toolbar-foreground);
+  --control-icon-color: var(--contrast-toolbar-foreground);
+  color: var(--contrast-toolbar-foreground);
 }
 
 html[data-theme-id] [data-chat-header] [data-slot="button"]:hover,
@@ -1467,7 +1476,7 @@ html[data-theme-id] [data-chat-header] [data-toolbar-control][data-pressed] {
 }
 
 html[data-theme-id] [data-chat-header] [data-slot="separator"] {
-  background-color: var(--toolbar-border);
+  background-color: var(--contrast-toolbar-border);
 }
 
 /* Chat code blocks join the other code surfaces on the code tokens. The
@@ -1475,7 +1484,7 @@ html[data-theme-id] [data-chat-header] [data-slot="separator"] {
    surfaces with the accent, which fights syntax highlighting. */
 html[data-theme-id] .chat-markdown .chat-markdown-codeblock {
   background-color: var(--code-background);
-  border-color: var(--border);
+  border-color: var(--contrast-border);
   color: var(--code-foreground);
 }
 
@@ -1512,9 +1521,9 @@ html[data-theme-id="t3-chat"]:not(.dark) .chat-markdown :not(pre) > code {
   border-radius: 0.25rem;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  background: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
   padding: 0.1em 0.35em;
-  color: var(--foreground);
+  color: var(--contrast-foreground);
   font-size: 0.85em;
 }
 
@@ -1555,17 +1564,17 @@ html[data-theme-id] [data-sidebar-version="v2"] {
    still use sidebarBorder for controls and internal separators, but the outer
    divider should not become more prominent just because a palette is vivid. */
 html[data-theme-id] [data-app-sidebar] {
-  border-color: color-mix(in srgb, var(--sidebar-foreground) 10%, transparent);
+  border-color: color-mix(in srgb, var(--contrast-sidebar-foreground) 10%, transparent);
 }
 
 html.dark[data-theme-id] [data-app-sidebar] {
-  border-color: color-mix(in srgb, var(--sidebar-foreground) 8%, transparent);
+  border-color: color-mix(in srgb, var(--contrast-sidebar-foreground) 8%, transparent);
 }
 
 /* T3 Chat's panel divider is deliberately pink, and its resize affordance
    keeps that color while hovered. Do not neutralize this branded edge. */
 html.dark[data-theme-id="t3-chat"] [data-app-sidebar] {
-  border-color: var(--sidebar-border);
+  border-color: var(--contrast-sidebar-border);
 }
 
 .theme-json-key {
@@ -1582,6 +1591,124 @@ html.dark[data-theme-id="t3-chat"] [data-app-sidebar] {
 
 .theme-json-constant {
   color: var(--app-theme-accent-surface-foreground, var(--color-violet-600));
+}
+
+/* Recompute contrast wherever a subtree owns its own semantic color palette. */
+:root,
+[data-app-sidebar] {
+  @variant dark {
+    --appearance-contrast-target: white;
+  }
+  --contrast-toolbar-foreground: color-mix(
+    in oklab,
+    color-mix(
+      in oklab,
+      var(--toolbar-foreground) var(--appearance-contrast-base),
+      var(--toolbar-background)
+    ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-toolbar-border: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--toolbar-border) var(--appearance-contrast-base), transparent),
+    var(--toolbar-foreground) var(--appearance-contrast-border-boost)
+  );
+  --contrast-toolbar-control-foreground: color-mix(
+    in oklab,
+    color-mix(
+      in oklab,
+      var(--toolbar-control-foreground) var(--appearance-contrast-base),
+      var(--toolbar-control)
+    ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-input: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--input) var(--appearance-contrast-base), transparent),
+    var(--foreground) var(--appearance-contrast-border-boost)
+  );
+  --contrast-border: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--border) var(--appearance-contrast-base), transparent),
+    var(--foreground) var(--appearance-contrast-border-boost)
+  );
+  --contrast-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--foreground) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-muted-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--muted-foreground) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-placeholder: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--placeholder) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-secondary-label: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--secondary-label) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-icon-muted: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--icon-muted) var(--appearance-contrast-base), var(--background)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-card-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--card-foreground) var(--appearance-contrast-base), var(--card)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-popover-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--popover-foreground) var(--appearance-contrast-base), var(--popover)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-accent-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--accent-foreground) var(--appearance-contrast-base), var(--accent)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-secondary-foreground: color-mix(
+    in oklab,
+    color-mix(
+      in oklab,
+      var(--secondary-foreground) var(--appearance-contrast-base),
+      var(--secondary)
+    ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-message-foreground: color-mix(
+    in oklab,
+    color-mix(
+      in oklab,
+      var(--message-foreground) var(--appearance-contrast-base),
+      var(--message-surface)
+    ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-sidebar-foreground: color-mix(
+    in oklab,
+    color-mix(in oklab, var(--sidebar-foreground) var(--appearance-contrast-base), var(--sidebar)),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-sidebar-muted-foreground: color-mix(
+    in oklab,
+    color-mix(
+      in oklab,
+      var(--sidebar-muted-foreground) var(--appearance-contrast-base),
+      var(--sidebar)
+    ),
+    var(--appearance-contrast-target) var(--appearance-contrast-boost)
+  );
+  --contrast-sidebar-border: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--sidebar-border) var(--appearance-contrast-base), transparent),
+    var(--sidebar-foreground) var(--appearance-contrast-border-boost)
+  );
 }
 
 body {
@@ -1867,7 +1994,7 @@ label:has(> select#reasoning-effort) select {
   margin: 1.25rem 0 0.5rem;
   font-weight: 600;
   line-height: 1.3;
-  color: var(--foreground);
+  color: var(--contrast-foreground);
 }
 
 .chat-markdown h1 {
@@ -1889,7 +2016,7 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown h6 {
-  color: var(--muted-foreground);
+  color: var(--contrast-muted-foreground);
 }
 
 .chat-markdown ul {
@@ -1962,16 +2089,16 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown blockquote {
-  border-left: 2px solid var(--border);
+  border-left: 2px solid var(--contrast-border);
   padding-left: 0.8rem;
-  color: var(--muted-foreground);
+  color: var(--contrast-muted-foreground);
 }
 
 .chat-markdown section[data-footnotes] {
   margin-top: 1.25rem;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--contrast-border);
   padding-top: 0.75rem;
-  color: var(--muted-foreground);
+  color: var(--contrast-muted-foreground);
   font-size: 0.75rem;
 }
 
@@ -1997,11 +2124,11 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown :not(pre) > code {
-  border: 1px solid var(--border);
+  border: 1px solid var(--contrast-border);
   border-radius: 0.375rem;
-  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  background: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
   padding: 0.1em 0.35em;
-  color: var(--foreground);
+  color: var(--contrast-foreground);
   font-size: 0.75rem;
 }
 
@@ -2018,7 +2145,7 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown pre {
   max-width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--contrast-border);
   border-radius: 0.75rem;
   background: var(--muted);
   padding: 0.8rem 0.9rem;
@@ -2033,7 +2160,7 @@ label:has(> select#reasoning-effort) select {
 
 .chat-markdown pre {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--border) 78%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--contrast-border) 78%, transparent) transparent;
 }
 
 .chat-markdown pre::-webkit-scrollbar {
@@ -2046,12 +2173,12 @@ label:has(> select#reasoning-effort) select {
 
 .chat-markdown pre::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--contrast-border) 78%, transparent);
 }
 
 .markdown-file-link-tooltip-scroll {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--border) 78%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--contrast-border) 78%, transparent) transparent;
 }
 
 .markdown-file-link-tooltip-scroll::-webkit-scrollbar {
@@ -2064,7 +2191,7 @@ label:has(> select#reasoning-effort) select {
 
 .markdown-file-link-tooltip-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--contrast-border) 78%, transparent);
 }
 
 .chat-markdown .chat-markdown-codeblock {
@@ -2079,7 +2206,7 @@ label:has(> select#reasoning-effort) select {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.375rem 0.375rem 0 0.75rem;
-  color: color-mix(in srgb, var(--foreground) 72%, transparent);
+  color: color-mix(in srgb, var(--contrast-foreground) 72%, transparent);
 }
 
 .chat-markdown .chat-markdown-codeblock-title {
@@ -2092,16 +2219,16 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown .chat-markdown-chrome-action {
-  color: color-mix(in srgb, var(--foreground) 72%, transparent);
+  color: color-mix(in srgb, var(--contrast-foreground) 72%, transparent);
 }
 
 .chat-markdown .chat-markdown-chrome-action:hover {
-  color: var(--foreground);
+  color: var(--contrast-foreground);
 }
 
 .chat-markdown .chat-markdown-chrome-action[aria-pressed="true"] {
-  color: var(--foreground);
-  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: var(--contrast-foreground);
+  background: color-mix(in srgb, var(--contrast-foreground) 8%, transparent);
 }
 
 .chat-markdown .chat-markdown-codeblock pre {
@@ -2141,14 +2268,14 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown thead th {
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--contrast-border) 60%, transparent);
   padding-block: 0.55rem;
   font-weight: 600;
   white-space: nowrap;
 }
 
 .chat-markdown tbody td {
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--contrast-border) 60%, transparent);
 }
 
 /* Collapsed (default): single-line cells truncate so arbitrary chat content

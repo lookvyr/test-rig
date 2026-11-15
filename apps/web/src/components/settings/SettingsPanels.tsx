@@ -54,6 +54,8 @@ import {
   MAX_TERMINAL_FONT_SIZE,
   MIN_CODE_FONT_SIZE,
   MIN_GLASS_OPACITY,
+  MIN_APPEARANCE_CONTRAST,
+  MAX_APPEARANCE_CONTRAST,
   MIN_INTERFACE_FONT_SIZE,
   MIN_PROMPT_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
@@ -277,6 +279,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(theme !== "system" ? ["Theme"] : []),
       ...(!followSystem ? ["Follow system"] : []),
       ...(themeHalves !== null ? ["Theme mix"] : []),
+      ...(settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast
+        ? ["Contrast"]
+        : []),
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
       ...(settings.environmentIdentificationMode !==
       DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
@@ -397,6 +402,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.fontSizePrompt,
       settings.fontSizeTerminal,
       settings.glassOpacity,
+      settings.appearanceContrast,
       settings.responseStreamingMode,
       settings.sidebarProjectGroupingMode,
       settings.sidebarWorkingShelfEnabled,
@@ -482,6 +488,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
+      appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
       defaultModelSelection: null,
@@ -820,12 +827,6 @@ export function AppearanceSettingsPanel() {
   const environmentStageLabel = useEnvironmentStageLabel();
   const showEnvironmentIdentification =
     resolveEnvironmentIdentificationPillLabel(environmentStageLabel) !== null;
-  const glassOpacityRatio =
-    (settings.glassOpacity - MIN_GLASS_OPACITY) / (MAX_GLASS_OPACITY - MIN_GLASS_OPACITY);
-  const glassOpacitySliderStyle = {
-    "--settings-slider-progress": `${glassOpacityRatio * 100}%`,
-    "--settings-slider-fill-offset": `${0.5 - glassOpacityRatio}rem`,
-  } as CSSProperties;
 
   return (
     <SettingsPageContainer>
@@ -848,50 +849,21 @@ export function AppearanceSettingsPanel() {
       </SettingsSection>
 
       <SettingsSection id="appearance-interface" title="Interface">
-        <SettingsRow
+        <ClientPercentSliderRow
+          settingKey="appearanceContrast"
+          {...searchableSetting("setting-appearance-contrast")}
+          inputId="appearance-contrast"
+          description="Make text, icons, and borders stronger or softer than the theme's defaults."
+          min={MIN_APPEARANCE_CONTRAST}
+          max={MAX_APPEARANCE_CONTRAST}
+        />
+        <ClientPercentSliderRow
+          settingKey="glassOpacity"
           {...searchableSetting("setting-glass-opacity")}
+          inputId="glass-opacity"
           description="Control how transparent glass surfaces are. Higher values make menus, dialogs, and the composer more solid."
-          resetAction={
-            settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? (
-              <SettingResetButton
-                label="glass opacity"
-                onClick={() =>
-                  updateSettings({ glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div className="flex w-full items-center gap-3 sm:w-52">
-              <output
-                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
-                htmlFor="glass-opacity"
-              >
-                {settings.glassOpacity}%
-              </output>
-              <input
-                aria-label="Glass opacity"
-                className="settings-slider min-w-0 flex-1"
-                id="glass-opacity"
-                max={MAX_GLASS_OPACITY}
-                min={MIN_GLASS_OPACITY}
-                onChange={(event) => {
-                  const glassOpacity = Number(event.currentTarget.value);
-                  if (
-                    Number.isInteger(glassOpacity) &&
-                    glassOpacity >= MIN_GLASS_OPACITY &&
-                    glassOpacity <= MAX_GLASS_OPACITY
-                  ) {
-                    updateSettings({ glassOpacity });
-                  }
-                }}
-                step={5}
-                style={glassOpacitySliderStyle}
-                type="range"
-                value={settings.glassOpacity}
-              />
-            </div>
-          }
+          min={MIN_GLASS_OPACITY}
+          max={MAX_GLASS_OPACITY}
         />
         <ClientSelectRow
           settingKey="chatWidth"
@@ -1797,6 +1769,76 @@ function ContinueThreadsRow() {
           }
           aria-label="Continue threads after restarts"
         />
+      }
+    />
+  );
+}
+
+/** A client-setting percentage slider row, stepping by 5. */
+function ClientPercentSliderRow({
+  settingKey,
+  id,
+  title,
+  inputId,
+  description,
+  min,
+  max,
+}: {
+  settingKey: "glassOpacity" | "appearanceContrast";
+  id: string;
+  title: string;
+  inputId: string;
+  description: string;
+  min: number;
+  max: number;
+}) {
+  const value = useClientSettings((settings) => settings[settingKey]);
+  const updateSettings = useUpdateClientSettings();
+  const defaultValue = DEFAULT_UNIFIED_SETTINGS[settingKey];
+  const ratio = (value - min) / (max - min);
+  const sliderStyle = {
+    "--settings-slider-progress": `${ratio * 100}%`,
+    "--settings-slider-fill-offset": `${0.5 - ratio}rem`,
+  } as CSSProperties;
+  return (
+    <SettingsRow
+      id={id}
+      title={title}
+      description={description}
+      resetAction={
+        value !== defaultValue ? (
+          <SettingResetButton
+            label={title.toLowerCase()}
+            onClick={() => updateSettings({ [settingKey]: defaultValue })}
+          />
+        ) : null
+      }
+      control={
+        <div className="flex w-full items-center gap-3 sm:w-52">
+          <output
+            className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+            htmlFor={inputId}
+          >
+            {value}%
+          </output>
+          <input
+            aria-label={title}
+            className="settings-slider min-w-0 flex-1"
+            id={inputId}
+            max={max}
+            min={min}
+            onChange={(event) => {
+              const next = Number(event.currentTarget.value);
+              if (Number.isInteger(next) && next >= min && next <= max) {
+                updateSettings({ [settingKey]: next });
+              }
+            }}
+            step={5}
+            style={sliderStyle}
+            type="range"
+            value={value}
+          />
+        </div>
       }
     />
   );

@@ -1220,7 +1220,7 @@ function ChatMarkdown(props: ChatMarkdownProps) {
   return (
     <div
       className={cn(
-        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80 redesign:text-foreground/90",
+        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/[calc(80%+var(--appearance-contrast-boost)/5)] redesign:text-foreground/[calc(90%+var(--appearance-contrast-boost)/10)]",
         className,
       )}
       onCopy={handleCopy}
