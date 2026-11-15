@@ -154,7 +154,7 @@ when, for example `300000`. Leave it empty to use Claude's default, or the
 details says "Compacts automatically at about N tokens" and marks it on the bar. Claude
 compacts about 33,000 tokens before the number you set.
 
-**Compact idle threads** in **Settings > General** decides what happens to an
+**Compact idle threads** in **Settings > Providers > Advanced** decides what happens to an
 idle Claude thread with at least 200,000 tokens of context. Each Claude
 provider's settings can override it:
 
@@ -383,7 +383,7 @@ reset time. **Resume at reset** schedules one continuation for that chat;
 message by itself. **Wake now** reverses the snooze without canceling a scheduled
 continuation; cancel auto-resume separately if you want both off.
 
-To apply these choices automatically, open **Settings → General** and enable
+To apply these choices automatically, open **Settings → Threads** and enable
 **Auto-resume limited threads**, **Snooze limited threads**, or both. Both settings
 are off by default. Changing these defaults does not cancel choices already
 scheduled in a chat; use that chat’s controls to cancel or wake it.

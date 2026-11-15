@@ -10,7 +10,7 @@ export function ThreadTitleInstructionsSettings() {
   return environment ? (
     <ProjectSettingsScope
       environmentId={environment.environmentId}
-      route="/settings/general"
+      route="/settings/threads"
       label="thread title instructions"
     >
       <Instructions />

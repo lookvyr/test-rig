@@ -2,7 +2,9 @@ import { RotateCcwIcon } from "lucide-react";
 import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
 import { useState } from "react";
 import { AppRouteModal, AppRouteModalClose } from "../components/AppRouteModal";
+import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
 import { SettingsSidebarNav } from "../components/settings/SettingsSidebarNav";
+import { MOVED_SETTINGS_PATHS } from "../components/settings/settingsSearch";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 
@@ -17,7 +19,7 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
       onClick={() => void restoreDefaults()}
     >
       <RotateCcwIcon className="mx-1 size-3.5" />
-      <span className="max-sm:sr-only">Restore defaults</span>
+      <span className="max-sm:sr-only">Restore device defaults</span>
     </Button>
   );
 }
@@ -31,8 +33,8 @@ function SettingsContentLayout() {
         <SettingsSidebarNav pathname={location.pathname} />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="flex h-12 shrink-0 items-center gap-3 border-b ps-5 pe-2">
-            <span className="text-sm font-medium">Settings</span>
-            <div className="ms-auto flex items-center gap-2">
+            <SettingsBreadcrumb pathname={location.pathname} />
+            <div className="ms-auto flex shrink-0 items-center gap-1">
               {location.pathname === "/settings/general" ? (
                 <RestoreDefaultsButton onRestored={() => setRestoreSignal((value) => value + 1)} />
               ) : null}
@@ -61,6 +63,8 @@ export const Route = createFileRoute("/_chat/settings")({
     if (location.pathname === "/settings") {
       throw redirect({ to: "/settings/general", replace: true });
     }
+    const moved = MOVED_SETTINGS_PATHS[location.pathname];
+    if (moved) throw redirect({ to: moved, hash: true, replace: true });
   },
   component: SettingsRouteLayout,
 });

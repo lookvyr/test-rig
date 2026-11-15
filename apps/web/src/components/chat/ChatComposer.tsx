@@ -1031,7 +1031,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
-  // Plan mode is a legacy feature behind Settings → Beta. With the flag off,
+  // Plan mode is a legacy feature behind Settings → Labs. With the flag off,
   // ChatView forces the effective mode to "default", so hiding the toggle
   // can't trap anyone in plan mode.
   const planModeUiEnabled = settings.planModeEnabled;

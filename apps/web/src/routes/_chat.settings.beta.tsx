@@ -1,11 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { BetaSettingsPanel } from "../components/settings/BetaSettingsPanel";
-
-function SettingsBetaRoute() {
-  return <BetaSettingsPanel />;
-}
-
-export const Route = createFileRoute("/_chat/settings/beta")({
-  component: SettingsBetaRoute,
-});
+// Renamed to /settings/labs; the settings route redirects old links.
+export const Route = createFileRoute("/_chat/settings/beta")({});

@@ -108,7 +108,7 @@ After creating or switching branches outside Test Rig, open the branch selector 
 
 When you publish a feature branch that tracks a differently named base branch, Test Rig remembers that base before updating upstream tracking. This also applies when you choose a remote explicitly; an explicitly selected base is preserved.
 
-Test Rig refreshes remote branch status in the background. The default fetch interval is 30 seconds. Change it in **Settings** → **Source Control** → **Git** → **Fetch interval**. Set the interval to `0` if Git should contact remotes only after an explicit action.
+Test Rig refreshes remote branch status in the background. The default fetch interval is 30 seconds. Change it in **Settings** → **Maintenance** → **Background activity**: choose **Advanced**, then set **Git fetch interval**. Set the interval to `0` if Git should contact remotes only after an explicit action.
 
 The background-activity policy can pause a scheduled fetch while the machine is locked, on battery, or in another restricted state. The fetch interval controls how often a refresh becomes eligible to run.
 
@@ -153,8 +153,8 @@ Use the copy button beside a filename in the diff panel to copy its repository-r
 
 ## Worktree branch names
 
-Choose how new worktree branches are named under **Settings** → **Source Control** →
-**Text generation** → **Worktree branch naming**:
+Choose how new worktree branches are named under **Settings** → **Worktrees** →
+**Branches** → **Worktree branch naming**:
 
 - **Static prefix:** generate a descriptive name from your first message under a fixed prefix,
   such as `test-rig/fix-login`. Leave the prefix empty for `fix-login`.
@@ -226,7 +226,7 @@ checkout are not copied into it.
 
 ## Automatic worktree cleanup
 
-**Settings** → **General** → **Automatic worktree cleanup** is on by default. Test Rig removes unused managed worktrees when their threads settle, including after a pull request is merged or closed. Existing settled threads are eligible too.
+**Settings** → **Worktrees** → **Automatic worktree cleanup** is on by default. Test Rig removes unused managed worktrees when their threads settle, including after a pull request is merged or closed. Existing settled threads are eligible too.
 
 The branch and conversation stay available. Sending a new prompt recreates the checkout from its branch and launches the project's setup script, when configured.
 

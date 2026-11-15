@@ -1231,7 +1231,8 @@ function SavedBackendListRow({
                 }
               />
               <TooltipPopup side="top" className="max-w-80 whitespace-pre-wrap leading-tight">
-                The WSL backend is managed by the WSL setting above — turn it on or off there.
+                The WSL backend is managed by the WSL setting in Sharing & access — turn it on or
+                off there.
               </TooltipPopup>
             </Tooltip>
           ) : (
@@ -1284,7 +1285,8 @@ function EmptyRemoteEnvironments() {
   );
 }
 
-export function ConnectionsSettings() {
+/** Environments lists paired machines; access manages how this machine is reached. */
+export function ConnectionsSettings({ view }: { readonly view: "environments" | "access" }) {
   const desktopBridge = window.desktopBridge;
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
@@ -2039,7 +2041,7 @@ export function ConnectionsSettings() {
   );
   const renderNetworkAccessRow = () => (
     <SettingsRow
-      title="Network access"
+      {...searchableSetting("network-access")}
       description={
         isLocalBackendNetworkAccessible ? (
           <NetworkAccessDescription
@@ -2071,7 +2073,7 @@ export function ConnectionsSettings() {
   );
   const renderDisabledNetworkAccessRow = () => (
     <SettingsRow
-      title="Network access"
+      {...searchableSetting("network-access")}
       description={
         currentAuthPolicy === "remote-reachable"
           ? "This backend is already configured for remote access. Network exposure changes must be made where the server is launched."
@@ -2098,6 +2100,69 @@ export function ConnectionsSettings() {
       }
     />
   );
+
+  const renderRemoteEnvironmentsSection = () => (
+    <SettingsSection
+      {...searchableSetting("remote-environments")}
+      headerAction={
+        <Dialog
+          open={addBackendDialogOpen}
+          onOpenChange={(open) => {
+            setAddBackendDialogOpen(open);
+            if (!open) {
+              setSavedBackendError(null);
+            }
+          }}
+        >
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DialogTrigger
+                  render={
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="h-5 gap-1 rounded-sm px-1 text-[11px] font-normal text-muted-foreground/60 hover:text-muted-foreground"
+                      aria-label="Add environment"
+                    >
+                      <PlusIcon className="size-3" />
+                      <span>Add environment</span>
+                    </Button>
+                  }
+                />
+              }
+            />
+            <TooltipPopup side="top">Add environment</TooltipPopup>
+          </Tooltip>
+          <DialogPopup className="max-h-[80dvh] sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Add Environment</DialogTitle>
+              <DialogDescription>
+                Start the server on the other machine, then enter its pairing details. For a
+                previous SSH connection, set up any forwarding yourself before pairing again.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogPanel>{renderRemoteModeBody()}</DialogPanel>
+          </DialogPopup>
+        </Dialog>
+      }
+    >
+      {savedEnvironments.map((environment) => (
+        <SavedBackendListRow
+          key={environment.environmentId}
+          environment={environment}
+          removingEnvironmentId={removingSavedEnvironmentId}
+          onConnect={handleConnectSavedBackend}
+          onRemove={handleRemoveSavedBackend}
+        />
+      ))}
+      {savedEnvironments.length === 0 ? <EmptyRemoteEnvironments /> : null}
+    </SettingsSection>
+  );
+
+  if (view === "environments") {
+    return <SettingsPageContainer>{renderRemoteEnvironmentsSection()}</SettingsPageContainer>;
+  }
 
   return (
     <SettingsPageContainer>
@@ -2144,7 +2209,7 @@ export function ConnectionsSettings() {
 
           {isLocalBackendNetworkAccessible ? (
             <SettingsSection
-              title="Authorized clients"
+              {...searchableSetting("authorized-clients")}
               headerAction={
                 <AuthorizedClientsHeaderAction
                   clientSessions={desktopClientSessions}
@@ -2332,63 +2397,6 @@ export function ConnectionsSettings() {
           />
         </SettingsSection>
       )}
-
-      <SettingsSection
-        {...searchableSetting("remote-environments")}
-        headerAction={
-          <Dialog
-            open={addBackendDialogOpen}
-            onOpenChange={(open) => {
-              setAddBackendDialogOpen(open);
-              if (!open) {
-                setSavedBackendError(null);
-              }
-            }}
-          >
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <DialogTrigger
-                    render={
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        className="h-5 gap-1 rounded-sm px-1 text-[11px] font-normal text-muted-foreground/60 hover:text-muted-foreground"
-                        aria-label="Add environment"
-                      >
-                        <PlusIcon className="size-3" />
-                        <span>Add environment</span>
-                      </Button>
-                    }
-                  />
-                }
-              />
-              <TooltipPopup side="top">Add environment</TooltipPopup>
-            </Tooltip>
-            <DialogPopup className="max-h-[80dvh] sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Add Environment</DialogTitle>
-                <DialogDescription>
-                  Start the server on the other machine, then enter its pairing details. For a
-                  previous SSH connection, set up any forwarding yourself before pairing again.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogPanel>{renderRemoteModeBody()}</DialogPanel>
-            </DialogPopup>
-          </Dialog>
-        }
-      >
-        {savedEnvironments.map((environment) => (
-          <SavedBackendListRow
-            key={environment.environmentId}
-            environment={environment}
-            removingEnvironmentId={removingSavedEnvironmentId}
-            onConnect={handleConnectSavedBackend}
-            onRemove={handleRemoveSavedBackend}
-          />
-        ))}
-        {savedEnvironments.length === 0 ? <EmptyRemoteEnvironments /> : null}
-      </SettingsSection>
     </SettingsPageContainer>
   );
 }

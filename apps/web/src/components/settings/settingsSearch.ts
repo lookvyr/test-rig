@@ -1,13 +1,21 @@
 export type SettingsPath =
   | "/settings/general"
   | "/settings/appearance"
+  | "/settings/chat"
+  | "/settings/diffs"
   | "/settings/keybindings"
   | "/settings/providers"
   | "/settings/tools"
+  | "/settings/threads"
+  | "/settings/browser"
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
+  | "/settings/worktrees"
   | "/settings/connections"
-  | "/settings/beta"
+  | "/settings/access"
+  | "/settings/maintenance"
+  | "/settings/labs"
+  | "/settings/about"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -18,20 +26,75 @@ export interface SettingsSearchItem {
 }
 
 /**
- * Section labels in sidebar order. The sidebar nav and the search-result
- * subtitles both render from this record, so each label exists once.
+ * Section labels. The sidebar nav, breadcrumb, and search-result subtitles all
+ * render from this record, so each label exists once.
  */
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/general": "General",
   "/settings/appearance": "Appearance",
+  "/settings/chat": "Chat",
+  "/settings/diffs": "Diffs & pull requests",
   "/settings/keybindings": "Keybindings",
   "/settings/providers": "Providers",
   "/settings/tools": "Tools",
+  "/settings/threads": "Threads",
+  "/settings/browser": "Browser",
   "/settings/scheduled-tasks": "Scheduled tasks",
   "/settings/source-control": "Source control",
-  "/settings/connections": "Connections",
-  "/settings/beta": "Beta",
+  "/settings/worktrees": "Worktrees",
+  "/settings/connections": "Environments",
+  "/settings/access": "Sharing & access",
+  "/settings/maintenance": "Maintenance",
+  "/settings/labs": "Labs",
+  "/settings/about": "About",
   "/settings/archived": "Archive",
+};
+
+/** Sidebar nav order. Hidden headings still name their group for screen readers. */
+export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
+  readonly heading: string;
+  readonly headingHidden?: true;
+  readonly paths: ReadonlyArray<SettingsPath>;
+}> = [
+  {
+    heading: "Preferences",
+    headingHidden: true,
+    paths: [
+      "/settings/general",
+      "/settings/appearance",
+      "/settings/chat",
+      "/settings/diffs",
+      "/settings/keybindings",
+    ],
+  },
+  {
+    heading: "Agents",
+    paths: [
+      "/settings/providers",
+      "/settings/tools",
+      "/settings/threads",
+      "/settings/browser",
+      "/settings/scheduled-tasks",
+    ],
+  },
+  {
+    heading: "Code",
+    paths: ["/settings/source-control", "/settings/worktrees"],
+  },
+  {
+    heading: "Connections",
+    paths: ["/settings/connections", "/settings/access"],
+  },
+  {
+    heading: "More",
+    headingHidden: true,
+    paths: ["/settings/maintenance", "/settings/labs", "/settings/about", "/settings/archived"],
+  },
+];
+
+/** Pages that moved; old links and bookmarks redirect here. */
+export const MOVED_SETTINGS_PATHS: Readonly<Record<string, SettingsPath>> = {
+  "/settings/beta": "/settings/labs",
 };
 
 /**
@@ -41,17 +104,17 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
  * here once instead of separately in the panel and the index.
  */
 export const SETTINGS_SEARCH_ITEMS = [
-  { id: "tool-call-visibility", title: "Tool calls in chat", to: "/settings/general" },
+  { id: "tool-call-visibility", title: "Tool calls in chat", to: "/settings/chat" },
   {
     id: "browser-profiles",
-    title: "Browser profiles, cookies and logins",
-    to: "/settings/general",
+    title: "Browser profiles",
+    to: "/settings/browser",
     targetId: "browser-profiles",
   },
   {
     id: "browser-search",
-    title: "Browser search engine",
-    to: "/settings/general",
+    title: "Search engine",
+    to: "/settings/browser",
     targetId: "browser-search",
   },
   { id: "scheduled-tasks", title: "Scheduled tasks", to: "/settings/scheduled-tasks" },
@@ -81,7 +144,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Environment identification",
     to: "/settings/appearance",
     // The setting is stage-dependent, so its parent section is the stable destination.
-    targetId: "appearance",
+    targetId: "appearance-interface",
   },
   {
     id: "interface-font",
@@ -136,58 +199,57 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "hide-whitespace-changes",
     title: "Hide whitespace changes",
-    to: "/settings/general",
+    to: "/settings/diffs",
   },
   {
     id: "assistant-output",
     title: "Assistant output",
-    to: "/settings/general",
+    to: "/settings/threads",
   },
   {
     id: "auto-resume-limited-threads",
     title: "Auto-resume limited threads",
-    to: "/settings/general",
+    to: "/settings/threads",
   },
   {
     id: "snooze-limited-threads",
     title: "Snooze limited threads",
-    to: "/settings/general",
+    to: "/settings/threads",
   },
   {
     id: "snooze-options",
     title: "Snooze options",
-    to: "/settings/general",
+    to: "/settings/threads",
   },
   {
     id: "compact-idle-threads",
     title: "Compact idle threads",
-    to: "/settings/general",
+    to: "/settings/providers",
   },
   {
     id: "new-threads",
-    title: "New threads",
-    to: "/settings/general",
+    title: "Workspace",
+    to: "/settings/threads",
   },
   {
     id: "start-from-origin",
-    title: "Start from origin",
-    to: "/settings/general",
-    targetId: "new-threads",
+    title: "Start from remote",
+    to: "/settings/worktrees",
   },
   {
     id: "automatic-worktree-cleanup",
     title: "Automatic worktree cleanup",
-    to: "/settings/general",
+    to: "/settings/worktrees",
   },
   {
     id: "worktree-branch-naming",
     title: "Worktree branch naming",
-    to: "/settings/source-control",
+    to: "/settings/worktrees",
   },
   {
     id: "add-project-starts-in",
     title: "Add project starts in",
-    to: "/settings/general",
+    to: "/settings/threads",
   },
   {
     id: "archive-confirmation",
@@ -202,17 +264,17 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "thread-title-instructions",
     title: "Thread title instructions",
-    to: "/settings/general",
+    to: "/settings/threads",
   },
   {
     id: "text-generation-model",
     title: "Text generation model",
-    to: "/settings/general",
+    to: "/settings/threads",
   },
   {
     id: "diagnostics",
     title: "Diagnostics",
-    to: "/settings/general",
+    to: "/settings/maintenance",
   },
   {
     id: "keybindings",
@@ -233,38 +295,58 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "remote-environments",
-    title: "Remote environments",
+    title: "Environments",
     to: "/settings/connections",
   },
   {
     id: "new-design",
     title: "New design",
-    to: "/settings/beta",
-  },
-  {
-    id: "sidebar-v2",
-    title: "Sidebar v2",
-    to: "/settings/beta",
+    to: "/settings/labs",
   },
   {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
-    to: "/settings/beta",
+    to: "/settings/threads",
   },
   {
     id: "auto-settle-merged-threads",
-    title: "Auto-settle merged pull requests",
-    to: "/settings/beta",
+    title: "Auto-settle merged threads",
+    to: "/settings/threads",
   },
   {
     id: "sidebar-working-shelf",
     title: "Working section",
-    to: "/settings/beta",
+    to: "/settings/general",
   },
   {
     id: "restore-plan-mode",
     title: "Restore plan mode (legacy)",
-    to: "/settings/beta",
+    to: "/settings/labs",
+  },
+  {
+    id: "background-activity",
+    title: "Background activity",
+    to: "/settings/maintenance",
+  },
+  {
+    id: "provider-advanced",
+    title: "Health check interval",
+    to: "/settings/providers",
+  },
+  {
+    id: "version",
+    title: "Version",
+    to: "/settings/about",
+  },
+  {
+    id: "network-access",
+    title: "Network access",
+    to: "/settings/access",
+  },
+  {
+    id: "authorized-clients",
+    title: "Authorized clients",
+    to: "/settings/access",
   },
   {
     id: "archive",

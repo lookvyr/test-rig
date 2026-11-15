@@ -20,7 +20,7 @@ Linux, use Ctrl instead of Command.
 Enter a website address or search terms in the browser's address bar, then press
 Enter. Search terms open results from Google in the current tab. To use
 DuckDuckGo, Bing, Brave Search, Kagi, Ecosia, or your own search address, choose it in
-**Settings → General → Browser search**. A custom address must contain `%s`
+**Settings → Browser → Search engine**. A custom address must contain `%s`
 where the search terms go. Searches are sent only when you submit them; typing
 does not request search suggestions.
 
@@ -145,7 +145,7 @@ the agent to take a screenshot or record a walkthrough.
 
 ## Profiles and sound
 
-Create named browser profiles in **Settings → General →
+Create named browser profiles in **Settings → Browser →
 Browser profiles** to keep separate cookies and logins. Choose a profile when
 opening a browser from the panel's add menu. The Default profile keeps your
 existing browser session. Incognito uses temporary storage. Server profiles are

@@ -28,9 +28,11 @@ import {
 } from "./projectSettingsScope.logic";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 
+type ProjectScopedSettingsRoute = "/settings/worktrees" | "/settings/threads";
+
 function useProjectSettingsScopeValue(
   environmentId: EnvironmentId,
-  route: "/settings/source-control" | "/settings/general",
+  route: ProjectScopedSettingsRoute,
 ) {
   const registry = useContext(RegistryContext);
   const settings = useEnvironmentSettings(environmentId);
@@ -52,8 +54,7 @@ function useProjectSettingsScopeValue(
     group.memberProjects.some((project) => project.environmentId === environmentId),
   );
   const { project: projectKey } = useSearch({
-    from:
-      route === "/settings/general" ? "/_chat/settings/general" : "/_chat/settings/source-control",
+    from: route === "/settings/threads" ? "/_chat/settings/threads" : "/_chat/settings/worktrees",
   });
   const navigate = useNavigate({ from: route });
   const group = groups.find((candidate) => candidate.projectKey === projectKey);
@@ -102,18 +103,18 @@ const ProjectSettingsContext = createContext<ReturnType<
 export function ProjectSettingsScope({
   environmentId,
   children,
-  route = "/settings/source-control",
+  route = "/settings/worktrees",
   label = "branch naming",
 }: {
   environmentId: EnvironmentId;
   children: ReactNode;
-  route?: "/settings/source-control" | "/settings/general";
+  route?: ProjectScopedSettingsRoute;
   label?: string;
 }) {
   const scope = useProjectSettingsScopeValue(environmentId, route);
   return (
     <ProjectSettingsContext value={scope}>
-      <div className="mb-3 rounded-xl border border-border/60 py-3">
+      <div className="pt-3">
         <p className="flex flex-wrap items-center gap-1.5 px-3 text-sm text-muted-foreground sm:px-4">
           Applying {label} for
           <Menu>

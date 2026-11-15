@@ -5,7 +5,8 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { SettingsRow, SettingResetButton } from "./settingsLayout";
-import { useProjectSettingsScope } from "./ProjectSettingsScope";
+import { ProjectSettingsScope, useProjectSettingsScope } from "./ProjectSettingsScope";
+import { usePrimaryEnvironment } from "../../state/environments";
 import { searchableSetting } from "./settingsSearch";
 
 type NamingKey = "branchNamingMode" | "branchNamePrefix" | "branchNameInstructions";
@@ -147,4 +148,14 @@ export function BranchNamingSettings() {
       ) : null}
     </>
   );
+}
+
+/** Branch naming rows under the worktree page's project scope picker. */
+export function BranchNamingSection() {
+  const environment = usePrimaryEnvironment();
+  return environment ? (
+    <ProjectSettingsScope environmentId={environment.environmentId} route="/settings/worktrees">
+      <BranchNamingSettings />
+    </ProjectSettingsScope>
+  ) : null;
 }

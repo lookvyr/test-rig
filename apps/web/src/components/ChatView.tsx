@@ -1551,7 +1551,7 @@ function ChatViewContent(props: ChatViewProps) {
   const threadError = isServerThread
     ? (localServerError ?? activeServerThread?.runtime?.lastError ?? null)
     : localDraftError;
-  // Plan mode is legacy (Settings → Beta). With the flag off the effective
+  // Plan mode is legacy (Settings → Labs). With the flag off the effective
   // mode is forced to "default" — even for threads with a stored plan mode —
   // so nobody is trapped in plan mode while its toggle is hidden. The next
   // send persists "default" back to the thread.

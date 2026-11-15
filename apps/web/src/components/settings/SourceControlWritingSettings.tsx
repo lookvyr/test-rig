@@ -1,5 +1,4 @@
-import { BranchNamingSettings } from "./BranchNamingSettings";
-import { ProjectSettingsScope } from "./ProjectSettingsScope";
+import { AdvancedSettings } from "./AdvancedSettings";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
 import type { EnvironmentId, SourceControlWritingStyleMode } from "@t3tools/contracts";
@@ -140,10 +139,7 @@ export function SourceControlWritingSettingsSection({
   );
 
   return (
-    <SettingsSection title="Text generation">
-      <ProjectSettingsScope environmentId={environmentId}>
-        <BranchNamingSettings />
-      </ProjectSettingsScope>
+    <SettingsSection title="Commits & pull requests">
       <SettingsRow
         title="Source control writing style"
         description={MODE_OPTIONS[style.mode].description}
@@ -242,78 +238,80 @@ export function SourceControlWritingSettingsSection({
         </div>
       </SettingsRow>
 
-      <SettingsRow
-        title="Follow change request templates"
-        description="Structures change request descriptions using the current repository's template when one is available."
-        resetAction={
-          style.followChangeRequestTemplates !== defaults.followChangeRequestTemplates ? (
-            <SettingResetButton
-              label="change request templates"
-              onClick={() =>
+      <AdvancedSettings targetIds={[]}>
+        <SettingsRow
+          title="Follow change request templates"
+          description="Structures change request descriptions using the current repository's template when one is available."
+          resetAction={
+            style.followChangeRequestTemplates !== defaults.followChangeRequestTemplates ? (
+              <SettingResetButton
+                label="change request templates"
+                onClick={() =>
+                  updateSettings({
+                    sourceControlWritingStyle: {
+                      followChangeRequestTemplates: defaults.followChangeRequestTemplates,
+                    },
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={style.followChangeRequestTemplates}
+              onCheckedChange={(checked) =>
                 updateSettings({
                   sourceControlWritingStyle: {
-                    followChangeRequestTemplates: defaults.followChangeRequestTemplates,
+                    followChangeRequestTemplates: Boolean(checked),
                   },
                 })
               }
+              aria-label="Follow change request templates"
             />
-          ) : null
-        }
-        control={
-          <Switch
-            checked={style.followChangeRequestTemplates}
-            onCheckedChange={(checked) =>
-              updateSettings({
-                sourceControlWritingStyle: {
-                  followChangeRequestTemplates: Boolean(checked),
-                },
-              })
-            }
-            aria-label="Follow change request templates"
-          />
-        }
-      />
+          }
+        />
 
-      <SettingsRow
-        title="Source control writer model"
-        description="Optional model override for change descriptions, change request titles and descriptions, and branch or bookmark names. Off uses the global text generation model."
-        control={
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {usesDedicatedModel ? (
-              <ProviderModelPicker
-                activeInstanceId={activeSelection.instanceId}
-                model={activeSelection.model}
-                lockedProvider={null}
-                instanceEntries={instanceEntries}
-                modelOptionsByInstance={modelOptionsByInstance}
-                triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                triggerAriaLabel="Source control writer model"
-                onInstanceModelChange={(instanceId, model) => {
+        <SettingsRow
+          title="Source control writer model"
+          description="Optional model override for change descriptions, change request titles and descriptions, and branch or bookmark names. Off uses the global text generation model."
+          control={
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {usesDedicatedModel ? (
+                <ProviderModelPicker
+                  activeInstanceId={activeSelection.instanceId}
+                  model={activeSelection.model}
+                  lockedProvider={null}
+                  instanceEntries={instanceEntries}
+                  modelOptionsByInstance={modelOptionsByInstance}
+                  triggerVariant="outline"
+                  triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                  triggerAriaLabel="Source control writer model"
+                  onInstanceModelChange={(instanceId, model) => {
+                    updateSettings({
+                      sourceControlWriterModelSelection: createModelSelection(instanceId, model),
+                    });
+                  }}
+                />
+              ) : null}
+              <Switch
+                checked={usesDedicatedModel}
+                onCheckedChange={(checked) =>
                   updateSettings({
-                    sourceControlWriterModelSelection: createModelSelection(instanceId, model),
-                  });
-                }}
+                    sourceControlWriterModelSelection: checked
+                      ? createModelSelection(
+                          defaultModelSelection.instanceId,
+                          defaultModelSelection.model,
+                          defaultModelSelection.options,
+                        )
+                      : null,
+                  })
+                }
+                aria-label="Use a separate source control writer model"
               />
-            ) : null}
-            <Switch
-              checked={usesDedicatedModel}
-              onCheckedChange={(checked) =>
-                updateSettings({
-                  sourceControlWriterModelSelection: checked
-                    ? createModelSelection(
-                        defaultModelSelection.instanceId,
-                        defaultModelSelection.model,
-                        defaultModelSelection.options,
-                      )
-                    : null,
-                })
-              }
-              aria-label="Use a separate source control writer model"
-            />
-          </div>
-        }
-      />
+            </div>
+          }
+        />
+      </AdvancedSettings>
     </SettingsSection>
   );
 }

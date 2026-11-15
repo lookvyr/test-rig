@@ -39,7 +39,7 @@ describe("searchSettings", () => {
   it("finds the new design toggle", () => {
     expect(searchSettings("new design")[0]).toMatchObject({
       id: "new-design",
-      to: "/settings/beta",
+      to: "/settings/labs",
     });
   });
   it("finds both Tools library sections", () => {
@@ -61,10 +61,9 @@ describe("searchSettings", () => {
 
   it("matches normalized title substrings", () => {
     expect(searchSettings("  WORD   WRAP  ", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
-    expect(searchSettings("work").map((item) => item.id)).toEqual([
+    expect(searchSettings("worktree").map((item) => item.id)).toEqual([
       "automatic-worktree-cleanup",
       "worktree-branch-naming",
-      "sidebar-working-shelf",
     ]);
     expect(searchSettings("worktree branch naming").map((item) => item.id)).toEqual([
       "worktree-branch-naming",
@@ -92,6 +91,15 @@ describe("searchSettings", () => {
     expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived threads" });
   });
 
+  it("routes rows that left General to their new pages", () => {
+    expect(searchSettings("tool calls")[0]).toMatchObject({ to: "/settings/chat" });
+    expect(searchSettings("snooze options")[0]).toMatchObject({ to: "/settings/threads" });
+    expect(searchSettings("start from remote")[0]).toMatchObject({ to: "/settings/worktrees" });
+    expect(searchSettings("background activity")[0]).toMatchObject({
+      to: "/settings/maintenance",
+    });
+  });
+
   it("routes appearance settings to their current section", () => {
     expect(searchSettings("theme")[0]).toMatchObject({
       id: "theme",
@@ -104,7 +112,7 @@ describe("searchSettings", () => {
     expect(searchSettings("environment identification")[0]).toMatchObject({
       id: "environment-identification",
       to: "/settings/appearance",
-      targetId: "appearance",
+      targetId: "appearance-interface",
     });
   });
 });

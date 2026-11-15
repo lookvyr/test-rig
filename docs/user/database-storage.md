@@ -1,6 +1,6 @@
 # Local database storage
 
-Settings → Diagnostics shows the current database size and unused pages. SQLite
+Settings → Maintenance → Diagnostics shows the current database size and unused pages. SQLite
 can reuse those pages; they do not mean that conversations are missing. A notice
 appears when at least 1 GiB could be returned to disk.
 

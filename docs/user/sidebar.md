@@ -31,7 +31,7 @@ the sidebar, leaving active and pinned threads at the top.
 
 The new design is on by default. It uses quieter read titles, clearer status
 colors, and shorter cards for threads without a branch. Turn off **New design**
-in **Settings → Beta** to return to the classic layout.
+in **Settings → Labs** to return to the classic layout.
 
 Working threads are dimmer than ready threads, and threads waiting on background
 work use quieter titles. Hover or focus a row to brighten it. The open thread, selected threads, unread results,
@@ -58,7 +58,7 @@ Repository grouping keeps each fork separate from its upstream repository and fr
 
 ## Generated titles
 
-In **Settings → General**, use **Thread title instructions**
+In **Settings → Threads → Text generation → Advanced**, use **Thread title instructions**
 to ask for shorter titles, a particular language, or a naming convention. Choose
 **All projects** for the environment default, or select a project for its own
 instructions. The instructions apply to new and regenerated titles with any
@@ -82,7 +82,7 @@ settled threads keep their own sections. This changes only sidebar presentation
 and does not stop, snooze, or settle any work.
 
 The Working section is on by default. To keep busy threads in the main list,
-turn off **Working section** in **Settings → Beta**. The choice is saved on this
+turn off **Working section** in **Settings → General**. The choice is saved on this
 client and works in both web and desktop.
 
 ## Agent conversations
@@ -112,7 +112,7 @@ turn completes successfully. A failed or interrupted turn leaves the thread acti
 as does a queued message waiting for a response. The pending request expires after
 24 hours or if the server restarts before the turn ends.
 
-In **Settings → Beta**, automatic settlement defaults to three days of inactivity,
+In **Settings → Threads → Auto-settle**, automatic settlement defaults to three days of inactivity,
 with settlement after a pull request merges enabled. These server preferences
 apply to both web and desktop clients. Closed pull requests can also settle
 threads. Work in progress, pending questions or approvals, and background work the
@@ -126,7 +126,7 @@ and time or a duration. **Wake thread** brings it back early. Snoozing alone
 does not send a message. Custom snooze is also available for selected sidebar
 threads.
 
-To change the choices in the snooze menu, open **Settings → General → Snooze
+To change the choices in the snooze menu, open **Settings → Threads → Snooze
 options**, or choose **Edit snooze options** in the Custom snooze dialog. Each
 option is a duration, such as 3 hours, or a time on a day, such as 9:00 PM
 tomorrow. A weekday means the next one after today. Menus list the options

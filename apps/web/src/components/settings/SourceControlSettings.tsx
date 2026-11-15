@@ -1,9 +1,7 @@
-import { ChevronDownIcon, GitPullRequestIcon, InfoIcon, RefreshCwIcon } from "lucide-react";
-import * as Duration from "effect/Duration";
+import { ChevronDownIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
 import * as Option from "effect/Option";
 import { useState, type ReactNode } from "react";
 import type {
-  BackgroundActivitySettings,
   EnvironmentId,
   SourceControlProviderKind,
   SourceControlProviderSettings,
@@ -13,13 +11,8 @@ import type {
   VcsDriverKind,
   VcsDiscoveryItem,
 } from "@t3tools/contracts";
-import {
-  getBackgroundActivityBaseProfile,
-  getBackgroundActivityPresetSettings,
-  resolveServerBackgroundActivitySettings,
-} from "@t3tools/shared/backgroundActivitySettings";
 
-import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
+import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironment, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
@@ -38,19 +31,12 @@ import {
   EmptyTitle,
 } from "../ui/empty";
 import { Skeleton } from "../ui/skeleton";
-import {
-  NumberField,
-  NumberFieldDecrement,
-  NumberFieldGroup,
-  NumberFieldIncrement,
-  NumberFieldInput,
-} from "../ui/number-field";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GitHubIcon, GitIcon, type Icon } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
-import { SettingResetButton, SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
@@ -77,68 +63,6 @@ const VCS_ICONS: Partial<Record<VcsDriverKind, Icon>> = {
 };
 
 const SOURCE_CONTROL_SKELETON_ROWS = ["primary", "secondary"] as const;
-const GIT_FETCH_INTERVAL_STEP_SECONDS = 5;
-type BackgroundActivityOverridePatch = Partial<{
-  [K in keyof BackgroundActivitySettings["overrides"]]:
-    | BackgroundActivitySettings["overrides"][K]
-    | undefined;
-}>;
-
-function durationToSeconds(duration: Duration.Duration): number {
-  return Math.round(Duration.toMillis(duration) / 1_000);
-}
-
-function normalizeFetchIntervalSeconds(value: number | null): number {
-  if (value === null || !Number.isFinite(value)) {
-    return 0;
-  }
-  return Math.max(0, Math.round(value));
-}
-
-function backgroundActivityOverrideSettings(
-  current: BackgroundActivitySettings,
-  overrides: BackgroundActivityOverridePatch,
-) {
-  const nextOverrides: BackgroundActivityOverridePatch = {
-    ...current.overrides,
-    ...overrides,
-  };
-  for (const [key, value] of Object.entries(nextOverrides)) {
-    if (value === undefined) {
-      delete nextOverrides[key as keyof typeof nextOverrides];
-    }
-  }
-  return {
-    backgroundActivity: {
-      schemaVersion: 1 as const,
-      profile: "custom" as const,
-      baseProfile: getBackgroundActivityBaseProfile(current),
-      overrides: nextOverrides as BackgroundActivitySettings["overrides"],
-    },
-  };
-}
-
-function BackgroundPolicyTooltip({ children }: { readonly children: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-            aria-label="Background policy details"
-          >
-            <InfoIcon className="size-3.5" />
-          </button>
-        }
-      />
-      <TooltipPopup side="top" className="max-w-72">
-        {children}
-      </TooltipPopup>
-    </Tooltip>
-  );
-}
-
 function optionLabel(value: Option.Option<string>): string | null {
   return Option.getOrNull(value);
 }
@@ -404,86 +328,6 @@ function SourceControlProviderToggleRow(props: {
   );
 }
 
-function GitFetchIntervalSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
-  const settings = useEnvironmentSettings(environmentId);
-  const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
-  const automaticGitFetchIntervalSeconds = durationToSeconds(
-    resolvedBackgroundActivity.automaticGitFetchInterval,
-  );
-  const defaultAutomaticGitFetchIntervalSeconds = durationToSeconds(
-    getBackgroundActivityPresetSettings(
-      getBackgroundActivityBaseProfile(settings.backgroundActivity),
-    ).automaticGitFetchInterval,
-  );
-  const canResetFetchInterval =
-    automaticGitFetchIntervalSeconds !== defaultAutomaticGitFetchIntervalSeconds;
-
-  return (
-    <div className="grid gap-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <div className="flex min-w-0 items-center gap-1">
-            <span className="text-xs font-medium text-foreground">Fetch interval</span>
-            <BackgroundPolicyTooltip>
-              This interval is configured for Git only. The shared Background activity policy still
-              decides whether Git refreshes may run when the timer fires. Custom intervals appear as
-              Advanced in General settings.
-            </BackgroundPolicyTooltip>
-            <span
-              className={cn(
-                "inline-flex size-5 shrink-0 items-center justify-center transition-opacity",
-                canResetFetchInterval ? "opacity-100" : "pointer-events-none opacity-0",
-              )}
-              aria-hidden={!canResetFetchInterval}
-            >
-              {canResetFetchInterval ? (
-                <SettingResetButton
-                  label="fetch interval"
-                  onClick={() =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(settings.backgroundActivity, {
-                        automaticGitFetchInterval: undefined,
-                      }),
-                    )
-                  }
-                />
-              ) : null}
-            </span>
-          </div>
-          <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
-            Refresh remote branch status in the background. Set this to 0 seconds if Git credentials
-            or security keys should only be prompted by explicit Git actions.
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <NumberField
-            value={automaticGitFetchIntervalSeconds}
-            min={0}
-            step={GIT_FETCH_INTERVAL_STEP_SECONDS}
-            size="sm"
-            className="w-32"
-            onValueChange={(value) =>
-              updateSettings(
-                backgroundActivityOverrideSettings(settings.backgroundActivity, {
-                  automaticGitFetchInterval: Duration.seconds(normalizeFetchIntervalSeconds(value)),
-                }),
-              )
-            }
-          >
-            <NumberFieldGroup>
-              <NumberFieldDecrement aria-label="Decrease fetch interval" />
-              <NumberFieldInput aria-label="Automatic Git fetch interval in seconds" />
-              <NumberFieldIncrement aria-label="Increase fetch interval" />
-            </NumberFieldGroup>
-          </NumberField>
-          <span className="text-xs text-muted-foreground">seconds</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SourceControlSectionSkeleton({
   title,
   headerAction,
@@ -647,19 +491,15 @@ function EnvironmentSourceControlSettingsPanel(props: {
   return (
     <SettingsPageContainer>
       {isInitialScanPending ? (
-        <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />
+        <SourceControlSectionSkeleton title="Version control" headerAction={scanButton} />
       ) : hasVersionControlSystems ? (
         <SettingsSection
           id={searchableSetting("source-control").id}
-          title="Version Control"
+          title="Version control"
           headerAction={scanButton}
         >
           {result.versionControlSystems.map((item) => (
-            <DiscoveryItemRow key={`vcs:${item.kind}`} item={item}>
-              {item.kind === "git" ? (
-                <GitFetchIntervalSettings environmentId={environmentId} />
-              ) : undefined}
-            </DiscoveryItemRow>
+            <DiscoveryItemRow key={`vcs:${item.kind}`} item={item} />
           ))}
         </SettingsSection>
       ) : (
@@ -673,8 +513,8 @@ function EnvironmentSourceControlSettingsPanel(props: {
       <SettingsSection
         title={
           props.isPrimary || environment === null
-            ? "Source Control Providers"
-            : `Source Control Providers · ${environment.label}`
+            ? "Source control providers"
+            : `Source control providers · ${environment.label}`
         }
       >
         {SOURCE_CONTROL_PROVIDER_OPTIONS.map((provider) => (

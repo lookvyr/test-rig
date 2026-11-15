@@ -1,5 +1,11 @@
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
-import { BrowserProfilesSettings, BrowserSearchSettings } from "./BrowserProfilesSettings";
+import {
+  isDefaultThreadDetailsVisibility,
+  resolveThreadDetailsVisibility,
+} from "../chat/threadDetailsItems";
+import { AdvancedSettings } from "./AdvancedSettings";
+import { BranchNamingSection } from "./BranchNamingSettings";
+import { AutoSettleRows, SidebarWorkingShelfRow } from "./LabsSettingsPanel";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import { ArchiveIcon, ArchiveX, Trash2Icon, LoaderIcon, SettingsIcon } from "lucide-react";
 import { Link } from "@tanstack/react-router";
@@ -8,7 +14,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type BackgroundActivityProfile,
-  IDLE_COMPACTION_MODES,
   ProviderDriverKind,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
@@ -246,8 +251,21 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
-      ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
-        ? ["Visible threads"]
+      ...(settings.sidebarWorkingShelfEnabled !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
+        ? ["Working section"]
+        : []),
+      ...(!isDefaultThreadDetailsVisibility(resolveThreadDetailsVisibility(settings))
+        ? ["Thread details"]
+        : []),
+      ...(settings.fontSizeInterface !== DEFAULT_UNIFIED_SETTINGS.fontSizeInterface ||
+      settings.fontSizePrompt !== DEFAULT_UNIFIED_SETTINGS.fontSizePrompt ||
+      settings.fontSizeCode !== DEFAULT_UNIFIED_SETTINGS.fontSizeCode ||
+      settings.fontSizeTerminal !== DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal
+        ? ["Font sizes"]
+        : []),
+      ...(settings.fontSmoothing !== DEFAULT_UNIFIED_SETTINGS.fontSmoothing
+        ? ["Font smoothing"]
         : []),
       ...(settings.sidebarProjectGroupingMode !==
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
@@ -344,7 +362,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.glassOpacity,
       settings.enableAssistantStreaming,
       settings.sidebarProjectGroupingMode,
-      settings.sidebarThreadPreviewCount,
+      settings.sidebarWorkingShelfEnabled,
+      settings.threadDetailsItems,
+      settings.fontSmoothing,
       settings.timestampFormat,
       settings.wordWrap,
       settings.persistComposerContextStrip,
@@ -357,7 +377,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (changedSettingLabels.length === 0) return;
     const api = readLocalApi();
     const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
-      ["Restore default settings?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
+      ["Restore device defaults?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
         "\n",
       ),
     );
@@ -422,7 +442,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
-      sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
+      sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
+      threadDetailsItems: {},
+      fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
+      fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
+      fontSizeCode: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
+      fontSizeTerminal: DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal,
+      fontSmoothing: DEFAULT_UNIFIED_SETTINGS.fontSmoothing,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
@@ -759,7 +785,7 @@ export function AppearanceSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection id="appearance" title="Appearance">
+      <SettingsSection id="appearance" title="Colors & themes" variant="plain" hideTitle>
         <div id={searchableSetting("theme").id}>
           <ThemeLibrary
             appearanceMode={appearanceMode}
@@ -775,7 +801,9 @@ export function AppearanceSettingsPanel() {
             onImportOpenChange={setIsImportThemeOpen}
           />
         </div>
+      </SettingsSection>
 
+      <SettingsSection id="appearance-interface" title="Interface">
         <SettingsRow
           {...searchableSetting("setting-glass-opacity")}
           description="Control how transparent glass surfaces are. Higher values make menus, dialogs, and the composer more solid."
@@ -821,77 +849,84 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
-
-        {showEnvironmentIdentification ? (
+        <ThreadDetailsItemsRow />
+        <AdvancedSettings
+          targetIds={[
+            "appearance-interface",
+            searchableSetting("environment-identification").id,
+            searchableSetting("composer-context").id,
+          ]}
+        >
+          {showEnvironmentIdentification ? (
+            <SettingsRow
+              {...searchableSetting("environment-identification")}
+              description="Choose how Dev and Nightly environments are identified."
+              resetAction={
+                settings.environmentIdentificationMode !==
+                DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE ? (
+                  <SettingResetButton
+                    label="environment identification"
+                    onClick={() =>
+                      updateSettings({
+                        environmentIdentificationMode: DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
+                      })
+                    }
+                  />
+                ) : null
+              }
+              control={
+                <Select
+                  value={settings.environmentIdentificationMode}
+                  onValueChange={(value) => {
+                    if (value === "artwork" || value === "pill" || value === "none") {
+                      updateSettings({ environmentIdentificationMode: value });
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-40" aria-label="Environment identification">
+                    <SelectValue>
+                      {ENVIRONMENT_IDENTIFICATION_LABELS[settings.environmentIdentificationMode]}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="end" alignItemWithTrigger={false}>
+                    {Object.entries(ENVIRONMENT_IDENTIFICATION_LABELS).map(([value, label]) => (
+                      <SelectItem hideIndicator key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+              }
+            />
+          ) : null}
           <SettingsRow
-            {...searchableSetting("environment-identification")}
-            description="Choose how Dev and Nightly environments are identified."
+            {...searchableSetting("composer-context")}
+            description="Keep branch and worktree controls below the composer after a thread starts."
             resetAction={
-              settings.environmentIdentificationMode !== DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE ? (
+              settings.persistComposerContextStrip !==
+              DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip ? (
                 <SettingResetButton
-                  label="environment identification"
+                  label="composer context"
                   onClick={() =>
                     updateSettings({
-                      environmentIdentificationMode: DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
+                      persistComposerContextStrip:
+                        DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
                     })
                   }
                 />
               ) : null
             }
             control={
-              <Select
-                value={settings.environmentIdentificationMode}
-                onValueChange={(value) => {
-                  if (value === "artwork" || value === "pill" || value === "none") {
-                    updateSettings({ environmentIdentificationMode: value });
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full sm:w-40" aria-label="Environment identification">
-                  <SelectValue>
-                    {ENVIRONMENT_IDENTIFICATION_LABELS[settings.environmentIdentificationMode]}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {Object.entries(ENVIRONMENT_IDENTIFICATION_LABELS).map(([value, label]) => (
-                    <SelectItem hideIndicator key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
+              <Switch
+                checked={settings.persistComposerContextStrip}
+                onCheckedChange={(checked) =>
+                  updateSettings({ persistComposerContextStrip: Boolean(checked) })
+                }
+                aria-label="Keep composer context visible in active threads"
+              />
             }
           />
-        ) : null}
-
-        <SettingsRow
-          {...searchableSetting("composer-context")}
-          description="Keep branch and worktree controls below the composer after a thread starts."
-          resetAction={
-            settings.persistComposerContextStrip !==
-            DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip ? (
-              <SettingResetButton
-                label="composer context"
-                onClick={() =>
-                  updateSettings({
-                    persistComposerContextStrip:
-                      DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.persistComposerContextStrip}
-              onCheckedChange={(checked) =>
-                updateSettings({ persistComposerContextStrip: Boolean(checked) })
-              }
-              aria-label="Keep composer context visible in active threads"
-            />
-          }
-        />
-        <ThreadDetailsItemsRow />
+        </AdvancedSettings>
       </SettingsSection>
 
       <TypographySection />
@@ -1093,7 +1128,6 @@ function FontSettingsGroup() {
       <PromptFontRow />
       <CodeFontRow />
       <TerminalFontRow />
-      <FontSmoothingRow />
     </>
   );
 }
@@ -1109,7 +1143,6 @@ function SimpleFontRows() {
     <>
       <InterfaceFontRow preview={<PromptFontPreview />} />
       <CodeFontRow
-        title="Monospace font"
         description="Code blocks, diffs, file previews, and the terminal."
         preview={
           <>
@@ -1129,15 +1162,11 @@ function SimpleFontRows() {
   );
 }
 
-// Font smoothing only renders on macOS, so a search jump to it elsewhere
-// must not flip the section - the target would never mount to be scrolled to.
-const ADVANCED_TYPOGRAPHY_TARGET_IDS: ReadonlySet<string> = new Set([
-  "prompt-font",
-  "terminal-font",
-  ...(typeof navigator !== "undefined" && isMacPlatform(navigator.platform)
-    ? ["font-smoothing"]
-    : []),
-]);
+// Font smoothing only renders on macOS, so elsewhere a search jump must not open the fold.
+const FONT_SMOOTHING_TARGET_IDS =
+  typeof navigator !== "undefined" && isMacPlatform(navigator.platform) ? ["font-smoothing"] : [];
+// Search jumps to the per-surface rows turn on separate fonts so the row mounts.
+const SEPARATE_FONT_TARGET_IDS: ReadonlySet<string> = new Set(["prompt-font", "terminal-font"]);
 
 /**
  * The two-font view by default - one sans, one monospace, each cascading to
@@ -1158,27 +1187,29 @@ function TypographySection() {
   // the still-set target immediately re-expanding the section.
   const lastExpandedTargetRef = useRef<string | null>(null);
   useEffect(() => {
-    if (searchTargetId === null || !ADVANCED_TYPOGRAPHY_TARGET_IDS.has(searchTargetId)) return;
+    if (searchTargetId === null || !SEPARATE_FONT_TARGET_IDS.has(searchTargetId)) return;
     if (lastExpandedTargetRef.current === searchTargetId) return;
     lastExpandedTargetRef.current = searchTargetId;
     setAdvanced(true);
   }, [searchTargetId, setAdvanced]);
   return (
-    <SettingsSection
-      title="Typography"
-      headerAction={
-        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
-          Advanced
-          <Switch
-            checked={advanced}
-            onCheckedChange={(checked) => setAdvanced(Boolean(checked))}
-            aria-label="Show advanced typography settings"
-          />
-        </label>
-      }
-    >
+    <SettingsSection id="typography" title="Typography">
       {advanced ? <FontSettingsGroup /> : <SimpleFontRows />}
       <WordWrapRow />
+      <AdvancedSettings targetIds={FONT_SMOOTHING_TARGET_IDS}>
+        <SettingsRow
+          title="Separate fonts"
+          description="Set the prompt, code, and terminal fonts separately."
+          control={
+            <Switch
+              checked={advanced}
+              onCheckedChange={(checked) => setAdvanced(Boolean(checked))}
+              aria-label="Set fonts separately"
+            />
+          }
+        />
+        <FontSmoothingRow />
+      </AdvancedSettings>
     </SettingsSection>
   );
 }
@@ -1374,59 +1405,13 @@ const isToolCallVisibility = Schema.is(ToolCallVisibility);
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
-  const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
-  );
-  const observability = useAtomValue(primaryServerObservabilityAtom);
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
-  const diagnosticsDescription = formatDiagnosticsDescription({
-    localTracingEnabled: observability?.localTracingEnabled ?? false,
-    otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
-    otlpTracesUrl: observability?.otlpTracesUrl,
-    otlpMetricsEnabled: observability?.otlpMetricsEnabled ?? false,
-    otlpMetricsUrl: observability?.otlpMetricsUrl,
-  });
-
-  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
-  const textGenInstanceId = textGenerationModelSelection.instanceId;
-  const textGenModel = textGenerationModelSelection.model;
-  const textGenModelOptions = textGenerationModelSelection.options;
-  const textGenerationModelInstanceEntries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
-  );
-  const textGenInstanceEntry = textGenerationModelInstanceEntries.find(
-    (entry) => entry.instanceId === textGenInstanceId,
-  );
-  const textGenProvider: ProviderDriverKind =
-    textGenInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND;
-  const textGenerationModelOptionsByInstance = getCustomModelOptionsByInstance(
-    settings,
-    serverProviders,
-    textGenInstanceId,
-    textGenModel,
-  );
-  const isTextGenerationModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
-  const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
-  const activeBackgroundActivityProfile = resolvedBackgroundActivity.profile;
-  const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
-  const backgroundActivityDescription =
-    backgroundActivityProfileOption === "advanced"
-      ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Current shared policy: ${
-          BACKGROUND_ACTIVITY_PROFILE_LABELS[activeBackgroundActivityProfile]
-        }.`
-      : BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS[resolvedBackgroundActivity.profile];
-  const canResetBackgroundActivity = !Equal.equals(
-    settings.backgroundActivity,
-    DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
   );
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="General">
+      <SettingsSection title="Sidebar">
         <SettingsRow
           {...searchableSetting("project-grouping")}
           description="Combine matching repositories across environments."
@@ -1462,44 +1447,61 @@ export function GeneralSettingsPanel() {
             />
           }
         />
-
+        <SidebarWorkingShelfRow />
+      </SettingsSection>
+      <SettingsSection title="Confirmations">
         <SettingsRow
-          {...searchableSetting("tool-call-visibility")}
-          description="Reduce commands, edits, searches, and tool calls in the conversation. Hide successful keeps running and failed calls. Zen also hides the agent's in-between messages and shows only final answers. Errors, approvals, questions, and agent interactions remain visible. This preference applies to this device."
+          {...searchableSetting("archive-confirmation")}
+          description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
-            settings.toolCallVisibility !== DEFAULT_UNIFIED_SETTINGS.toolCallVisibility ? (
+            settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
               <SettingResetButton
-                label="tool calls in chat"
+                label="archive confirmation"
                 onClick={() =>
                   updateSettings({
-                    toolCallVisibility: DEFAULT_UNIFIED_SETTINGS.toolCallVisibility,
+                    confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
                   })
                 }
               />
             ) : null
           }
           control={
-            <Select
-              value={settings.toolCallVisibility}
-              onValueChange={(value) => {
-                if (isToolCallVisibility(value)) updateSettings({ toolCallVisibility: value });
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Tool calls in chat">
-                <SelectValue>
-                  {TOOL_CALL_VISIBILITY_LABELS[settings.toolCallVisibility]}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {ToolCallVisibility.literals.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {TOOL_CALL_VISIBILITY_LABELS[value]}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
+            <Switch
+              checked={settings.confirmThreadArchive}
+              onCheckedChange={(checked) =>
+                updateSettings({ confirmThreadArchive: Boolean(checked) })
+              }
+              aria-label="Confirm thread archiving"
+            />
           }
         />
+        <SettingsRow
+          {...searchableSetting("delete-confirmation")}
+          description="Ask before deleting a thread and its chat history."
+          resetAction={
+            settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
+              <SettingResetButton
+                label="delete confirmation"
+                onClick={() =>
+                  updateSettings({
+                    confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.confirmThreadDelete}
+              onCheckedChange={(checked) =>
+                updateSettings({ confirmThreadDelete: Boolean(checked) })
+              }
+              aria-label="Confirm thread deletion"
+            />
+          }
+        />
+      </SettingsSection>
+      <SettingsSection title="Display">
         <SettingsRow
           {...searchableSetting("time-format")}
           description="System default follows your browser or OS clock preference."
@@ -1541,7 +1543,67 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
 
+export function ChatSettingsPanel() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Activity">
+        <SettingsRow
+          {...searchableSetting("tool-call-visibility")}
+          description="Reduce commands, edits, searches, and tool calls in the conversation. Hide successful keeps running and failed calls. Zen also hides the agent's in-between messages and shows only final answers. Errors, approvals, questions, and agent interactions remain visible. This preference applies to this device."
+          resetAction={
+            settings.toolCallVisibility !== DEFAULT_UNIFIED_SETTINGS.toolCallVisibility ? (
+              <SettingResetButton
+                label="tool calls in chat"
+                onClick={() =>
+                  updateSettings({
+                    toolCallVisibility: DEFAULT_UNIFIED_SETTINGS.toolCallVisibility,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.toolCallVisibility}
+              onValueChange={(value) => {
+                if (isToolCallVisibility(value)) updateSettings({ toolCallVisibility: value });
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Tool calls in chat">
+                <SelectValue>
+                  {TOOL_CALL_VISIBILITY_LABELS[settings.toolCallVisibility]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {ToolCallVisibility.literals.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {TOOL_CALL_VISIBILITY_LABELS[value]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function DiffsSettingsPanel() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Diffs">
         <SettingsRow
           {...searchableSetting("hide-whitespace-changes")}
           description="Set whether the diff panel ignores whitespace-only edits by default."
@@ -1567,18 +1629,293 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
 
+export function ThreadsSettingsPanel() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
+  const textGenInstanceId = textGenerationModelSelection.instanceId;
+  const textGenModel = textGenerationModelSelection.model;
+  const textGenModelOptions = textGenerationModelSelection.options;
+  const textGenerationModelInstanceEntries = sortProviderInstanceEntries(
+    applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
+  );
+  const textGenInstanceEntry = textGenerationModelInstanceEntries.find(
+    (entry) => entry.instanceId === textGenInstanceId,
+  );
+  const textGenProvider: ProviderDriverKind =
+    textGenInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND;
+  const textGenerationModelOptionsByInstance = getCustomModelOptionsByInstance(
+    settings,
+    serverProviders,
+    textGenInstanceId,
+    textGenModel,
+  );
+  const isTextGenerationModelDirty = !Equal.equals(
+    settings.textGenerationModelSelection ?? null,
+    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
+  );
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="New projects">
         <SettingsRow
-          {...searchableSetting("assistant-output")}
-          description="Show token-by-token output while a response is in progress."
+          {...searchableSetting("add-project-starts-in")}
+          description='Leave empty to use "~/" when the Add Project browser opens.'
           resetAction={
-            settings.enableAssistantStreaming !==
-            DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming ? (
+            settings.addProjectBaseDirectory !==
+            DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
               <SettingResetButton
-                label="assistant output"
+                label="add project base directory"
                 onClick={() =>
                   updateSettings({
-                    enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+                    addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              className="w-full sm:w-72"
+              value={settings.addProjectBaseDirectory}
+              onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
+              placeholder="~/"
+              spellCheck={false}
+              aria-label="Add project base directory"
+            />
+          }
+        />
+      </SettingsSection>
+      <SettingsSection title="New threads">
+        <SettingsRow
+          {...searchableSetting("new-threads")}
+          description="Where new threads start."
+          resetAction={
+            settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
+              <SettingResetButton
+                label="new thread workspace"
+                onClick={() =>
+                  updateSettings({
+                    defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.defaultThreadEnvMode}
+              onValueChange={(value) => {
+                if (value === "local" || value === "worktree") {
+                  updateSettings({ defaultThreadEnvMode: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-44" aria-label="Default thread mode">
+                <SelectValue>
+                  {settings.defaultThreadEnvMode === "worktree" ? "New worktree" : "Local"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="local">
+                  Local
+                </SelectItem>
+                <SelectItem hideIndicator value="worktree">
+                  New worktree
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+      </SettingsSection>
+      <SettingsSection title="Snooze">
+        <SnoozePresetsRow />
+      </SettingsSection>
+      <SettingsSection title="Usage limits">
+        <SettingsRow
+          {...searchableSetting("auto-resume-limited-threads")}
+          description="Automatically schedule continuation after a provider reports a usage-limit reset time. Off by default. Cancel an already scheduled continuation in its chat."
+          resetAction={
+            settings.autoResumeLimitedThreads ? (
+              <SettingResetButton
+                label="Auto-resume limited threads"
+                onClick={() => updateSettings({ autoResumeLimitedThreads: false })}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.autoResumeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Auto-resume limited threads"
+            />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("snooze-limited-threads")}
+          description="Snooze usage-limited chats until the reported reset time. Off by default and independent of auto-resume; snoozing alone never sends a message."
+          resetAction={
+            settings.snoozeLimitedThreads ? (
+              <SettingResetButton
+                label="Snooze limited threads"
+                onClick={() => updateSettings({ snoozeLimitedThreads: false })}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.snoozeLimitedThreads}
+              onCheckedChange={(checked) =>
+                updateSettings({ snoozeLimitedThreads: Boolean(checked) })
+              }
+              aria-label="Snooze limited threads"
+            />
+          }
+        />
+      </SettingsSection>
+      <SettingsSection title="Auto-settle">
+        <AutoSettleRows />
+      </SettingsSection>
+      <SettingsSection title="Text generation">
+        <SettingsRow
+          {...searchableSetting("text-generation-model")}
+          description="Default model for generated text like thread titles and source control content. Source control settings can override it with a dedicated source control writer model."
+          resetAction={
+            isTextGenerationModelDirty ? (
+              <SettingResetButton
+                label="text generation model"
+                onClick={() =>
+                  updateSettings({
+                    textGenerationModelSelection:
+                      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <ProviderModelPicker
+                activeInstanceId={textGenInstanceId}
+                model={textGenModel}
+                lockedProvider={null}
+                instanceEntries={textGenerationModelInstanceEntries}
+                modelOptionsByInstance={textGenerationModelOptionsByInstance}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onInstanceModelChange={(instanceId, model) => {
+                  updateSettings({
+                    textGenerationModelSelection: resolveAppModelSelectionState(
+                      {
+                        ...settings,
+                        textGenerationModelSelection: createModelSelection(instanceId, model),
+                      },
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+              <TraitsPicker
+                provider={textGenProvider}
+                models={
+                  // Use the exact instance's models (rather than the
+                  // first-kind-match) so a custom text-gen instance like
+                  // `codex_personal` gets its own model list, not the
+                  // default Codex one.
+                  textGenInstanceEntry?.models ?? []
+                }
+                model={textGenModel}
+                prompt=""
+                onPromptChange={() => {}}
+                modelOptions={textGenModelOptions}
+                allowPromptInjectedEffort={false}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onModelOptionsChange={(nextOptions) => {
+                  updateSettings({
+                    textGenerationModelSelection: resolveAppModelSelectionState(
+                      {
+                        ...settings,
+                        textGenerationModelSelection: createModelSelection(
+                          textGenInstanceId,
+                          textGenModel,
+                          nextOptions,
+                        ),
+                      },
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+            </div>
+          }
+        />
+        <AdvancedSettings
+          targetIds={[
+            searchableSetting("thread-title-instructions").id,
+            searchableSetting("assistant-output").id,
+          ]}
+        >
+          <ThreadTitleInstructionsSettings />
+          <SettingsRow
+            {...searchableSetting("assistant-output")}
+            description="Show token-by-token output while a response is in progress."
+            resetAction={
+              settings.enableAssistantStreaming !==
+              DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming ? (
+                <SettingResetButton
+                  label="assistant output"
+                  onClick={() =>
+                    updateSettings({
+                      enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.enableAssistantStreaming}
+                onCheckedChange={(checked) =>
+                  updateSettings({ enableAssistantStreaming: Boolean(checked) })
+                }
+                aria-label="Stream assistant messages"
+              />
+            }
+          />
+        </AdvancedSettings>
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function WorktreesSettingsPanel() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Creation">
+        <SettingsRow
+          {...searchableSetting("start-from-origin")}
+          description="Base new worktrees on the latest matching branch on the remote instead of your local branch."
+          resetAction={
+            settings.newWorktreesStartFromOrigin !==
+            DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
+              <SettingResetButton
+                label="new worktrees start from remote"
+                onClick={() =>
+                  updateSettings({
+                    newWorktreesStartFromOrigin:
+                      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
                   })
                 }
               />
@@ -1586,16 +1923,76 @@ export function GeneralSettingsPanel() {
           }
           control={
             <Switch
-              checked={settings.enableAssistantStreaming}
+              checked={settings.newWorktreesStartFromOrigin}
               onCheckedChange={(checked) =>
-                updateSettings({ enableAssistantStreaming: Boolean(checked) })
+                updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
               }
-              aria-label="Stream assistant messages"
+              aria-label="Start new worktrees from the remote branch"
             />
           }
         />
-
+      </SettingsSection>
+      <SettingsSection title="Branches">
+        <BranchNamingSection />
+      </SettingsSection>
+      <SettingsSection title="Cleanup">
         <SettingsRow
+          {...searchableSetting("automatic-worktree-cleanup")}
+          description="Remove unused worktrees when threads settle and Git is clean, including ignored files such as .env. Keeps branches and conversations."
+          resetAction={
+            !settings.autoRemoveSettledWorktrees ? (
+              <SettingResetButton
+                label="automatic worktree cleanup"
+                onClick={() => updateSettings({ autoRemoveSettledWorktrees: true })}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.autoRemoveSettledWorktrees}
+              onCheckedChange={(autoRemoveSettledWorktrees) =>
+                updateSettings({ autoRemoveSettledWorktrees })
+              }
+              aria-label="Automatically remove worktrees when threads settle"
+            />
+          }
+        />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function MaintenanceSettingsPanel() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
+  const observability = useAtomValue(primaryServerObservabilityAtom);
+  const diagnosticsDescription = formatDiagnosticsDescription({
+    localTracingEnabled: observability?.localTracingEnabled ?? false,
+    otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
+    otlpTracesUrl: observability?.otlpTracesUrl,
+    otlpMetricsEnabled: observability?.otlpMetricsEnabled ?? false,
+    otlpMetricsUrl: observability?.otlpMetricsUrl,
+  });
+  const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
+  const activeBackgroundActivityProfile = resolvedBackgroundActivity.profile;
+  const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
+  const backgroundActivityDescription =
+    backgroundActivityProfileOption === "advanced"
+      ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Current shared policy: ${
+          BACKGROUND_ACTIVITY_PROFILE_LABELS[activeBackgroundActivityProfile]
+        }.`
+      : BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS[resolvedBackgroundActivity.profile];
+  const canResetBackgroundActivity = !Equal.equals(
+    settings.backgroundActivity,
+    DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
+  );
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection title="Background activity">
+        <SettingsRow
+          id={searchableSetting("background-activity").id}
           title={
             <span className="inline-flex items-center gap-1.5">
               Background activity
@@ -1676,351 +2073,8 @@ export function GeneralSettingsPanel() {
             </>
           }
         />
-
-        <SettingsRow
-          {...searchableSetting("auto-resume-limited-threads")}
-          description="Automatically schedule continuation after a provider reports a usage-limit reset time. Off by default. Cancel an already scheduled continuation in its chat."
-          resetAction={
-            settings.autoResumeLimitedThreads ? (
-              <SettingResetButton
-                label="Auto-resume limited threads"
-                onClick={() => updateSettings({ autoResumeLimitedThreads: false })}
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.autoResumeLimitedThreads}
-              onCheckedChange={(checked) =>
-                updateSettings({ autoResumeLimitedThreads: Boolean(checked) })
-              }
-              aria-label="Auto-resume limited threads"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("snooze-limited-threads")}
-          description="Snooze usage-limited chats until the reported reset time. Off by default and independent of auto-resume; snoozing alone never sends a message."
-          resetAction={
-            settings.snoozeLimitedThreads ? (
-              <SettingResetButton
-                label="Snooze limited threads"
-                onClick={() => updateSettings({ snoozeLimitedThreads: false })}
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.snoozeLimitedThreads}
-              onCheckedChange={(checked) =>
-                updateSettings({ snoozeLimitedThreads: Boolean(checked) })
-              }
-              aria-label="Snooze limited threads"
-            />
-          }
-        />
-
-        <SnoozePresetsRow />
-
-        <SettingsRow
-          {...searchableSetting("compact-idle-threads")}
-          description="When to compact an idle Claude thread over 200,000 tokens: Claude asks when you return, Test Rig compacts just before its prompt cache expires, or never. Each Claude provider can override this."
-          resetAction={
-            settings.compactIdleThreads !== DEFAULT_UNIFIED_SETTINGS.compactIdleThreads ? (
-              <SettingResetButton
-                label="Compact idle threads"
-                onClick={() =>
-                  updateSettings({
-                    compactIdleThreads: DEFAULT_UNIFIED_SETTINGS.compactIdleThreads,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.compactIdleThreads}
-              onValueChange={(value) => {
-                const mode = IDLE_COMPACTION_MODES.find((candidate) => candidate.value === value);
-                if (mode) updateSettings({ compactIdleThreads: mode.value });
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-64" aria-label="Compact idle threads">
-                <SelectValue>
-                  {
-                    IDLE_COMPACTION_MODES.find((mode) => mode.value === settings.compactIdleThreads)
-                      ?.label
-                  }
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {IDLE_COMPACTION_MODES.map((mode) => (
-                  <SelectItem hideIndicator key={mode.value} value={mode.value}>
-                    {mode.label}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("new-threads")}
-          description="Pick the default workspace mode for newly created draft threads."
-          resetAction={
-            settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ||
-            settings.newWorktreesStartFromOrigin !==
-              DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
-              <SettingResetButton
-                label="new threads"
-                onClick={() =>
-                  updateSettings({
-                    defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
-                    newWorktreesStartFromOrigin:
-                      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.defaultThreadEnvMode}
-              onValueChange={(value) => {
-                if (value === "local" || value === "worktree") {
-                  updateSettings({ defaultThreadEnvMode: value });
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-44" aria-label="Default thread mode">
-                <SelectValue>
-                  {settings.defaultThreadEnvMode === "worktree" ? "New worktree" : "Local"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="local">
-                  Local
-                </SelectItem>
-                <SelectItem hideIndicator value="worktree">
-                  New worktree
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-
-        {settings.defaultThreadEnvMode === "worktree" ? (
-          <SettingsRow
-            className="bg-muted/20 sm:pl-9"
-            title={searchableSetting("start-from-origin").title}
-            description="Creates the worktree from the latest matching branch on origin instead of your local branch."
-            resetAction={
-              settings.newWorktreesStartFromOrigin !==
-              DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
-                <SettingResetButton
-                  label="new worktrees start from origin"
-                  onClick={() =>
-                    updateSettings({
-                      newWorktreesStartFromOrigin:
-                        DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={settings.newWorktreesStartFromOrigin}
-                onCheckedChange={(checked) =>
-                  updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
-                }
-                aria-label="Start new worktrees from origin by default"
-              />
-            }
-          />
-        ) : null}
-
-        <SettingsRow
-          {...searchableSetting("automatic-worktree-cleanup")}
-          description="Remove unused worktrees when threads settle and Git is clean, including ignored files such as .env. Keeps branches and conversations."
-          resetAction={
-            !settings.autoRemoveSettledWorktrees ? (
-              <SettingResetButton
-                label="automatic worktree cleanup"
-                onClick={() => updateSettings({ autoRemoveSettledWorktrees: true })}
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.autoRemoveSettledWorktrees}
-              onCheckedChange={(autoRemoveSettledWorktrees) =>
-                updateSettings({ autoRemoveSettledWorktrees })
-              }
-              aria-label="Automatically remove worktrees when threads settle"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("add-project-starts-in")}
-          description='Leave empty to use "~/" when the Add Project browser opens.'
-          resetAction={
-            settings.addProjectBaseDirectory !==
-            DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
-              <SettingResetButton
-                label="add project base directory"
-                onClick={() =>
-                  updateSettings({
-                    addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <DraftInput
-              className="w-full sm:w-72"
-              value={settings.addProjectBaseDirectory}
-              onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
-              placeholder="~/"
-              spellCheck={false}
-              aria-label="Add project base directory"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("archive-confirmation")}
-          description="Require a second click on the inline archive action before a thread is archived."
-          resetAction={
-            settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive ? (
-              <SettingResetButton
-                label="archive confirmation"
-                onClick={() =>
-                  updateSettings({
-                    confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.confirmThreadArchive}
-              onCheckedChange={(checked) =>
-                updateSettings({ confirmThreadArchive: Boolean(checked) })
-              }
-              aria-label="Confirm thread archiving"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("delete-confirmation")}
-          description="Ask before deleting a thread and its chat history."
-          resetAction={
-            settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
-              <SettingResetButton
-                label="delete confirmation"
-                onClick={() =>
-                  updateSettings({
-                    confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.confirmThreadDelete}
-              onCheckedChange={(checked) =>
-                updateSettings({ confirmThreadDelete: Boolean(checked) })
-              }
-              aria-label="Confirm thread deletion"
-            />
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("text-generation-model")}
-          description="Default model for generated text like thread titles and source control content. Source control settings can override it with a dedicated source control writer model."
-          resetAction={
-            isTextGenerationModelDirty ? (
-              <SettingResetButton
-                label="text generation model"
-                onClick={() =>
-                  updateSettings({
-                    textGenerationModelSelection:
-                      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div className="flex flex-wrap items-center justify-end gap-1.5">
-              <ProviderModelPicker
-                activeInstanceId={textGenInstanceId}
-                model={textGenModel}
-                lockedProvider={null}
-                instanceEntries={textGenerationModelInstanceEntries}
-                modelOptionsByInstance={textGenerationModelOptionsByInstance}
-                triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                onInstanceModelChange={(instanceId, model) => {
-                  updateSettings({
-                    textGenerationModelSelection: resolveAppModelSelectionState(
-                      {
-                        ...settings,
-                        textGenerationModelSelection: createModelSelection(instanceId, model),
-                      },
-                      serverProviders,
-                    ),
-                  });
-                }}
-              />
-              <TraitsPicker
-                provider={textGenProvider}
-                models={
-                  // Use the exact instance's models (rather than the
-                  // first-kind-match) so a custom text-gen instance like
-                  // `codex_personal` gets its own model list, not the
-                  // default Codex one.
-                  textGenInstanceEntry?.models ?? []
-                }
-                model={textGenModel}
-                prompt=""
-                onPromptChange={() => {}}
-                modelOptions={textGenModelOptions}
-                allowPromptInjectedEffort={false}
-                triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                onModelOptionsChange={(nextOptions) => {
-                  updateSettings({
-                    textGenerationModelSelection: resolveAppModelSelectionState(
-                      {
-                        ...settings,
-                        textGenerationModelSelection: createModelSelection(
-                          textGenInstanceId,
-                          textGenModel,
-                          nextOptions,
-                        ),
-                      },
-                      serverProviders,
-                    ),
-                  });
-                }}
-              />
-            </div>
-          }
-        />
-        <ThreadTitleInstructionsSettings />
       </SettingsSection>
-
-      <SettingsSection title="About">
-        <AboutVersionSection />
+      <SettingsSection title="Diagnostics">
         <SettingsRow
           {...searchableSetting("diagnostics")}
           description={diagnosticsDescription}
@@ -2031,8 +2085,16 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
-      <BrowserProfilesSettings />
-      <BrowserSearchSettings />
+    </SettingsPageContainer>
+  );
+}
+
+export function AboutSettingsPanel() {
+  return (
+    <SettingsPageContainer>
+      <SettingsSection id={searchableSetting("version").id} title="App">
+        <AboutVersionSection />
+      </SettingsSection>
     </SettingsPageContainer>
   );
 }

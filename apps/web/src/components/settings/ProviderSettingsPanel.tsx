@@ -13,7 +13,7 @@ import {
   type ProviderInstanceConfig,
   type ProviderInstanceId,
 } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { DEFAULT_UNIFIED_SETTINGS, IDLE_COMPACTION_MODES } from "@t3tools/contracts/settings";
 import {
   getBackgroundActivityPresetSettings,
   resolveServerBackgroundActivitySettings,
@@ -37,6 +37,7 @@ import { isElectron } from "../../env";
 import { usePrimarySessionState } from "../../environments/primary";
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { resolveAppModelSelectionState } from "../../modelSelection";
 import {
   useEnvironments,
@@ -679,72 +680,11 @@ export function EnvironmentProviderSettings({
           // threading a disabled flag through every control.
           inert={readOnly}
           aria-disabled={readOnly || undefined}
-          className={readOnly ? "space-y-1 opacity-50 select-none" : "space-y-1"}
+          className={cn(
+            "[&>*+*]:border-t [&>*+*]:border-border/50",
+            readOnly && "opacity-50 select-none",
+          )}
         >
-          <SettingsRow
-            title={
-              <span className="inline-flex items-center gap-1.5">
-                Health check interval
-                <PolicyTooltip>
-                  This interval is configured here, then the shared Background activity policy
-                  decides whether provider probes may run when the timer fires. Custom intervals
-                  appear as Advanced in General settings.
-                </PolicyTooltip>
-              </span>
-            }
-            description="Refresh provider availability, versions, auth state, and model metadata in the background. Set this to 0 seconds to rely on manual refreshes."
-            resetAction={
-              providerHealthRefreshIntervalSeconds !==
-              defaultProviderHealthRefreshIntervalSeconds ? (
-                <SettingResetButton
-                  label="provider health check interval"
-                  onClick={() =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          providerHealthRefreshInterval: undefined,
-                        },
-                      ),
-                    )
-                  }
-                />
-              ) : null
-            }
-            control={
-              <div className="flex shrink-0 items-center gap-2">
-                <NumberField
-                  value={providerHealthRefreshIntervalSeconds}
-                  min={0}
-                  step={PROVIDER_HEALTH_INTERVAL_STEP_SECONDS}
-                  size="sm"
-                  className="w-32"
-                  onValueChange={(value) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          providerHealthRefreshInterval: Duration.seconds(
-                            normalizeIntervalSeconds(value),
-                          ),
-                        },
-                      ),
-                    )
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease provider health check interval" />
-                    <NumberFieldInput aria-label="Provider health check interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase provider health check interval" />
-                  </NumberFieldGroup>
-                </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            }
-          />
-
           {rows.map((row) => {
             const driverOption = getDriverOption(row.driver);
             const liveProvider = serverProviders.find(
@@ -839,6 +779,120 @@ export function EnvironmentProviderSettings({
               />
             );
           })}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Advanced">
+        <div
+          inert={readOnly}
+          className={cn("[&>*+*]:border-t [&>*+*]:border-border/50", readOnly && "opacity-50")}
+        >
+          <SettingsRow
+            id={searchableSetting("provider-advanced").id}
+            title={
+              <span className="inline-flex items-center gap-1.5">
+                Health check interval
+                <PolicyTooltip>
+                  This interval is configured here, then the shared Background activity policy
+                  decides whether provider probes may run when the timer fires. Custom intervals
+                  appear as Advanced in Maintenance settings.
+                </PolicyTooltip>
+              </span>
+            }
+            description="Refresh provider availability, versions, auth state, and model metadata in the background. Set this to 0 seconds to rely on manual refreshes."
+            resetAction={
+              providerHealthRefreshIntervalSeconds !==
+              defaultProviderHealthRefreshIntervalSeconds ? (
+                <SettingResetButton
+                  label="provider health check interval"
+                  onClick={() =>
+                    updateSettings(
+                      backgroundActivityOverrideSettings(
+                        settings.backgroundActivity,
+                        resolvedBackgroundActivity,
+                        {
+                          providerHealthRefreshInterval: undefined,
+                        },
+                      ),
+                    )
+                  }
+                />
+              ) : null
+            }
+            control={
+              <div className="flex shrink-0 items-center gap-2">
+                <NumberField
+                  value={providerHealthRefreshIntervalSeconds}
+                  min={0}
+                  step={PROVIDER_HEALTH_INTERVAL_STEP_SECONDS}
+                  size="sm"
+                  className="w-32"
+                  onValueChange={(value) =>
+                    updateSettings(
+                      backgroundActivityOverrideSettings(
+                        settings.backgroundActivity,
+                        resolvedBackgroundActivity,
+                        {
+                          providerHealthRefreshInterval: Duration.seconds(
+                            normalizeIntervalSeconds(value),
+                          ),
+                        },
+                      ),
+                    )
+                  }
+                >
+                  <NumberFieldGroup>
+                    <NumberFieldDecrement aria-label="Decrease provider health check interval" />
+                    <NumberFieldInput aria-label="Provider health check interval in seconds" />
+                    <NumberFieldIncrement aria-label="Increase provider health check interval" />
+                  </NumberFieldGroup>
+                </NumberField>
+                <span className="text-xs text-muted-foreground">seconds</span>
+              </div>
+            }
+          />
+          <SettingsRow
+            {...searchableSetting("compact-idle-threads")}
+            description="When to compact an idle Claude thread over 200,000 tokens: Claude asks when you return, Test Rig compacts just before its prompt cache expires, or never. Each Claude provider can override this."
+            resetAction={
+              settings.compactIdleThreads !== DEFAULT_UNIFIED_SETTINGS.compactIdleThreads ? (
+                <SettingResetButton
+                  label="Compact idle threads"
+                  onClick={() =>
+                    updateSettings({
+                      compactIdleThreads: DEFAULT_UNIFIED_SETTINGS.compactIdleThreads,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={settings.compactIdleThreads}
+                onValueChange={(value) => {
+                  const mode = IDLE_COMPACTION_MODES.find((candidate) => candidate.value === value);
+                  if (mode) updateSettings({ compactIdleThreads: mode.value });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-64" aria-label="Compact idle threads">
+                  <SelectValue>
+                    {
+                      IDLE_COMPACTION_MODES.find(
+                        (mode) => mode.value === settings.compactIdleThreads,
+                      )?.label
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {IDLE_COMPACTION_MODES.map((mode) => (
+                    <SelectItem hideIndicator key={mode.value} value={mode.value}>
+                      {mode.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
         </div>
       </SettingsSection>
 

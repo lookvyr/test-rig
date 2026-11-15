@@ -195,7 +195,7 @@ function CustomSnoozeDialog() {
               className="sm:mr-auto"
               onClick={() => {
                 finish(null);
-                void navigate({ to: "/settings/general", hash: "snooze-options" });
+                void navigate({ to: "/settings/threads", hash: "snooze-options" });
               }}
             >
               <Settings2Icon />

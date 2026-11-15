@@ -15,12 +15,7 @@ function SettingsSourceControlRoute() {
 }
 
 export const Route = createFileRoute("/_chat/settings/source-control")({
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { project?: string; environmentId: string | undefined } => ({
-    ...(typeof search.project === "string" && search.project.length > 0
-      ? { project: search.project }
-      : {}),
+  validateSearch: (search: Record<string, unknown>): { environmentId: string | undefined } => ({
     environmentId:
       typeof search.environmentId === "string" && search.environmentId.length > 0
         ? search.environmentId

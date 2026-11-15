@@ -39,7 +39,7 @@ running a headless server from the CLI.
 
 If you are already running the desktop app and want to make it reachable from other devices:
 
-1. Open **Settings** → **Connections**.
+1. Open **Settings** → **Sharing & access**.
 2. Under **This environment**, toggle **Network access** on. This will restart the app and run the backend on all network interfaces.
 3. The settings panel will show the default reachable endpoint, with a `+N` control when more endpoints are available. Expand it to inspect alternatives such as loopback, LAN, or custom HTTPS endpoints.
 4. Use **Create Link** to generate a pairing link you can share with another device.
@@ -95,7 +95,7 @@ client when its saved connections are upgraded. Projects and conversations on
 the remote machine remain there.
 
 To reconnect, start Test Rig on that machine yourself, establish any network
-access or SSH forwarding you need, then open **Settings → Connections → Add
+access or SSH forwarding you need, then open **Settings → Environments → Add
 environment** and enter its pairing URL or host and pairing code.
 
 Git clone, fetch, and push over SSH, GitHub integration, local Claude and Codex

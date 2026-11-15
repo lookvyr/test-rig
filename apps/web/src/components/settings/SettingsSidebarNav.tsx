@@ -12,14 +12,22 @@ import {
 import {
   ArchiveIcon,
   BotIcon,
-  Clock3Icon,
+  CalendarClockIcon,
+  FileDiffIcon,
   FlaskConicalIcon,
+  FolderTreeIcon,
   GitBranchIcon,
+  GlobeIcon,
+  HammerIcon,
+  InfoIcon,
   KeyboardIcon,
-  Link2Icon,
+  MessageSquareTextIcon,
+  MessagesSquareIcon,
   PaletteIcon,
   SearchIcon,
+  ServerIcon,
   Settings2Icon,
+  ShieldCheckIcon,
   WrenchIcon,
   XIcon,
 } from "lucide-react";
@@ -38,6 +46,7 @@ import {
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
+  SETTINGS_NAV_GROUPS,
   SETTINGS_SECTION_LABELS,
   type SettingsPath,
   type SettingsSearchItem,
@@ -48,34 +57,38 @@ const SETTINGS_SECTION_ICONS: Readonly<
 > = {
   "/settings/general": Settings2Icon,
   "/settings/appearance": PaletteIcon,
+  "/settings/chat": MessageSquareTextIcon,
+  "/settings/diffs": FileDiffIcon,
   "/settings/keybindings": KeyboardIcon,
   "/settings/providers": BotIcon,
-  "/settings/tools": WrenchIcon,
-  "/settings/scheduled-tasks": Clock3Icon,
+  "/settings/tools": HammerIcon,
+  "/settings/threads": MessagesSquareIcon,
+  "/settings/browser": GlobeIcon,
+  "/settings/scheduled-tasks": CalendarClockIcon,
   "/settings/source-control": GitBranchIcon,
-  "/settings/connections": Link2Icon,
-  "/settings/beta": FlaskConicalIcon,
+  "/settings/worktrees": FolderTreeIcon,
+  "/settings/connections": ServerIcon,
+  "/settings/access": ShieldCheckIcon,
+  "/settings/maintenance": WrenchIcon,
+  "/settings/labs": FlaskConicalIcon,
+  "/settings/about": InfoIcon,
   "/settings/archived": ArchiveIcon,
 };
 
-export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
-  label: string;
-  to: SettingsPath;
-  icon: ComponentType<{ className?: string }>;
-}> = (Object.keys(SETTINGS_SECTION_LABELS) as SettingsPath[]).map((to) => ({
-  to,
-  label: SETTINGS_SECTION_LABELS[to],
-  icon: SETTINGS_SECTION_ICONS[to],
-}));
+// Detail pages without a nav entry highlight the page that links to them.
+const SETTINGS_DETAIL_PAGE_PARENTS: Readonly<Record<string, SettingsPath>> = {
+  "/settings/diagnostics": "/settings/maintenance",
+};
 
 function SettingsSectionIcon({ to }: { to: SettingsPath }) {
   const Icon = SETTINGS_SECTION_ICONS[to];
-  return <Icon className="mt-0.5 size-3.5 shrink-0 text-sidebar-muted-foreground/60" />;
+  return <Icon className="size-4 shrink-0 text-(--sidebar-icon-color)" />;
 }
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
   const currentHash = useLocation({ select: (location) => location.hash });
+  const activePath = SETTINGS_DETAIL_PAGE_PARENTS[pathname] ?? pathname;
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [compactSearchOpen, setCompactSearchOpen] = useState(false);
@@ -183,7 +196,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <nav
       aria-label="Settings"
       className={cn(
-        "flex w-56 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground max-md:w-14",
+        "flex w-60 shrink-0 flex-col border-e bg-sidebar text-sidebar-foreground max-md:w-14",
         compactSearchOpen &&
           "max-md:absolute max-md:inset-y-0 max-md:start-0 max-md:z-10 max-md:w-full",
       )}
@@ -279,7 +292,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                       tabIndex={-1}
                       size="sm"
                       isActive={index === activeResultIndex}
-                      className="h-auto min-h-10 items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                      className="h-auto min-h-10 items-start"
                       onMouseMove={() => setActiveResultIndex(index)}
                       onClick={() => handleSearchResultClick(item)}
                     >
@@ -288,31 +301,60 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                         <span className="block truncate text-sm font-medium text-sidebar-foreground">
                           {item.title}
                         </span>
-                        <span className="block truncate text-[11px] text-sidebar-muted-foreground/75">
+                        <span className="block truncate text-2xs text-sidebar-muted-foreground/75">
                           {SETTINGS_SECTION_LABELS[item.to]}
                         </span>
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))
-              : SETTINGS_NAV_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = pathname === item.to;
-                  return (
-                    <SidebarMenuItem key={item.to}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => handleSectionClick(item.to)}
-                      >
-                        <Icon />
-                        <span className={cn("truncate", !compactSearchOpen && "max-md:sr-only")}>
-                          {item.label}
-                        </span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+              : null}
           </SidebarMenu>
+          {isSearching ? null : (
+            <div className="flex flex-col gap-4">
+              {SETTINGS_NAV_GROUPS.map((group, index) => (
+                <div
+                  key={group.heading}
+                  className="flex flex-col gap-1 max-md:border-t max-md:border-sidebar-border max-md:pt-4 max-md:first:border-t-0 max-md:first:pt-0"
+                >
+                  <h3
+                    id={`settings-nav-group-${index}`}
+                    className={cn(
+                      "px-2 text-xs font-medium text-sidebar-muted-foreground/80",
+                      group.headingHidden ? "sr-only" : !compactSearchOpen && "max-md:sr-only",
+                    )}
+                  >
+                    {group.heading}
+                  </h3>
+                  {/* The heading stays outside the group it names so screen readers do not read it twice. */}
+                  <div role="group" aria-labelledby={`settings-nav-group-${index}`}>
+                    <SidebarMenu>
+                      {group.paths.map((to) => {
+                        const Icon = SETTINGS_SECTION_ICONS[to];
+                        const isActive = activePath === to;
+                        return (
+                          <SidebarMenuItem key={to}>
+                            <SidebarMenuButton
+                              aria-current={isActive ? "page" : undefined}
+                              isActive={isActive}
+                              onClick={() => handleSectionClick(to)}
+                            >
+                              <Icon />
+                              <span
+                                className={cn("truncate", !compactSearchOpen && "max-md:sr-only")}
+                              >
+                                {SETTINGS_SECTION_LABELS[to]}
+                              </span>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        );
+                      })}
+                    </SidebarMenu>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </SidebarGroup>
       </SidebarContent>
     </nav>
