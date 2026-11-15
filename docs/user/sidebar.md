@@ -59,10 +59,11 @@ Repository grouping keeps each fork separate from its upstream repository and fr
 ## Generated titles
 
 In **Settings → Threads → Text generation → Advanced**, use **Thread title instructions**
-to ask for shorter titles, a particular language, or a naming convention. Choose
-**All projects** for the environment default, or select a project for its own
-instructions. The instructions apply to new and regenerated titles with any
-supported provider. Clear the override to inherit the default again.
+to ask for shorter titles, a particular language, or a naming convention. With
+**All projects** selected at the top of the page, you edit the default; select a
+project there to give it its own instructions. The instructions apply to new and
+regenerated titles with any supported provider. Use the row's reset control to
+inherit the default again.
 
 ## Working section
 

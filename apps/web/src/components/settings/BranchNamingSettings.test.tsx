@@ -1,9 +1,9 @@
-import { DEFAULT_SERVER_SETTINGS, ProjectId } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { visitElements } from "../../test/reactElementTree";
 import { reactHookHarness as hooks } from "../../test/reactHookHarness";
 
-const state = vi.hoisted(() => ({ mixed: true, update: vi.fn(), clear: vi.fn() }));
+const state = vi.hoisted(() => ({ mixed: true, update: vi.fn() }));
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
   const { reactHookHarness } = await import("../../test/reactHookHarness");
@@ -13,15 +13,11 @@ vi.mock("react/compiler-runtime", async () => {
   const { reactHookHarness } = await import("../../test/reactHookHarness");
   return { c: reactHookHarness.useMemoCache };
 });
-vi.mock("./ProjectSettingsScope", () => ({
-  useProjectSettingsScope: () => ({
-    settings: DEFAULT_SERVER_SETTINGS,
-    projectIds: [ProjectId.make("project")],
-    isMixed: (key: string) => key === "branchNamePrefix" && state.mixed,
-    source: () => "project",
-    update: state.update,
-    clear: state.clear,
-  }),
+vi.mock("./useScopedSettings", () => ({
+  useScopedSettings: () => DEFAULT_SERVER_SETTINGS,
+  useScopedSettingsMixed: (keys: readonly string[]) =>
+    keys[0] === "branchNamePrefix" && state.mixed,
+  useUpdateScopedSettings: () => state.update,
 }));
 import { BranchNamingSettings } from "./BranchNamingSettings";
 
@@ -56,12 +52,9 @@ describe("scoped branch naming controls", () => {
     (prefix.props.onBlur as (event: unknown) => void)({ target: { value: "" } });
     expect(state.update).toHaveBeenCalledExactlyOnceWith({ branchNamePrefix: "" });
   });
-  it("clears a project override even when its value equals the built-in default", () => {
+  it("offers a reset only when the value differs from the default", () => {
     state.mixed = false;
     const reset = visitElements(render(), (element) => element.props.label === "branch prefix");
-    expect(reset).not.toBeNull();
-    (reset!.props.onClick as () => void)();
-    expect(state.clear).toHaveBeenCalledExactlyOnceWith("branchNamePrefix");
-    expect(state.update).not.toHaveBeenCalled();
+    expect(reset).toBeNull();
   });
 });

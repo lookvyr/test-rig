@@ -542,7 +542,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
     handleOpenChange(false);
     void navigate({
       to: "/settings/source-control",
-      search: { environmentId: props.environmentId ?? undefined },
+      search: props.environmentId ? { machine: props.environmentId } : {},
     });
   }, [handleOpenChange, navigate, props.environmentId]);
 

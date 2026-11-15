@@ -51,6 +51,9 @@ import {
   type SettingsPath,
   type SettingsSearchItem,
 } from "./settingsSearch";
+import { useOptionalSettingsScope } from "./SettingsScopeContext";
+import { SETTINGS_SCOPED_PATHS } from "./SettingsScopeSentence";
+import { settingsLinkSearch } from "./settingsScopeNavigation";
 
 const SETTINGS_SECTION_ICONS: Readonly<
   Record<SettingsPath, ComponentType<{ className?: string }>>
@@ -88,6 +91,12 @@ function SettingsSectionIcon({ to }: { to: SettingsPath }) {
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
   const currentHash = useLocation({ select: (location) => location.hash });
+  const scopeSearch = useOptionalSettingsScope()?.search;
+  const linkSearch = useCallback(
+    (to: SettingsPath) =>
+      settingsLinkSearch(pathname, to, scopeSearch ?? {}, SETTINGS_SCOPED_PATHS),
+    [pathname, scopeSearch],
+  );
   const activePath = SETTINGS_DETAIL_PAGE_PARENTS[pathname] ?? pathname;
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
@@ -143,9 +152,15 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const handleSectionClick = useCallback(
     (to: SettingsPath) => {
       setCompactSearchOpen(false);
-      void navigate({ to, hash: "", replace: true, hashScrollIntoView: false });
+      void navigate({
+        to,
+        search: linkSearch(to),
+        hash: "",
+        replace: true,
+        hashScrollIntoView: false,
+      });
     },
-    [navigate],
+    [linkSearch, navigate],
   );
   const clearSearch = useCallback(() => {
     setQuery("");
@@ -160,9 +175,15 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         scrollToSettingsTarget(targetId);
         return;
       }
-      void navigate({ to: item.to, hash: targetId, replace: true, hashScrollIntoView: false });
+      void navigate({
+        to: item.to,
+        search: linkSearch(item.to),
+        hash: targetId,
+        replace: true,
+        hashScrollIntoView: false,
+      });
     },
-    [clearSearch, currentHash, navigate, pathname],
+    [clearSearch, currentHash, linkSearch, navigate, pathname],
   );
   const handleSearchKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {

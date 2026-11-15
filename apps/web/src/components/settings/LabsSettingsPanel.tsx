@@ -17,6 +17,8 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { ScopedSwitch } from "./ScopedSwitch";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 const AUTO_SETTLE_MIN_DAYS = 1;
 const AUTO_SETTLE_MAX_DAYS = 90;
@@ -94,23 +96,26 @@ export function SidebarWorkingShelfRow() {
 
 /** Thread auto-settlement rows: on merge, and after a stretch of inactivity. */
 export function AutoSettleRows() {
-  const sidebarAutoSettleAfterDays = usePrimarySettings(
+  const sidebarAutoSettleAfterDays = useScopedSettings(
     (settings) => settings.sidebarAutoSettleAfterDays,
   );
-  const sidebarAutoSettleOnMerge = usePrimarySettings(
+  const sidebarAutoSettleOnMerge = useScopedSettings(
     (settings) => settings.sidebarAutoSettleOnMerge,
   );
-  const keepPullRequests = usePrimarySettings(
+  const keepPullRequests = useScopedSettings(
     (settings) => settings.sidebarAutoSettleKeepPullRequests,
   );
-  const updatePrimarySettings = useUpdatePrimarySettings();
+  const updatePrimarySettings = useUpdateScopedSettings();
   return (
     <>
       <SettingsRow
         {...searchableSetting("auto-settle-merged-threads")}
+        serverScoped
+        settingKeys={["sidebarAutoSettleOnMerge"]}
         description="Settle idle threads when their pull request is merged. Closed pull requests also settle when automatic settlement is enabled."
         control={
-          <Switch
+          <ScopedSwitch
+            settingKeys={["sidebarAutoSettleOnMerge"]}
             checked={sidebarAutoSettleOnMerge}
             onCheckedChange={(checked) =>
               updatePrimarySettings({ sidebarAutoSettleOnMerge: Boolean(checked) })
@@ -121,6 +126,8 @@ export function AutoSettleRows() {
       />
       <SettingsRow
         {...searchableSetting("auto-settle-inactive-threads")}
+        serverScoped
+        settingKeys={["sidebarAutoSettleAfterDays"]}
         description="Idle threads with no activity for this long settle automatically."
         control={
           <Switch
@@ -137,6 +144,8 @@ export function AutoSettleRows() {
       {sidebarAutoSettleAfterDays !== null ? (
         <SettingsRow
           title="Days of inactivity before auto-settle"
+          serverScoped
+          settingKeys={["sidebarAutoSettleAfterDays"]}
           description="Any new activity un-settles a thread automatically."
           control={
             <AutoSettleDaysInput
@@ -149,9 +158,12 @@ export function AutoSettleRows() {
       {sidebarAutoSettleAfterDays !== null ? (
         <SettingsRow
           {...searchableSetting("auto-settle-keep-pull-requests")}
+          serverScoped
+          settingKeys={["sidebarAutoSettleKeepPullRequests"]}
           description="Inactivity never settles a thread that has a pull request."
           control={
-            <Switch
+            <ScopedSwitch
+              settingKeys={["sidebarAutoSettleKeepPullRequests"]}
               checked={keepPullRequests}
               onCheckedChange={(checked) =>
                 updatePrimarySettings({ sidebarAutoSettleKeepPullRequests: Boolean(checked) })

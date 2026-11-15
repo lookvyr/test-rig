@@ -1,0 +1,327 @@
+import { fileBasename } from "@t3tools/shared/path";
+import { useLocation } from "@tanstack/react-router";
+import { ChevronDownIcon, FolderIcon, LayersIcon, MonitorIcon } from "lucide-react";
+import { Fragment, type ReactNode } from "react";
+
+import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
+import { useEnvironments, type EnvironmentPresentation } from "../../state/environments";
+import { ProjectFavicon } from "../ProjectFavicon";
+import { Button } from "../ui/button";
+import {
+  Menu,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
+import { useOptionalSettingsScope } from "./SettingsScopeContext";
+import { resolveSettingsScope, type SettingsScopeSearch } from "./settingsScope";
+import {
+  ALL_CHECKOUTS_VALUE,
+  ALL_ENVIRONMENTS_VALUE,
+  ALL_PROJECTS_VALUE,
+  environmentAxisValue,
+  projectAxisValue,
+  projectScopeMenuGroups,
+  selectCheckoutAxis,
+  selectEnvironmentAxis,
+  selectProjectAxis,
+  settingsScopeCheckoutChoices,
+  settingsScopeCheckoutLabel,
+  settingsScopeEnvironmentAddress,
+  settingsScopeEnvironmentLabel,
+  settingsScopeEnvironmentLabels,
+  settingsScopeProjectMachines,
+} from "./settingsScopeAxis";
+
+/**
+ * Pages whose server-setting rows follow the page scope. Every other page
+ * saves for this device or picks its environment on the page itself, so it
+ * hides the scope picker.
+ */
+export const SETTINGS_SCOPED_PATHS: ReadonlySet<string> = new Set([
+  "/settings/threads",
+  "/settings/browser",
+  "/settings/source-control",
+  "/settings/worktrees",
+  "/settings/maintenance",
+]);
+
+interface SettingsScopeMenuProps {
+  readonly value: SettingsScopeSearch;
+  readonly groups: readonly SidebarProjectSnapshot[];
+  readonly environments: readonly EnvironmentPresentation[];
+  readonly singleEnvironment: boolean;
+  readonly onChange: (next: SettingsScopeSearch) => void;
+}
+
+export function SettingsScopeSentence() {
+  const scope = useOptionalSettingsScope();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const { environments } = useEnvironments();
+  if (scope === null || !SETTINGS_SCOPED_PATHS.has(pathname)) return null;
+  const props: SettingsScopeMenuProps = {
+    value: scope.search,
+    singleEnvironment: scope.singleEnvironment,
+    groups: scope.groups,
+    environments,
+    onChange: scope.selectScope,
+  };
+  // A single local setup has nothing to choose between, so the machine axis stays out of the way.
+  const showEnvironment = environments.length > 1;
+  return (
+    <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-3 text-sm text-muted-foreground sm:px-4">
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="shrink-0">Applying settings for</span>
+        <ProjectScopeMenu {...props} />
+      </span>
+      {showEnvironment ? (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0">
+            {scope.search.machine || scope.scope.kind === "checkout" ? "on" : "across"}
+          </span>
+          <EnvironmentScopeMenu {...props} />
+        </span>
+      ) : null}
+      <CheckoutScopeMenu {...props} />
+    </p>
+  );
+}
+
+interface ScopeOption {
+  value: string;
+  label: string;
+  secondary?: string;
+  icon?: ReactNode;
+  offline?: boolean;
+}
+
+function ScopeOptionLabel({ option }: { option: ScopeOption }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      {option.icon}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{option.label}</span>
+        {option.secondary ? (
+          <span className="block truncate text-xs text-muted-foreground">{option.secondary}</span>
+        ) : null}
+      </span>
+      {option.offline ? (
+        <span className="shrink-0 text-xs text-muted-foreground">Offline</span>
+      ) : null}
+    </span>
+  );
+}
+
+function ScopeMenu({
+  ariaLabel,
+  icon,
+  label,
+  value,
+  options,
+  allOption,
+  onChange,
+}: {
+  ariaLabel: string;
+  icon: ReactNode;
+  label: string;
+  value: string;
+  options: ScopeOption[];
+  allOption: ScopeOption | null;
+  onChange: (next: string) => void;
+}) {
+  const choices = allOption ? [allOption, ...options] : options;
+  return (
+    <Menu>
+      <MenuTrigger
+        aria-label={`${ariaLabel}: ${label}`}
+        render={<Button variant="outline" size="sm" />}
+        className="min-w-0 max-w-72"
+      >
+        {icon}
+        <span className="min-w-0 truncate">{label}</span>
+        <ChevronDownIcon
+          aria-hidden
+          strokeWidth={1.75}
+          className="-me-0.5 size-3.5 shrink-0 text-muted-foreground opacity-70"
+        />
+      </MenuTrigger>
+      <MenuPopup align="start">
+        <div className="max-h-80 w-72 max-w-full overflow-y-auto">
+          <MenuRadioGroup
+            value={value}
+            onValueChange={(next) => {
+              if (typeof next === "string") onChange(next);
+            }}
+          >
+            {choices.map((option, index) => (
+              <Fragment key={option.value}>
+                <MenuRadioItem value={option.value} closeOnClick>
+                  <ScopeOptionLabel option={option} />
+                </MenuRadioItem>
+                {index === 0 && allOption && options.length > 0 ? <MenuSeparator /> : null}
+              </Fragment>
+            ))}
+          </MenuRadioGroup>
+        </div>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+function EnvironmentScopeMenu({
+  value,
+  groups,
+  environments,
+  onChange,
+  singleEnvironment,
+}: SettingsScopeMenuProps) {
+  const resolved = resolveSettingsScope(value, groups, environments);
+  const environmentValue = environmentAxisValue(
+    value,
+    resolved.kind === "checkout" ? resolved.environmentId : null,
+  );
+  const selected = environments.find(
+    (environment) => environment.environmentId === environmentValue,
+  );
+  const project = groups.find((group) => group.projectKey === value.project);
+  const memberEnvironmentIds = project
+    ? new Set(project.memberProjects.map((member) => member.environmentId))
+    : null;
+  const options = memberEnvironmentIds
+    ? environments.filter((environment) => memberEnvironmentIds.has(environment.environmentId))
+    : environments;
+  return (
+    <ScopeMenu
+      ariaLabel="Environment scope"
+      icon={selected ? <MonitorIcon aria-hidden className="size-3.5 shrink-0" /> : null}
+      label={
+        selected
+          ? settingsScopeEnvironmentLabel(selected, environments)
+          : environmentValue !== ALL_ENVIRONMENTS_VALUE
+            ? "Unavailable environment"
+            : singleEnvironment
+              ? "No environments"
+              : "All environments"
+      }
+      value={environmentValue}
+      onChange={(next) => onChange(selectEnvironmentAxis(value, next))}
+      allOption={
+        singleEnvironment
+          ? null
+          : {
+              value: ALL_ENVIRONMENTS_VALUE,
+              label: "All environments",
+              icon: <LayersIcon aria-hidden className="size-3.5 shrink-0" />,
+            }
+      }
+      options={options.map((environment) => {
+        const { primary, secondary } = settingsScopeEnvironmentLabels(environment, environments);
+        return {
+          value: environment.environmentId,
+          label: primary,
+          secondary:
+            environments.length <= 1
+              ? ""
+              : secondary || settingsScopeEnvironmentAddress(environment),
+          icon: <MonitorIcon aria-hidden className="size-3.5 shrink-0" />,
+          offline: environment.connection.phase !== "connected",
+        };
+      })}
+    />
+  );
+}
+
+function CheckoutScopeMenu({ value, groups, onChange }: SettingsScopeMenuProps) {
+  const group = groups.find((candidate) => candidate.projectKey === value.project);
+  const checkouts = group ? settingsScopeCheckoutChoices(group, value) : [];
+  if (checkouts.length === 0) return null;
+  const selected = checkouts.find((member) => member.physicalProjectKey === value.checkout);
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="shrink-0">in</span>
+      <ScopeMenu
+        ariaLabel="Checkout scope"
+        icon={<FolderIcon aria-hidden className="size-3.5 shrink-0" />}
+        label={
+          selected
+            ? settingsScopeCheckoutLabel(selected, checkouts)
+            : value.checkout
+              ? "Unavailable checkout"
+              : "All checkouts"
+        }
+        value={value.checkout ?? ALL_CHECKOUTS_VALUE}
+        onChange={(next) =>
+          onChange(
+            selectCheckoutAxis(
+              value,
+              checkouts.find((member) => member.physicalProjectKey === next) ?? null,
+            ),
+          )
+        }
+        allOption={{ value: ALL_CHECKOUTS_VALUE, label: "All checkouts" }}
+        options={checkouts.map((member) => ({
+          value: member.physicalProjectKey,
+          label: fileBasename(member.workspaceRoot),
+          secondary: member.workspaceRoot,
+        }))}
+      />
+    </span>
+  );
+}
+
+function ProjectScopeMenu({ value, groups, environments, onChange }: SettingsScopeMenuProps) {
+  const selected = groups.find((group) => group.projectKey === value.project);
+  const projects = projectScopeMenuGroups(groups, value).map((group) => ({
+    group,
+    machines: settingsScopeProjectMachines(group, environments, true).join(", "),
+  }));
+  return (
+    <ScopeMenu
+      ariaLabel="Project scope"
+      icon={
+        selected ? (
+          <ProjectFavicon
+            environmentId={selected.environmentId}
+            cwd={selected.workspaceRoot}
+            className="size-3.5 shrink-0"
+          />
+        ) : null
+      }
+      label={selected?.displayName ?? (value.project ? "Unavailable project" : "All projects")}
+      value={projectAxisValue(value)}
+      onChange={(next) => onChange(selectProjectAxis(value, next))}
+      allOption={{ value: ALL_PROJECTS_VALUE, label: "All projects" }}
+      options={projects.map(({ group, machines }) => {
+        const sameName = projects.filter(
+          (other) =>
+            other.group.projectKey !== group.projectKey &&
+            other.group.displayName === group.displayName,
+        );
+        const location =
+          sameName.length === 0
+            ? environments.length > 1
+              ? group.workspaceRoot
+              : ""
+            : sameName.some((other) => other.machines === machines)
+              ? `${machines} · ${group.workspaceRoot}`
+              : environments.length > 1
+                ? machines
+                : group.workspaceRoot;
+        return {
+          value: group.projectKey,
+          label: group.displayName,
+          secondary: location,
+          icon: (
+            <ProjectFavicon
+              environmentId={group.environmentId}
+              cwd={group.workspaceRoot}
+              className="size-3.5 shrink-0"
+            />
+          ),
+        };
+      })}
+    />
+  );
+}

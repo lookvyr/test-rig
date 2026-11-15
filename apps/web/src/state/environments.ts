@@ -8,6 +8,7 @@ import * as Option from "effect/Option";
 import { useMemo } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentPresentations, useEnvironmentPresentation } from "./presentation";
 import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { useEnvironmentQuery } from "./query";
@@ -54,6 +55,14 @@ export function useEnvironments() {
 
 export function usePrimaryEnvironmentId(): EnvironmentId | null {
   return useAtomValue(primaryEnvironmentIdAtom);
+}
+
+/** The environment's state now, for handlers that should not re-render on every change. */
+export function readEnvironment(environmentId: EnvironmentId): EnvironmentPresentation | null {
+  const presentation = appAtomRegistry
+    .get(environmentPresentations.presentationsAtom)
+    .get(environmentId);
+  return presentation ? projectEnvironmentPresentation(environmentId, presentation) : null;
 }
 
 export function useEnvironment(

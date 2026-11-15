@@ -11,7 +11,7 @@ import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import { PlusIcon, XIcon } from "lucide-react";
 
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { formatShortTimestamp } from "../../timestampFormat";
 import { Button } from "../ui/button";
@@ -91,8 +91,8 @@ function withWhen(preset: SnoozePresetSetting, when: string): SnoozePresetSettin
 
 /** Edits the options every snooze menu offers. Menus list them soonest first. */
 export function SnoozePresetsRow() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
   const saved = settings.snoozePresets;
   // Edits build on a local draft, so a second edit before the first save echoes back
   // (a quick double click on Add) does not build on the stale list.
@@ -118,6 +118,8 @@ export function SnoozePresetsRow() {
   return (
     <SettingsRow
       {...searchableSetting("snooze-options")}
+      serverScoped
+      settingKeys={["snoozePresets"]}
       description="Choices in every snooze menu, listed soonest first. A weekday means the next one after today."
       resetAction={
         Equal.equals(presets, DEFAULT_SNOOZE_PRESETS) ? null : (

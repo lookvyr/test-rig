@@ -11,6 +11,12 @@ import {
 } from "./StorageSettings";
 import { BranchNamingSection } from "./BranchNamingSettings";
 import { AutoSettleRows, SidebarWorkingShelfRow } from "./LabsSettingsPanel";
+import { ScopedSwitch } from "./ScopedSwitch";
+import {
+  useScopedServerProviders,
+  useScopedSettings,
+  useUpdateScopedSettings,
+} from "./useScopedSettings";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
 import { ArchiveIcon, ArchiveX, Trash2Icon, LoaderIcon, SettingsIcon } from "lucide-react";
 import { Link } from "@tanstack/react-router";
@@ -24,6 +30,7 @@ import {
   type SidebarProjectGroupingMode,
   type SendShortcut,
   type SidebarProjectSortOrder,
+  type ServerSettings,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -89,7 +96,7 @@ import {
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
-import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../../state/server";
+import { primaryServerObservabilityAtom } from "../../state/server";
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
@@ -536,8 +543,8 @@ function BackgroundActivityAdvancedDialog({
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }) {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
   const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
   const activeProfile = resolvedBackgroundActivity.profile;
   const automaticGitFetchIntervalSeconds = durationToSeconds(
@@ -1516,9 +1523,9 @@ function ProjectOrderRow() {
  * A configured model wins over that memory.
  */
 function DefaultModelRow() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const serverProviders = useScopedServerProviders();
   const entries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
   );
@@ -1538,6 +1545,8 @@ function DefaultModelRow() {
     <SettingsRow
       id="default-model"
       title="Model"
+      serverScoped
+      settingKeys={["defaultModelSelection"]}
       description="Default model for new threads."
       status={
         configured === null
@@ -1601,13 +1610,15 @@ function DefaultModelRow() {
 
 /** Approval level new threads start in. */
 function DefaultPermissionsRow() {
-  const runtimeMode = usePrimarySettings((settings) => settings.defaultRuntimeMode);
-  const updateSettings = useUpdatePrimarySettings();
+  const runtimeMode = useScopedSettings((settings) => settings.defaultRuntimeMode);
+  const updateSettings = useUpdateScopedSettings();
   const Icon = runtimeModeConfig[runtimeMode].icon;
   return (
     <SettingsRow
       id="default-permissions"
       title="Permissions"
+      serverScoped
+      settingKeys={["defaultRuntimeMode"]}
       description={runtimeModeConfig[runtimeMode].description}
       resetAction={
         runtimeMode !== DEFAULT_UNIFIED_SETTINGS.defaultRuntimeMode ? (
@@ -1663,12 +1674,14 @@ const WORKTREE_SUBMODULES_OPTIONS = ["recursive", "top-level", "none"] as const;
 
 /** How new worktrees populate git submodules; projects' t3.json can override it. */
 function WorktreeSubmodulesRow() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
   const effective = resolveProjectSettings(settings, null, null, null).settings.worktreeSubmodules;
   return (
     <SettingsRow
       {...searchableSetting("worktree-submodules")}
+      serverScoped
+      settingKeys={["worktreeSubmodules"]}
       description="How new worktrees populate git submodules. A project's t3.json can override it."
       resetAction={
         settings.worktreeSubmodules !== null ? (
@@ -1704,11 +1717,13 @@ function WorktreeSubmodulesRow() {
 
 /** Resume interrupted threads once the server comes back. */
 function ContinueThreadsRow() {
-  const enabled = usePrimarySettings((settings) => settings.continueThreadsAfterServerUpdate);
-  const updateSettings = useUpdatePrimarySettings();
+  const enabled = useScopedSettings((settings) => settings.continueThreadsAfterServerUpdate);
+  const updateSettings = useUpdateScopedSettings();
   return (
     <SettingsRow
       {...searchableSetting("continue-threads-after-restart")}
+      serverScoped
+      settingKeys={["continueThreadsAfterServerUpdate"]}
       description="Automatically resume interrupted threads after an update, crash, or machine restart."
       resetAction={
         enabled !== DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate ? (
@@ -1724,7 +1739,8 @@ function ContinueThreadsRow() {
         ) : null
       }
       control={
-        <Switch
+        <ScopedSwitch
+          settingKeys={["continueThreadsAfterServerUpdate"]}
           checked={enabled}
           onCheckedChange={(checked) =>
             updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
@@ -1915,7 +1931,7 @@ function SkillsInSlashMenuRow() {
   );
 }
 
-/** A boolean switch row for one client or primary server setting. */
+/** A boolean switch row for one client or scoped server setting. */
 function SwitchSettingRow({
   id,
   title,
@@ -1923,6 +1939,7 @@ function SwitchSettingRow({
   checked,
   defaultChecked,
   onChange,
+  settingKeys,
 }: {
   id: string;
   title: string;
@@ -1930,12 +1947,15 @@ function SwitchSettingRow({
   checked: boolean;
   defaultChecked: boolean;
   onChange: (checked: boolean) => void;
+  /** Server keys this row edits through the page scope; omit for client settings. */
+  settingKeys?: readonly (keyof ServerSettings)[];
 }) {
   return (
     <SettingsRow
       id={id}
       title={title}
       description={description}
+      {...(settingKeys ? { serverScoped: true, settingKeys } : {})}
       resetAction={
         checked !== defaultChecked ? (
           <SettingResetButton
@@ -1970,11 +1990,12 @@ function UnpinConfirmationRow() {
 }
 
 function KeepAwakeRow() {
-  const keepAwake = usePrimarySettings((settings) => settings.keepAwakeWhileAgentsWork);
-  const updateSettings = useUpdatePrimarySettings();
+  const keepAwake = useScopedSettings((settings) => settings.keepAwakeWhileAgentsWork);
+  const updateSettings = useUpdateScopedSettings();
   return (
     <SwitchSettingRow
       {...searchableSetting("keep-awake")}
+      settingKeys={["keepAwakeWhileAgentsWork"]}
       description="Keep this computer from sleeping while agents are working. The display can still turn off."
       checked={keepAwake}
       defaultChecked={DEFAULT_UNIFIED_SETTINGS.keepAwakeWhileAgentsWork}
@@ -1984,11 +2005,12 @@ function KeepAwakeRow() {
 }
 
 function GhqCloneLayoutRow() {
-  const ghq = usePrimarySettings((settings) => settings.ghqCloneLayout);
-  const updateSettings = useUpdatePrimarySettings();
+  const ghq = useScopedSettings((settings) => settings.ghqCloneLayout);
+  const updateSettings = useUpdateScopedSettings();
   return (
     <SwitchSettingRow
       {...searchableSetting("ghq-clone-layout")}
+      settingKeys={["ghqCloneLayout"]}
       description="Clone repositories into host/owner/repo folders below the starting folder, like ghq."
       checked={ghq}
       defaultChecked={DEFAULT_UNIFIED_SETTINGS.ghqCloneLayout}
@@ -2277,9 +2299,9 @@ export function DiffsSettingsPanel() {
 }
 
 export function ThreadsSettingsPanel() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const serverProviders = useScopedServerProviders();
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenInstanceId = textGenerationModelSelection.instanceId;
   const textGenModel = textGenerationModelSelection.model;
@@ -2308,6 +2330,8 @@ export function ThreadsSettingsPanel() {
       <SettingsSection title="New projects">
         <SettingsRow
           {...searchableSetting("add-project-starts-in")}
+          serverScoped
+          settingKeys={["addProjectBaseDirectory"]}
           description='Leave empty to use "~/" when the Add Project browser opens.'
           resetAction={
             settings.addProjectBaseDirectory !==
@@ -2341,6 +2365,8 @@ export function ThreadsSettingsPanel() {
         <SettingsRow
           {...searchableSetting("new-threads")}
           description="Where new threads start."
+          serverScoped
+          settingKeys={["defaultThreadEnvMode"]}
           resetAction={
             settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
               <SettingResetButton
@@ -2385,6 +2411,8 @@ export function ThreadsSettingsPanel() {
       <SettingsSection title="Usage limits">
         <SettingsRow
           {...searchableSetting("auto-resume-limited-threads")}
+          serverScoped
+          settingKeys={["autoResumeLimitedThreads"]}
           description="Automatically schedule continuation after a provider reports a usage-limit reset time. Off by default. Cancel an already scheduled continuation in its chat."
           resetAction={
             settings.autoResumeLimitedThreads ? (
@@ -2406,6 +2434,8 @@ export function ThreadsSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("snooze-limited-threads")}
+          serverScoped
+          settingKeys={["snoozeLimitedThreads"]}
           description="Snooze usage-limited chats until the reported reset time. Off by default and independent of auto-resume; snoozing alone never sends a message."
           resetAction={
             settings.snoozeLimitedThreads ? (
@@ -2432,6 +2462,8 @@ export function ThreadsSettingsPanel() {
       <SettingsSection title="Text generation">
         <SettingsRow
           {...searchableSetting("text-generation-model")}
+          serverScoped
+          settingKeys={["textGenerationModelSelection"]}
           description="Default model for generated text like thread titles and source control content. Source control settings can override it with a dedicated source control writer model."
           resetAction={
             isTextGenerationModelDirty ? (
@@ -2512,6 +2544,8 @@ export function ThreadsSettingsPanel() {
           <ThreadTitleInstructionsSettings />
           <SettingsRow
             {...searchableSetting("response-streaming")}
+            serverScoped
+            settingKeys={["responseStreamingMode"]}
             description={RESPONSE_STREAMING_MODE_DESCRIPTIONS[settings.responseStreamingMode]}
             resetAction={
               settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode ? (
@@ -2557,40 +2591,11 @@ export function ThreadsSettingsPanel() {
 }
 
 export function WorktreesSettingsPanel() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-
   return (
     <SettingsPageContainer>
       <SettingsSection title="Creation">
         <WorktreesDirectoryRow />
-        <SettingsRow
-          {...searchableSetting("start-from-origin")}
-          description="Base new worktrees on the latest matching branch on the remote instead of your local branch."
-          resetAction={
-            settings.newWorktreesStartFromOrigin !==
-            DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
-              <SettingResetButton
-                label="new worktrees start from remote"
-                onClick={() =>
-                  updateSettings({
-                    newWorktreesStartFromOrigin:
-                      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.newWorktreesStartFromOrigin}
-              onCheckedChange={(checked) =>
-                updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
-              }
-              aria-label="Start new worktrees from the remote branch"
-            />
-          }
-        />
+        <StartFromOriginRow />
         <AdvancedSettings targetIds={[searchableSetting("worktree-submodules").id]}>
           <WorktreeSubmodulesRow />
         </AdvancedSettings>
@@ -2603,9 +2608,45 @@ export function WorktreesSettingsPanel() {
   );
 }
 
+/** New worktrees start from the remote branch instead of the local one. */
+function StartFromOriginRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("start-from-origin")}
+      serverScoped
+      settingKeys={["newWorktreesStartFromOrigin"]}
+      description="Base new worktrees on the latest matching branch on the remote instead of your local branch."
+      resetAction={
+        settings.newWorktreesStartFromOrigin !==
+        DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin ? (
+          <SettingResetButton
+            label="new worktrees start from remote"
+            onClick={() =>
+              updateSettings({
+                newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.newWorktreesStartFromOrigin}
+          onCheckedChange={(checked) =>
+            updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
+          }
+          aria-label="Start new worktrees from the remote branch"
+        />
+      }
+    />
+  );
+}
+
 export function MaintenanceSettingsPanel() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
   const [backgroundActivityDialogOpen, setBackgroundActivityDialogOpen] = useState(false);
   const observability = useAtomValue(primaryServerObservabilityAtom);
   const diagnosticsDescription = formatDiagnosticsDescription({
@@ -2638,6 +2679,8 @@ export function MaintenanceSettingsPanel() {
       <SettingsSection title="Background activity">
         <SettingsRow
           id={searchableSetting("background-activity").id}
+          serverScoped
+          settingKeys={["backgroundActivity"]}
           title={
             <span className="inline-flex items-center gap-1.5">
               Background activity

@@ -1235,7 +1235,7 @@ function OpenCommandPaletteDialog(props: {
       setOpen(false);
       void navigate({
         to: "/settings/source-control",
-        search: { environmentId },
+        search: { machine: environmentId },
       });
     },
     [navigate, setOpen],

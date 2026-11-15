@@ -69,3 +69,10 @@ export function newProjectFolderName(name: string): string {
   if (slug.length === 0) return "project";
   return WINDOWS_RESERVED_NAME.test(slug) ? `${slug}-project` : slug;
 }
+
+export function fileBasename(path: string): string {
+  const trimmed = path.replace(/[/\\]+$/, "");
+  if (trimmed.length === 0) return path;
+  const separatorIndex = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return separatorIndex >= 0 ? trimmed.slice(separatorIndex + 1) : trimmed;
+}

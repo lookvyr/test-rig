@@ -90,7 +90,7 @@ uses the normal target-branch selection.
 
 Generating a commit message keeps your existing staged and unstaged selections intact. The general Git commit workflow stages its selected changes when the commit runs. A failed or cancelled message-generation step leaves staging unchanged, including partially staged files.
 
-Open **Settings** → **Source Control** to choose a writing style for generated commit messages and change requests. You can also add separate instructions for commit messages, change request titles, and change request descriptions. These are global defaults for every project in the current environment.
+Open **Settings** → **Source Control** to choose a writing style for generated commit messages and change requests. You can also add separate instructions for commit messages, change request titles, and change request descriptions. They follow the project selected at the top of the page: **All projects** edits the defaults, and a selected project gets its own overrides.
 
 Repository conventions includes recent commit subjects and local `AGENTS.md` instructions. When Claude is the selected writer, it also includes local `CLAUDE.md` instructions. Test Rig adds these files to its writing prompt only when Repository conventions is selected.
 
@@ -169,8 +169,8 @@ Choose how new worktree branches are named under **Settings** → **Worktrees** 
 - **Custom instructions:** tell the model your naming convention. It returns the complete name;
   Test Rig adds no prefix or collision suffix and preserves capitalization.
 
-Choose **All projects** to edit the defaults, or select a project to override its naming
-settings. Projects inherit each value until you change it. Use a row’s reset control to
+Choose **All projects** at the top of the page to edit the defaults, or select a project
+there to override its naming settings. Projects inherit each value until you change it. Use a row’s reset control to
 remove its project override and inherit again. Changing a default preserves project overrides.
 If a grouped project’s checkouts have different values, the field shows **Mixed**; editing
 it applies the value to those checkouts in the selected environment.

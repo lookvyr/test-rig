@@ -28,12 +28,7 @@ import { isValidSearchUrlTemplate } from "@t3tools/shared/preview";
 import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
 
 import { ScreenRotationIcon } from "~/browser/ScreenRotationIcon";
-import {
-  useClientSettings,
-  usePrimarySettings,
-  useUpdateClientSettings,
-  useUpdatePrimarySettings,
-} from "~/hooks/useSettings";
+import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
 import { isElectron } from "../../env";
 import { cn, randomUUID } from "~/lib/utils";
 import { Badge } from "../ui/badge";
@@ -61,6 +56,8 @@ import {
   SettingsUnavailableGroup,
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { ScopedSwitch } from "./ScopedSwitch";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 /** Named browser cookie profiles; removing a name keeps existing tabs signed in. */
 function BrowserProfilesSetting() {
@@ -548,12 +545,14 @@ function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boo
 }
 
 function AgentBrowserAccessSetting() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
 
   return (
     <SettingsRow
       {...searchableSetting("agent-browser-access")}
+      serverScoped
+      settingKeys={["enableAgentBrowserAccess"]}
       description="Allow agents to use the shared browser. Applies when an agent session next starts."
       resetAction={
         settings.enableAgentBrowserAccess !== DEFAULT_SERVER_SETTINGS.enableAgentBrowserAccess ? (
@@ -568,7 +567,8 @@ function AgentBrowserAccessSetting() {
         ) : null
       }
       control={
-        <Switch
+        <ScopedSwitch
+          settingKeys={["enableAgentBrowserAccess"]}
           aria-label="Agent browser access"
           checked={settings.enableAgentBrowserAccess}
           onCheckedChange={(enabled) => updateSettings({ enableAgentBrowserAccess: enabled })}

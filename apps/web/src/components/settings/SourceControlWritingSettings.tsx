@@ -1,12 +1,10 @@
 import { AdvancedSettings } from "./AdvancedSettings";
-import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useRef, useState } from "react";
-import type { EnvironmentId, SourceControlWritingStyleMode } from "@t3tools/contracts";
+import type { SourceControlWritingStyleMode } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
 
-import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -16,7 +14,7 @@ import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
-import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
+import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -25,6 +23,9 @@ import { Textarea } from "../ui/textarea";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { useSettingsScope } from "./SettingsScopeContext";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+import { ScopedSwitch } from "./ScopedSwitch";
 
 const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; description: string }> =
   {
@@ -75,10 +76,10 @@ function instructionDrafts(style: {
   };
 }
 
-/** Repository behavior for the selected environment: merges and keeping checkouts current. */
-export function RepositoriesSettingsSection({ environmentId }: { environmentId: EnvironmentId }) {
-  const settings = useEnvironmentSettings(environmentId);
-  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+/** Repository behavior for the page scope: how merges are written. */
+export function RepositoriesSettingsSection() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
   return (
     <SettingsSection title="Repositories">
       <SettingsRow
@@ -104,6 +105,8 @@ export function RepositoriesSettingsSection({ environmentId }: { environmentId: 
       />
       <SettingsRow
         {...searchableSetting("remove-agent-credits")}
+        serverScoped
+        settingKeys={["removeAgentCreditsOnMerge"]}
         description="Strip agent co-author lines and generated-by footers from the merge commit message when merging a pull request."
         resetAction={
           settings.removeAgentCreditsOnMerge !==
@@ -119,7 +122,8 @@ export function RepositoriesSettingsSection({ environmentId }: { environmentId: 
           ) : null
         }
         control={
-          <Switch
+          <ScopedSwitch
+            settingKeys={["removeAgentCreditsOnMerge"]}
             checked={settings.removeAgentCreditsOnMerge}
             onCheckedChange={(checked) =>
               updateSettings({ removeAgentCreditsOnMerge: Boolean(checked) })
@@ -132,15 +136,11 @@ export function RepositoriesSettingsSection({ environmentId }: { environmentId: 
   );
 }
 
-export function SourceControlWritingSettingsSection({
-  environmentId,
-}: {
-  environmentId: EnvironmentId;
-}) {
-  const settings = useEnvironmentSettings(environmentId);
-  const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const serverProviders =
-    useAtomValue(serverEnvironment.providersValueAtom(environmentId)) ?? EMPTY_SERVER_PROVIDERS;
+export function SourceControlWritingSettingsSection() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const { environment } = useSettingsScope();
+  const serverProviders = environment?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS;
   const style = settings.sourceControlWritingStyle;
   const defaults = DEFAULT_UNIFIED_SETTINGS.sourceControlWritingStyle;
   const [activeInstruction, setActiveInstruction] = useState<InstructionKey>("commitInstructions");
@@ -200,6 +200,8 @@ export function SourceControlWritingSettingsSection({
     <SettingsSection title="Commits & pull requests">
       <SettingsRow
         title="Source control writing style"
+        serverScoped
+        settingKeys={["sourceControlWritingStyle"]}
         description={MODE_OPTIONS[style.mode].description}
         resetAction={
           isSourceControlWritingStyleDirty ? (
@@ -242,6 +244,8 @@ export function SourceControlWritingSettingsSection({
 
       <SettingsRow
         title="Additional writing instructions"
+        serverScoped
+        settingKeys={["sourceControlWritingStyle"]}
         description="Use these to fine-tune generated text. They take precedence when they conflict with the selected writing style."
       >
         <div className="mt-3 max-w-2xl space-y-3 pb-3.5">
@@ -279,7 +283,7 @@ export function SourceControlWritingSettingsSection({
             aria-label={`${activeOption.label} additional writing instructions`}
           />
           <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span>Global default for every project in this environment.</span>
+            <span>Applies to the projects selected above.</span>
             <div className="flex items-center gap-2">
               <span>{drafts[activeInstruction].length.toLocaleString()} / 4,000</span>
               <Button
@@ -299,6 +303,8 @@ export function SourceControlWritingSettingsSection({
       <AdvancedSettings targetIds={[]}>
         <SettingsRow
           title="Follow change request templates"
+          serverScoped
+          settingKeys={["sourceControlWritingStyle"]}
           description="Structures change request descriptions using the current repository's template when one is available."
           resetAction={
             style.followChangeRequestTemplates !== defaults.followChangeRequestTemplates ? (
@@ -331,6 +337,8 @@ export function SourceControlWritingSettingsSection({
 
         <SettingsRow
           title="Source control writer model"
+          serverScoped
+          settingKeys={["sourceControlWriterModelSelection"]}
           description="Optional model override for change descriptions, change request titles and descriptions, and branch or bookmark names. Off uses the global text generation model."
           control={
             <div className="flex flex-wrap items-center justify-end gap-2">

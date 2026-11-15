@@ -23,3 +23,20 @@ removal.
 
 If a worktree launch encounters a concurrent Git reference update, Test Rig retries
 the fetch once automatically.
+
+## Settings for one project
+
+The **Threads**, **Browser**, **Source control**, **Worktrees**, and
+**Maintenance** settings pages start with **Applying settings for All
+projects**. Choose a project there to give it its own value for settings a
+project can override, such as the default model, branch naming, title
+instructions, or auto-settle rules. The project keeps inheriting every value
+you leave alone. A layers marker next to a setting shows where its current
+value comes from; use the row's reset control to drop the project's override.
+Settings that belong to the whole environment, such as background activity,
+are read-only while a project is selected.
+
+When you connect more than one environment, the same sentence also lets you
+choose an environment, or a single checkout when a project has several on one
+environment. Changes made with **All environments** selected save to every
+connected environment.

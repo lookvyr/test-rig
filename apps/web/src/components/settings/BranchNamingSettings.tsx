@@ -5,8 +5,11 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { SettingsRow, SettingResetButton } from "./settingsLayout";
-import { ProjectSettingsScope, useProjectSettingsScope } from "./ProjectSettingsScope";
-import { usePrimaryEnvironment } from "../../state/environments";
+import {
+  useScopedSettings,
+  useScopedSettingsMixed,
+  useUpdateScopedSettings,
+} from "./useScopedSettings";
 import { searchableSetting } from "./settingsSearch";
 
 type NamingKey = "branchNamingMode" | "branchNamePrefix" | "branchNameInstructions";
@@ -16,51 +19,47 @@ const MODES = {
   custom: "Custom instructions",
 } satisfies Record<BranchNamingMode, string>;
 
+const MODE_KEYS = ["branchNamingMode"] as const;
+const PREFIX_KEYS = ["branchNamePrefix"] as const;
+const INSTRUCTIONS_KEYS = ["branchNameInstructions"] as const;
+
+/** Branch naming rows; a project selected in the page scope stores its own overrides. */
 export function BranchNamingSettings() {
-  const scope = useProjectSettingsScope();
-  const { settings } = scope;
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
   const prefixEdited = useRef(false);
   const instructionsEdited = useRef(false);
-  const modeMixed = scope.isMixed("branchNamingMode");
-  const prefixMixed = scope.isMixed("branchNamePrefix");
-  const instructionsMixed = scope.isMixed("branchNameInstructions");
-  const resetAction = (key: NamingKey, label: string) => {
-    const isProject = scope.projectIds !== null;
-    const hasOverride = scope.source(key) !== "environment";
-    const changed = scope.isMixed(key) || settings[key] !== DEFAULT_SERVER_SETTINGS[key];
-    return (isProject ? hasOverride : changed) ? (
+  const modeMixed = useScopedSettingsMixed(MODE_KEYS);
+  const prefixMixed = useScopedSettingsMixed(PREFIX_KEYS);
+  const instructionsMixed = useScopedSettingsMixed(INSTRUCTIONS_KEYS);
+  const mixedByKey: Record<NamingKey, boolean> = {
+    branchNamingMode: modeMixed,
+    branchNamePrefix: prefixMixed,
+    branchNameInstructions: instructionsMixed,
+  };
+  // Project overrides reset from the row itself, back to the inherited value.
+  const resetAction = (key: NamingKey, label: string) =>
+    mixedByKey[key] || settings[key] !== DEFAULT_SERVER_SETTINGS[key] ? (
       <SettingResetButton
         label={label}
-        onClick={() => {
-          if (isProject) scope.clear(key);
-          else scope.update({ [key]: DEFAULT_SERVER_SETTINGS[key] });
-        }}
+        onClick={() => updateSettings({ [key]: DEFAULT_SERVER_SETTINGS[key] })}
       />
     ) : null;
-  };
-  const status = (key: NamingKey) => {
-    if (scope.projectIds === null) return undefined;
-    const source = scope.source(key);
-    return source === "environment"
-      ? "Inherited from All projects"
-      : source === "project"
-        ? "Project override"
-        : "Some checkouts override this setting";
-  };
 
   return (
     <>
       <SettingsRow
         {...searchableSetting("worktree-branch-naming")}
         description="Choose how new worktree branches are named from your first message."
-        status={status("branchNamingMode")}
+        serverScoped
+        settingKeys={MODE_KEYS}
         resetAction={resetAction("branchNamingMode", "branch naming")}
         control={
           <Select
             value={modeMixed ? null : settings.branchNamingMode}
             onValueChange={(value) => {
               if (BranchNamingMode.literals.includes(value as BranchNamingMode)) {
-                scope.update({ branchNamingMode: value as BranchNamingMode });
+                updateSettings({ branchNamingMode: value as BranchNamingMode });
               }
             }}
           >
@@ -83,7 +82,8 @@ export function BranchNamingSettings() {
         <SettingsRow
           title="Branch prefix"
           description="For example, test-rig or test-rig/ produces test-rig/add-search. Leave empty for no prefix."
-          status={status("branchNamePrefix")}
+          serverScoped
+          settingKeys={PREFIX_KEYS}
           resetAction={resetAction("branchNamePrefix", "branch prefix")}
           control={
             <Input
@@ -99,7 +99,7 @@ export function BranchNamingSettings() {
               onBlur={(event) => {
                 const value = event.target.value.trim();
                 if (prefixEdited.current && (prefixMixed || value !== settings.branchNamePrefix))
-                  scope.update({ branchNamePrefix: value });
+                  updateSettings({ branchNamePrefix: value });
                 prefixEdited.current = false;
               }}
             />
@@ -116,7 +116,8 @@ export function BranchNamingSettings() {
         <SettingsRow
           title="Branch naming instructions"
           description="Appended to the naming prompt. The model returns the complete branch name; no prefix or suffix is added."
-          status={status("branchNameInstructions")}
+          serverScoped
+          settingKeys={INSTRUCTIONS_KEYS}
           resetAction={resetAction("branchNameInstructions", "branch naming instructions")}
         >
           <div className="mt-3 max-w-2xl pb-3.5">
@@ -139,7 +140,7 @@ export function BranchNamingSettings() {
                   instructionsEdited.current &&
                   (instructionsMixed || value !== settings.branchNameInstructions)
                 )
-                  scope.update({ branchNameInstructions: value });
+                  updateSettings({ branchNameInstructions: value });
                 instructionsEdited.current = false;
               }}
             />
@@ -150,12 +151,7 @@ export function BranchNamingSettings() {
   );
 }
 
-/** Branch naming rows under the worktree page's project scope picker. */
+/** Branch naming rows on the Worktrees page; they follow the page scope. */
 export function BranchNamingSection() {
-  const environment = usePrimaryEnvironment();
-  return environment ? (
-    <ProjectSettingsScope environmentId={environment.environmentId} route="/settings/worktrees">
-      <BranchNamingSettings />
-    </ProjectSettingsScope>
-  ) : null;
+  return <BranchNamingSettings />;
 }

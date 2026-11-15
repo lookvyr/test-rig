@@ -1,20 +1,20 @@
 import { ChevronDownIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
 import * as Option from "effect/Option";
 import { useState, type ReactNode } from "react";
-import type {
-  EnvironmentId,
-  SourceControlProviderKind,
-  SourceControlProviderSettings,
-  SourceControlDiscoveryResult,
-  SourceControlProviderAuth,
-  SourceControlProviderDiscoveryItem,
-  VcsDriverKind,
-  VcsDiscoveryItem,
+import {
+  DEFAULT_SERVER_SETTINGS,
+  type EnvironmentId,
+  type ServerSettings,
+  type SourceControlProviderKind,
+  type SourceControlProviderSettings,
+  type SourceControlDiscoveryResult,
+  type SourceControlProviderAuth,
+  type SourceControlProviderDiscoveryItem,
+  type VcsDriverKind,
+  type VcsDiscoveryItem,
 } from "@t3tools/contracts";
 
-import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
-import { useEnvironment, usePrimaryEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { sourceControlEnvironment } from "../../state/sourceControl";
 import { serverEnvironment } from "../../state/server";
@@ -41,6 +41,7 @@ import {
 } from "./SourceControlWritingSettings";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
+import { useSettingsScope } from "./SettingsScopeContext";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
@@ -412,29 +413,36 @@ function EmptySourceControlDiscovery({
   );
 }
 
-export function SourceControlSettingsPanel(props: { readonly environmentId?: EnvironmentId }) {
-  const primaryEnvironment = usePrimaryEnvironment();
-  const environmentId = props.environmentId ?? primaryEnvironment?.environmentId ?? null;
-
+/** Discovery and provider toggles follow the scope's representative environment. */
+export function SourceControlSettingsPanel() {
+  const { scope, environment, connectedEnvironments } = useSettingsScope();
+  const environmentId =
+    environment?.connection.phase === "connected" ? environment.environmentId : null;
   if (environmentId === null) {
-    return <SettingsPageContainer>{null}</SettingsPageContainer>;
+    return (
+      <SettingsPageContainer>
+        <RepositoriesSettingsSection />
+        <SourceControlWritingSettingsSection />
+      </SettingsPageContainer>
+    );
   }
-
+  const aggregate = scope.environmentIds.length !== 1 && connectedEnvironments.length > 1;
   return (
     <EnvironmentSourceControlSettingsPanel
       environmentId={environmentId}
-      isPrimary={environmentId === primaryEnvironment?.environmentId}
+      environmentLabel={aggregate && environment ? environment.label : null}
+      settings={environment?.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS}
     />
   );
 }
 
 function EnvironmentSourceControlSettingsPanel(props: {
   readonly environmentId: EnvironmentId;
-  readonly isPrimary: boolean;
+  /** Shown when several environments are selected, since providers belong to one of them. */
+  readonly environmentLabel: string | null;
+  readonly settings: ServerSettings;
 }) {
-  const { environmentId } = props;
-  const environment = useEnvironment(environmentId);
-  const settings = useEnvironmentSettings(environmentId);
+  const { environmentId, settings } = props;
   const updateServerSettings = useAtomCommand(
     serverEnvironment.updateSettings,
     "source control provider settings update",
@@ -493,7 +501,7 @@ function EnvironmentSourceControlSettingsPanel(props: {
 
   return (
     <SettingsPageContainer>
-      <RepositoriesSettingsSection environmentId={environmentId} />
+      <RepositoriesSettingsSection />
       {isInitialScanPending ? (
         <SourceControlSectionSkeleton title="Version control" headerAction={scanButton} />
       ) : hasVersionControlSystems ? (
@@ -516,9 +524,9 @@ function EnvironmentSourceControlSettingsPanel(props: {
 
       <SettingsSection
         title={
-          props.isPrimary || environment === null
+          props.environmentLabel === null
             ? "Source control providers"
-            : `Source control providers · ${environment.label}`
+            : `Source control providers · ${props.environmentLabel}`
         }
       >
         {SOURCE_CONTROL_PROVIDER_OPTIONS.map((provider) => (
@@ -534,7 +542,7 @@ function EnvironmentSourceControlSettingsPanel(props: {
         ))}
       </SettingsSection>
 
-      <SourceControlWritingSettingsSection environmentId={environmentId} />
+      <SourceControlWritingSettingsSection />
     </SettingsPageContainer>
   );
 }

@@ -203,7 +203,7 @@ export function mergeEnvironmentSettings(
   return { ...clientSettings, ...serverSettings };
 }
 
-function useMergedSettings<T>(
+export function useMergedSettings<T = UnifiedSettings>(
   serverSettings: ServerSettings,
   selector: ((settings: UnifiedSettings) => T) | undefined,
 ): T {
@@ -307,6 +307,14 @@ export function useUpdateEnvironmentSettings(environmentId: EnvironmentId) {
 
 export function useUpdatePrimarySettings() {
   return useUpdateSettingsTarget(usePrimaryEnvironment()?.environmentId ?? null);
+}
+
+/** Apply a client-settings patch outside React, such as from a scoped settings plan. */
+export function persistClientSettingsPatch(patch: ClientSettingsPatch): void {
+  persistClientSettings({
+    ...getClientSettingsSnapshot(),
+    ...patch,
+  });
 }
 
 export function useUpdateClientSettings() {

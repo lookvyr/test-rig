@@ -1,46 +1,32 @@
 import { useRef } from "react";
 import { Textarea } from "../ui/textarea";
 import { SettingsRow, SettingResetButton } from "./settingsLayout";
-import { ProjectSettingsScope, useProjectSettingsScope } from "./ProjectSettingsScope";
-import { usePrimaryEnvironment } from "../../state/environments";
 import { searchableSetting } from "./settingsSearch";
+import {
+  useScopedSettings,
+  useScopedSettingsMixed,
+  useUpdateScopedSettings,
+} from "./useScopedSettings";
 
+const KEYS = ["threadTitleInstructions"] as const;
+
+/** Instructions appended to title generation; a project can override them from the page scope. */
 export function ThreadTitleInstructionsSettings() {
-  const environment = usePrimaryEnvironment();
-  return environment ? (
-    <ProjectSettingsScope
-      environmentId={environment.environmentId}
-      route="/settings/threads"
-      label="thread title instructions"
-    >
-      <Instructions />
-    </ProjectSettingsScope>
-  ) : null;
-}
-
-function Instructions() {
-  const scope = useProjectSettingsScope();
+  const value = useScopedSettings((settings) => settings.threadTitleInstructions);
+  const mixed = useScopedSettingsMixed(KEYS);
+  const updateSettings = useUpdateScopedSettings();
   const edited = useRef(false);
-  const mixed = scope.isMixed("threadTitleInstructions");
-  const value = scope.settings.threadTitleInstructions;
-  const isProject = scope.projectIds !== null;
-  const overridden = scope.source("threadTitleInstructions") !== "environment";
   return (
     <SettingsRow
       {...searchableSetting("thread-title-instructions")}
       description="Appended to the prompt for new and regenerated thread titles."
-      status={
-        isProject ? (overridden ? "Project override" : "Inherited from All projects") : undefined
-      }
+      serverScoped
+      settingKeys={KEYS}
       resetAction={
-        (isProject ? overridden : value !== "" || mixed) ? (
+        value !== "" || mixed ? (
           <SettingResetButton
             label="thread title instructions"
-            onClick={() =>
-              isProject
-                ? scope.clear("threadTitleInstructions")
-                : scope.update({ threadTitleInstructions: "" })
-            }
+            onClick={() => updateSettings({ threadTitleInstructions: "" })}
           />
         ) : null
       }
@@ -62,7 +48,7 @@ function Instructions() {
           onBlur={(event) => {
             const next = event.target.value.trim();
             if (edited.current && (mixed || next !== value))
-              scope.update({ threadTitleInstructions: next });
+              updateSettings({ threadTitleInstructions: next });
             edited.current = false;
           }}
         />
