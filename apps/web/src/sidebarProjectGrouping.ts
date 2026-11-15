@@ -1,6 +1,16 @@
-import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ScopedProjectRef,
+  SidebarProjectGroupingMode,
+} from "@t3tools/contracts";
 import { buildProjectGroups, type ProjectGroupingSettings } from "./logicalProject";
 import type { Project } from "./types";
+
+export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
+  repository: "Group by repository",
+  repository_path: "Group by repository path",
+  separate: "Keep separate",
+};
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
 

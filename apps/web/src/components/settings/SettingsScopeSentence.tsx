@@ -41,6 +41,7 @@ import {
  * hides the scope picker.
  */
 export const SETTINGS_SCOPED_PATHS: ReadonlySet<string> = new Set([
+  "/settings/projects",
   "/settings/threads",
   "/settings/browser",
   "/settings/source-control",

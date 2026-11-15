@@ -10,7 +10,8 @@ project**, **New project**, and **New thread**. Choose a project from the filter
 to show only its threads; the button then shows that project's icon and stays
 highlighted. Choose **All projects** in the same menu to clear the filter. Each
 project in the menu has an actions button for its name, grouping rule, and
-removal.
+removal. **Settings → Projects** offers the same controls along with the
+project's new-thread defaults and actions.
 
 In the desktop app, back and forward arrows next to the app name move through the
 pages you have visited, like a browser. They are dimmed when there is nowhere to

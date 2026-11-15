@@ -24,10 +24,33 @@ removal.
 If a worktree launch encounters a concurrent Git reference update, Test Rig retries
 the fetch once automatically.
 
+## Projects settings
+
+Open **Settings → Projects** and choose a project to manage it in one place:
+
+- **Name** renames the project, or only the checkout selected at the top of the page.
+- **Checkouts** lists each folder the project groups together, with its
+  environment and grouping rule. Changing the rule can move a checkout to a
+  different project in the sidebar. With several checkouts, each can be removed
+  on its own.
+- **New threads** sets the model, permissions, and workspace that new threads in
+  this project start with.
+- **Actions** lists the project's commands. Add, edit, or delete them here or
+  from the actions menu in a chat. Actions a repository declares in its
+  `t3.json` can be imported with **Import from t3.json**. A project without its
+  own list uses the environment's default actions; the reset control returns it
+  to them. If the checkout's `t3.json` cannot be parsed, a warning explains that
+  its scripts and settings are ignored.
+- **Danger zone** removes the project entries and their threads. Files on disk
+  are not touched.
+
+Existing per-project actions, models, and workspace choices carry over
+unchanged.
+
 ## Settings for one project
 
-The **Threads**, **Browser**, **Source control**, **Worktrees**, and
-**Maintenance** settings pages start with **Applying settings for All
+The **Projects**, **Threads**, **Browser**, **Source control**, **Worktrees**,
+and **Maintenance** settings pages start with **Applying settings for All
 projects**. Choose a project there to give it its own value for settings a
 project can override, such as the default model, branch naming, title
 instructions, or auto-settle rules. The project keeps inheriting every value

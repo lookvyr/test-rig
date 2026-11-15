@@ -105,6 +105,7 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import {
+  PROJECT_GROUPING_MODE_LABELS,
   buildSidebarProjectSnapshots,
   type SidebarProjectGroupMember,
   type SidebarProjectSnapshot,
@@ -225,12 +226,6 @@ function SidebarHeaderTouchTarget() {
     />
   );
 }
-
-const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
-  repository: "Group by repository",
-  repository_path: "Group by repository path",
-  separate: "Keep separate",
-};
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";

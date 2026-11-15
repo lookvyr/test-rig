@@ -9,6 +9,7 @@ export type SettingsPath =
   | "/settings/threads"
   | "/settings/browser"
   | "/settings/scheduled-tasks"
+  | "/settings/projects"
   | "/settings/source-control"
   | "/settings/worktrees"
   | "/settings/connections"
@@ -40,6 +41,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/threads": "Threads",
   "/settings/browser": "Browser",
   "/settings/scheduled-tasks": "Scheduled tasks",
+  "/settings/projects": "Projects",
   "/settings/source-control": "Source control",
   "/settings/worktrees": "Worktrees",
   "/settings/connections": "Environments",
@@ -79,7 +81,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   },
   {
     heading: "Code",
-    paths: ["/settings/source-control", "/settings/worktrees"],
+    paths: ["/settings/projects", "/settings/source-control", "/settings/worktrees"],
   },
   {
     heading: "Connections",
@@ -104,6 +106,9 @@ export const MOVED_SETTINGS_PATHS: Readonly<Record<string, SettingsPath>> = {
  * here once instead of separately in the panel and the index.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  { id: "projects", title: "Projects", to: "/settings/projects" },
+  { id: "project-actions", title: "Project actions", to: "/settings/projects" },
+  { id: "project-checkouts", title: "Project checkouts", to: "/settings/projects" },
   { id: "send-shortcut", title: "Send shortcut", to: "/settings/chat" },
   { id: "skills-in-slash-menu", title: "Show skills in slash menu", to: "/settings/chat" },
   { id: "tool-call-visibility", title: "Tool calls in chat", to: "/settings/chat" },

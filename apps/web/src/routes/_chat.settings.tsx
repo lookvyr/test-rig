@@ -34,7 +34,8 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
 /** A scope that cannot be written to replaces the page instead of silently writing elsewhere. */
 function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
   const { scope, connectedEnvironments } = useSettingsScope();
-  if (!SETTINGS_SCOPED_PATHS.has(pathname)) return children;
+  // The Projects page explains its own unavailable selections.
+  if (!SETTINGS_SCOPED_PATHS.has(pathname) || pathname === "/settings/projects") return children;
   if (scope.kind === "unavailable") {
     return (
       <SettingsPageContainer>

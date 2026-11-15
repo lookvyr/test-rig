@@ -20,6 +20,7 @@ import { Route as ChatSettingsThreadsRouteImport } from './routes/_chat.settings
 import { Route as ChatSettingsSourceControlRouteImport } from './routes/_chat.settings.source-control'
 import { Route as ChatSettingsScheduledTasksRouteImport } from './routes/_chat.settings.scheduled-tasks'
 import { Route as ChatSettingsProvidersRouteImport } from './routes/_chat.settings.providers'
+import { Route as ChatSettingsProjectsRouteImport } from './routes/_chat.settings.projects'
 import { Route as ChatSettingsMaintenanceRouteImport } from './routes/_chat.settings.maintenance'
 import { Route as ChatSettingsLabsRouteImport } from './routes/_chat.settings.labs'
 import { Route as ChatSettingsKeybindingsRouteImport } from './routes/_chat.settings.keybindings'
@@ -91,6 +92,11 @@ const ChatSettingsScheduledTasksRoute =
 const ChatSettingsProvidersRoute = ChatSettingsProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
+  getParentRoute: () => ChatSettingsRoute,
+} as any)
+const ChatSettingsProjectsRoute = ChatSettingsProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
   getParentRoute: () => ChatSettingsRoute,
 } as any)
 const ChatSettingsMaintenanceRoute = ChatSettingsMaintenanceRouteImport.update({
@@ -196,6 +202,7 @@ export interface FileRoutesByFullPath {
   '/settings/keybindings': typeof ChatSettingsKeybindingsRoute
   '/settings/labs': typeof ChatSettingsLabsRoute
   '/settings/maintenance': typeof ChatSettingsMaintenanceRoute
+  '/settings/projects': typeof ChatSettingsProjectsRoute
   '/settings/providers': typeof ChatSettingsProvidersRoute
   '/settings/scheduled-tasks': typeof ChatSettingsScheduledTasksRoute
   '/settings/source-control': typeof ChatSettingsSourceControlRoute
@@ -224,6 +231,7 @@ export interface FileRoutesByTo {
   '/settings/keybindings': typeof ChatSettingsKeybindingsRoute
   '/settings/labs': typeof ChatSettingsLabsRoute
   '/settings/maintenance': typeof ChatSettingsMaintenanceRoute
+  '/settings/projects': typeof ChatSettingsProjectsRoute
   '/settings/providers': typeof ChatSettingsProvidersRoute
   '/settings/scheduled-tasks': typeof ChatSettingsScheduledTasksRoute
   '/settings/source-control': typeof ChatSettingsSourceControlRoute
@@ -254,6 +262,7 @@ export interface FileRoutesById {
   '/_chat/settings/keybindings': typeof ChatSettingsKeybindingsRoute
   '/_chat/settings/labs': typeof ChatSettingsLabsRoute
   '/_chat/settings/maintenance': typeof ChatSettingsMaintenanceRoute
+  '/_chat/settings/projects': typeof ChatSettingsProjectsRoute
   '/_chat/settings/providers': typeof ChatSettingsProvidersRoute
   '/_chat/settings/scheduled-tasks': typeof ChatSettingsScheduledTasksRoute
   '/_chat/settings/source-control': typeof ChatSettingsSourceControlRoute
@@ -284,6 +293,7 @@ export interface FileRouteTypes {
     | '/settings/keybindings'
     | '/settings/labs'
     | '/settings/maintenance'
+    | '/settings/projects'
     | '/settings/providers'
     | '/settings/scheduled-tasks'
     | '/settings/source-control'
@@ -312,6 +322,7 @@ export interface FileRouteTypes {
     | '/settings/keybindings'
     | '/settings/labs'
     | '/settings/maintenance'
+    | '/settings/projects'
     | '/settings/providers'
     | '/settings/scheduled-tasks'
     | '/settings/source-control'
@@ -341,6 +352,7 @@ export interface FileRouteTypes {
     | '/_chat/settings/keybindings'
     | '/_chat/settings/labs'
     | '/_chat/settings/maintenance'
+    | '/_chat/settings/projects'
     | '/_chat/settings/providers'
     | '/_chat/settings/scheduled-tasks'
     | '/_chat/settings/source-control'
@@ -431,6 +443,13 @@ declare module '@tanstack/react-router' {
       path: '/providers'
       fullPath: '/settings/providers'
       preLoaderRoute: typeof ChatSettingsProvidersRouteImport
+      parentRoute: typeof ChatSettingsRoute
+    }
+    '/_chat/settings/projects': {
+      id: '/_chat/settings/projects'
+      path: '/projects'
+      fullPath: '/settings/projects'
+      preLoaderRoute: typeof ChatSettingsProjectsRouteImport
       parentRoute: typeof ChatSettingsRoute
     }
     '/_chat/settings/maintenance': {
@@ -563,6 +582,7 @@ interface ChatSettingsRouteChildren {
   ChatSettingsKeybindingsRoute: typeof ChatSettingsKeybindingsRoute
   ChatSettingsLabsRoute: typeof ChatSettingsLabsRoute
   ChatSettingsMaintenanceRoute: typeof ChatSettingsMaintenanceRoute
+  ChatSettingsProjectsRoute: typeof ChatSettingsProjectsRoute
   ChatSettingsProvidersRoute: typeof ChatSettingsProvidersRoute
   ChatSettingsScheduledTasksRoute: typeof ChatSettingsScheduledTasksRoute
   ChatSettingsSourceControlRoute: typeof ChatSettingsSourceControlRoute
@@ -586,6 +606,7 @@ const ChatSettingsRouteChildren: ChatSettingsRouteChildren = {
   ChatSettingsKeybindingsRoute: ChatSettingsKeybindingsRoute,
   ChatSettingsLabsRoute: ChatSettingsLabsRoute,
   ChatSettingsMaintenanceRoute: ChatSettingsMaintenanceRoute,
+  ChatSettingsProjectsRoute: ChatSettingsProjectsRoute,
   ChatSettingsProvidersRoute: ChatSettingsProvidersRoute,
   ChatSettingsScheduledTasksRoute: ChatSettingsScheduledTasksRoute,
   ChatSettingsSourceControlRoute: ChatSettingsSourceControlRoute,

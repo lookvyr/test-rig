@@ -1522,7 +1522,7 @@ function ProjectOrderRow() {
  * The model new threads start with. Unset is "Automatic": the model of the last launched thread.
  * A configured model wins over that memory.
  */
-function DefaultModelRow() {
+export function DefaultModelRow() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const serverProviders = useScopedServerProviders();
@@ -1608,8 +1608,58 @@ function DefaultModelRow() {
   );
 }
 
+/** Where new threads start: the project checkout or a new worktree. */
+export function NewThreadWorkspaceRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("new-threads")}
+      description="Where new threads start."
+      serverScoped
+      settingKeys={["defaultThreadEnvMode"]}
+      resetAction={
+        settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
+          <SettingResetButton
+            label="new thread workspace"
+            onClick={() =>
+              updateSettings({
+                defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={settings.defaultThreadEnvMode}
+          onValueChange={(value) => {
+            if (value === "local" || value === "worktree") {
+              updateSettings({ defaultThreadEnvMode: value });
+            }
+          }}
+        >
+          <SelectTrigger className="w-full sm:w-44" aria-label="Default thread mode">
+            <SelectValue>
+              {settings.defaultThreadEnvMode === "worktree" ? "New worktree" : "Local"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem hideIndicator value="local">
+              Local
+            </SelectItem>
+            <SelectItem hideIndicator value="worktree">
+              New worktree
+            </SelectItem>
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
 /** Approval level new threads start in. */
-function DefaultPermissionsRow() {
+export function DefaultPermissionsRow() {
   const runtimeMode = useScopedSettings((settings) => settings.defaultRuntimeMode);
   const updateSettings = useUpdateScopedSettings();
   const Icon = runtimeModeConfig[runtimeMode].icon;
@@ -2362,48 +2412,7 @@ export function ThreadsSettingsPanel() {
       <SettingsSection title="New threads">
         <DefaultModelRow />
         <DefaultPermissionsRow />
-        <SettingsRow
-          {...searchableSetting("new-threads")}
-          description="Where new threads start."
-          serverScoped
-          settingKeys={["defaultThreadEnvMode"]}
-          resetAction={
-            settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
-              <SettingResetButton
-                label="new thread workspace"
-                onClick={() =>
-                  updateSettings({
-                    defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.defaultThreadEnvMode}
-              onValueChange={(value) => {
-                if (value === "local" || value === "worktree") {
-                  updateSettings({ defaultThreadEnvMode: value });
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-44" aria-label="Default thread mode">
-                <SelectValue>
-                  {settings.defaultThreadEnvMode === "worktree" ? "New worktree" : "Local"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="local">
-                  Local
-                </SelectItem>
-                <SelectItem hideIndicator value="worktree">
-                  New worktree
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
+        <NewThreadWorkspaceRow />
       </SettingsSection>
       <SettingsSection title="Snooze">
         <SnoozePresetsRow />
