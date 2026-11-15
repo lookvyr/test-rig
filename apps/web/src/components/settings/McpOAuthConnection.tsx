@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   McpOAuthStatus,
   McpOAuthBeginResult,
@@ -13,6 +13,8 @@ export function McpOAuthConnection({
   error,
   pending,
   disabled,
+  autoBegin = false,
+  onAutoBegin,
   onBegin,
   onComplete,
   onSignOut,
@@ -22,6 +24,9 @@ export function McpOAuthConnection({
   error: string | null;
   pending: boolean;
   disabled: boolean;
+  /** Start sign-in as soon as the page opens, as when arriving from a row's Sign in button. */
+  autoBegin?: boolean;
+  onAutoBegin?: () => void;
   onBegin: () => Promise<McpOAuthBeginResult>;
   onComplete: (input: McpOAuthCompleteInput) => Promise<void>;
   onSignOut: () => Promise<void>;
@@ -43,11 +48,32 @@ export function McpOAuthConnection({
       onRefresh();
     }
   };
+  const begin = () =>
+    run(async () => {
+      const started = await onBegin();
+      setFlow(
+        started.flowId && started.authorizationUrl
+          ? { flowId: started.flowId, authorizationUrl: started.authorizationUrl }
+          : null,
+      );
+      setCallbackUrl("");
+      if (started.authorizationUrl)
+        await ensureLocalApi().shell.openExternal(started.authorizationUrl);
+    });
+  const autoBegun = useRef(false);
+  useEffect(() => {
+    if (!autoBegin || disabled || pending || autoBegun.current) return;
+    autoBegun.current = true;
+    onAutoBegin?.();
+    if (status?.state === "signed-in") return;
+    // Starting sign-in opens the browser, an external effect; run it after this commit.
+    queueMicrotask(() => void begin());
+  });
   return (
     <div className="space-y-3 rounded-xl border p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <p className="text-sm font-medium">Shared sign-in</p>
+          <p className="text-sm font-medium">Sign-in</p>
           <p role="status" className="text-xs text-muted-foreground">
             {pending
               ? "Checking sign-in…"
@@ -64,34 +90,13 @@ export function McpOAuthConnection({
           {error ? "Retry" : "Refresh"}
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Sign in once for Codex and Claude in this environment. Servers that do not require sign-in
-        can be used while signed out.
-      </p>
       {error || actionError || status?.error ? (
         <p role="alert" className="text-xs text-destructive">
           {actionError || error || status?.error}
         </p>
       ) : null}
       <div className="flex gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={disabled || busy || pending}
-          onClick={() =>
-            run(async () => {
-              const started = await onBegin();
-              setFlow(
-                started.flowId && started.authorizationUrl
-                  ? { flowId: started.flowId, authorizationUrl: started.authorizationUrl }
-                  : null,
-              );
-              setCallbackUrl("");
-              if (started.authorizationUrl)
-                await ensureLocalApi().shell.openExternal(started.authorizationUrl);
-            })
-          }
-        >
+        <Button size="sm" variant="outline" disabled={disabled || busy || pending} onClick={begin}>
           {status?.state === "signed-in" ? "Sign in again" : "Sign in"}
         </Button>
         {status?.state === "signed-in" || status?.state === "expired" ? (

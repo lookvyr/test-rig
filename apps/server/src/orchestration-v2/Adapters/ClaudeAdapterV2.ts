@@ -182,6 +182,10 @@ import {
 export const CLAUDE_PROVIDER = ProviderDriverKind.make("claudeAgent");
 export const CLAUDE_AGENT_SDK_QUERY_PROTOCOL = "claude-agent-sdk.query" as const;
 
+function claudeToolSummaries(tools: ClaudeMcpServerStatus["tools"]) {
+  return tools?.map((tool) => ({ name: tool.name, description: tool.description ?? null })) ?? null;
+}
+
 function claudeContextWindow(modelSelection: ModelSelection): number | null {
   return (
     resolveClaudeCatalogContextWindowTokens(BUNDLED_CLAUDE_MODEL_CATALOG, modelSelection) ?? null
@@ -9008,6 +9012,7 @@ export function makeClaudeAdapterV2(
                             {
                               state: normalizeMcpRuntimeState(status.status),
                               toolCount: status.tools?.length ?? null,
+                              tools: claudeToolSummaries(status.tools),
                             },
                           ]),
                         ),
@@ -9024,6 +9029,7 @@ export function makeClaudeAdapterV2(
                       return {
                         state: normalizeMcpRuntimeState(status?.status),
                         toolCount: status?.tools?.length ?? null,
+                        tools: claudeToolSummaries(status?.tools),
                       };
                     }),
                     Effect.mapError(providerMcpRequestError),

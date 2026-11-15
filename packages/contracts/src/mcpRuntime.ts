@@ -45,8 +45,17 @@ export const McpRuntimeAuthenticateResult = Schema.Struct({
 });
 export type McpRuntimeAuthenticateResult = typeof McpRuntimeAuthenticateResult.Type;
 
+/** A tool an MCP server offers, as a provider last reported it. */
+export const McpToolSummary = Schema.Struct({
+  name: Schema.String,
+  description: Schema.NullOr(Schema.String),
+});
+export type McpToolSummary = typeof McpToolSummary.Type;
+
 export const ListMcpRuntimeStatusesResult = Schema.Struct({
   statuses: Schema.Array(McpRuntimeStatus),
+  /** The last tool list any session reported per server, kept after the session ends. */
+  serverTools: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(McpToolSummary))),
 });
 export type ListMcpRuntimeStatusesResult = typeof ListMcpRuntimeStatusesResult.Type;
 

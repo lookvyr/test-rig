@@ -1,54 +1,35 @@
 /**
  * Sensitive MCP server variables (env values, HTTP headers) live in the
- * secret store, never in settings.json or on the wire. Every helper walks
- * environment servers, physical project overrides, and shared Tools scopes.
+ * secret store, never in settings.json or on the wire.
  *
  * On disk and towards clients a sensitive variable is `{value: "",
  * valueRedacted: true}`. A client that sends that back keeps the stored
  * secret; a new value replaces it. Non-sensitive values remain in settings.
  */
-import type { ProjectSettingsOverrides, ServerSettings } from "@t3tools/contracts";
-import type {
-  McpServerConfig,
-  McpServerProjectOverride,
-  McpServerVariable,
-} from "@t3tools/contracts";
-
-/** Each storage namespace owns its own secrets, even when server names match. */
-type McpServerOwner =
-  | { readonly kind: "environment" }
-  | { readonly kind: "project"; readonly id: string }
-  | { readonly kind: "tools-scope"; readonly id: string };
-
-type ServerEntry = McpServerConfig | McpServerProjectOverride;
+import type { McpServerConfig, McpServerVariable, ServerSettings } from "@t3tools/contracts";
 
 const encode = (value: string) => Buffer.from(value, "utf8").toString("base64url");
 
-/** Deterministic per (owner, server, variable kind, variable name). */
+/** Deterministic per (server, variable kind, variable name). */
 function mcpServerSecretName(input: {
-  readonly owner: McpServerOwner;
   readonly server: string;
   readonly variableKind: "env" | "header";
   readonly variable: string;
 }): string {
-  const owner =
-    input.owner.kind === "environment" ? "env" : `${input.owner.kind}-${encode(input.owner.id)}`;
-  return `mcp-${owner}-${encode(input.server)}-${input.variableKind}-${encode(input.variable)}`;
+  return `mcp-env-${encode(input.server)}-${input.variableKind}-${encode(input.variable)}`;
 }
 
 interface VariableSite {
-  readonly owner: McpServerOwner;
   readonly server: string;
   readonly variableKind: "env" | "header";
   readonly variable: McpServerVariable;
 }
 
-function variablesOf(entry: ServerEntry): {
+function variablesOf(entry: McpServerConfig): {
   readonly kind: "env" | "header";
   readonly variables: ReadonlyArray<McpServerVariable>;
-} | null {
+} {
   const transport = entry.transport;
-  if (transport === undefined) return null;
   return transport.type === "stdio"
     ? { kind: "env", variables: transport.env }
     : { kind: "header", variables: transport.headers };
@@ -57,39 +38,14 @@ function variablesOf(entry: ServerEntry): {
 function* variableSites(settings: ServerSettings): Generator<VariableSite> {
   for (const [server, entry] of Object.entries(settings.mcpServers)) {
     const variables = variablesOf(entry);
-    if (variables === null) continue;
     for (const variable of variables.variables) {
-      yield { owner: { kind: "environment" }, server, variableKind: variables.kind, variable };
-    }
-  }
-  for (const [id, overrides] of Object.entries(settings.toolsScopeMcpServers)) {
-    for (const [server, entry] of Object.entries(overrides)) {
-      const variables = variablesOf(entry);
-      if (variables === null) continue;
-      for (const variable of variables.variables) {
-        yield {
-          owner: { kind: "tools-scope", id },
-          server,
-          variableKind: variables.kind,
-          variable,
-        };
-      }
-    }
-  }
-  for (const [id, overrides] of Object.entries(settings.projectSettingsOverrides)) {
-    for (const [server, entry] of Object.entries(overrides.mcpServers ?? {})) {
-      const variables = variablesOf(entry);
-      if (variables === null) continue;
-      for (const variable of variables.variables) {
-        yield { owner: { kind: "project", id }, server, variableKind: variables.kind, variable };
-      }
+      yield { server, variableKind: variables.kind, variable };
     }
   }
 }
 
 const siteSecretName = (site: VariableSite) =>
   mcpServerSecretName({
-    owner: site.owner,
     server: site.server,
     variableKind: site.variableKind,
     variable: site.variable.name,
@@ -97,28 +53,20 @@ const siteSecretName = (site: VariableSite) =>
 
 /**
  * Rebuild every server in `settings` with `map` applied to each variable.
- * Returns the input unchanged when no server has variables.
  */
 function mapVariables(
   settings: ServerSettings,
   map: (site: VariableSite) => McpServerVariable,
 ): ServerSettings {
-  const mapEntry = <Entry extends ServerEntry>(
-    owner: McpServerOwner,
-    server: string,
-    entry: Entry,
-  ): Entry => {
+  const mapEntry = (server: string, entry: McpServerConfig): McpServerConfig => {
     const transport = entry.transport;
-    if (transport === undefined) return entry;
     if (transport.type === "stdio") {
       if (transport.env.length === 0) return entry;
       return {
         ...entry,
         transport: {
           ...transport,
-          env: transport.env.map((variable) =>
-            map({ owner, server, variableKind: "env", variable }),
-          ),
+          env: transport.env.map((variable) => map({ server, variableKind: "env", variable })),
         },
       };
     }
@@ -128,45 +76,15 @@ function mapVariables(
       transport: {
         ...transport,
         headers: transport.headers.map((variable) =>
-          map({ owner, server, variableKind: "header", variable }),
+          map({ server, variableKind: "header", variable }),
         ),
       },
     };
   };
   const mcpServers = Object.fromEntries(
-    Object.entries(settings.mcpServers).map(([server, entry]) => [
-      server,
-      mapEntry({ kind: "environment" }, server, entry),
-    ]),
+    Object.entries(settings.mcpServers).map(([server, entry]) => [server, mapEntry(server, entry)]),
   ) as ServerSettings["mcpServers"];
-  const projectSettingsOverrides = Object.fromEntries(
-    Object.entries(settings.projectSettingsOverrides).map(([id, overrides]) => [
-      id,
-      overrides.mcpServers === undefined
-        ? overrides
-        : ({
-            ...overrides,
-            mcpServers: Object.fromEntries(
-              Object.entries(overrides.mcpServers).map(([server, entry]) => [
-                server,
-                mapEntry({ kind: "project", id }, server, entry),
-              ]),
-            ),
-          } satisfies ProjectSettingsOverrides),
-    ]),
-  ) as ServerSettings["projectSettingsOverrides"];
-  const toolsScopeMcpServers = Object.fromEntries(
-    Object.entries(settings.toolsScopeMcpServers).map(([id, servers]) => [
-      id,
-      Object.fromEntries(
-        Object.entries(servers).map(([server, entry]) => [
-          server,
-          mapEntry({ kind: "tools-scope", id }, server, entry),
-        ]),
-      ),
-    ]),
-  ) as ServerSettings["toolsScopeMcpServers"];
-  return { ...settings, mcpServers, projectSettingsOverrides, toolsScopeMcpServers };
+  return { ...settings, mcpServers };
 }
 
 /** What a client sees: sensitive values blanked, with a flag that one is stored. */

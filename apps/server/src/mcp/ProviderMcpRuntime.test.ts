@@ -21,6 +21,7 @@ import {
 } from "./ProviderMcpRuntime.ts";
 import { AppMcpOAuth, type AppMcpOAuthStatus } from "./AppMcpOAuth.ts";
 import * as McpProviderSession from "./McpProviderSession.ts";
+import { rememberedMcpTools, resetMcpToolHistory } from "./McpToolHistory.ts";
 
 const runtime = (name: string, project = "project-a"): ProviderMcpRuntime => ({
   identity: {
@@ -374,4 +375,44 @@ it.effect("keeps explicitly configured HTTP credentials independent of shared OA
     assert.equal(result.reconnects, 1);
     assert.equal(result.authenticates, 0);
   }).pipe(Effect.scoped),
+);
+
+it.effect("keeps a connected server's tool list after its session ends", () =>
+  Effect.gen(function* () {
+    resetMcpToolHistory();
+    const tools = [
+      { name: "get_issue", description: "Read one issue" },
+      { name: "search_code", description: null },
+    ];
+    const current = {
+      ...runtime("runtime-tools"),
+      servers: [{ name: "tools-demo", runtimeName: "tru-tools-demo" }],
+      status: () => Effect.succeed({ state: "connected" as const, toolCount: 2, tools }),
+    };
+    const transport = { type: "stdio" as const, command: "npx", args: ["tools-demo"], env: [] };
+    McpProviderSession.setMcpProviderSession({
+      environmentId: EnvironmentId.make("tools-env"),
+      threadId: current.identity.threadId,
+      providerSessionId: "tools-session",
+      providerInstanceId: current.identity.providerInstanceId,
+      endpoint: "http://localhost/mcp",
+      authorizationHeader: "Bearer local-only",
+      browserToolsAvailable: false,
+      appMcpServers: [{ name: "tools-demo", transport }],
+    });
+    const dispose = registerProviderMcpRuntime(current);
+    yield* listMcpRuntimeStatuses({ serverName: "tools-demo" });
+    dispose();
+    McpProviderSession.clearMcpProviderSession(current.identity.threadId);
+    assert.lengthOf(yield* listMcpRuntimeStatuses({ serverName: "tools-demo" }), 0);
+    const config = {
+      providers: ["claudeAgent" as const],
+      enabled: true,
+      assignment: { allProjects: true, projectIds: [], disabledProjectIds: [] },
+      transport,
+    };
+    assert.deepEqual(rememberedMcpTools({ "tools-demo": config }, "tools-demo"), {
+      "tools-demo": tools,
+    });
+  }),
 );

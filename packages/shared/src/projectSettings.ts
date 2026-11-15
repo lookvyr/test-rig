@@ -15,10 +15,8 @@ import {
 } from "@t3tools/contracts";
 import { isModelSelectionProviderEnabled } from "./serverSettings.ts";
 import {
-  DEFAULT_MCP_SERVER_PROVIDERS,
-  type McpServerConfig,
+  isToolsAssignmentAvailable,
   type McpServers,
-  type McpServerProjectOverrides,
   type ResolvedMcpServer,
 } from "@t3tools/contracts";
 import type { ProviderDriverKind } from "@t3tools/contracts";
@@ -181,11 +179,6 @@ function resolveProjectOverrides(
     // A forward-compatible decode leaves an unknown value as a present
     // undefined; that is not an override.
     if (value === undefined) continue;
-    if (key === "mcpServers") {
-      effective[key] = mergeProjectMcpServers(settings.mcpServers, overrides.mcpServers);
-      sources[key] = "project";
-      continue;
-    }
     // A model on a disabled provider falls back to the environment, like the
     // environment-level guards do for these keys.
     if (
@@ -202,48 +195,22 @@ function resolveProjectOverrides(
   return { settings: effective as ServerSettings, sources, overrides };
 }
 
-/** Apply sparse project entries by name, retaining unrelated and newly added global servers. */
-export function mergeProjectMcpServers(
-  environment: McpServers,
-  project: McpServerProjectOverrides | undefined,
-): McpServers {
-  if (project === undefined) return environment;
-  const merged: Record<string, McpServerConfig> = { ...environment };
-  for (const [name, entry] of Object.entries(project)) {
-    if (entry.transport !== undefined) {
-      merged[name] = {
-        enabled: entry.enabled,
-        providers: entry.providers ?? environment[name]?.providers ?? DEFAULT_MCP_SERVER_PROVIDERS,
-        transport: entry.transport,
-      };
-    } else if (Object.hasOwn(environment, name)) {
-      merged[name] = {
-        ...environment[name]!,
-        enabled: entry.enabled,
-        ...(entry.providers === undefined ? {} : { providers: entry.providers }),
-      };
-    }
-  }
-  return merged;
-}
-
-/** Enabled, provider-eligible servers from settings with secrets already materialized. */
+/**
+ * The servers a project's sessions receive: each server's assignment decides.
+ * Without a project (the environment-wide view) every configured server counts.
+ */
 export function resolveToolsScopeMcpServers(
   settings: ServerSettings,
   projectId: ProjectId | null,
   scopeId?: ToolsScopeId | null,
   memberProjectIds: ReadonlyArray<ProjectId> = projectId === null ? [] : [projectId],
 ): McpServers {
-  const inherited: Record<string, import("@t3tools/contracts").McpServerProjectOverride> = {};
-  const legacyMembers =
-    scopeId == null ? (projectId === null ? [] : [projectId]) : memberProjectIds;
-  for (const memberId of legacyMembers.toReversed()) {
-    Object.assign(inherited, settings.projectSettingsOverrides[memberId]?.mcpServers);
-  }
-  const legacy = mergeProjectMcpServers(settings.mcpServers, inherited);
-  const scoped = scopeId == null ? undefined : settings.toolsScopeMcpServers[scopeId];
-  if (scoped === undefined) return legacy;
-  return mergeProjectMcpServers(legacy, scoped);
+  if (projectId === null && scopeId == null) return settings.mcpServers;
+  return Object.fromEntries(
+    Object.entries(settings.mcpServers).filter(([, server]) =>
+      isToolsAssignmentAvailable(server.assignment, scopeId, memberProjectIds),
+    ),
+  );
 }
 
 export function resolveMcpServers(

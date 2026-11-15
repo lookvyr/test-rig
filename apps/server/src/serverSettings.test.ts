@@ -1,7 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
-  ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
   ServerSettings,
@@ -25,19 +24,13 @@ import * as Stream from "effect/Stream";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ServerConfig from "./config.ts";
 import * as ServerSettingsModule from "./serverSettings.ts";
-import {
-  McpServerConfig,
-  McpServerProjectOverride,
-} from "../../../packages/contracts/src/mcpServers.ts";
-
-import { ToolsScopeId } from "../../../packages/contracts/src/toolsScope.ts";
+import { McpServerConfig } from "../../../packages/contracts/src/mcpServers.ts";
 
 const encodeLegacySettings = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 const decodeSavedServerSettings = Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings));
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 const decodeMcpServerConfig = Schema.decodeEffect(McpServerConfig);
-const decodeMcpProjectOverride = Schema.decodeEffect(McpServerProjectOverride);
 
 it.layer(NodeServices.layer)("MCP secret persistence", (it) => {
   it.effect("returns committed settings when obsolete MCP secret cleanup fails", () =>
@@ -97,7 +90,7 @@ it.layer(NodeServices.layer)("MCP secret persistence", (it) => {
       );
     }),
   );
-  it.effect("keeps a working scope credential when settings rename or deletion fails", () =>
+  it.effect("keeps a working server credential when settings rename or deletion fails", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       let failSettingsWrite = false;
@@ -121,18 +114,15 @@ it.layer(NodeServices.layer)("MCP secret persistence", (it) => {
         const config = yield* ServerConfig.ServerConfig;
         settingsPath = config.settingsPath;
         const service = yield* ServerSettingsModule.ServerSettingsService;
-        const scope = ToolsScopeId.make("project:failed-save");
         yield* service.updateSettings({
-          toolsScopeMcpServers: {
-            [scope]: {
-              old: yield* decodeMcpProjectOverride({
-                transport: {
-                  type: "http",
-                  url: "https://example.test",
-                  headers: [{ name: "X-Credential", value: "working-secret" }],
-                },
-              }),
-            },
+          mcpServers: {
+            old: yield* decodeMcpServerConfig({
+              transport: {
+                type: "http",
+                url: "https://example.test",
+                headers: [{ name: "X-Credential", value: "working-secret" }],
+              },
+            }),
           },
         });
         const originalDisk = yield* fs.readFileString(settingsPath);
@@ -140,23 +130,22 @@ it.layer(NodeServices.layer)("MCP secret persistence", (it) => {
           name.startsWith("mcp-"),
         );
         const renamePatch = {
-          toolsScopeMcpServers: {
-            [scope]: {
-              renamed: yield* decodeMcpProjectOverride({
-                transport: {
-                  type: "http",
-                  url: "https://example.test",
-                  headers: [
-                    {
-                      name: "X-New-Credential",
-                      value: "",
-                      valueRedacted: true,
-                      storedAs: { server: "old", variable: "X-Credential" },
-                    },
-                  ],
-                },
-              }),
-            },
+          mcpServers: {
+            old: null,
+            renamed: yield* decodeMcpServerConfig({
+              transport: {
+                type: "http",
+                url: "https://example.test",
+                headers: [
+                  {
+                    name: "X-New-Credential",
+                    value: "",
+                    valueRedacted: true,
+                    storedAs: { server: "old", variable: "X-Credential" },
+                  },
+                ],
+              },
+            }),
           },
         };
         failSettingsWrite = true;
@@ -164,31 +153,25 @@ it.layer(NodeServices.layer)("MCP secret persistence", (it) => {
         assert.equal(failure.operation, "write-file");
         assert.equal(yield* fs.readFileString(settingsPath), originalDisk);
         assert.isTrue(
-          encodeLegacySettings(
-            (yield* service.getSettings).toolsScopeMcpServers[scope]?.old,
-          ).includes("working-secret"),
+          encodeLegacySettings((yield* service.getSettings).mcpServers.old).includes(
+            "working-secret",
+          ),
         );
         assert.deepEqual(
           (yield* fs.readDirectory(config.secretsDir)).filter((name) => name.startsWith("mcp-")),
           originalSecretFiles,
         );
-        yield* service
-          .updateSettings({ toolsScopeMcpServers: { [scope]: null } })
-          .pipe(Effect.flip);
+        yield* service.updateSettings({ mcpServers: { old: null } }).pipe(Effect.flip);
         assert.equal(yield* fs.readFileString(settingsPath), originalDisk);
         assert.isTrue(
-          encodeLegacySettings(
-            (yield* service.getSettings).toolsScopeMcpServers[scope]?.old,
-          ).includes("working-secret"),
-        );
-        failSettingsWrite = false;
-        const saved = yield* service.updateSettings(renamePatch);
-        assert.isUndefined(saved.toolsScopeMcpServers[scope]?.old);
-        assert.isTrue(
-          encodeLegacySettings(saved.toolsScopeMcpServers[scope]?.renamed).includes(
+          encodeLegacySettings((yield* service.getSettings).mcpServers.old).includes(
             "working-secret",
           ),
         );
+        failSettingsWrite = false;
+        const saved = yield* service.updateSettings(renamePatch);
+        assert.isUndefined(saved.mcpServers.old);
+        assert.isTrue(encodeLegacySettings(saved.mcpServers.renamed).includes("working-secret"));
         assert.lengthOf(
           (yield* fs.readDirectory(config.secretsDir)).filter((name) => name.startsWith("mcp-")),
           1,
@@ -201,116 +184,6 @@ it.layer(NodeServices.layer)("MCP secret persistence", (it) => {
         ),
       );
     }),
-  );
-  it.effect(
-    "persists and reloads Tools-scope secrets independently, and cleans only a renamed or removed scope",
-    () =>
-      Effect.gen(function* () {
-        const service = yield* ServerSettingsModule.ServerSettingsService;
-        const fs = yield* FileSystem.FileSystem;
-        const config = yield* ServerConfig.ServerConfig;
-        const scope = ToolsScopeId.make("git:" + "a".repeat(64));
-        const other = ToolsScopeId.make("project:other");
-        const physical = ProjectId.make("physical-worktree");
-        const header = (value: string) =>
-          decodeMcpProjectOverride({
-            transport: {
-              type: "http",
-              url: "https://scope.test",
-              headers: [{ name: "X-Credential", value }],
-            },
-          });
-        yield* service.updateSettings({
-          mcpServers: {
-            docs: yield* decodeMcpServerConfig({
-              transport: {
-                type: "http",
-                url: "https://global.test",
-                headers: [{ name: "X-Credential", value: "global-secret" }],
-              },
-            }),
-          },
-          projectSettingsOverrides: {
-            [physical]: { mcpServers: { docs: yield* header("physical-secret") } },
-          },
-          toolsScopeMcpServers: {
-            [scope]: { docs: yield* header("scope-secret") },
-            [other]: {
-              docs: yield* decodeMcpProjectOverride({
-                transport: {
-                  type: "stdio",
-                  command: "node",
-                  env: [{ name: "DATABASE_URL", value: "other-scope-secret" }],
-                },
-              }),
-            },
-          },
-        });
-        const loaded = yield* service.getSettings;
-        const client = ServerSettingsModule.redactServerSettingsForClient(loaded);
-        const disk = yield* fs.readFileString(config.settingsPath);
-        for (const secret of [
-          "global-secret",
-          "physical-secret",
-          "scope-secret",
-          "other-scope-secret",
-        ]) {
-          assert.isFalse(disk.includes(secret));
-          assert.isFalse(encodeLegacySettings(client).includes(secret));
-          assert.isTrue(encodeLegacySettings(loaded).includes(secret));
-        }
-        yield* service.updateSettings({ toolsScopeMcpServers: client.toolsScopeMcpServers });
-        const restarted = yield* Effect.gen(function* () {
-          const fresh = yield* ServerSettingsModule.ServerSettingsService;
-          return yield* fresh.getSettings;
-        }).pipe(
-          Effect.provide(ServerSettingsModule.layer.pipe(Layer.provide(ServerSecretStore.layer))),
-        );
-        assert.isTrue(
-          encodeLegacySettings(restarted.toolsScopeMcpServers).includes("scope-secret"),
-        );
-        const renamed = yield* service.updateSettings({
-          toolsScopeMcpServers: {
-            [scope]: {
-              renamed: yield* decodeMcpProjectOverride({
-                transport: {
-                  type: "http",
-                  url: "https://scope.test",
-                  headers: [
-                    {
-                      name: "X-New-Credential",
-                      value: "",
-                      valueRedacted: true,
-                      storedAs: { server: "docs", variable: "X-Credential" },
-                    },
-                  ],
-                },
-              }),
-            },
-          },
-        });
-        assert.isUndefined(renamed.toolsScopeMcpServers[scope]?.docs);
-        assert.isTrue(
-          encodeLegacySettings(renamed.toolsScopeMcpServers[scope]).includes("scope-secret"),
-        );
-        assert.lengthOf(
-          (yield* fs.readDirectory(config.secretsDir)).filter((name) => name.startsWith("mcp-")),
-          4,
-        );
-        const removed = yield* service.updateSettings({ toolsScopeMcpServers: { [scope]: null } });
-        assert.isUndefined(removed.toolsScopeMcpServers[scope]);
-        assert.isTrue(
-          encodeLegacySettings(removed.toolsScopeMcpServers[other]).includes("other-scope-secret"),
-        );
-        assert.isTrue(encodeLegacySettings(removed.mcpServers).includes("global-secret"));
-        assert.isTrue(
-          encodeLegacySettings(removed.projectSettingsOverrides).includes("physical-secret"),
-        );
-        assert.lengthOf(
-          (yield* fs.readDirectory(config.secretsDir)).filter((name) => name.startsWith("mcp-")),
-          3,
-        );
-      }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
   it.effect("preserves both stored secrets when variable names are swapped", () =>
     Effect.gen(function* () {
@@ -360,61 +233,71 @@ it.layer(NodeServices.layer)("MCP secret persistence", (it) => {
       );
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
-  it.effect(
-    "keeps global and project secrets out of settings and client values, including a reload",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const config = yield* ServerConfig.ServerConfig;
-        const service = yield* ServerSettingsModule.ServerSettingsService;
-        const server = yield* decodeMcpServerConfig({
-          transport: {
-            type: "stdio",
-            command: "node",
-            env: [
-              { name: "TOKEN", value: "global-secret" },
-              { name: "PLAIN", value: "public-value", sensitive: false },
-            ],
-          },
-        });
-        const project = yield* decodeMcpProjectOverride({
-          transport: {
-            type: "http",
-            url: "https://example.test/mcp",
-            headers: [{ name: "Authorization", value: "project-secret" }],
-          },
-        });
-        const settings = yield* service.updateSettings({
-          mcpServers: { docs: server },
-          projectSettingsOverrides: {
-            [ProjectId.make("workspace-a")]: { mcpServers: { docs: project } },
-          },
-        });
-        const disk = yield* fs.readFileString(config.settingsPath);
-        assert.isFalse(disk.includes("global-secret"));
-        assert.isFalse(disk.includes("project-secret"));
-        assert.isTrue(disk.includes("public-value"));
-        const client = ServerSettingsModule.redactServerSettingsForClient(settings);
-        assert.isFalse(encodeLegacySettings(client).includes("global-secret"));
-        assert.isFalse(encodeLegacySettings(client).includes("project-secret"));
-        yield* service.updateSettings({
-          mcpServers: client.mcpServers,
-          projectSettingsOverrides: client.projectSettingsOverrides,
-        });
-        const loaded = yield* service.getSettings;
-        assert.isTrue(encodeLegacySettings(loaded).includes("global-secret"));
-        assert.isTrue(encodeLegacySettings(loaded).includes("project-secret"));
-        const restarted = yield* Effect.gen(function* () {
-          const fresh = yield* ServerSettingsModule.ServerSettingsService;
-          return yield* fresh.getSettings;
-        }).pipe(
-          Effect.provide(ServerSettingsModule.layer.pipe(Layer.provide(ServerSecretStore.layer))),
-        );
-        assert.isTrue(encodeLegacySettings(restarted).includes("global-secret"));
-        assert.isTrue(encodeLegacySettings(restarted).includes("project-secret"));
-      }).pipe(Effect.provide(makeServerSettingsLayer())),
+  it.effect("keeps server secrets out of settings and client values, including a reload", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const config = yield* ServerConfig.ServerConfig;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const server = yield* decodeMcpServerConfig({
+        transport: {
+          type: "stdio",
+          command: "node",
+          env: [
+            { name: "TOKEN", value: "global-secret" },
+            { name: "PLAIN", value: "public-value", sensitive: false },
+          ],
+        },
+      });
+      const remote = yield* decodeMcpServerConfig({
+        transport: {
+          type: "http",
+          url: "https://example.test/mcp",
+          headers: [{ name: "Authorization", value: "project-secret" }],
+        },
+      });
+      const settings = yield* service.updateSettings({
+        mcpServers: { docs: server, remote },
+      });
+      const disk = yield* fs.readFileString(config.settingsPath);
+      assert.isFalse(disk.includes("global-secret"));
+      assert.isFalse(disk.includes("project-secret"));
+      assert.isTrue(disk.includes("public-value"));
+      const client = ServerSettingsModule.redactServerSettingsForClient(settings);
+      assert.isFalse(encodeLegacySettings(client).includes("global-secret"));
+      assert.isFalse(encodeLegacySettings(client).includes("project-secret"));
+      yield* service.updateSettings({ mcpServers: client.mcpServers });
+      const loaded = yield* service.getSettings;
+      assert.isTrue(encodeLegacySettings(loaded).includes("global-secret"));
+      assert.isTrue(encodeLegacySettings(loaded).includes("project-secret"));
+      const restarted = yield* Effect.gen(function* () {
+        const fresh = yield* ServerSettingsModule.ServerSettingsService;
+        return yield* fresh.getSettings;
+      }).pipe(
+        Effect.provide(ServerSettingsModule.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+      );
+      assert.isTrue(encodeLegacySettings(restarted).includes("global-secret"));
+      assert.isTrue(encodeLegacySettings(restarted).includes("project-secret"));
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("removes secrets left by retired per-project server overrides on start", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const config = yield* ServerConfig.ServerConfig;
+      const kept = "mcp-env-ZG9jcw-header-WC1Ub2tlbg.bin";
+      for (const file of [
+        kept,
+        "mcp-project-cHJvamVjdA-ZG9jcw-header-WC1Ub2tlbg.bin",
+        "mcp-tools-scope-Z2l0OmFiYw-ZG9jcw-env-VE9LRU4.bin",
+      ])
+        yield* fs.writeFileString(`${config.secretsDir}/${file}`, "secret");
+      yield* (yield* ServerSettingsModule.ServerSettingsService).start;
+      assert.deepEqual(
+        (yield* fs.readDirectory(config.secretsDir)).filter((name) => name.startsWith("mcp-")),
+        [kept],
+      );
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
   it.effect("preserves a secret during rename and removes it when the server is deleted", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;

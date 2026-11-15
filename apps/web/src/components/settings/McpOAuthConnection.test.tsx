@@ -10,7 +10,13 @@ vi.mock("../../localApi", () => ({
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
   const { reactHookHarness } = await import("../../test/reactHookHarness");
-  return { ...actual, useState: reactHookHarness.useState };
+  return {
+    ...actual,
+    useState: reactHookHarness.useState,
+    useRef: reactHookHarness.useRef,
+    // Effects run synchronously on each render; the component guards its own re-runs.
+    useEffect: (effect: () => void) => effect(),
+  };
 });
 vi.mock("react/compiler-runtime", async () => {
   const { reactHookHarness } = await import("../../test/reactHookHarness");
@@ -25,6 +31,8 @@ const onComplete = vi.fn(async () => {});
 const onSignOut = vi.fn(async () => {});
 const onRefresh = vi.fn();
 let status: McpOAuthStatus;
+let autoBegin = false;
+const onAutoBegin = vi.fn();
 const render = () => {
   hooks.beginRender();
   return McpOAuthConnection({
@@ -32,6 +40,8 @@ const render = () => {
     error: null,
     pending: false,
     disabled: false,
+    autoBegin,
+    onAutoBegin,
     onBegin,
     onComplete,
     onSignOut,
@@ -48,6 +58,7 @@ const click = (label: string) => (button(label).props.onClick as () => Promise<v
 beforeEach(() => {
   hooks.reset();
   vi.clearAllMocks();
+  autoBegin = false;
   status = { serverName: "example", projectId: null, state: "signed-out", error: null };
 });
 
@@ -92,4 +103,15 @@ it("refreshes an existing sign-in without opening a browser when authorization i
   expect(
     visitElements(render(), (element) => element.props["aria-label"] === "Sign-in callback URL"),
   ).toBeNull();
+});
+
+it("starts sign-in once when opened from a row's Sign in button", async () => {
+  autoBegin = true;
+  render();
+  render();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(onAutoBegin).toHaveBeenCalledOnce();
+  expect(onBegin).toHaveBeenCalledOnce();
+  expect(openExternal).toHaveBeenCalledExactlyOnceWith(flow.authorizationUrl);
 });

@@ -390,7 +390,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/providers",
   },
   { id: "mcp-servers", title: "MCP servers", to: "/settings/tools" },
-  { id: "skill-library", title: "Skill library", to: "/settings/tools" },
+  { id: "skill-library", title: "Skills", to: "/settings/tools" },
   {
     id: "source-control",
     title: "Source control",
@@ -498,5 +498,8 @@ export function searchSettings(
   const normalizedQuery = normalizeSearchText(query);
   if (normalizedQuery.length === 0) return [];
 
-  return items.filter((item) => normalizeSearchText(item.title).includes(normalizedQuery));
+  // An exact title comes first; the rest keep catalog order.
+  const matches = items.filter((item) => normalizeSearchText(item.title).includes(normalizedQuery));
+  const exact = matches.filter((item) => normalizeSearchText(item.title) === normalizedQuery);
+  return [...exact, ...matches.filter((item) => !exact.includes(item))];
 }

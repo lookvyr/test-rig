@@ -3,86 +3,74 @@ import { ProjectId, ToolsScopeId, type SkillLibraryDetail } from "@t3tools/contr
 import {
   insertMarkdown,
   parseMcpServerJson,
-  projectMcpServerSettings,
   skillEditorDetail,
   assignmentIncludesScope,
+  assignmentSummary,
+  assignScopes,
   selectedSkillScopes,
-  setSelectedSkillScopes,
-  toggleSkillScope,
-  countAssignedSkillScopes,
 } from "./toolsSettings.logic";
 
-describe("shared repository availability", () => {
+describe("project assignment", () => {
   const first = ProjectId.make("main"),
     second = ProjectId.make("worktree");
   const scope = ToolsScopeId.make(`git:${"a".repeat(64)}`);
-  const projects = [{ id: scope, memberProjectIds: [first, second] }];
-  it("keeps one assigned project after a known member is removed from the project list", () => {
-    const assignment = { allProjects: false, projectIds: [first], disabledProjectIds: [] };
-    const enabled = toggleSkillScope(assignment, scope, true, [first, second]);
-    expect(enabled.projectIds).toEqual([]);
-    expect(countAssignedSkillScopes(enabled, [{ id: scope, memberProjectIds: [second] }])).toBe(1);
+  const other = ToolsScopeId.make(`git:${"b".repeat(64)}`);
+  const unavailable = ToolsScopeId.make(`git:${"c".repeat(64)}`);
+  const projects = [
+    { id: scope, memberProjectIds: [first, second] },
+    { id: other, memberProjectIds: [ProjectId.make("other")] },
+  ];
+  const none = { allProjects: false, projectIds: [], disabledProjectIds: [] };
+
+  it("shows a legacy selected workspace as its whole repository", () => {
+    const legacy = { ...none, projectIds: [first] };
+    expect(selectedSkillScopes(legacy, projects)).toEqual([scope]);
+    expect(assignmentSummary(legacy, projects)).toBe("1 of 2");
   });
-  it("canonicalizes known members while preserving unrelated legacy assignments", () => {
-    const unknown = ProjectId.make("unavailable-project");
-    const assignment = {
+
+  it("summarizes every project with new ones joining as All", () => {
+    const all = { allProjects: true, projectIds: [], disabledProjectIds: [] };
+    expect(assignmentSummary(all, projects)).toBe("All");
+    expect(assignmentSummary(assignScopes(all, [scope], true, projects), projects)).toBe("1 of 2");
+    expect(assignmentSummary(assignScopes(all, [scope, other], false, projects), projects)).toBe(
+      "2 of 2",
+    );
+  });
+
+  it("includes projects added later only with new projects on", () => {
+    const future = ToolsScopeId.make(`git:${"d".repeat(64)}`);
+    const withNew = assignScopes(none, [scope], true, projects);
+    expect(assignmentIncludesScope(withNew, future, [])).toBe(true);
+    expect(assignmentIncludesScope(withNew, other, [])).toBe(false);
+    const picked = assignScopes(withNew, [scope], false, projects);
+    expect(assignmentIncludesScope(picked, future, [])).toBe(false);
+    expect(assignmentIncludesScope(picked, scope, [ProjectId.make("new-worktree")])).toBe(true);
+  });
+
+  it("replaces legacy member choices for listed projects and keeps unavailable ones", () => {
+    const gone = ProjectId.make("gone");
+    const legacy = {
       allProjects: true,
-      projectIds: [first, unknown],
-      disabledProjectIds: [second, unknown],
-    };
-    const enabled = toggleSkillScope(assignment, scope, true, [first, second]);
-    expect(enabled.projectIds).toEqual([unknown]);
-    expect(enabled.disabledProjectIds).toEqual([unknown]);
-    expect(assignmentIncludesScope(enabled, scope, [second])).toBe(true);
-  });
-  it("counts a repository once after a legacy assignment is toggled off and on", () => {
-    const assignment = { allProjects: false, projectIds: [first, second], disabledProjectIds: [] };
-    expect(countAssignedSkillScopes(assignment, projects)).toBe(1);
-    const disabled = toggleSkillScope(assignment, scope, false);
-    expect(countAssignedSkillScopes(disabled, projects)).toBe(0);
-    expect(countAssignedSkillScopes(toggleSkillScope(disabled, scope, true), projects)).toBe(1);
-  });
-  it("retains unknown assignments in the count without counting disabled entries", () => {
-    const unknown = ToolsScopeId.make(`git:${"c".repeat(64)}`);
-    const assignment = {
-      allProjects: false,
-      projectIds: [first, second, ProjectId.make("unknown")],
-      disabledProjectIds: [],
-      scopeIds: [scope, unknown],
-      disabledScopeIds: [unknown],
-    };
-    expect(countAssignedSkillScopes(assignment, projects)).toBe(2);
-  });
-  it("shows legacy selected workspaces as one project and writes one durable scope", () => {
-    const assignment = { allProjects: false, projectIds: [first], disabledProjectIds: [] };
-    expect(selectedSkillScopes(assignment, projects)).toEqual([scope]);
-    const changed = setSelectedSkillScopes(assignment, [scope], projects);
-    expect(changed.projectIds).toEqual([]);
-    expect(changed.scopeIds).toEqual([scope]);
-    expect(assignmentIncludesScope(changed, scope, [ProjectId.make("future-worktree")])).toBe(true);
-    expect(
-      assignmentIncludesScope(toggleSkillScope(changed, scope, false), scope, [first, second]),
-    ).toBe(false);
-  });
-  it("preserves legacy global exclusions until an explicit repository choice changes them", () => {
-    const assignment = { allProjects: true, projectIds: [], disabledProjectIds: [first] };
-    expect(assignmentIncludesScope(assignment, scope, [first, second])).toBe(false);
-    expect(
-      assignmentIncludesScope(toggleSkillScope(assignment, scope, true), scope, [first, second]),
-    ).toBe(true);
-  });
-  it("preserves an unavailable repository scope when editing another checkbox", () => {
-    const unknown = ToolsScopeId.make(`git:${"b".repeat(64)}`);
-    const assignment = {
-      allProjects: false,
       projectIds: [],
-      disabledProjectIds: [],
-      scopeIds: [unknown],
+      disabledProjectIds: [first, gone],
+      disabledScopeIds: [unavailable],
     };
-    expect(setSelectedSkillScopes(assignment, [scope], projects).scopeIds).toEqual([
-      unknown,
-      scope,
-    ]);
+    const changed = assignScopes(legacy, [scope, other], true, projects);
+    expect(changed.disabledProjectIds).toEqual([gone]);
+    expect(changed.disabledScopeIds).toEqual([unavailable]);
+    expect(assignmentIncludesScope(changed, scope, [first, second])).toBe(true);
+    const picked = assignScopes({ ...none, scopeIds: [unavailable] }, [other], false, projects);
+    expect(picked.scopeIds).toEqual([unavailable, other]);
+  });
+
+  it("keeps an unavailable workspace's access when new projects are turned off", () => {
+    const missing = ProjectId.make("missing-workspace");
+    const excluded = ProjectId.make("excluded-workspace");
+    const all = { allProjects: true, projectIds: [], disabledProjectIds: [excluded] };
+    const picked = assignScopes(all, [scope], false, projects, [missing, excluded]);
+    expect(picked.projectIds).toEqual([missing]);
+    expect(assignmentIncludesScope(picked, unavailable, [missing])).toBe(true);
+    expect(assignmentIncludesScope(picked, unavailable, [excluded])).toBe(false);
   });
 });
 
@@ -96,6 +84,7 @@ describe("skill editor freshness after a project switch", () => {
     instructions: "Instructions",
     providers: ["codex"],
     assignment: { allProjects: false, projectIds: [one, two], disabledProjectIds: [] },
+    enabled: true,
     path: "/library/example/SKILL.md",
     supportingFiles: [],
     createdAt: "2026-10-11T18:00:00.000Z",
@@ -181,64 +170,5 @@ describe("Markdown toolbar insertion", () => {
     const result = insertMarkdown("before", 6, 6, "code");
     expect(result.text).toBe("before\n```\ncode\n```");
     expect(result.text.slice(result.start, result.end)).toBe("code");
-  });
-});
-
-describe("MCP project edits", () => {
-  const config = {
-    enabled: true,
-    providers: ["codex", "claudeAgent"] as const,
-    transport: { type: "http" as const, url: "https://example.com/mcp", headers: [] },
-  };
-  it("keeps provider inheritance when changing only project enabled state", () => {
-    expect(
-      projectMcpServerSettings({ docs: config }, {}, "docs", "docs", { ...config, enabled: false }),
-    ).toEqual({ mcpServers: { docs: { enabled: false } } });
-    expect(projectMcpServerSettings({ docs: config }, {}, "docs", "docs", config)).toEqual({});
-  });
-  it("disables the old inherited name when renaming a project server", () => {
-    expect(projectMcpServerSettings({ docs: config }, {}, "docs", "renamed", config)).toEqual({
-      mcpServers: {
-        docs: { enabled: false },
-        renamed: { enabled: true, providers: config.providers, transport: config.transport },
-      },
-    });
-  });
-  it("preserves a provider subset when renaming instead of enabling other providers", () => {
-    const limited = { ...config, providers: ["codex"] as const };
-    expect(
-      projectMcpServerSettings({ docs: limited }, {}, "docs", "renamed", limited).mcpServers
-        ?.renamed?.providers,
-    ).toEqual(["codex"]);
-  });
-  it("requires reentry before copying an inherited connection's saved secret", () => {
-    const secretConfig = {
-      ...config,
-      transport: {
-        ...config.transport,
-        headers: [{ name: "Authorization", value: "", valueRedacted: true, sensitive: true }],
-      },
-    };
-    expect(() =>
-      projectMcpServerSettings({ docs: secretConfig }, {}, "docs", "docs", {
-        ...secretConfig,
-        transport: { ...secretConfig.transport, url: "https://new.example/mcp" },
-      }),
-    ).toThrow("saved secret values again");
-    expect(
-      projectMcpServerSettings({ docs: secretConfig }, {}, "docs", "docs", {
-        ...secretConfig,
-        enabled: false,
-      }),
-    ).toEqual({ mcpServers: { docs: { enabled: false } } });
-  });
-  it("removes only the chosen project override when resetting inheritance", () => {
-    const overrides = {
-      mcpServers: { docs: { enabled: false }, other: config },
-      branchNamePrefix: "keep",
-    };
-    expect(
-      projectMcpServerSettings({ docs: config }, overrides, "docs", "docs", config, true),
-    ).toEqual({ ...overrides, mcpServers: { other: config } });
   });
 });

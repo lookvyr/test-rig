@@ -6174,6 +6174,12 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                         return {
                           state: normalizeMcpRuntimeState(status?.runtimeStatus),
                           toolCount: status ? Object.keys(status.tools).length : null,
+                          tools: status
+                            ? Object.values(status.tools).map((tool) => ({
+                                name: tool.name,
+                                description: tool.description ?? null,
+                              }))
+                            : null,
                           authStatus: status?.authStatus ?? null,
                           authenticateSupported: status?.authStatus === "notLoggedIn",
                         };

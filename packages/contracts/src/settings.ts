@@ -32,14 +32,8 @@ import { RuntimeMode, DEFAULT_RUNTIME_MODE } from "./providerPolicy.ts";
 import { WorktreeSubmodules } from "./environment.ts";
 import { ProjectScript } from "./project.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
-import {
-  McpServerConfig,
-  McpServerName,
-  McpServerProjectOverrides,
-  McpServers,
-} from "./mcpServers.ts";
+import { McpServerConfig, McpServerName, McpServers } from "./mcpServers.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
-import { ToolsScopeId } from "./toolsScope.ts";
 
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
 
@@ -838,7 +832,6 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "sidebarAutoSettleKeepPullRequests",
   "continueThreadsAfterServerUpdate",
   "responseStreamingMode",
-  "mcpServers",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
 
@@ -848,7 +841,6 @@ export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTIN
  * model, no dedicated writer model, never auto-settle).
  */
 export const ProjectSettingsOverrides = Schema.Struct({
-  mcpServers: ForwardCompatibleOptional(McpServerProjectOverrides),
   worktreeCleanup: Schema.optionalKey(WorktreeCleanup),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
@@ -984,9 +976,6 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
   ),
   projectSettingsOverrides: Schema.Record(ProjectId, ProjectSettingsOverrides).pipe(
-    Schema.withDecodingDefault(Effect.succeed({})),
-  ),
-  toolsScopeMcpServers: Schema.Record(ToolsScopeId, McpServerProjectOverrides).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   projectSettingsFolded: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1219,9 +1208,6 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
-  ),
-  toolsScopeMcpServers: Schema.optionalKey(
-    Schema.Record(ToolsScopeId, Schema.NullOr(McpServerProjectOverrides)),
   ),
   projectSettingsFolded: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),

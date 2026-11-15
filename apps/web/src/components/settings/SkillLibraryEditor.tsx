@@ -8,15 +8,17 @@ import {
   ItalicIcon,
   LinkIcon,
   ListIcon,
-  Trash2Icon,
 } from "lucide-react";
 import type {
+  ProjectId,
+  SkillLibraryAssignment,
   SkillLibraryDetail,
   SkillLibrarySourceDetail,
   SkillLibraryUpsertInput,
 } from "@t3tools/contracts";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import {
   Dialog,
@@ -28,19 +30,15 @@ import {
 } from "../ui/dialog";
 import { PullRequestMarkdown } from "../pull-requests/PullRequestMarkdown";
 import {
-  ProviderAvailability,
-  ProjectChoices,
-  ToolsSelect,
+  ProviderToggles,
+  ToolField,
+  type ToolToggle,
   type ToolsProject,
 } from "./ToolsAvailability";
-import {
-  EMPTY_SKILL_ASSIGNMENT,
-  insertMarkdown,
-  selectedSkillScopes,
-  setSelectedSkillScopes,
-  type MarkdownTool,
-} from "./toolsSettings.logic";
-import { SettingsPageContainer } from "./settingsLayout";
+import { ToolsProjectsDialog } from "./ToolsProjectsDialog";
+import { SkillGlyph } from "./ToolStatusDot";
+import { assignmentSummary, insertMarkdown, type MarkdownTool } from "./toolsSettings.logic";
+import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 
 const MARKDOWN_TOOLS = [
   { tool: "bold", label: "Bold", icon: BoldIcon },
@@ -51,11 +49,20 @@ const MARKDOWN_TOOLS = [
   { tool: "code", label: "Code block", icon: CodeIcon },
 ] as const;
 
+type SkillPatch = Partial<Pick<SkillLibraryUpsertInput, "assignment">>;
+
+/**
+ * One skill's page. Name, description and instructions wait for Save;
+ * the switch, projects and providers save at once for a saved skill.
+ */
 export function SkillLibraryEditor({
   detail,
   projects,
-  initialTab = "instructions",
+  unavailableProjectIds,
+  initialAssignment,
   onSave,
+  onPatch,
+  onToggle,
   onDelete,
   onBack,
   readOnly = false,
@@ -63,12 +70,15 @@ export function SkillLibraryEditor({
   onCopy,
   onCreated,
   disabled = false,
-  statusMessage,
 }: {
   detail: SkillLibraryDetail | SkillLibrarySourceDetail | null;
   projects: readonly ToolsProject[];
-  initialTab?: string | undefined;
+  unavailableProjectIds?: readonly ProjectId[] | undefined;
+  initialAssignment?: SkillLibraryAssignment;
   onSave: (draft: SkillLibraryUpsertInput) => Promise<SkillLibraryDetail>;
+  onPatch?: ((change: SkillPatch) => Promise<void>) | undefined;
+  /** Switch and provider changes on a saved skill; they show at once and save in the background. */
+  onToggle?: ((change: ToolToggle) => void) | undefined;
   onDelete?: (() => Promise<void>) | undefined;
   onBack: () => void;
   readOnly?: boolean;
@@ -76,33 +86,40 @@ export function SkillLibraryEditor({
   onCopy?: (() => Promise<void>) | undefined;
   onCreated?: ((id: string) => void) | undefined;
   disabled?: boolean;
-  statusMessage?: string | undefined;
 }) {
+  const saved = detail && "id" in detail ? detail : null;
   const [draft, setDraft] = useState<SkillLibraryUpsertInput>(() =>
     detail
       ? {
-          ...("id" in detail ? { id: detail.id } : {}),
+          ...(saved ? { id: saved.id } : {}),
           name: detail.name,
           description: detail.description,
           instructions: detail.instructions,
-          assignment: "assignment" in detail ? detail.assignment : EMPTY_SKILL_ASSIGNMENT,
-          providers: "providers" in detail ? detail.providers : ["codex", "claudeAgent"],
+          assignment: saved?.assignment ?? initialAssignment ?? ALL_PROJECTS,
+          providers: saved?.providers ?? ["codex", "claudeAgent"],
         }
       : {
           name: "",
           description: "",
           instructions: "",
-          assignment: EMPTY_SKILL_ASSIGNMENT,
+          assignment: initialAssignment ?? ALL_PROJECTS,
           providers: ["codex", "claudeAgent"],
         },
   );
-  const [tab, setTab] = useState(initialTab);
   const [view, setView] = useState("edit");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [baseline, setBaseline] = useState(() => JSON.stringify(draft));
-  const dirty = !readOnly && JSON.stringify(draft) !== baseline;
+  const [editingProjects, setEditingProjects] = useState(false);
+  const textOf = (value: Pick<SkillLibraryUpsertInput, "name" | "description" | "instructions">) =>
+    JSON.stringify([value.name, value.description, value.instructions]);
+  const [baseline, setBaseline] = useState(() => textOf(draft));
+  const isNew = !saved && !readOnly;
+  const dirty =
+    !readOnly && (isNew ? textOf(draft) !== textOf(EMPTY_TEXT) : textOf(draft) !== baseline);
+  // A saved skill's projects and providers come from the stored copy; a new one keeps them locally.
+  const assignment = saved && onPatch ? saved.assignment : draft.assignment;
+  const providers = saved && onPatch ? saved.providers : draft.providers;
   const navigationAfterSave = useRef(false);
   const blocker = useBlocker({
     shouldBlockFn: () => dirty && !navigationAfterSave.current,
@@ -117,13 +134,6 @@ export function SkillLibraryEditor({
     navigationAfterSave.current = false;
     setDraft({ ...draft, ...patch });
   };
-  const assignment = draft.assignment;
-  const mode = assignment.allProjects
-    ? "all"
-    : assignment.projectIds.length || assignment.scopeIds?.length
-      ? "selected"
-      : "none";
-  const [availabilityMode, setAvailabilityMode] = useState(mode);
   const format = (tool: MarkdownTool) => {
     const element = textarea.current;
     if (!element) return;
@@ -150,41 +160,47 @@ export function SkillLibraryEditor({
       setBusy(false);
     }
   };
+  const patch = (change: SkillPatch) =>
+    saved && onPatch ? run(() => onPatch(change)) : Promise.resolve(update(change));
   const save = () =>
     void run(async () => {
       if (!draft.name.trim()) throw new Error("Add a skill name.");
       if (!draft.instructions.trim()) throw new Error("Add instructions for this skill.");
-      if (!draft.providers.length) throw new Error("Choose at least one provider.");
-      if (
-        availabilityMode === "selected" &&
-        assignment.projectIds.length === 0 &&
-        !assignment.scopeIds?.length
-      )
-        throw new Error("Select a project or choose No projects.");
-      const canonical = await onSave({ ...draft, name: draft.name.trim() });
+      if (!providers.length) throw new Error("Choose at least one provider.");
+      const canonical = await onSave({ ...draft, name: draft.name.trim(), assignment, providers });
       navigationAfterSave.current = true;
-      setBaseline(JSON.stringify(draft));
-      toastManager.add({
-        type: "success",
-        title: "Skill saved",
-        description:
-          !canonical.assignment.allProjects &&
-          canonical.assignment.projectIds.length === 0 &&
-          !canonical.assignment.scopeIds?.length
-            ? "Saved to the library; not enabled in any project."
-            : undefined,
-        timeout: 3000,
-      });
+      setBaseline(textOf(draft));
+      toastManager.add({ type: "success", title: "Skill saved", timeout: 2000 });
       if (!draft.id) onCreated?.(canonical.id);
     });
+  const discard = () => {
+    if (!saved) return;
+    setDraft({
+      ...draft,
+      name: saved.name,
+      description: saved.description,
+      instructions: saved.instructions,
+    });
+    setError("");
+  };
   return (
-    <SettingsPageContainer className="max-w-6xl gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button size="sm" variant="ghost" onClick={onBack} disabled={busy}>
+    <SettingsPageContainer className="gap-8 pb-24">
+      <div className="space-y-4 px-3 sm:px-4">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="-ml-2.5 w-fit text-muted-foreground"
+          onClick={onBack}
+          disabled={busy}
+        >
           <ArrowLeftIcon className="size-4" />
-          Back to library
+          Tools
         </Button>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <SkillGlyph />
+          <h1 className="mr-auto min-w-0 truncate text-2xl font-semibold tracking-tight">
+            {readOnly ? detail?.name : saved ? saved.name : "New skill"}
+          </h1>
           {readOnly ? (
             <Button
               onClick={() =>
@@ -201,267 +217,187 @@ export function SkillLibraryEditor({
             >
               Copy to library
             </Button>
-          ) : (
-            <>
-              {onDelete ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={busy || disabled}
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  <Trash2Icon className="size-4" />
-                  Delete
-                </Button>
-              ) : null}
-              <Button disabled={busy || disabled} onClick={save}>
-                {busy ? "Saving…" : detail ? "Save changes" : "Save to library"}
-              </Button>
-            </>
-          )}
+          ) : saved && onToggle ? (
+            <Switch
+              aria-label={`${saved.enabled ? "Disable" : "Enable"} ${saved.name}`}
+              checked={saved.enabled}
+              disabled={disabled}
+              onCheckedChange={(enabled) => onToggle?.({ enabled })}
+            />
+          ) : null}
         </div>
-      </div>
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {readOnly ? detail?.name : detail ? "Edit skill" : "New skill"}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {readOnly
-            ? "This skill is managed outside Test Rig. Copy it to the library to edit a separate copy."
-            : "One library copy. Edits apply wherever this skill is enabled."}
-        </p>
         {source ? (
           <p className="break-all font-mono text-xs text-muted-foreground">{source}</p>
         ) : null}
       </div>
-      {statusMessage ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          {statusMessage}
-        </p>
-      ) : null}
       <fieldset disabled={busy || disabled} className="contents">
-        {!readOnly ? (
-          <div className="flex gap-1 border-b pb-2">
-            {["instructions", "availability"].map((value) => (
-              <Button
-                key={value}
-                size="sm"
-                variant={tab === value ? "secondary" : "ghost"}
-                aria-pressed={tab === value}
-                onClick={() => setTab(value)}
-              >
-                {value === "instructions" ? "Instructions" : "Availability"}
-              </Button>
-            ))}
-          </div>
-        ) : null}
-        {readOnly || tab === "instructions" ? (
-          <div className="space-y-5">
-            <div className="grid gap-4 md:grid-cols-[minmax(12rem,1fr)_minmax(0,2fr)]">
-              <label className="block space-y-1.5 text-sm font-medium">
-                Name
-                <Input
-                  value={draft.name}
-                  readOnly={readOnly}
-                  onChange={(event) => update({ name: event.currentTarget.value })}
-                  placeholder="my-skill"
-                  maxLength={128}
-                />
-              </label>
-              <label className="block space-y-1.5 text-sm font-medium">
-                When to use it
-                <Input
-                  value={draft.description}
-                  readOnly={readOnly}
-                  onChange={(event) => update({ description: event.currentTarget.value })}
-                  placeholder="Describe the task this skill handles"
-                  maxLength={2000}
-                />
-              </label>
+        <SettingsSection title="Details" hideTitle>
+          <ToolField label="Name">
+            <Input
+              aria-label="Skill name"
+              value={draft.name}
+              readOnly={readOnly}
+              onChange={(event) => update({ name: event.currentTarget.value })}
+              placeholder="my-skill"
+              maxLength={128}
+              autoFocus={isNew}
+            />
+          </ToolField>
+          <ToolField label="Description">
+            <Input
+              aria-label="Skill description"
+              value={draft.description}
+              readOnly={readOnly}
+              onChange={(event) => update({ description: event.currentTarget.value })}
+              placeholder="When to use it"
+              maxLength={2000}
+            />
+          </ToolField>
+        </SettingsSection>
+        <SettingsSection title="Instructions" variant="plain">
+          {readOnly ? (
+            <div className="min-h-80 rounded-xl border p-5">
+              <PullRequestMarkdown text={draft.instructions} />
             </div>
-            {readOnly ? (
-              <div className="min-h-80 rounded-xl border p-5">
-                <PullRequestMarkdown text={draft.instructions} />
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-xl border">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/20 p-2">
-                  <div className="flex gap-0.5" aria-label="Markdown formatting">
-                    {MARKDOWN_TOOLS.map(({ tool, label, icon: Icon }) => (
-                      <Button
-                        key={tool}
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={label}
-                        title={label}
-                        disabled={view === "preview"}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => format(tool)}
-                      >
-                        <Icon className="size-4" />
-                      </Button>
-                    ))}
-                  </div>
-                  <div className="flex gap-0.5">
-                    {["edit", "preview", "split"].map((value) => (
-                      <Button
-                        key={value}
-                        size="xs"
-                        variant={view === value ? "secondary" : "ghost"}
-                        className={value === "split" ? "hidden lg:inline-flex" : undefined}
-                        aria-pressed={view === value}
-                        onClick={() => setView(value)}
-                      >
-                        {value === "edit" ? "Edit" : value === "preview" ? "Preview" : "Split"}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-                <div className={view === "split" ? "grid lg:grid-cols-2" : ""}>
-                  {view !== "preview" ? (
-                    <textarea
-                      ref={textarea}
-                      aria-label="Skill instructions Markdown"
-                      value={draft.instructions}
-                      onChange={(event) => update({ instructions: event.currentTarget.value })}
-                      spellCheck={false}
-                      placeholder={"# Instructions\n\nWhat should the agent do?"}
-                      className="min-h-[min(55vh,36rem)] w-full resize-y bg-background p-5 font-mono text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                    />
-                  ) : null}
-                  {view !== "edit" ? (
-                    <div
-                      className={`min-h-[min(55vh,36rem)] overflow-auto p-5 ${view === "split" ? "border-t lg:border-t-0 lg:border-l" : ""}`}
+          ) : (
+            <div className="overflow-hidden rounded-xl border">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/20 p-2">
+                <div className="flex gap-0.5" aria-label="Markdown formatting">
+                  {MARKDOWN_TOOLS.map(({ tool, label, icon: Icon }) => (
+                    <Button
+                      key={tool}
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={label}
+                      title={label}
+                      disabled={view === "preview"}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => format(tool)}
                     >
-                      <PullRequestMarkdown
-                        text={draft.instructions || "Write instructions to preview them here."}
-                      />
-                    </div>
-                  ) : null}
+                      <Icon className="size-4" />
+                    </Button>
+                  ))}
+                </div>
+                <div className="flex gap-0.5">
+                  {["edit", "preview", "split"].map((value) => (
+                    <Button
+                      key={value}
+                      size="xs"
+                      variant={view === value ? "secondary" : "ghost"}
+                      className={value === "split" ? "hidden lg:inline-flex" : undefined}
+                      aria-pressed={view === value}
+                      onClick={() => setView(value)}
+                    >
+                      {value === "edit" ? "Edit" : value === "preview" ? "Preview" : "Split"}
+                    </Button>
+                  ))}
                 </div>
               </div>
-            )}
-            {detail?.supportingFiles.length ? (
-              <p className="text-xs text-muted-foreground">
-                Supporting files retained: {detail.supportingFiles.join(", ")}
-              </p>
-            ) : null}
-            {!detail && !readOnly ? (
-              <p className="text-xs text-muted-foreground">
-                New skills are saved to your library without being enabled in any project. Choose
-                Availability to assign this skill.
-              </p>
-            ) : null}
-          </div>
-        ) : (
-          <div className="max-w-2xl space-y-6">
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Available in</p>
-              <ToolsSelect
-                label="Skill project availability"
-                value={availabilityMode}
-                onChange={(value) => {
-                  setAvailabilityMode(value);
-                  update({
-                    assignment:
-                      value === "all"
-                        ? { ...assignment, allProjects: true, projectIds: [], scopeIds: [] }
-                        : value === "none"
-                          ? EMPTY_SKILL_ASSIGNMENT
-                          : {
-                              ...assignment,
-                              allProjects: false,
-                              disabledProjectIds: [],
-                              disabledScopeIds: [],
-                            },
-                  });
-                }}
-                options={[
-                  { value: "none", label: "No projects · save for later" },
-                  { value: "all", label: "All projects" },
-                  { value: "selected", label: "Selected projects" },
-                ]}
-              />
+              <div className={view === "split" ? "grid lg:grid-cols-2" : ""}>
+                {view !== "preview" ? (
+                  <textarea
+                    ref={textarea}
+                    aria-label="Skill instructions Markdown"
+                    value={draft.instructions}
+                    onChange={(event) => update({ instructions: event.currentTarget.value })}
+                    spellCheck={false}
+                    placeholder={"# Instructions\n\nWhat should the agent do?"}
+                    className="min-h-[min(50vh,32rem)] w-full resize-y bg-background p-5 font-mono text-sm leading-6 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  />
+                ) : null}
+                {view !== "edit" ? (
+                  <div
+                    className={`min-h-[min(50vh,32rem)] overflow-auto p-5 ${view === "split" ? "border-t lg:border-t-0 lg:border-l" : ""}`}
+                  >
+                    <PullRequestMarkdown text={draft.instructions || "Nothing to preview yet."} />
+                  </div>
+                ) : null}
+              </div>
             </div>
-            {availabilityMode === "selected" ? (
-              <ProjectChoices
-                projects={projects}
-                selected={selectedSkillScopes(assignment, projects)}
-                onChange={(scopeIds) =>
-                  update({ assignment: setSelectedSkillScopes(assignment, scopeIds, projects) })
+          )}
+        </SettingsSection>
+        {readOnly ? null : (
+          <SettingsSection title="Availability">
+            <ToolField label="Projects">
+              <button
+                type="button"
+                onClick={() => setEditingProjects(true)}
+                className="rounded-md px-2 py-1 text-sm text-muted-foreground tabular-nums outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {assignmentSummary(assignment, projects)}
+              </button>
+            </ToolField>
+            <ToolField label="Providers">
+              <ProviderToggles
+                providers={providers}
+                onChange={(next) =>
+                  saved && onToggle ? onToggle({ providers: next }) : update({ providers: next })
                 }
               />
-            ) : null}
-            {availabilityMode === "all" &&
-            (assignment.disabledProjectIds.length || assignment.disabledScopeIds?.length) ? (
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground">
-                  Off in{" "}
-                  {[...assignment.disabledProjectIds, ...(assignment.disabledScopeIds ?? [])]
-                    .map(
-                      (id) =>
-                        projects.find(
-                          (project) =>
-                            project.id === id ||
-                            project.memberProjectIds.some((member) => member === id),
-                        )?.name ?? "Unavailable project",
-                    )
-                    .join(", ")}
-                  .
-                </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    update({
-                      assignment: { ...assignment, disabledProjectIds: [], disabledScopeIds: [] },
-                    })
-                  }
-                >
-                  Enable in every project
-                </Button>
-              </div>
-            ) : null}
-            <ProviderAvailability
-              providers={draft.providers}
-              onChange={(providers) => update({ providers })}
-            />
-            <p className="text-xs text-muted-foreground">
-              Availability applies to new or restarted agent sessions.
-            </p>
-          </div>
+            </ToolField>
+          </SettingsSection>
         )}
       </fieldset>
       {error ? (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="px-3 text-sm text-destructive sm:px-4">
           {error}
         </p>
       ) : null}
-      {confirmDelete ? (
-        <div className="max-w-xl space-y-3 rounded-xl border border-destructive/30 p-4">
-          <p className="text-sm">
-            Delete {draft.name} from the library and every assigned project?
-          </p>
-          <div className="flex gap-2">
+      {onDelete && !readOnly ? (
+        <div className="flex items-center gap-2 px-3 sm:px-4">
+          {confirmDelete ? (
+            <>
+              <span className="text-sm">Delete {saved?.name}?</span>
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={busy || disabled}
+                onClick={() =>
+                  void run(async () => {
+                    await onDelete();
+                    navigationAfterSave.current = true;
+                    onBack();
+                  })
+                }
+              >
+                Delete
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+                Cancel
+              </Button>
+            </>
+          ) : (
             <Button
               size="sm"
-              variant="destructive"
-              disabled={busy || disabled}
-              onClick={() =>
-                void run(async () => {
-                  await onDelete?.();
-                  navigationAfterSave.current = true;
-                  onBack();
-                })
-              }
+              variant="ghost"
+              className="-ml-2.5 text-destructive hover:text-destructive"
+              disabled={disabled}
+              onClick={() => setConfirmDelete(true)}
             >
               Delete skill
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
-              Cancel
-            </Button>
-          </div>
+          )}
         </div>
+      ) : null}
+      {isNew || dirty ? (
+        <div className="sticky bottom-4 z-20 mx-3 flex items-center justify-end gap-2 rounded-xl border bg-popover/95 p-2 shadow-lg backdrop-blur sm:mx-4">
+          <Button variant="ghost" disabled={busy} onClick={() => (isNew ? onBack() : discard())}>
+            {isNew ? "Cancel" : "Discard"}
+          </Button>
+          <Button disabled={busy || disabled} onClick={save}>
+            {busy ? "Saving…" : isNew ? "Create skill" : "Save"}
+          </Button>
+        </div>
+      ) : null}
+      {editingProjects ? (
+        <ToolsProjectsDialog
+          toolName={draft.name || "New skill"}
+          projects={projects}
+          unavailableProjectIds={unavailableProjectIds}
+          assignment={assignment}
+          onClose={() => setEditingProjects(false)}
+          onSave={(next) => patch({ assignment: next })}
+        />
       ) : null}
       <Dialog
         open={blocker.status === "blocked"}
@@ -487,3 +423,10 @@ export function SkillLibraryEditor({
     </SettingsPageContainer>
   );
 }
+
+const ALL_PROJECTS: SkillLibraryAssignment = {
+  allProjects: true,
+  projectIds: [],
+  disabledProjectIds: [],
+};
+const EMPTY_TEXT = { name: "", description: "", instructions: "" };

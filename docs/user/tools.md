@@ -1,44 +1,51 @@
 # Tools and skills
 
 Open **Settings → Tools** to manage MCP servers and your Test Rig skill library.
-Choose an environment and either **All projects** or a specific project. The
-project choices exclude **No project**. Tools belong to that environment,
-including when you connect from another device.
+Each server and skill is configured once, in one list, and then pointed at the
+projects and providers it applies to. If more than one environment is connected,
+choose one at the top; tools belong to that environment, including when you
+connect from another device.
 
-A repository has one Tools entry across its linked worktrees. Availability applies
-to its current and future worktrees, even if you added a worktree separately.
-Separate clones and environments keep independent settings.
+Each row shows a status dot (hover it for the state), the providers that can use
+the tool, how many projects it reaches, and an on/off switch. A tool that is off
+keeps its settings but reaches no sessions.
+Click the count to pick projects. **New projects** at the bottom of that list
+decides whether projects you add later get the tool too. Click anywhere else on a
+row to open the tool's page.
 
-If a registered workspace is missing or unreadable, expand **Unavailable projects**
-in Tools to see its name and folder. Other projects stay available. Its saved settings and skill assignments are
-preserved. Restore access to the folder and choose **Retry unavailable projects**
-to bring it back into the selector.
+The filter button narrows the list to the tools that reach one project or one
+provider. An active filter shows as a chip; clear it with its **×**. Filtering
+never changes where a tool applies.
+
+A repository appears once, covering its linked worktrees, even if you added a
+worktree separately. Separate clones and environments keep independent settings.
+Chats started without a project appear as **Scratch chats**.
+If a registered workspace is missing or unreadable, expand **Unavailable
+projects** to see it. Its existing access is kept while you edit other projects.
 
 ## MCP servers
 
 Choose **Add server** and enter a URL with optional headers, or a command with
-arguments and environment variables. **Import JSON** opens a separate panel for a
-single server configuration from common provider formats. **Use configuration**
-fills the connection fields without changing your availability choices. Header and environment
-values are secret by default; saved secrets are not shown again in the editor.
+arguments and environment variables. **Import JSON** fills the connection fields
+from a single server configuration in common provider formats. Header and
+environment values are secret by default; saved secrets are not shown again.
 
-The server's availability controls which providers can use it. All-project
-servers are inherited by projects. A project can override a server or turn it
-off; resetting the override restores the all-project setting. Editing an
-inherited connection's transport requires reentering its secrets.
+On a server's page, the connection fields save with **Save**; **Discard** drops
+your edits. Projects, providers, and the on/off switch save as soon as you change
+them. Changes apply to new or restarted agent sessions.
 
-Configuration changes apply to new or restarted agent sessions. **Configured**
-means the server is saved but no active session has reported a connection. Open a
-server's **Connections** tab to inspect each active session. Its action menu
-offers reconnect when the provider supports it. Codex's reload action
-reloads its provider MCP configuration, rather than just one server. Reconnect is
-not offered for a connection that needs sign-in. Reconnect failures show the
-provider's error message.
+The page also lists the server's tools, as last reported by a running session.
+Tools appear after a chat has used the server and stay listed after it ends,
+including across restarts, until you change the server's URL or command. If the
+server failed to connect, **Retry** reconnects its active sessions. **Sessions** shows each active session, with reconnect when the
+provider supports it. Codex's reload action reloads its whole provider MCP
+configuration.
 
-For HTTP servers that require OAuth, open **Connections → Shared sign-in** and
-choose **Sign in**. Complete authorization in your browser, return to Tools, and
-choose **Refresh** to see **Signed in**. This sign-in is shared by Codex and Claude
-in the same environment and does not require an active conversation.
+When an HTTP server needs OAuth, its row shows **Sign in**, which opens the
+server's page and starts sign-in. You can also use **Account → Sign in** there.
+Complete authorization in your browser, return to Tools, and choose **Refresh**
+to see **Signed in**. This sign-in is shared by Codex and Claude in the same
+environment and does not require an active conversation.
 Servers without authentication work while signed out.
 
 OAuth servers must support discovery and dynamic client registration, as
@@ -61,17 +68,14 @@ a provider continue to work through that provider; Test Rig does not list or edi
 their configuration here. Turning off a Test Rig server does not turn off a
 separately configured native server.
 
-## Skill library
+## Skills
 
-Choose **New skill** to write reusable instructions in the full-page Markdown
-editor. The formatting toolbar inserts Markdown; Preview renders it, and Split
-shows source and preview together on a wide screen.
-
-Save a skill without assigning it to keep it in your library for later. In
-Availability, choose all projects or selected projects and select the providers
-that can use it. Turning a skill off for one project preserves its assignments
-elsewhere. Editing a library skill updates its one shared copy.
-A brief toast confirms when a skill is saved or copied into the library.
+Choose **New skill** to write reusable instructions in the Markdown editor. The
+formatting toolbar inserts Markdown; Preview renders it, and Split shows source
+and preview together on a wide screen. Name, description, and instructions save
+with **Save**; the on/off switch, projects, and providers save as soon as you
+change them. Editing a
+library skill updates its one shared copy.
 
 Assigned skills appear in the selected provider's `$` picker. Test Rig also gives
 new or restarted agent sessions a catalogue of those skills and their file
@@ -79,11 +83,11 @@ locations. It does not install copies in the provider's global skill folders.
 Restart existing sessions after changing availability, names, or the catalogue.
 An agent that rereads a skill's file can see instruction edits immediately.
 
-For a selected project, expand the discovered skills section to inspect skills
-provided by the repository or provider. These sources are read-only here.
+While the list is filtered to one project, expand **Found outside Test Rig** to
+inspect skills provided by the repository or provider. These sources are read-only here.
 When providers discover the same file through symlinks, it appears once with
 each provider listed. Separate files remain separate even when their names match.
-**Copy to library** creates a separate, initially unassigned copy, including its
+**Copy to library** creates a separate copy for that project, including its
 supporting files. It leaves the original intact and does not merge skills that
 share a name. Provider-specific hooks or tool restrictions in copied metadata
 are not enforced by the Test Rig catalogue.

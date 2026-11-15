@@ -131,10 +131,15 @@ it.layer(layer.pipe(Layer.provideMerge(services)))("repository tools scopes", (i
               docs: {
                 enabled: true,
                 providers: ["codex"],
+                assignment: {
+                  allProjects: true,
+                  projectIds: [],
+                  disabledProjectIds: [],
+                  disabledScopeIds: [mainScope.scopeId],
+                },
                 transport: { type: "stdio", command: "docs", args: [], env: [] },
               },
             },
-            toolsScopeMcpServers: { [mainScope.scopeId]: { docs: { enabled: false } } },
           });
           yield* runGit(["-C", mainPath, "worktree", "add", "--detach", futurePath]);
           yield* register(future, futurePath);

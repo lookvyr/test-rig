@@ -1,16 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ToolsSettings } from "../components/settings/ToolsSettings";
 
+const SEARCH_KEYS = ["environmentId", "project", "provider", "server", "skill", "signin"] as const;
+type ToolsSearch = Partial<Record<(typeof SEARCH_KEYS)[number], string>>;
+
+/** `project` and `provider` filter the list; `server` and `skill` open one tool's page. */
 export const Route = createFileRoute("/_chat/settings/tools")({
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { project?: string; environmentId?: string; skill?: string; tab?: string } => ({
-    ...(typeof search.project === "string" && search.project ? { project: search.project } : {}),
-    ...(typeof search.environmentId === "string" && search.environmentId
-      ? { environmentId: search.environmentId }
-      : {}),
-    ...(typeof search.skill === "string" && search.skill ? { skill: search.skill } : {}),
-    ...(search.tab === "availability" ? { tab: "availability" } : {}),
-  }),
+  validateSearch: (search: Record<string, unknown>): ToolsSearch =>
+    Object.fromEntries(
+      SEARCH_KEYS.flatMap((key) => {
+        const value = search[key];
+        return typeof value === "string" && value ? [[key, value]] : [];
+      }),
+    ),
   component: ToolsSettings,
 });

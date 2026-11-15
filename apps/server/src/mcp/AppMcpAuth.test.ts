@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import {
+  ALL_PROJECTS_TOOLS_ASSIGNMENT,
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
   ToolsScopeId,
@@ -18,38 +19,29 @@ const mainProject = ProjectId.make("main");
 const worktreeProject = ProjectId.make("worktree");
 const scopeId = ToolsScopeId.make(`git:${"a".repeat(64)}`);
 const callbackUrl = "https://remote.example.test/oauth/mcp/callback";
-const httpServer = (url: string): McpServerConfig => ({
+const otherScopeId = ToolsScopeId.make(`git:${"b".repeat(64)}`);
+const httpServer = (url: string, assignment = ALL_PROJECTS_TOOLS_ASSIGNMENT): McpServerConfig => ({
   enabled: true,
   providers: ["codex", "claudeAgent"],
+  assignment,
   transport: { type: "http", url, headers: [] },
+});
+const pick = (id: ToolsScopeId) => ({
+  ...ALL_PROJECTS_TOOLS_ASSIGNMENT,
+  allProjects: false,
+  scopeIds: [id],
 });
 const settings: ServerSettings = {
   ...DEFAULT_SERVER_SETTINGS,
   mcpServers: {
     inherited: httpServer("https://inherited.example.test/mcp"),
-    overridden: httpServer("https://global.example.test/mcp"),
+    repository: httpServer("https://repository.example.test/mcp", pick(scopeId)),
+    elsewhere: httpServer("https://elsewhere.example.test/mcp", pick(otherScopeId)),
     local: {
       enabled: true,
       providers: ["codex"],
+      assignment: ALL_PROJECTS_TOOLS_ASSIGNMENT,
       transport: { type: "stdio", command: "node", args: [], env: [] },
-    },
-  },
-  projectSettingsOverrides: {
-    [mainProject]: {
-      mcpServers: {
-        legacy: {
-          enabled: true,
-          transport: httpServer("https://legacy.example.test/mcp").transport,
-        },
-      },
-    },
-  },
-  toolsScopeMcpServers: {
-    [scopeId]: {
-      overridden: {
-        enabled: true,
-        transport: httpServer("https://repository.example.test/mcp").transport,
-      },
     },
   },
 };
@@ -104,25 +96,25 @@ function fixture() {
   return { layer, statusUrls, authentications, completions, signOutUrls, resolvedProjects };
 }
 
-it.effect(
-  "lists saved HTTP authentication without provider sessions and keeps global settings separate",
-  () =>
-    Effect.gen(function* () {
-      const test = fixture();
-      const result = yield* AppMcpAuth.list({}).pipe(Effect.provide(test.layer));
-      assert.deepEqual(result.statuses, [
-        { serverName: "inherited", projectId: null, state: "signed-in", error: null },
-        { serverName: "overridden", projectId: null, state: "signed-in", error: null },
-      ]);
-      assert.deepEqual(test.statusUrls, [
-        "https://inherited.example.test/mcp",
-        "https://global.example.test/mcp",
-      ]);
-      assert.deepEqual(test.resolvedProjects, []);
-    }),
+it.effect("lists every saved HTTP server without a project or provider session", () =>
+  Effect.gen(function* () {
+    const test = fixture();
+    const result = yield* AppMcpAuth.list({}).pipe(Effect.provide(test.layer));
+    assert.deepEqual(result.statuses, [
+      { serverName: "inherited", projectId: null, state: "signed-in", error: null },
+      { serverName: "repository", projectId: null, state: "signed-in", error: null },
+      { serverName: "elsewhere", projectId: null, state: "signed-in", error: null },
+    ]);
+    assert.deepEqual(test.statusUrls, [
+      "https://inherited.example.test/mcp",
+      "https://repository.example.test/mcp",
+      "https://elsewhere.example.test/mcp",
+    ]);
+    assert.deepEqual(test.resolvedProjects, []);
+  }),
 );
 
-it.effect("resolves inherited, repository and legacy settings equally from linked worktrees", () =>
+it.effect("lists the servers assigned to a repository equally from its linked worktrees", () =>
   Effect.gen(function* () {
     const test = fixture();
     for (const projectId of [mainProject, worktreeProject]) {
@@ -131,18 +123,15 @@ it.effect("resolves inherited, repository and legacy settings equally from linke
         result.statuses.map((status) => [status.serverName, status.projectId]),
         [
           ["inherited", projectId],
-          ["overridden", projectId],
-          ["legacy", projectId],
+          ["repository", projectId],
         ],
       );
     }
     assert.deepEqual(test.statusUrls, [
       "https://inherited.example.test/mcp",
       "https://repository.example.test/mcp",
-      "https://legacy.example.test/mcp",
       "https://inherited.example.test/mcp",
       "https://repository.example.test/mcp",
-      "https://legacy.example.test/mcp",
     ]);
     assert.deepEqual(test.resolvedProjects, [mainProject, worktreeProject]);
   }),
@@ -152,7 +141,7 @@ it.effect("filters status by saved server name before consulting OAuth", () =>
   Effect.gen(function* () {
     const test = fixture();
     const result = yield* AppMcpAuth.list({
-      serverName: "overridden",
+      serverName: "repository",
       projectId: worktreeProject,
     }).pipe(Effect.provide(test.layer));
     assert.lengthOf(result.statuses, 1);
@@ -161,12 +150,12 @@ it.effect("filters status by saved server name before consulting OAuth", () =>
 );
 
 it.effect(
-  "begins authorization against the effective configured URL and rejects unsaved or stdio servers",
+  "begins authorization against the configured URL and rejects unsaved, unassigned or stdio servers",
   () =>
     Effect.gen(function* () {
       const test = fixture();
       const input = {
-        serverName: "overridden",
+        serverName: "repository",
         projectId: worktreeProject,
         callbackUrl,
         serverUrl: "https://unconfigured.example.test/mcp",
@@ -179,11 +168,12 @@ it.effect(
       assert.deepEqual(test.authentications, [
         { serverUrl: "https://repository.example.test/mcp", callbackUrl },
       ]);
-      for (const serverName of ["missing", "local"]) {
-        const failure = yield* AppMcpAuth.begin({ serverName, callbackUrl }).pipe(
-          Effect.provide(test.layer),
-          Effect.result,
-        );
+      for (const serverName of ["missing", "local", "elsewhere"]) {
+        const failure = yield* AppMcpAuth.begin({
+          serverName,
+          projectId: worktreeProject,
+          callbackUrl,
+        }).pipe(Effect.provide(test.layer), Effect.result);
         assert.equal(failure._tag, "Failure");
         if (failure._tag === "Failure")
           assert.equal(failure.failure.message, "Sign-in requires a saved HTTP MCP server.");
@@ -229,15 +219,15 @@ it.effect(
     }),
 );
 
-it.effect("signs out the configured global or worktree URL", () =>
+it.effect("signs out the configured URL with or without a project", () =>
   Effect.gen(function* () {
     const test = fixture();
-    yield* AppMcpAuth.signOut({ serverName: "overridden" }).pipe(Effect.provide(test.layer));
-    yield* AppMcpAuth.signOut({ serverName: "overridden", projectId: worktreeProject }).pipe(
+    yield* AppMcpAuth.signOut({ serverName: "repository" }).pipe(Effect.provide(test.layer));
+    yield* AppMcpAuth.signOut({ serverName: "repository", projectId: worktreeProject }).pipe(
       Effect.provide(test.layer),
     );
     assert.deepEqual(test.signOutUrls, [
-      "https://global.example.test/mcp",
+      "https://repository.example.test/mcp",
       "https://repository.example.test/mcp",
     ]);
   }),

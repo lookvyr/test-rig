@@ -1,6 +1,7 @@
 import type { ProjectId, SkillLibraryProvider, ToolsScopeId } from "@t3tools/contracts";
 import { ChevronDownIcon } from "lucide-react";
-import { Checkbox } from "../ui/checkbox";
+import type { ReactNode } from "react";
+import { cn } from "../../lib/utils";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PROVIDER_CLIENT_DEFINITIONS } from "./providerDriverMeta";
@@ -12,7 +13,19 @@ export interface ToolsProject {
   workspaceRoot: string;
 }
 
-export function ProviderAvailability({
+/** A switch or provider change shown before its save lands. */
+export interface ToolToggle {
+  readonly enabled?: boolean;
+  readonly providers?: readonly SkillLibraryProvider[];
+}
+
+const toggled = (providers: readonly SkillLibraryProvider[], provider: SkillLibraryProvider) =>
+  providers.includes(provider)
+    ? providers.filter((entry) => entry !== provider)
+    : [...providers, provider];
+
+/** Quiet per-row provider toggles: dim when off, a tooltip names each. */
+export function ProviderIconToggles({
   providers,
   onChange,
   disabled = false,
@@ -22,40 +35,74 @@ export function ProviderAvailability({
   disabled?: boolean;
 }) {
   return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium">Providers</p>
-      <div className="flex gap-2">
-        {PROVIDER_CLIENT_DEFINITIONS.map(({ value, label, icon: Icon }) => {
-          const provider = value as SkillLibraryProvider;
-          const checked = providers.includes(provider);
-          return (
-            <Tooltip key={value}>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    disabled={disabled}
-                    aria-label={`${checked ? "Disable" : "Enable"} for ${label}`}
-                    aria-pressed={checked}
-                    onClick={() =>
-                      onChange(
-                        checked
-                          ? providers.filter((entry) => entry !== provider)
-                          : [...providers, provider],
-                      )
-                    }
-                    className={`inline-flex size-10 items-center justify-center rounded-lg border transition-colors disabled:opacity-50 ${checked ? "border-primary/40 bg-primary/10 text-foreground" : "border-border text-muted-foreground/50 hover:bg-accent"}`}
-                  >
-                    <Icon className="size-5" aria-hidden />
-                  </button>
-                }
-              />
-              <TooltipPopup>{label}</TooltipPopup>
-            </Tooltip>
-          );
-        })}
-      </div>
-    </div>
+    <span className="flex shrink-0 items-center">
+      {PROVIDER_CLIENT_DEFINITIONS.map(({ value, label, icon: Icon }) => {
+        const provider = value as SkillLibraryProvider;
+        const checked = providers.includes(provider);
+        return (
+          <Tooltip key={value}>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-label={label}
+                  aria-pressed={checked}
+                  onClick={() => onChange(toggled(providers, provider))}
+                  className={cn(
+                    "inline-flex size-7 items-center justify-center rounded-md outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none",
+                    checked
+                      ? "opacity-85 hover:opacity-100"
+                      : "opacity-25 grayscale hover:opacity-60",
+                  )}
+                >
+                  <Icon className="size-3.5" aria-hidden />
+                </button>
+              }
+            />
+            <TooltipPopup>{label}</TooltipPopup>
+          </Tooltip>
+        );
+      })}
+    </span>
+  );
+}
+
+/** Labeled provider toggles for a tool's detail page. */
+export function ProviderToggles({
+  providers,
+  onChange,
+  disabled = false,
+}: {
+  providers: readonly SkillLibraryProvider[];
+  onChange: (providers: SkillLibraryProvider[]) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <span className="flex gap-1.5">
+      {PROVIDER_CLIENT_DEFINITIONS.map(({ value, label, icon: Icon }) => {
+        const provider = value as SkillLibraryProvider;
+        const checked = providers.includes(provider);
+        return (
+          <button
+            key={value}
+            type="button"
+            disabled={disabled}
+            aria-pressed={checked}
+            onClick={() => onChange(toggled(providers, provider))}
+            className={cn(
+              "inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+              checked
+                ? "border-primary/40 bg-primary/10 text-foreground"
+                : "border-border text-muted-foreground hover:bg-accent",
+            )}
+          >
+            <Icon className={cn("size-3.5", !checked && "opacity-40 grayscale")} aria-hidden />
+            {label}
+          </button>
+        );
+      })}
+    </span>
   );
 }
 
@@ -101,37 +148,12 @@ export function ToolsSelect({
   );
 }
 
-export function ProjectChoices({
-  projects,
-  selected,
-  onChange,
-  disabled = false,
-}: {
-  projects: readonly ToolsProject[];
-  selected: readonly ToolsScopeId[];
-  onChange: (value: ToolsScopeId[]) => void;
-  disabled?: boolean;
-}) {
+/** A label on the left, its control on the right. */
+export function ToolField({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="max-h-64 space-y-2 overflow-y-auto rounded-lg border p-3">
-      {projects.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No projects available.</p>
-      ) : (
-        projects.map((project) => (
-          <label key={project.id} className="flex cursor-pointer items-center gap-2 text-sm">
-            <Checkbox
-              disabled={disabled}
-              checked={selected.includes(project.id)}
-              onCheckedChange={(checked) =>
-                onChange(
-                  checked ? [...selected, project.id] : selected.filter((id) => id !== project.id),
-                )
-              }
-            />
-            {project.name}
-          </label>
-        ))
-      )}
+    <div className="flex min-h-12 items-center gap-4 px-3 py-2 sm:px-4">
+      <span className="w-28 shrink-0 text-sm text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">{children}</div>
     </div>
   );
 }

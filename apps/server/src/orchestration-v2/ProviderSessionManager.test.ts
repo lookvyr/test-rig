@@ -3,6 +3,7 @@ import * as NetAddress from "effect/unstable/net/NetAddress";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
 import {
+  ALL_PROJECTS_TOOLS_ASSIGNMENT,
   EnvironmentId,
   EventId,
   type ModelSelection,
@@ -4920,21 +4921,23 @@ it.effect(
       const scopeId = ToolsScopeId.make(`git:${"a".repeat(64)}`);
       const settings = yield* Ref.make({
         ...DEFAULT_SERVER_SETTINGS,
-        toolsScopeMcpServers: { [scopeId]: { withheld: { enabled: false } } },
         mcpServers: {
           withheld: {
             enabled: true,
             providers: ["codex" as const],
+            assignment: { ...ALL_PROJECTS_TOOLS_ASSIGNMENT, disabledScopeIds: [scopeId] },
             transport: { type: "stdio" as const, command: "withheld", args: [], env: [] },
           },
           shared: {
             enabled: true,
             providers: ["codex" as const],
+            assignment: ALL_PROJECTS_TOOLS_ASSIGNMENT,
             transport: { type: "stdio" as const, command: "node", args: ["old.js"], env: [] },
           },
           claude: {
             enabled: true,
             providers: ["claudeAgent" as const],
+            assignment: ALL_PROJECTS_TOOLS_ASSIGNMENT,
             transport: { type: "stdio" as const, command: "node", args: [], env: [] },
           },
         },

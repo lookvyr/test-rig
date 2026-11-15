@@ -33,6 +33,7 @@ const assigned: SkillLibrarySummary = {
   description: "Review the changes",
   providers: ["codex", "claudeAgent"],
   assignment: { allProjects: false, projectIds: [projectId], disabledProjectIds: [] },
+  enabled: true,
   path: "/state/library/review/SKILL.md",
   createdAt: "2026-10-10T00:00:00.000Z",
   updatedAt: "2026-10-10T00:00:00.000Z",

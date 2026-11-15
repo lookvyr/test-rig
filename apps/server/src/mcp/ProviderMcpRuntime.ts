@@ -1,5 +1,6 @@
 import type {
   ListMcpRuntimeStatusesInput,
+  McpToolSummary,
   McpRuntimeAuthenticateResult,
   McpRuntimeOperationInput,
   McpRuntimeState,
@@ -14,9 +15,11 @@ import { AppMcpOAuth } from "./AppMcpOAuth.ts";
 import { readMcpProviderSession } from "./McpProviderSession.ts";
 
 export { McpRuntimeError as ProviderMcpRuntimeError } from "@t3tools/contracts";
+import { rememberMcpTools } from "./McpToolHistory.ts";
 export interface ProviderMcpConnection {
   readonly state: McpRuntimeState;
   readonly toolCount?: number | null;
+  readonly tools?: ReadonlyArray<McpToolSummary> | null;
   readonly authStatus?: string | null;
   readonly authenticateSupported?: boolean;
   readonly reconnectSupported?: boolean;
@@ -146,6 +149,15 @@ export const listMcpRuntimeStatuses = Effect.fn("ProviderMcpRuntime.list")(funct
                 withSharedAuth(runtime.identity.threadId, server.name, connection),
               ),
               Effect.timeout("10 seconds"),
+              Effect.tap((connection) =>
+                Effect.sync(() => {
+                  const transport = readMcpProviderSession(
+                    runtime.identity.threadId,
+                  )?.appMcpServers?.find((entry) => entry.name === server.name)?.transport;
+                  if (connection.state === "connected" && connection.tools && transport)
+                    rememberMcpTools(server.name, transport, connection.tools);
+                }),
+              ),
               Effect.map(
                 (connection) =>
                   ({

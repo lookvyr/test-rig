@@ -1,8 +1,9 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { ToolsScopeId } from "./toolsScope.ts";
+import { isToolsAssignmentAvailable, ToolsAssignment, type ToolsScopeId } from "./toolsScope.ts";
 
 export const SKILL_LIBRARY_MAX_SKILLS = 256;
 export const SKILL_LIBRARY_MAX_INSTRUCTIONS_LENGTH = 200_000;
@@ -17,14 +18,8 @@ export type SkillLibraryId = typeof SkillLibraryId.Type;
 export const SkillLibraryProvider = Schema.Literals(["codex", "claudeAgent"]);
 export type SkillLibraryProvider = typeof SkillLibraryProvider.Type;
 
-export const SkillLibraryAssignment = Schema.Struct({
-  allProjects: Schema.Boolean,
-  projectIds: Schema.Array(ProjectId).check(Schema.isMaxLength(1_000)),
-  disabledProjectIds: Schema.Array(ProjectId).check(Schema.isMaxLength(1_000)),
-  scopeIds: Schema.optionalKey(Schema.Array(ToolsScopeId).check(Schema.isMaxLength(1_000))),
-  disabledScopeIds: Schema.optionalKey(Schema.Array(ToolsScopeId).check(Schema.isMaxLength(1_000))),
-});
-export type SkillLibraryAssignment = typeof SkillLibraryAssignment.Type;
+export const SkillLibraryAssignment = ToolsAssignment;
+export type SkillLibraryAssignment = ToolsAssignment;
 
 const editableFields = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
@@ -47,6 +42,7 @@ export const SkillLibrarySummary = Schema.Struct({
       }),
     ),
   ),
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   path: TrimmedNonEmptyString,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -69,6 +65,8 @@ export type SkillLibraryReadInput = typeof SkillLibraryReadInput.Type;
 export const SkillLibraryUpsertInput = Schema.Struct({
   id: Schema.optionalKey(SkillLibraryId),
   ...editableFields,
+  /** Omitted keeps the stored value; a new skill starts on. */
+  enabled: Schema.optionalKey(Schema.Boolean),
   instructions: Schema.String.check(Schema.isMaxLength(SKILL_LIBRARY_MAX_INSTRUCTIONS_LENGTH)),
 });
 export type SkillLibraryUpsertInput = typeof SkillLibraryUpsertInput.Type;
@@ -108,22 +106,13 @@ export class SkillLibraryError extends Schema.TaggedError<SkillLibraryError>()(
 
 /** Assignment controls the catalogue, rather than filesystem permissions. */
 export function isSkillLibrarySkillAvailable(
-  skill: Pick<SkillLibrarySummary, "providers" | "assignment">,
+  skill: Pick<SkillLibrarySummary, "providers" | "assignment"> & { readonly enabled?: boolean },
   projectId: ProjectId | null | undefined,
   provider: string,
   scopeId?: ToolsScopeId | null,
   memberProjectIds: ReadonlyArray<ProjectId> = projectId == null ? [] : [projectId],
 ): boolean {
-  if (!skill.providers.some((entry) => entry === provider)) return false;
-  if (scopeId != null) {
-    if (skill.assignment.disabledScopeIds?.includes(scopeId)) return false;
-    if (skill.assignment.scopeIds?.includes(scopeId)) return true;
-  }
-  return (
-    (projectId != null || scopeId != null) &&
-    skill.providers.some((entry) => entry === provider) &&
-    !memberProjectIds.some((id) => skill.assignment.disabledProjectIds.includes(id)) &&
-    (skill.assignment.allProjects ||
-      memberProjectIds.some((id) => skill.assignment.projectIds.includes(id)))
-  );
+  if (skill.enabled === false || !skill.providers.some((entry) => entry === provider)) return false;
+  if (projectId == null && scopeId == null) return false;
+  return isToolsAssignmentAvailable(skill.assignment, scopeId, memberProjectIds);
 }

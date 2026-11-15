@@ -45,6 +45,24 @@ describe("MCP settings contracts", () => {
     expect(decodeServerSettingsPatch({ mcpServers: { docs: null } }).mcpServers?.docs).toBeNull();
   });
 
+  it("assigns a server to every project by default and ignores retired per-project overrides", () => {
+    const transport = { type: "http", url: "https://example.com/mcp" };
+    const settings = decodeServerSettings({
+      mcpServers: { docs: { transport } },
+      toolsScopeMcpServers: { [`git:${"a".repeat(64)}`]: { docs: { enabled: false } } },
+      projectSettingsOverrides: { "project-1": { mcpServers: { docs: { enabled: false } } } },
+    });
+    expect(settings.mcpServers.docs?.assignment).toEqual({
+      allProjects: true,
+      projectIds: [],
+      disabledProjectIds: [],
+    });
+    expect(settings).not.toHaveProperty("toolsScopeMcpServers");
+    expect(settings.projectSettingsOverrides["project-1" as never]).not.toHaveProperty(
+      "mcpServers",
+    );
+  });
+
   it("drops the removed default MCP assignment without disabling retained providers", () => {
     const settings = decodeServerSettings({
       mcpServers: {

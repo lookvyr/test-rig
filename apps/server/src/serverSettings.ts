@@ -261,7 +261,7 @@ function stripDefaultServerSettings(current: unknown, defaults: unknown): unknow
 }
 
 const make = Effect.gen(function* () {
-  const { settingsPath } = yield* ServerConfig.ServerConfig;
+  const { settingsPath, secretsDir } = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
   const secretStore = yield* ServerSecretStore.ServerSecretStore;
@@ -658,6 +658,21 @@ const make = Effect.gen(function* () {
     );
   });
 
+  // Per-project and per-scope MCP overrides were retired; nothing reads their secrets now.
+  const removeRetiredMcpSecrets = fs.readDirectory(secretsDir).pipe(
+    Effect.flatMap((files) =>
+      Effect.forEach(
+        files.flatMap((file) => {
+          const match = /^(mcp-(?:project|tools-scope)-.+)\.bin$/.exec(file);
+          return match ? [match[1]!] : [];
+        }),
+        (name) => secretStore.remove(name),
+        { discard: true },
+      ),
+    ),
+    Effect.ignore({ log: true }),
+  );
+
   const start = Effect.gen(function* () {
     const shouldStart = yield* Ref.modify(startedRef, (started) => [!started, true]);
     if (!shouldStart) {
@@ -668,6 +683,7 @@ const make = Effect.gen(function* () {
       yield* startWatcher;
       yield* Cache.invalidate(settingsCache, cacheKey);
       yield* getSettingsFromCache;
+      yield* removeRetiredMcpSecrets;
     });
 
     const startupExit = yield* Effect.exit(startup);

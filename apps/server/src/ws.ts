@@ -7,6 +7,7 @@ import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SkillLibrary from "./skills/SkillLibrary.ts";
 import * as ToolsProjectScopes from "./skills/ToolsProjectScopes.ts";
 import * as ProviderMcpRuntime from "./mcp/ProviderMcpRuntime.ts";
+import * as McpToolHistory from "./mcp/McpToolHistory.ts";
 import * as AppMcpAuth from "./mcp/AppMcpAuth.ts";
 import { AppMcpOAuth } from "./mcp/AppMcpOAuth.ts";
 import { SkillLibraryError, type SkillLibrarySourceReadInput } from "@t3tools/contracts";
@@ -508,6 +509,13 @@ const makeWsRpcLayer = (
       );
 
       const fileSystem = yield* FileSystem.FileSystem;
+      // Concurrent first requests share one read of the saved MCP tool history.
+      const loadMcpToolHistory = yield* Effect.cached(
+        McpToolHistory.loadMcpToolHistory(config.stateDir).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+        ),
+      );
       const namedProjectFolders = yield* makeNamedProjectFolders;
       const prepareScratchWorkspace = yield* makePrepareScratchWorkspace;
       // Resolve early for drafts and bootstrap setup; engine dispatch also prepares
@@ -735,9 +743,23 @@ const makeWsRpcLayer = (
         [WS_METHODS.mcpRuntimeList]: (input) =>
           observeRpcEffect(
             WS_METHODS.mcpRuntimeList,
-            ProviderMcpRuntime.listMcpRuntimeStatuses(input).pipe(
-              Effect.provideService(AppMcpOAuth, appMcpOAuth),
-              Effect.map((statuses) => ({ statuses })),
+            Effect.gen(function* () {
+              yield* loadMcpToolHistory;
+              const statuses = yield* ProviderMcpRuntime.listMcpRuntimeStatuses(input).pipe(
+                Effect.provideService(AppMcpOAuth, appMcpOAuth),
+              );
+              // The tool history is best effort; statuses still return without it.
+              const servers = yield* serverSettings.getSettings.pipe(
+                Effect.map((settings) => settings.mcpServers),
+                Effect.orElseSucceed(() => null),
+              );
+              if (servers === null) return { statuses };
+              const serverTools = McpToolHistory.rememberedMcpTools(servers, input.serverName);
+              yield* McpToolHistory.saveMcpToolHistory(config.stateDir);
+              return { statuses, serverTools };
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
             ),
           ),
         [WS_METHODS.mcpRuntimeReconnect]: (input) =>

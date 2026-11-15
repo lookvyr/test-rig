@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ALL_PROJECTS_TOOLS_ASSIGNMENT, ToolsAssignment } from "./toolsScope.ts";
 
 /**
  * MCP servers that Test Rig applies to every provider session.
@@ -104,32 +105,21 @@ const McpServerProviders = Schema.Array(
   ),
 );
 
+/** One configured server. Its assignment decides which projects' sessions receive it. */
 export const McpServerConfig = Schema.Struct({
   providers: McpServerProviders.pipe(
     Schema.withDecodingDefault(Effect.succeed([...DEFAULT_MCP_SERVER_PROVIDERS])),
   ),
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  assignment: ToolsAssignment.pipe(
+    Schema.withDecodingDefault(Effect.succeed(ALL_PROJECTS_TOOLS_ASSIGNMENT)),
+  ),
   transport: McpServerTransport,
 });
 export type McpServerConfig = typeof McpServerConfig.Type;
 
-/**
- * One server in a project's overrides. With a transport it adds a server to
- * the project, or replaces the environment's server of the same name. Without
- * one it only switches the inherited server on or off for the project.
- */
-export const McpServerProjectOverride = Schema.Struct({
-  providers: Schema.optionalKey(McpServerProviders),
-  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  transport: Schema.optionalKey(McpServerTransport),
-});
-export type McpServerProjectOverride = typeof McpServerProjectOverride.Type;
-
 export const McpServers = Schema.Record(McpServerName, McpServerConfig);
 export type McpServers = typeof McpServers.Type;
-
-export const McpServerProjectOverrides = Schema.Record(McpServerName, McpServerProjectOverride);
-export type McpServerProjectOverrides = typeof McpServerProjectOverrides.Type;
 
 /** An MCP server as a provider session receives it: secrets materialized, enabled only. */
 export interface ResolvedMcpServer {

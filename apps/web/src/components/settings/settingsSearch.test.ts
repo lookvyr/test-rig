@@ -47,7 +47,7 @@ describe("searchSettings", () => {
       id: "mcp-servers",
       to: "/settings/tools",
     });
-    expect(searchSettings("skill library")[0]).toMatchObject({
+    expect(searchSettings("skills")[0]).toMatchObject({
       id: "skill-library",
       to: "/settings/tools",
     });

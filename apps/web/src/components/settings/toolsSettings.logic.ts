@@ -1,20 +1,13 @@
-import type {
-  McpServerConfig,
-  McpServerVariable,
-  McpServerProjectOverride,
-  McpServers,
-  ProjectSettingsOverrides,
-  ProjectId,
-  SkillLibraryAssignment,
-  SkillLibraryDetail,
-  ToolsScopeId,
+import {
+  ALL_PROJECTS_TOOLS_ASSIGNMENT,
+  isToolsAssignmentAvailable,
+  type McpServerConfig,
+  type McpServerVariable,
+  type ProjectId,
+  type SkillLibraryAssignment,
+  type SkillLibraryDetail,
+  type ToolsScopeId,
 } from "@t3tools/contracts";
-
-export const EMPTY_SKILL_ASSIGNMENT: SkillLibraryAssignment = {
-  allProjects: false,
-  projectIds: [],
-  disabledProjectIds: [],
-};
 
 export const MCP_STATUS_LABELS = {
   connected: "Connected",
@@ -42,32 +35,7 @@ export function assignmentIncludesScope(
   scopeId: ToolsScopeId,
   memberProjectIds: ReadonlyArray<ProjectId>,
 ) {
-  if (assignment.disabledScopeIds?.includes(scopeId)) return false;
-  if (assignment.scopeIds?.includes(scopeId)) return true;
-  return (
-    !memberProjectIds.some((id) => assignment.disabledProjectIds.includes(id)) &&
-    (assignment.allProjects || memberProjectIds.some((id) => assignment.projectIds.includes(id)))
-  );
-}
-
-export function toggleSkillScope(
-  assignment: SkillLibraryAssignment,
-  scopeId: ToolsScopeId,
-  enabled: boolean,
-  memberProjectIds: ReadonlyArray<ProjectId> = [],
-): SkillLibraryAssignment {
-  const members = new Set(memberProjectIds);
-  return {
-    ...assignment,
-    projectIds: assignment.projectIds.filter((id) => !members.has(id)),
-    disabledProjectIds: assignment.disabledProjectIds.filter((id) => !members.has(id)),
-    scopeIds: enabled
-      ? [...new Set([...(assignment.scopeIds ?? []), scopeId])]
-      : (assignment.scopeIds ?? []).filter((id) => id !== scopeId),
-    disabledScopeIds: enabled
-      ? (assignment.disabledScopeIds ?? []).filter((id) => id !== scopeId)
-      : [...new Set([...(assignment.disabledScopeIds ?? []), scopeId])],
-  };
+  return isToolsAssignmentAvailable(assignment, scopeId, memberProjectIds);
 }
 
 export function selectedSkillScopes(
@@ -79,34 +47,59 @@ export function selectedSkillScopes(
     .map((project) => project.id);
 }
 
-export function countAssignedSkillScopes(
+/** "All" when every listed project is in and new ones join; otherwise "3 of 7". */
+export function assignmentSummary(
   assignment: SkillLibraryAssignment,
   projects: ReadonlyArray<{ id: ToolsScopeId; memberProjectIds: readonly ProjectId[] }>,
-): number {
-  const knownProjectIds = new Set(projects.flatMap((project) => project.memberProjectIds));
-  const knownScopeIds = new Set(projects.map((project) => project.id));
-  const availableScopes = selectedSkillScopes(assignment, projects);
-  const unknownProjects = assignment.projectIds.filter(
-    (id) => !knownProjectIds.has(id) && !assignment.disabledProjectIds.includes(id),
-  );
-  const unknownScopes = (assignment.scopeIds ?? []).filter(
-    (id) => !knownScopeIds.has(id) && !assignment.disabledScopeIds?.includes(id),
-  );
-  return new Set([...availableScopes, ...unknownProjects, ...unknownScopes]).size;
+): string {
+  const count = selectedSkillScopes(assignment, projects).length;
+  return assignment.allProjects && count === projects.length
+    ? "All"
+    : `${count} of ${projects.length}`;
 }
 
-export function setSelectedSkillScopes(
+/**
+ * Replace the choices for the listed projects. With `includeNew`, every
+ * project is in unless unchecked, so projects added later join; without it,
+ * only the checked ones. Choices about projects not listed (an unavailable
+ * workspace) are left alone.
+ */
+export function assignScopes(
   assignment: SkillLibraryAssignment,
-  scopeIds: ReadonlyArray<ToolsScopeId>,
+  selected: ReadonlyArray<ToolsScopeId>,
+  includeNew: boolean,
   projects: ReadonlyArray<{ id: ToolsScopeId; memberProjectIds: readonly ProjectId[] }>,
+  unavailableProjectIds: ReadonlyArray<ProjectId> = [],
 ): SkillLibraryAssignment {
-  const knownIds = new Set(projects.flatMap((project) => project.memberProjectIds));
-  const knownScopes = new Set(projects.map((project) => project.id));
+  const knownScopes = new Set<string>(projects.map((project) => project.id));
+  const knownMembers = new Set<string>(projects.flatMap((project) => project.memberProjectIds));
+  const unknownScopes = (ids: ReadonlyArray<ToolsScopeId> | undefined) =>
+    (ids ?? []).filter((id) => !knownScopes.has(id));
+  const unknownMembers = (ids: ReadonlyArray<ProjectId>) =>
+    ids.filter((id) => !knownMembers.has(id));
+  if (includeNew)
+    return {
+      allProjects: true,
+      projectIds: [],
+      disabledProjectIds: unknownMembers(assignment.disabledProjectIds),
+      scopeIds: [],
+      disabledScopeIds: [
+        ...unknownScopes(assignment.disabledScopeIds),
+        ...projects
+          .filter((project) => !selected.includes(project.id))
+          .map((project) => project.id),
+      ],
+    };
+  // Leaving "every project" keeps the access an unavailable workspace already had.
+  const keptUnavailable = assignment.allProjects
+    ? unavailableProjectIds.filter((id) => !assignment.disabledProjectIds.includes(id))
+    : [];
   return {
-    ...assignment,
-    projectIds: assignment.projectIds.filter((id) => !knownIds.has(id)),
-    scopeIds: [...(assignment.scopeIds ?? []).filter((id) => !knownScopes.has(id)), ...scopeIds],
-    disabledScopeIds: (assignment.disabledScopeIds ?? []).filter((id) => !scopeIds.includes(id)),
+    allProjects: false,
+    projectIds: [...new Set([...unknownMembers(assignment.projectIds), ...keptUnavailable])],
+    disabledProjectIds: unknownMembers(assignment.disabledProjectIds),
+    scopeIds: [...unknownScopes(assignment.scopeIds), ...selected],
+    disabledScopeIds: [],
   };
 }
 
@@ -161,6 +154,7 @@ export function parseMcpServerJson(text: string): { name: string; config: McpSer
   }
   const url = entry.url ?? entry.serverUrl ?? entry.httpUrl;
   const providers = ["codex", "claudeAgent"] as const;
+  const assignment = ALL_PROJECTS_TOOLS_ASSIGNMENT;
   if (url !== undefined) {
     if (typeof url !== "string") throw new Error("Server URL must be a string.");
     return {
@@ -168,6 +162,7 @@ export function parseMcpServerJson(text: string): { name: string; config: McpSer
       config: {
         enabled: entry.enabled !== false,
         providers,
+        assignment,
         transport: { type: "http", url, headers: variables(entry.headers) },
       },
     };
@@ -180,6 +175,7 @@ export function parseMcpServerJson(text: string): { name: string; config: McpSer
     config: {
       enabled: entry.enabled !== false,
       providers,
+      assignment,
       transport: {
         type: "stdio",
         command: command[0],
@@ -188,55 +184,6 @@ export function parseMcpServerJson(text: string): { name: string; config: McpSer
       },
     },
   };
-}
-
-/** Keep inherited connection and provider choices sparse when editing a project's availability. */
-export function projectMcpServerSettings(
-  global: McpServers,
-  overrides: ProjectSettingsOverrides,
-  oldName: string,
-  name: string,
-  config: McpServerConfig,
-  remove = false,
-): ProjectSettingsOverrides {
-  const servers: Record<string, McpServerProjectOverride> = { ...overrides.mcpServers };
-  if (oldName !== name || remove) delete servers[oldName];
-  if (remove) return { ...overrides, mcpServers: servers };
-  const inherited = global[oldName];
-  const previous = overrides.mcpServers?.[oldName];
-  const sameInheritedTransport =
-    !previous?.transport &&
-    inherited &&
-    name === oldName &&
-    JSON.stringify(inherited.transport) === JSON.stringify(config.transport);
-  const vars = config.transport.type === "http" ? config.transport.headers : config.transport.env;
-  if (
-    !sameInheritedTransport &&
-    !previous?.transport &&
-    vars.some((variable) => variable.valueRedacted)
-  )
-    throw new Error(
-      "Enter the saved secret values again to create a separate connection for this project. Availability changes can keep the inherited connection.",
-    );
-  if (oldName !== name && inherited) servers[oldName] = { enabled: false };
-  const providersUnchanged =
-    name === oldName &&
-    !previous?.providers &&
-    inherited &&
-    JSON.stringify(inherited.providers) === JSON.stringify(config.providers);
-  if (
-    sameInheritedTransport &&
-    !previous &&
-    config.enabled === inherited.enabled &&
-    providersUnchanged
-  )
-    return overrides;
-  servers[name] = {
-    enabled: config.enabled,
-    ...(providersUnchanged ? {} : { providers: config.providers }),
-    ...(sameInheritedTransport ? {} : { transport: config.transport }),
-  };
-  return { ...overrides, mcpServers: servers };
 }
 
 export type MarkdownTool = "bold" | "italic" | "heading" | "list" | "link" | "code";
