@@ -416,6 +416,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/labs",
   },
   {
+    id: "worktree-fast-checkout",
+    title: "Fast worktree checkout",
+    to: "/settings/labs",
+  },
+  {
     id: "background-activity",
     title: "Background activity",
     to: "/settings/maintenance",

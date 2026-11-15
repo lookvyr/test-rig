@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -6,6 +7,7 @@ import {
   useUpdateClientSettings,
   useUpdatePrimarySettings,
 } from "../../hooks/useSettings";
+import { primaryServerConfigAtom } from "../../state/server";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import {
@@ -201,7 +203,32 @@ export function LabsSettingsPanel() {
             />
           }
         />
+        <FastWorktreeCheckoutRow />
       </SettingsSection>
     </SettingsPageContainer>
+  );
+}
+
+/** Shows only when the primary environment is a Mac, since only macOS servers honor it. */
+function FastWorktreeCheckoutRow() {
+  const supported =
+    useAtomValue(primaryServerConfigAtom)?.environment.capabilities.fastWorktreeCheckout === true;
+  const enabled = usePrimarySettings((settings) => settings.fastWorktreeCheckout);
+  const updatePrimarySettings = useUpdatePrimarySettings();
+  if (!supported) return null;
+  return (
+    <SettingsRow
+      {...searchableSetting("worktree-fast-checkout")}
+      description="On a Mac, clone new worktrees from a checkout cached in the Test Rig home folder instead of writing every file. Uses Git’s normal checkout when it can’t. Turning it off deletes the cache."
+      control={
+        <Switch
+          checked={enabled}
+          onCheckedChange={(checked) =>
+            updatePrimarySettings({ fastWorktreeCheckout: Boolean(checked) })
+          }
+          aria-label="Fast worktree checkout"
+        />
+      }
+    />
   );
 }

@@ -144,6 +144,7 @@ export const make = Effect.gen(function* () {
       threadSnooze: true,
       threadPinning: true,
       threadTitleRegeneration: true,
+      ...(hostPlatform === "darwin" ? { fastWorktreeCheckout: true } : {}),
     },
   };
 

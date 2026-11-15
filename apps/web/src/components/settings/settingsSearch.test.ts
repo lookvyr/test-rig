@@ -66,6 +66,7 @@ describe("searchSettings", () => {
       "storage-worktrees",
       "storage-worktree-keep-when",
       "worktree-branch-naming",
+      "worktree-fast-checkout",
     ]);
     expect(searchSettings("worktree branch naming").map((item) => item.id)).toEqual([
       "worktree-branch-naming",

@@ -234,6 +234,12 @@ checkout are not copied into it.
 
 **Settings** → **Worktrees** → **Worktree location** sets the folder where new worktrees are created, such as `~/worktrees`. Leave it empty to use the Test Rig home folder. Use a dedicated folder inside your home folder; your home folder itself and its parents are not accepted, because cleanup treats everything in the worktree folder as Test Rig's. Changing it does not move existing worktrees. Cleanup keeps managing worktrees in earlier locations.
 
+## Fast worktree checkout on macOS
+
+Fast worktree checkout is a beta. Turn it on in **Settings** → **Labs** → **Fast worktree checkout**; the row appears only on a Mac. Test Rig then keeps a few recent checkouts of each repository in the `caches` folder of the Test Rig home folder. A new worktree is cloned from one of them with APFS copy-on-write, which is about twice as fast as writing every file and makes the first `git status` in it fast as well. Turning it off deletes the cache.
+
+The first worktree of a repository uses Git's normal checkout and fills the cache. It needs Git 2.42 or newer. Git's normal checkout is also used for worktrees on a different drive from the Test Rig home folder, sparse checkouts, repositories whose attributes use filters such as Git LFS, and repositories whose checkout settings changed.
+
 ## Worktree cleanup
 
 **Settings** → **Worktrees** → **Cleanup** decides when Test Rig removes unused managed worktrees. By default, **Delete settled worktrees** is set to 0 days: a worktree is removed as soon as every thread using it settles, including after a pull request is merged or closed. Existing settled threads are eligible too. If you turned automatic worktree cleanup off in an earlier version, all rules start off.
