@@ -5,6 +5,7 @@ import * as Equal from "effect/Equal";
 
 import { useT3ProjectFileState } from "../../hooks/useT3ProjectFileScripts";
 import ProjectScriptsControl from "../ProjectScriptsControl";
+import { readLocalApi } from "../../localApi";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { type ProjectScriptTarget, useProjectScriptSettings } from "./useProjectScriptSettings";
@@ -80,7 +81,19 @@ export function ProjectActionsSettings() {
             mixed={mixed}
             title="Actions"
             description="Commands that run in this project's checkout or its worktree, with optional shortcuts. Unchanged projects use the environment's default actions."
-            onResetOverride={() => void persist(() => null)}
+            onResetOverride={() =>
+              void (async () => {
+                // Resetting drops this project's own list for the environment's defaults, which
+                // are usually empty, so it asks first.
+                const confirm = readLocalApi()?.dialogs.confirm;
+                const confirmed = confirm
+                  ? await confirm(
+                      "Reset this project's actions?\nIts own actions are removed and it uses the environment's default actions instead.",
+                    )
+                  : false;
+                if (confirmed) await persist(() => null);
+              })()
+            }
             control={controls}
           />
         )}

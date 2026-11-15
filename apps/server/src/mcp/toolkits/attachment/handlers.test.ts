@@ -1,4 +1,5 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as ServerSettings from "../../../serverSettings.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
@@ -89,6 +90,7 @@ it.effect(
           },
         }),
         Layer.mock(Project.ProjectService)({}),
+        ServerSettings.layerTest(),
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
       ).pipe(
         Layer.provideMerge(

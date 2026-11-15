@@ -41,9 +41,12 @@ export async function resolveDraftProjectDefaults(
     project,
     projectFile,
   ).settings;
+  // A project override of null means "Automatic" for that project, not "use the environment's".
+  const projectOverride = settings.projectSettingsOverrides[projectRef.projectId];
   const chosen =
-    settings.projectSettingsOverrides[projectRef.projectId]?.defaultModelSelection ??
-    settings.defaultModelSelection;
+    projectOverride !== undefined && Object.hasOwn(projectOverride, "defaultModelSelection")
+      ? (projectOverride.defaultModelSelection ?? null)
+      : settings.defaultModelSelection;
   return {
     ...defaults,
     defaultModelSelection:

@@ -85,6 +85,15 @@ describe("destination draft defaults", () => {
       seedFallbackModelSelection: legacy,
     });
   });
+  it("treats a project set to Automatic as Automatic even with an environment model", async () => {
+    mocks.configs.set("destination", {
+      settings: {
+        ...settings,
+        projectSettingsOverrides: { b: { defaultModelSelection: null } },
+      },
+    });
+    expect((await resolveDraftProjectDefaults(ref)).defaultModelSelection).toBeNull();
+  });
   it("consults t3.json only when the workspace setting is unset", async () => {
     mocks.configs.set("destination", { settings: { ...settings, defaultThreadEnvMode: null } });
     mocks.file.mockResolvedValue({ defaultThreadEnvMode: "worktree" });

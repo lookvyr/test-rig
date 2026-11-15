@@ -77,6 +77,15 @@ const sameWorktreeRules = (left: WorktreeCleanupRules, right: WorktreeCleanupRul
   (Object.keys(left) as Array<keyof WorktreeCleanupRules>).every((key) => left[key] === right[key]);
 
 /** A settlement never overrides active work, including provider background tasks. */
+// An on-settle action is typed into its terminal before the subprocess poll can mark it busy,
+// so a settle terminal touched moments ago counts as running.
+const SETTLE_ACTION_GRACE_MS = 15_000;
+function settleActionStarting(terminal: TerminalSummary, now: number): boolean {
+  if (!terminal.terminalId.startsWith("settle-") || terminal.status === "exited") return false;
+  const updatedAt = Date.parse(terminal.updatedAt);
+  return Number.isNaN(updatedAt) || now - updatedAt < SETTLE_ACTION_GRACE_MS;
+}
+
 export function worktreeHasActiveThread(thread: Thread, now: number): boolean {
   const messageAt =
     thread.latestUserMessageAt == null
@@ -578,7 +587,10 @@ export const make = Effect.gen(function* () {
     }
     if (
       checkoutTerminals(checkout).some(
-        (terminal) => terminal.hasRunningSubprocess || terminal.status === "starting",
+        (terminal) =>
+          terminal.hasRunningSubprocess ||
+          terminal.status === "starting" ||
+          settleActionStarting(terminal, now),
       )
     ) {
       notice("pending", "Worktree cleanup is waiting for a terminal job to finish.");
@@ -609,7 +621,8 @@ export const make = Effect.gen(function* () {
       yield* providers.close(session.providerSessionId);
     }
     for (const terminal of checkoutTerminals(checkout)) {
-      if (terminal.hasRunningSubprocess) return keep("open terminal");
+      if (terminal.hasRunningSubprocess || settleActionStarting(terminal, now))
+        return keep("open terminal");
       yield* terminals.close({ threadId: terminal.threadId, terminalId: terminal.terminalId });
     }
     // Settlement, preferences and files may change while provider shutdown is in progress.

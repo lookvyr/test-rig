@@ -503,6 +503,27 @@ describe("settled worktree cleanup", () => {
       expect(f.state.get(f.thread.id)?.reason).toContain("terminal job");
     }),
   );
+  it.effect("waits for an on-settle action that just started", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.terminal({
+        threadId: f.thread.id,
+        terminalId: "settle-cleanup-1a2b3c4d",
+        cwd: f.checkout,
+        worktreePath: f.checkout,
+        status: "running",
+        pid: 123,
+        exitCode: null,
+        exitSignal: null,
+        hasRunningSubprocess: false,
+        label: "Terminal",
+        updatedAt: DateTime.formatIso(yield* DateTime.now),
+      });
+      yield* f.start();
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+    }),
+  );
   it.effect("removes a shared checkout only once every thread is settled", () =>
     Effect.gen(function* () {
       const f = yield* fixture;

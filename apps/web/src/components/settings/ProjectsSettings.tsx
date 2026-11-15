@@ -13,6 +13,7 @@ import { useRef } from "react";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
+import { forgetAppModalReturnWhen } from "../sidebar/mainAppLocation";
 import { readLocalApi } from "../../localApi";
 import { deriveProjectGroupingOverrideKey } from "../../logicalProject";
 import {
@@ -211,7 +212,9 @@ function ProjectSettingsPanel({
               ]
             : [`This removes ${targets.length} checkout entries.`]),
           ...(threadCount > 0
-            ? ["This permanently clears conversation history for those threads."]
+            ? [
+                "This permanently clears conversation history for those threads and cannot be undone.",
+              ]
             : []),
           removesWholeProject
             ? "This removes only the project entries, not the files on disk."
@@ -221,6 +224,7 @@ function ProjectSettingsPanel({
     );
     if (confirmed._tag === "Failure" || !confirmed.value) return;
     const draftStore = useComposerDraftStore.getState();
+    const removedDraftIds: string[] = [];
     for (const member of targets) {
       const hasThreads = targetThreads.some(
         (thread) => thread.environmentId === member.environmentId && thread.projectId === member.id,
@@ -235,9 +239,15 @@ function ProjectSettingsPanel({
       }
       const projectRef = scopeProjectRef(member.environmentId, member.id);
       const draft = draftStore.getDraftThreadByProjectRef(projectRef);
-      if (draft) draftStore.clearDraftThread(draft.draftId);
+      if (draft) {
+        removedDraftIds.push(draft.draftId);
+        draftStore.clearDraftThread(draft.draftId);
+      }
       draftStore.clearProjectDraftThreadId(projectRef);
     }
+    // The chat view behind Settings may show a thread or draft that was just deleted.
+    const removedIds = [...targetThreads.map((thread) => thread.id), ...removedDraftIds];
+    forgetAppModalReturnWhen((href) => removedIds.some((id) => href.includes(id)));
     if (removesWholeProject) {
       void navigate({ to: "/settings/projects", search: {}, replace: true });
     }

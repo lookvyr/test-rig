@@ -17,6 +17,11 @@ export function MainAppLocationTracker() {
   return null;
 }
 
+/** Closing Settings goes home instead when the page that opened it no longer exists. */
+export function forgetAppModalReturnWhen(isGone: (href: string) => boolean) {
+  if (appModalReturnHref !== null && isGone(appModalReturnHref)) appModalReturnHref = null;
+}
+
 /** Leaves Settings for the page that opened it. */
 export function useCloseAppModal() {
   const navigate = useNavigate();

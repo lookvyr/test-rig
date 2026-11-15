@@ -1,4 +1,11 @@
-import { MessageId, ThreadId, OrchestratorMcpFailure, ProjectId } from "@t3tools/contracts";
+import {
+  MessageId,
+  ThreadId,
+  OrchestratorMcpFailure,
+  ProjectId,
+  type ProjectScript,
+} from "@t3tools/contracts";
+import { resolveProjectScripts } from "@t3tools/shared/projectScripts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageIntake.ts";
@@ -6,6 +13,7 @@ import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
+import * as Settings from "../../../serverSettings.ts";
 import { newCommandId, readCaller, readMutationCaller, unavailable } from "../../threadAccess.ts";
 import { ProjectToolkit } from "./tools.ts";
 import { assertPendingUploadOwnership } from "../attachment/handlers.ts";
@@ -38,6 +46,29 @@ const mutation = Effect.gen(function* () {
     });
   return yield* Project.ProjectService;
 });
+/** Saves an agent's action list as the project's settings override, where the app reads it. */
+const saveProjectScripts = (projectId: ProjectId, scripts: ReadonlyArray<ProjectScript>) =>
+  Effect.gen(function* () {
+    const settings = yield* Settings.ServerSettingsService;
+    yield* settings
+      .updateSettings({ projectScriptOverrides: { [projectId]: scripts } })
+      .pipe(Effect.mapError(unavailable));
+  });
+
+/** Reports the actions the app actually uses for the project. */
+const withResolvedScripts = <
+  P extends { readonly id: ProjectId; readonly scripts: ReadonlyArray<ProjectScript> },
+>(
+  project: P,
+) =>
+  Effect.gen(function* () {
+    const settings = yield* Settings.ServerSettingsService;
+    const current = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+    return current === null
+      ? project
+      : { ...project, scripts: resolveProjectScripts(current, project) };
+  });
+
 export const ProjectHandlersLive = ProjectToolkit.toLayer({
   t3_thread_launch: (input) =>
     Effect.gen(function* () {
@@ -135,7 +166,7 @@ export const ProjectHandlersLive = ProjectToolkit.toLayer({
           code: "invalid_request",
           message: "The project was not found.",
         });
-      return result.value;
+      return yield* withResolvedScripts(result.value);
     }),
   t3_project_create: ({ workspaceRoot, ...input }) =>
     Effect.gen(function* () {
@@ -176,16 +207,27 @@ export const ProjectHandlersLive = ProjectToolkit.toLayer({
         };
       }
       const commandId = yield* newCommandId();
-      return yield* projects
-        .create({ ...input, workspaceRoot, commandId, projectId: ProjectId.make(commandId) })
+      const { scripts, ...createInput } = input;
+      const created = yield* projects
+        .create({
+          ...createInput,
+          workspaceRoot,
+          commandId,
+          projectId: ProjectId.make(commandId),
+        })
         .pipe(Effect.mapError(projectFailure));
+      if (scripts !== undefined) yield* saveProjectScripts(created.id, scripts);
+      return yield* withResolvedScripts(created);
     }),
-  t3_project_update: (input) =>
+  t3_project_update: ({ scripts, ...input }) =>
     Effect.gen(function* () {
       const projects = yield* mutation;
-      return yield* projects
+      // Actions live in settings now; the project's own list is no longer read.
+      if (scripts !== undefined) yield* saveProjectScripts(input.projectId, scripts);
+      const updated = yield* projects
         .update({ ...input, commandId: yield* newCommandId() })
         .pipe(Effect.mapError(projectFailure));
+      return yield* withResolvedScripts(updated);
     }),
   t3_project_delete: (input) =>
     Effect.gen(function* () {
