@@ -117,6 +117,7 @@ vi.mock("../../state/entities", () => ({
 vi.mock("../../state/environments", () => ({
   useEnvironments: () => ({ environments: [] }),
 }));
+vi.mock("../../lib/openPullRequestLink", () => ({ useOpenPrLink: () => () => {} }));
 vi.mock("../../hooks/usePullRequestHandoff", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../hooks/usePullRequestHandoff")>()),
   usePullRequestHandoff: () => ({}),
