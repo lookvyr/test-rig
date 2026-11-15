@@ -43,6 +43,10 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
+vi.mock("../../rpc/atomRegistry", () => ({
+  appAtomRegistry: { get: () => settingsState.value },
+}));
+
 vi.mock("../../localApi", () => ({
   readLocalApi: () => ({ dialogs: { confirm: async () => true } }),
 }));
@@ -60,6 +64,7 @@ vi.mock("../../state/server", () => ({
   EMPTY_SERVER_PROVIDERS: [],
   serverEnvironment: {
     providersValueAtom: () => atoms.providersAtom,
+    settingsValueAtom: () => atoms.providersAtom,
     refreshProviders: atoms.refreshProviders,
     updateProvider: atoms.updateProvider,
   },
@@ -190,6 +195,13 @@ describe("EnvironmentProviderSettings routing", () => {
     expect(inertWrapper).not.toBeNull();
     const providerCard = visitElements(panel, (element) => element.props.instanceId === codexId);
     expect(providerCard).not.toBeNull();
+    // The list stays selectable; only its enable switch is disabled.
+    const listCard = visitElements(
+      panel,
+      (element) => element.props.instanceId === codexId && element.props.mode === "list",
+    );
+    expect(listCard?.props.readOnly).toBe(true);
+    expect(listCard?.props.onSelect).toBeTypeOf("function");
 
     const notice = visitElements(panel, (element) => element.props.title === "Limited permissions");
     expect(notice).not.toBeNull();

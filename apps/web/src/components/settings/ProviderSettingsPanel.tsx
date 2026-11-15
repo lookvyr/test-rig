@@ -65,6 +65,7 @@ import {
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readLocalApi } from "../../localApi";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { ScrollArea } from "../ui/scroll-area";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { SettingsGroup } from "./SettingsGroup";
@@ -562,8 +563,12 @@ export function EnvironmentProviderSettings({
     const confirm = readLocalApi()?.dialogs.confirm;
     const confirmed = confirm ? await confirm(`Remove the ${name} provider instance?`) : false;
     if (!confirmed) return;
+    // The dialog can stay open while other writes land, so read the map as it is now.
+    const current =
+      appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId))?.providerInstances ??
+      settings.providerInstances;
     updateSettings({
-      providerInstances: withoutProviderInstanceKey(settings.providerInstances, row.instanceId),
+      providerInstances: withoutProviderInstanceKey(current, row.instanceId),
     });
   };
 
@@ -698,8 +703,9 @@ export function EnvironmentProviderSettings({
         onModelOrderChange={(modelOrder) =>
           updateProviderModelPreferences(row.instanceId, { ...modelPreferences, modelOrder })
         }
+        readOnly={readOnly}
         onRunUpdate={
-          supportsInlineUpdate && liveProvider
+          !readOnly && supportsInlineUpdate && liveProvider
             ? () => {
                 if (!canRunInlineUpdate) return;
                 void runProviderUpdate(liveProvider);
@@ -754,14 +760,9 @@ export function EnvironmentProviderSettings({
         ) : null}
         <SettingsGroup
           divided={false}
-          // `inert` blocks focus and interaction in one attribute, so the read-only view stays
-          // the editable layout without threading a disabled flag through every control.
-          inert={readOnly}
-          aria-disabled={readOnly || undefined}
           className={cn(
             PROVIDER_CARD_HEIGHT_CLASS_NAME,
             "overflow-hidden @min-[48rem]/providers:grid @min-[48rem]/providers:grid-cols-[17rem_minmax(0,1fr)]",
-            readOnly && "opacity-50 select-none",
           )}
         >
           <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/providers:flex @min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-col @min-[48rem]/providers:border-r @min-[48rem]/providers:border-b-0">
@@ -788,7 +789,13 @@ export function EnvironmentProviderSettings({
           <div data-provider-detail className="min-w-0 @min-[48rem]/providers:min-h-0">
             {selectedRow ? (
               <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/providers:h-full">
-                <div className="space-y-6 py-4">
+                {/* Read-only sessions can still pick and scroll providers; `inert` disables
+                    every editor control at once without threading a flag through each. */}
+                <div
+                  inert={readOnly}
+                  aria-disabled={readOnly || undefined}
+                  className={cn("space-y-6 py-4", readOnly && "opacity-50 select-none")}
+                >
                   {renderProviderInstance(selectedRow, "editor")}
                 </div>
               </ScrollArea>
