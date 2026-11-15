@@ -148,6 +148,15 @@ describe("scheduled task model defaults", () => {
       ),
     ).toEqual(projectSelection);
   });
+  it("falls back to a folded project's own model before the catalog", () => {
+    const folded = {
+      ...config,
+      settings: { ...config.settings, defaultModelSelection: null, projectSettingsFolded: true },
+    } as unknown as ServerConfig;
+    expect(resolve(folded, { id: projectId, defaultModelSelection: projectSelection })).toEqual(
+      projectSelection,
+    );
+  });
   it("uses the advertised default instead of catalog order when no default is configured", () => {
     expect(
       resolve({ ...config, settings: { ...config.settings, defaultModelSelection: null } }, null),

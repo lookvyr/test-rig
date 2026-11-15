@@ -47,6 +47,7 @@ export const SETTINGS_SCOPED_PATHS: ReadonlySet<string> = new Set([
   "/settings/source-control",
   "/settings/worktrees",
   "/settings/maintenance",
+  "/settings/labs",
 ]);
 
 interface SettingsScopeMenuProps {

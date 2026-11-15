@@ -145,7 +145,9 @@ export function scheduledTaskDefaultModel(
   );
   const configured = resolveProjectSettings(settings, project?.id ?? null, project).settings
     .defaultModelSelection;
-  for (const selection of [configured, settings.defaultModelSelection]) {
+  // Folded projects keep their old model on the project record; it stays the last configured choice.
+  const legacy = project?.defaultModelSelection ?? null;
+  for (const selection of [configured, settings.defaultModelSelection, legacy]) {
     if (
       selection &&
       available.some(
