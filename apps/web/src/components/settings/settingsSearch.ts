@@ -323,6 +323,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Open pull requests in Test Rig",
     to: "/settings/diffs",
   },
+  { id: "auto-pull", title: "Automatically pull", to: "/settings/source-control" },
   {
     id: "remove-agent-credits",
     title: "Remove agent credits when merging",

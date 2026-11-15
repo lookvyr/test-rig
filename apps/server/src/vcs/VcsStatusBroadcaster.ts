@@ -23,9 +23,12 @@ import type {
   VcsStatusSubscriptionInput,
 } from "@t3tools/contracts";
 import { mergeGitStatusParts } from "@t3tools/shared/git";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ServerSettings from "../serverSettings.ts";
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30);
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30);
@@ -155,6 +158,32 @@ export function remoteRefreshFailureDelay(
   return Duration.max(configuredInterval, cappedBackoff);
 }
 
+/** Whether a checkout's project keeps its default branch current with automatic pulls. */
+export class VcsAutoPullPolicy extends Context.Reference<{
+  readonly isEnabled: (cwd: string) => Effect.Effect<boolean, never>;
+}>("t3/vcs/VcsAutoPullPolicy", {
+  defaultValue: () => ({ isEnabled: () => Effect.succeed(false) }),
+}) {}
+
+export const layerAutoPullPolicy = Layer.effect(
+  VcsAutoPullPolicy,
+  Effect.gen(function* () {
+    const projects = yield* ProjectStore.ProjectStoreV2;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
+    return {
+      isEnabled: Effect.fn("VcsAutoPullPolicy.isEnabled")(
+        function* (cwd: string) {
+          const project = yield* projects.findActiveByWorkspaceRoot(cwd);
+          if (project._tag === "None") return false;
+          const settings = yield* serverSettings.getSettings;
+          return resolveProjectSettings(settings, project.value.projectId).settings.defaultAutoPull;
+        },
+        Effect.orElseSucceed(() => false),
+      ),
+    };
+  }),
+);
+
 export class VcsStatusBroadcaster extends Context.Service<
   VcsStatusBroadcaster,
   {
@@ -193,6 +222,7 @@ const normalizeCwd = (cwd: string) =>
 
 export const make = Effect.gen(function* () {
   const workflow = yield* GitWorkflowService.GitWorkflowService;
+  const autoPullPolicy = yield* VcsAutoPullPolicy;
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
   const fs = yield* FileSystem.FileSystem;
   const changesPubSub = yield* Effect.acquireRelease(
@@ -390,9 +420,51 @@ export const make = Effect.gen(function* () {
     return yield* refreshLocalStatusCore(cwd);
   });
 
+  // Fast-forwards a clean default-branch checkout that is only behind its upstream, when its
+  // project opted in. Anything else (local commits, edits, another branch) is left alone.
+  // Projects store their roots as opened, not symlink-resolved, so the policy is asked about the
+  // paths clients subscribed with as well as the normalized one.
+  const maybeAutoPull = Effect.fn("VcsStatusBroadcaster.maybeAutoPull")(function* (
+    cwd: string,
+    remote: VcsStatusRemoteResult | null,
+    policyCwds: ReadonlyArray<string>,
+  ) {
+    if (
+      remote === null ||
+      !remote.hasUpstream ||
+      remote.aheadCount > 0 ||
+      remote.behindCount <= 0
+    ) {
+      return false;
+    }
+    const enabled = yield* Effect.forEach(
+      [...new Set([cwd, ...policyCwds])],
+      autoPullPolicy.isEnabled,
+      { concurrency: "unbounded" },
+    );
+    if (!enabled.some(Boolean)) return false;
+    return yield* Effect.gen(function* () {
+      yield* workflow.invalidateLocalStatus(cwd);
+      const local = yield* workflow.localStatus({ cwd });
+      if (!local.isRepo || !local.isDefaultRef || local.hasWorkingTreeChanges) return false;
+      yield* workflow.pullCurrentBranch(cwd);
+      return true;
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Automatic project pull failed", {
+          cwdLength: cwd.length,
+          errorTag: error._tag,
+        }).pipe(Effect.as(false)),
+      ),
+    );
+  });
+
   const refreshRemoteStatus = Effect.fn("VcsStatusBroadcaster.refreshRemoteStatus")(function* (
     cwd: string,
-    options?: { readonly refreshUpstream?: boolean },
+    options?: {
+      readonly refreshUpstream?: boolean;
+      readonly policyCwds?: ReadonlyArray<string>;
+    },
   ) {
     return yield* withRemoteWriteLock(
       cwd,
@@ -401,6 +473,17 @@ export const make = Effect.gen(function* () {
           yield* workflow.invalidateRemoteStatus(cwd);
         }
         const remote = yield* workflow.remoteStatus({ cwd }, options);
+        // Only a fresh fetch can justify an automatic pull.
+        const pulled =
+          options?.refreshUpstream === false
+            ? false
+            : yield* maybeAutoPull(cwd, remote, options?.policyCwds ?? []);
+        if (pulled) {
+          yield* workflow.invalidateStatus(cwd);
+          yield* refreshLocalStatusCore(cwd);
+          const refreshed = yield* workflow.remoteStatus({ cwd }, { refreshUpstream: false });
+          return yield* updateCachedRemoteStatus(cwd, refreshed, { publish: true });
+        }
 
         return yield* updateCachedRemoteStatus(cwd, remote, { publish: true });
       }),
@@ -492,6 +575,7 @@ export const make = Effect.gen(function* () {
 
         const exit = yield* refreshRemoteStatus(cwd, {
           refreshUpstream: !Duration.isZero(configuredInterval),
+          policyCwds: [...demandCwds.keys()],
         }).pipe(Effect.exit);
         if (Exit.isSuccess(exit)) {
           yield* Ref.set(needsInitialRefreshRef, false);

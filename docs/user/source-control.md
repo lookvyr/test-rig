@@ -108,6 +108,12 @@ After creating or switching branches outside Test Rig, open the branch selector 
 
 When you publish a feature branch that tracks a differently named base branch, Test Rig remembers that base before updating upstream tracking. This also applies when you choose a remote explicitly; an explicitly selected base is preserved.
 
+To keep a project's default branch current, turn on **Settings → Source control →
+Automatically pull**. When a background refresh finds the default branch behind its
+remote, Test Rig pulls it, but only on a checkout with no local commits or uncommitted
+changes. Other branches are never pulled automatically, and a fetch interval of `0`
+turns automatic pulls off along with background fetches.
+
 Test Rig refreshes remote branch status in the background. The default fetch interval is 30 seconds. Change it in **Settings** → **Maintenance** → **Background activity**: choose **Advanced**, then set **Git fetch interval**. Set the interval to `0` if Git should contact remotes only after an explicit action.
 
 The background-activity policy can pause a scheduled fetch while the machine is locked, on battery, or in another restricted state. The fetch interval controls how often a refresh becomes eligible to run.

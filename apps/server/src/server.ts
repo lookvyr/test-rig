@@ -281,7 +281,17 @@ const VcsLayerLive = Layer.empty.pipe(
       Layer.provide(SourceControlProviderRegistryLayerLive),
     ),
   ),
-  Layer.provideMerge(VcsStatusBroadcaster.layer.pipe(Layer.provide(GitWorkflowLayerLive))),
+  Layer.provideMerge(
+    VcsStatusBroadcaster.layer.pipe(
+      Layer.provide(GitWorkflowLayerLive),
+      Layer.provide(
+        VcsStatusBroadcaster.layerAutoPullPolicy.pipe(
+          Layer.provide(ProjectStoreV2.layer),
+          Layer.provide(ServerSettingsLayerLive),
+        ),
+      ),
+    ),
+  ),
 );
 
 const CheckpointingLayerLive = Layer.empty.pipe(

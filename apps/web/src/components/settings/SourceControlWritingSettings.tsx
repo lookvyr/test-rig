@@ -82,6 +82,27 @@ export function RepositoriesSettingsSection({ environmentId }: { environmentId: 
   return (
     <SettingsSection title="Repositories">
       <SettingsRow
+        {...searchableSetting("auto-pull")}
+        description="Keep the default branch current on clean checkouts by pulling when the remote is ahead and you have no local commits or edits."
+        resetAction={
+          settings.defaultAutoPull !== DEFAULT_UNIFIED_SETTINGS.defaultAutoPull ? (
+            <SettingResetButton
+              label="automatically pull"
+              onClick={() =>
+                updateSettings({ defaultAutoPull: DEFAULT_UNIFIED_SETTINGS.defaultAutoPull })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            checked={settings.defaultAutoPull}
+            onCheckedChange={(checked) => updateSettings({ defaultAutoPull: Boolean(checked) })}
+            aria-label="Automatically pull"
+          />
+        }
+      />
+      <SettingsRow
         {...searchableSetting("remove-agent-credits")}
         description="Strip agent co-author lines and generated-by footers from the merge commit message when merging a pull request."
         resetAction={
