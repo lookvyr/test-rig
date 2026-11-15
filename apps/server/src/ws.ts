@@ -1,4 +1,5 @@
 import { readDatabaseStorage } from "./persistence/DatabaseMaintenance.ts";
+import * as StorageCleanup from "./storageCleanup.ts";
 import { resolveDoctorCommand } from "./cli/invocation.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
@@ -344,6 +345,7 @@ const makeWsRpcLayer = (
       const skillLibrary = yield* SkillLibrary.SkillLibraryService;
       const toolsProjectScopes = yield* ToolsProjectScopes.ToolsProjectScopesService;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const storageCleanup = yield* StorageCleanup.StorageCleanup;
       const appMcpOAuth = yield* AppMcpOAuth;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -837,6 +839,14 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.serverRunStorageCleanup]: (_input) =>
+          observeRpcEffect(WS_METHODS.serverRunStorageCleanup, storageCleanup.runNow, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.serverGetStorageCleanupReport]: (_input) =>
+          observeRpcStream(WS_METHODS.serverGetStorageCleanupReport, storageCleanup.reports, {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverGetSettings]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverGetSettings,

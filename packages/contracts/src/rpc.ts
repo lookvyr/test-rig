@@ -265,6 +265,7 @@ import {
 import {
   DatabaseStorageStatus,
   DatabaseStorageError,
+  StorageCleanupReport,
   ServerSettings,
   ServerSettingsError,
   ServerSettingsPatch,
@@ -404,6 +405,8 @@ export const WS_METHODS = {
   serverRemoveKeybinding: "server.removeKeybinding",
   serverGetSettings: "server.getSettings",
   serverGetDatabaseStorage: "server.getDatabaseStorage",
+  serverRunStorageCleanup: "server.runStorageCleanup",
+  serverGetStorageCleanupReport: "server.getStorageCleanupReport",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
@@ -494,6 +497,23 @@ export const WsServerGetDatabaseStorageRpc = Rpc.make(WS_METHODS.serverGetDataba
   success: DatabaseStorageStatus,
   error: Schema.Union([DatabaseStorageError, EnvironmentAuthorizationError]),
 });
+
+export const WsServerRunStorageCleanupRpc = Rpc.make(WS_METHODS.serverRunStorageCleanup, {
+  payload: Schema.Struct({}),
+  success: StorageCleanupReport,
+  error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+/** Streams the latest cleanup report, then each new one. Null until the first sweep finishes. */
+export const WsServerGetStorageCleanupReportRpc = Rpc.make(
+  WS_METHODS.serverGetStorageCleanupReport,
+  {
+    payload: Schema.Struct({}),
+    success: Schema.NullOr(StorageCleanupReport),
+    error: EnvironmentAuthorizationError,
+    stream: true,
+  },
+);
 
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
   payload: Schema.Struct({}),
@@ -1526,6 +1546,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerGetDatabaseStorageRpc,
+  WsServerRunStorageCleanupRpc,
+  WsServerGetStorageCleanupReportRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,

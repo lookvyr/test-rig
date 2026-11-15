@@ -32,6 +32,14 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live behind the VCS driver contract in `apps/server/src/vcs/VcsDriver.ts`, implemented by [GitVcsDriverCore.ts][3].
 
+#### Managed worktree folder
+
+A folder whose worktrees Test Rig may remove: `ServerConfig.worktreesDir`, the `worktreesDirectory` setting, and every folder in `previousWorktreesDirectories` (server-maintained when the setting changes). Resolved by `managedWorktreesDirectories` in [worktreesDirectory.ts][25]. A worktree dev home only manages its own `worktreesDir`, because its seeded data can point at real worktrees.
+
+#### Storage cleanup
+
+The server service in [storageCleanup.ts][26] that removes managed worktrees by rule (`storageCleanup` settings, overridable per project through `worktreeCleanup`), deletes expired browser artifacts and rotated logs, and publishes the last full run as a `StorageCleanupReport`. Quick passes (settlement events and every minute) evaluate the time-based worktree rules; hourly and **Delete now** passes add the Git-based rules (merged, unchanged) and file retention. It owns the per-thread `worktreeCleanup` status (`pending` / `retained`) shown in the sidebar and composer. It replaces the earlier `WorktreeCleanup` service; the legacy `autoRemoveSettledWorktrees: false` setting is folded into `storageCleanup.worktreeSettledAfterDays: null` when settings load. Deleting a thread does not remove its worktree, so `worktreeOnDelete` is accepted but ignored.
+
 #### Workspace area
 
 A keyboard focus stop in the web client, marked with `workspaceAreaProps(name, order, label)`
@@ -224,3 +232,5 @@ A server-owned tab that no desktop renders, marked `headless` on its preview sna
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
+[25]: ../../apps/server/src/worktreesDirectory.ts
+[26]: ../../apps/server/src/storageCleanup.ts

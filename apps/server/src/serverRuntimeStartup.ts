@@ -1,4 +1,4 @@
-import { WorktreeCleanup } from "./workspace/WorktreeCleanup.ts";
+import { StorageCleanup } from "./storageCleanup.ts";
 import {
   CommandId,
   DEFAULT_MODEL,
@@ -337,7 +337,7 @@ export const make = (options?: StartupOptions) =>
         orchestrator.recoverDelegatedTasks,
       );
       yield* EffectWorker.runDaemon.pipe(Effect.forkIn(workerScope));
-      yield* (yield* WorktreeCleanup).start().pipe(Effect.provideService(Scope.Scope, workerScope));
+      yield* (yield* StorageCleanup).start().pipe(Effect.provideService(Scope.Scope, workerScope));
       const bootstrapTargets = yield* resolveAutoBootstrapWelcomeTargets;
       yield* forkParked(legacyImporter.importPendingTranscripts);
       const welcomeBase = yield* resolveWelcomeBase;

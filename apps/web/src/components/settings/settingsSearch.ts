@@ -298,8 +298,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/worktrees",
   },
   {
-    id: "automatic-worktree-cleanup",
-    title: "Automatic worktree cleanup",
+    id: "storage-worktrees-location",
+    title: "Worktree location",
+    to: "/settings/worktrees",
+  },
+  {
+    id: "storage-worktrees",
+    title: "Worktree cleanup",
+    to: "/settings/worktrees",
+  },
+  {
+    id: "storage-worktree-keep-when",
+    title: "Keep worktrees with local changes",
     to: "/settings/worktrees",
   },
   {
@@ -331,6 +341,8 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   { id: "unpin-confirmation", title: "Unpin confirmation", to: "/settings/general" },
   { id: "keep-awake", title: "Keep awake while agents work", to: "/settings/maintenance" },
+  { id: "storage-artifacts", title: "Artifacts and logs", to: "/settings/maintenance" },
+  { id: "storage-delete-now", title: "Delete now", to: "/settings/maintenance" },
   {
     id: "auto-settle-keep-pull-requests",
     title: "Keep threads with a pull request",

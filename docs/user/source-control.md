@@ -230,17 +230,42 @@ A conversation already attached to a worktree rejects another move. The new
 worktree starts from the selected Git base; uncommitted files in the original
 checkout are not copied into it.
 
-## Automatic worktree cleanup
+## Worktree location
 
-**Settings** → **Worktrees** → **Automatic worktree cleanup** is on by default. Test Rig removes unused managed worktrees when their threads settle, including after a pull request is merged or closed. Existing settled threads are eligible too.
+**Settings** → **Worktrees** → **Worktree location** sets the folder where new worktrees are created, such as `~/worktrees`. Leave it empty to use the Test Rig home folder. Use a dedicated folder inside your home folder; your home folder itself and its parents are not accepted, because cleanup treats everything in the worktree folder as Test Rig's. Changing it does not move existing worktrees. Cleanup keeps managing worktrees in earlier locations.
+
+## Worktree cleanup
+
+**Settings** → **Worktrees** → **Cleanup** decides when Test Rig removes unused managed worktrees. By default, **Delete settled worktrees** is set to 0 days: a worktree is removed as soon as every thread using it settles, including after a pull request is merged or closed. Existing settled threads are eligible too. If you turned automatic worktree cleanup off in an earlier version, all rules start off.
+
+Each rule can be turned on separately:
+
+- **Delete settled worktrees** removes a worktree this many days after its threads settle.
+- **Delete merged worktrees** removes a worktree once its pull request is merged and its commits reached the remote.
+- **Delete inactive worktrees** removes a worktree after its threads have been inactive for this many days, settled or not.
+- **Delete unchanged worktrees**, under **Advanced**, removes a worktree with no commits beyond the default branch, once every thread using it has settled.
+
+Settled and inactive rules apply within about a minute. Merged and unchanged worktrees are checked about once an hour, and when you press **Delete now** in **Settings** → **Maintenance**.
 
 The branch and conversation stay available. Sending a new prompt recreates the checkout from its branch and launches the project's setup script, when configured.
 
-Cleanup requires a clean Git working directory: staged changes, unstaged changes, and non-ignored untracked files prevent removal. Ignored files and directories, including `.env`, `.husky/_/`, `node_modules`, and build outputs, are deleted with the worktree. They are not restored from the branch when the checkout is recreated; use the project's setup script to recreate any needed local configuration and generated files.
+**Keep worktrees with local changes**, under **Advanced**, decides which files protect a worktree:
 
-Running agents, checkpoints, terminal jobs, pins, and other threads sharing the checkout prevent removal. Idle sessions and terminals close during cleanup.
+- **Uncommitted changes** (the default): staged changes, unstaged changes, and untracked files prevent removal. Ignored files and directories, including `.env`, `.husky/_/`, `node_modules`, and build outputs, are deleted with the worktree.
+- **Any local files**: ignored files also prevent removal, except `node_modules`.
+- **Edited tracked files**: only staged or unstaged edits to tracked files prevent removal. Untracked and ignored files, including `.env`, are deleted.
 
-When cleanup is waiting or keeps a checkout, a small worktree icon in the sidebar shows the reason on hover. The same explanation appears above that thread's composer. Cleanup retries automatically. Turn the setting off to keep worktrees until you remove them yourself.
+Deleted files are not restored from the branch when the checkout is recreated; use the project's setup script to recreate any needed local configuration and generated files.
+
+Running agents, checkpoints, terminal jobs, pins, snoozes, and other threads sharing the checkout prevent removal. Idle sessions and terminals close during cleanup.
+
+When cleanup is waiting or keeps a checkout, a small worktree icon in the sidebar shows the reason on hover. The same explanation appears above that thread's composer. Cleanup retries automatically. Turn every rule off to keep worktrees until you remove them yourself.
+
+## Storage cleanup
+
+**Settings** → **Maintenance** → **Artifacts and logs** can delete saved browser captures and rotated log files after a number of days. Both are off by default. Current logs are never deleted.
+
+**Delete now** runs every cleanup rule immediately. **Last run** lists what the most recent full cleanup removed or kept, and why.
 
 ## Available provider actions
 

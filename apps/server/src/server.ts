@@ -7,7 +7,7 @@ import {
 import * as ProjectionStoreV2 from "./orchestration-v2/ProjectionStore.ts";
 import { projectHttpApiLayer } from "./project/http.ts";
 import * as ProviderContinuationRequests from "./orchestration-v2/ProviderContinuationRequests.ts";
-import * as WorktreeCleanup from "./workspace/WorktreeCleanup.ts";
+import * as StorageCleanup from "./storageCleanup.ts";
 import { EnvironmentHttpApi } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -431,7 +431,7 @@ const RuntimeCoreDependenciesLive = Layer.mergeAll(
 
 const RuntimeDependenciesLive = Layer.mergeAll(
   CheckpointDiffQuery.layer,
-  WorktreeCleanup.layer,
+  StorageCleanup.layer,
   KeepAwake.layer,
 ).pipe(
   Layer.provideMerge(RuntimeCoreDependenciesLive),

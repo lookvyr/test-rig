@@ -62,7 +62,9 @@ describe("searchSettings", () => {
   it("matches normalized title substrings", () => {
     expect(searchSettings("  WORD   WRAP  ", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("worktree").map((item) => item.id)).toEqual([
-      "automatic-worktree-cleanup",
+      "storage-worktrees-location",
+      "storage-worktrees",
+      "storage-worktree-keep-when",
       "worktree-branch-naming",
     ]);
     expect(searchSettings("worktree branch naming").map((item) => item.id)).toEqual([

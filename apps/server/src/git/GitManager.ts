@@ -733,6 +733,11 @@ export const make = Effect.gen(function* () {
         );
     return resolveProjectSettings(settings, projectId).settings;
   });
+  // Best effort: a settings read failure falls back to the default worktrees folder.
+  const readWorktreesDirectory = serverSettingsService.getSettings.pipe(
+    Effect.map((settings) => settings.worktreesDirectory),
+    Effect.orElseSucceed(() => ""),
+  );
   const createWorktree: GitManager["Service"]["createWorktree"] = Effect.fn(
     "GitManager.createWorktree",
   )(function* (input, options) {
@@ -743,7 +748,11 @@ export const make = Effect.gen(function* () {
             Effect.map((settings) => settings.worktreeSubmodules),
             Effect.orElseSucceed(() => null),
           );
-    return yield* gitCore.createWorktree(input, { ...options, submodules });
+    return yield* gitCore.createWorktree(input, {
+      ...options,
+      submodules,
+      worktreesDirectory: yield* readWorktreesDirectory,
+    });
   });
 
   const readRepositoryInstructions = (cwd: string, fileName: string) =>
@@ -2662,6 +2671,7 @@ export const make = Effect.gen(function* () {
             Effect.map((settings) => settings.worktreeSubmodules),
             Effect.orElseSucceed(() => null),
           ),
+          worktreesDirectory: yield* readWorktreesDirectory,
         },
       );
       // Worktrees share branch configuration; materialization already fetched and set its upstream.

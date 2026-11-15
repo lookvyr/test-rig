@@ -4,6 +4,11 @@ import {
   resolveThreadDetailsVisibility,
 } from "../chat/threadDetailsItems";
 import { AdvancedSettings } from "./AdvancedSettings";
+import {
+  StorageCleanupSections,
+  WorktreeCleanupSection,
+  WorktreesDirectoryRow,
+} from "./StorageSettings";
 import { BranchNamingSection } from "./BranchNamingSettings";
 import { AutoSettleRows, SidebarWorkingShelfRow } from "./LabsSettingsPanel";
 import { presentThreadShell } from "@t3tools/client-runtime/state/models";
@@ -328,9 +333,11 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
         ? ["New worktrees start from origin"]
         : []),
-      ...(settings.autoRemoveSettledWorktrees !==
-      DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees
-        ? ["Automatic worktree cleanup"]
+      ...(!Equal.equals(settings.storageCleanup, DEFAULT_UNIFIED_SETTINGS.storageCleanup)
+        ? ["Storage cleanup"]
+        : []),
+      ...(settings.worktreesDirectory !== DEFAULT_UNIFIED_SETTINGS.worktreesDirectory
+        ? ["Worktree location"]
         : []),
       ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
         ? ["Auto-resume limited threads"]
@@ -364,7 +371,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
-      settings.autoRemoveSettledWorktrees,
+      settings.storageCleanup,
+      settings.worktreesDirectory,
       settings.autoResumeLimitedThreads,
       settings.snoozeLimitedThreads,
       settings.snoozePresets,
@@ -484,7 +492,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
-      autoRemoveSettledWorktrees: DEFAULT_UNIFIED_SETTINGS.autoRemoveSettledWorktrees,
+      storageCleanup: DEFAULT_UNIFIED_SETTINGS.storageCleanup,
+      worktreesDirectory: DEFAULT_UNIFIED_SETTINGS.worktreesDirectory,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
@@ -2554,6 +2563,7 @@ export function WorktreesSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title="Creation">
+        <WorktreesDirectoryRow />
         <SettingsRow
           {...searchableSetting("start-from-origin")}
           description="Base new worktrees on the latest matching branch on the remote instead of your local branch."
@@ -2588,29 +2598,7 @@ export function WorktreesSettingsPanel() {
       <SettingsSection title="Branches">
         <BranchNamingSection />
       </SettingsSection>
-      <SettingsSection title="Cleanup">
-        <SettingsRow
-          {...searchableSetting("automatic-worktree-cleanup")}
-          description="Remove unused worktrees when threads settle and Git is clean, including ignored files such as .env. Keeps branches and conversations."
-          resetAction={
-            !settings.autoRemoveSettledWorktrees ? (
-              <SettingResetButton
-                label="automatic worktree cleanup"
-                onClick={() => updateSettings({ autoRemoveSettledWorktrees: true })}
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.autoRemoveSettledWorktrees}
-              onCheckedChange={(autoRemoveSettledWorktrees) =>
-                updateSettings({ autoRemoveSettledWorktrees })
-              }
-              aria-label="Automatically remove worktrees when threads settle"
-            />
-          }
-        />
-      </SettingsSection>
+      <WorktreeCleanupSection />
     </SettingsPageContainer>
   );
 }
@@ -2732,6 +2720,7 @@ export function MaintenanceSettingsPanel() {
         />
         <KeepAwakeRow />
       </SettingsSection>
+      <StorageCleanupSections />
       <SettingsSection title="Diagnostics">
         <SettingsRow
           {...searchableSetting("diagnostics")}

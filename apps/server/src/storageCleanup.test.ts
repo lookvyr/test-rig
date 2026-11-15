@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { EffectOutboxV2 } from "../orchestration-v2/EffectOutbox.ts";
+import { EffectOutboxV2 } from "./orchestration-v2/EffectOutbox.ts";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -13,23 +13,25 @@ import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   DEFAULT_SERVER_SETTINGS,
   OrchestrationV2ThreadShell,
+  type ServerSettings,
   ProviderSessionId,
   ThreadId,
   ProjectId,
   type TerminalSummary,
 } from "@t3tools/contracts";
-import { ServerConfig } from "../config.ts";
-import { ServerSettingsService } from "../serverSettings.ts";
-import { ProjectStoreV2 } from "../orchestration-v2/ProjectStore.ts";
-import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
-import { ProviderSessionManagerV2 } from "../orchestration-v2/ProviderSessionManager.ts";
-import { TerminalManager } from "../terminal/Manager.ts";
-import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
-import { GitManager } from "../git/GitManager.ts";
-import * as Cleanup from "./WorktreeCleanup.ts";
+import { ServerConfig } from "./config.ts";
+import { ServerSettingsService } from "./serverSettings.ts";
+import { ProjectStoreV2 } from "./orchestration-v2/ProjectStore.ts";
+import { ThreadManagementService } from "./orchestration-v2/ThreadManagementService.ts";
+import { ProviderSessionManagerV2 } from "./orchestration-v2/ProviderSessionManager.ts";
+import { TerminalManager } from "./terminal/Manager.ts";
+import { GitVcsDriver } from "./vcs/GitVcsDriver.ts";
+import { GitManager } from "./git/GitManager.ts";
+import * as Cleanup from "./storageCleanup.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -99,7 +101,7 @@ const fixture = Effect.gen(function* () {
     hasActionableProposedPlan: false,
   });
   let threads = [thread];
-  let enabled = true;
+  let settings: ServerSettings = DEFAULT_SERVER_SETTINGS;
   let merged = false;
   let terminals: TerminalSummary[] = [];
   let afterStop = () => {};
@@ -123,10 +125,7 @@ const fixture = Effect.gen(function* () {
     Layer.provide(ServerConfig.layerTest(repo, root)),
     Layer.provide(
       Layer.mock(ServerSettingsService, {
-        getSettings: Effect.sync(() => ({
-          ...DEFAULT_SERVER_SETTINGS,
-          autoRemoveSettledWorktrees: enabled,
-        })),
+        getSettings: Effect.sync(() => settings),
         subscribeChanges: Effect.succeed(Stream.empty),
       }),
     ),
@@ -178,6 +177,24 @@ const fixture = Effect.gen(function* () {
     ),
     Layer.provide(
       Layer.mock(GitVcsDriver, {
+        execute: (input) =>
+          Effect.sync(() => {
+            const result = NodeChildProcess.spawnSync("git", [...input.args], {
+              cwd: input.cwd,
+              encoding: "utf8",
+            });
+            if (result.status !== 0 && input.allowNonZeroExit !== true)
+              throw new Error(`git ${input.args.join(" ")} failed: ${result.stderr}`);
+            return {
+              exitCode: ChildProcessSpawner.ExitCode(result.status ?? 1),
+              stdout: result.stdout,
+              stderr: result.stderr,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            };
+          }),
+        resolveCommit: (input) =>
+          Effect.sync(() => ({ commitSha: git(input.cwd, "rev-parse", input.revision).trim() })),
         statusDetailsLocal: (cwd) =>
           Effect.sync(() => ({
             isRepo: true,
@@ -225,7 +242,7 @@ const fixture = Effect.gen(function* () {
     Layer.provide(NodeServices.layer),
   );
   const context = yield* Layer.build(layer);
-  const service = Context.get(context, Cleanup.WorktreeCleanup);
+  const service = Context.get(context, Cleanup.StorageCleanup);
   const state = {
     get: (id: ThreadId) => threads.find((thread) => thread.id === id)?.worktreeCleanup ?? null,
   };
@@ -234,7 +251,8 @@ const fixture = Effect.gen(function* () {
     checkout,
     thread,
     state,
-    sweep: () => service.sweep.pipe(Effect.provide(context)),
+    sweep: (mode: Cleanup.StorageCleanupMode = "quick") =>
+      service.sweep(mode).pipe(Effect.provide(context)),
     start: () => service.start().pipe(Effect.provide(context)),
     pendingEffects: (value: boolean) => {
       pendingWorkspaceEffects = value;
@@ -243,8 +261,24 @@ const fixture = Effect.gen(function* () {
       sessions = value;
     },
     enable: (value: boolean) => {
-      enabled = value;
+      settings = {
+        ...settings,
+        storageCleanup: {
+          ...settings.storageCleanup,
+          worktreeSettledAfterDays: value ? 0 : null,
+        },
+      };
     },
+    rules: (value: Partial<ServerSettings["storageCleanup"]>) => {
+      settings = { ...settings, storageCleanup: { ...settings.storageCleanup, ...value } };
+    },
+    settings: (value: Partial<ServerSettings>) => {
+      settings = { ...settings, ...value };
+    },
+    config: yield* ServerConfig.pipe(
+      Effect.provide(ServerConfig.layerTest(repo, root).pipe(Layer.provide(NodeServices.layer))),
+    ),
+    latestReport: () => service.latestReport,
     setThreads: (value: typeof threads) => {
       threads = value;
     },
@@ -528,4 +562,174 @@ describe("settled worktree cleanup", () => {
       expect(f.state.get(f.thread.id)?.state).toBe("pending");
     }),
   );
+});
+
+describe("worktree cleanup rules", () => {
+  it.live("waits out a settled-days rule before removing", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.rules({ worktreeSettledAfterDays: 3650 });
+      const kept = yield* f.sweep("manual");
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+      expect(f.state.get(f.thread.id)).toBeNull();
+      expect(kept.entries[0]?.reason).toMatch(/^Settled for \d+ of 3650 days$/);
+      f.rules({ worktreeSettledAfterDays: 30 });
+      const removed = yield* f.sweep("manual");
+      expect(NodeFS.existsSync(f.checkout)).toBe(false);
+      expect(removed.entries[0]).toMatchObject({ outcome: "removed", path: f.checkout });
+      expect(removed.counts.removed).toBe(1);
+    }),
+  );
+  it.live("removes an inactive worktree whose thread never settled", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.setThreads([{ ...f.thread, settledOverride: null, settledAt: null }]);
+      f.rules({ worktreeAfterDays: 3650 });
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+      f.rules({ worktreeAfterDays: 30 });
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(false);
+    }),
+  );
+  it.live("keeps an inactive worktree with changes without flagging its active thread", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.setThreads([{ ...f.thread, settledOverride: null, settledAt: null }]);
+      f.rules({ worktreeSettledAfterDays: null, worktreeAfterDays: 30 });
+      NodeFS.writeFileSync(NodePath.join(f.checkout, "tracked.txt"), "changed");
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+      expect(f.state.get(f.thread.id)?.state).toBeUndefined();
+    }),
+  );
+  it.live("removes untracked files when only edited tracked files count", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.rules({ worktreeKeepWhen: "tracked-changes" });
+      NodeFS.writeFileSync(NodePath.join(f.checkout, "scratch.txt"), "throwaway");
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(false);
+    }),
+  );
+  it.live("keeps ignored files when any local file counts", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.rules({ worktreeKeepWhen: "any-local-files" });
+      NodeFS.mkdirSync(NodePath.join(f.checkout, "node_modules"));
+      NodeFS.writeFileSync(NodePath.join(f.checkout, "node_modules", "cache"), "fine");
+      yield* f.sweep();
+      expect(NodeFS.existsSync(f.checkout)).toBe(false);
+    }),
+  );
+  it.live("keeps a worktree holding an ignored .env when any local file counts", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.rules({ worktreeKeepWhen: "any-local-files" });
+      NodeFS.writeFileSync(NodePath.join(f.checkout, ".env"), "SECRET=1");
+      const result = yield* f.sweep("manual");
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+      expect(f.state.get(f.thread.id)).toEqual({
+        state: "retained",
+        reason: "Worktree kept because it has local files.",
+      });
+      expect(result.entries[0]?.reason).toBe("Has ignored files (.env)");
+    }),
+  );
+  it.live("removes an unchanged worktree only on a full pass", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.rules({ worktreeSettledAfterDays: null, worktreeUnchanged: true });
+      yield* f.sweep("quick");
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+      yield* f.sweep("automatic");
+      expect(NodeFS.existsSync(f.checkout)).toBe(false);
+    }),
+  );
+  it.live("never treats an unsettled thread's worktree as unchanged", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.setThreads([{ ...f.thread, settledOverride: null, settledAt: null }]);
+      f.rules({
+        worktreeSettledAfterDays: null,
+        worktreeUnchanged: true,
+        worktreeKeepWhen: "tracked-changes",
+      });
+      NodeFS.writeFileSync(NodePath.join(f.checkout, "draft.txt"), "uncommitted work");
+      yield* f.sweep("manual");
+      expect(NodeFS.existsSync(NodePath.join(f.checkout, "draft.txt"))).toBe(true);
+    }),
+  );
+  it.live("keeps a worktree with commits beyond the project branch", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.rules({ worktreeSettledAfterDays: null, worktreeUnchanged: true });
+      git(f.checkout, "commit", "--allow-empty", "-m", "work");
+      const result = yield* f.sweep("manual");
+      expect(NodeFS.existsSync(f.checkout)).toBe(true);
+      expect(result.entries[0]?.reason).toBe("Has commits beyond the project branch");
+    }),
+  );
+  it.live("cleans worktrees in a folder the worktree location moved away from", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const previous = NodePath.join(NodePath.dirname(f.repo), "elsewhere");
+      const checkout = NodePath.join(previous, "repo", "moved");
+      git(f.repo, "worktree", "add", "-b", "moved", checkout);
+      f.setThreads([{ ...f.thread, worktreePath: checkout, branch: "moved" }]);
+      yield* f.sweep();
+      expect(NodeFS.existsSync(checkout)).toBe(true);
+      f.settings({ worktreesDirectory: "", previousWorktreesDirectories: [previous] });
+      yield* f.sweep();
+      expect(NodeFS.existsSync(checkout)).toBe(false);
+    }),
+  );
+  it.live("deletes expired browser artifacts and rotated logs on a full pass", () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const old = DateTime.toDateUtc(DateTime.subtract(yield* DateTime.now, { days: 40 }));
+      const write = (file: string, stale: boolean) => {
+        NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
+        NodeFS.writeFileSync(file, "x");
+        if (stale) NodeFS.utimesSync(file, old, old);
+      };
+      write(NodePath.join(f.config.browserArtifactsDir, "old.png"), true);
+      write(NodePath.join(f.config.browserArtifactsDir, "new.png"), false);
+      write(NodePath.join(f.config.logsDir, "server.log.1"), true);
+      write(NodePath.join(f.config.logsDir, "server.log"), true);
+      f.rules({ browserArtifactsAfterDays: 30, logsAfterDays: 30 });
+      yield* f.sweep("quick");
+      expect(NodeFS.existsSync(NodePath.join(f.config.browserArtifactsDir, "old.png"))).toBe(true);
+      const result = yield* f.sweep("manual");
+      expect(NodeFS.existsSync(NodePath.join(f.config.browserArtifactsDir, "old.png"))).toBe(false);
+      expect(NodeFS.existsSync(NodePath.join(f.config.browserArtifactsDir, "new.png"))).toBe(true);
+      expect(NodeFS.existsSync(NodePath.join(f.config.logsDir, "server.log.1"))).toBe(false);
+      // The current log is never rotated-out, however old.
+      expect(NodeFS.existsSync(NodePath.join(f.config.logsDir, "server.log"))).toBe(true);
+      expect(result.trigger).toBe("manual");
+      expect(result.entries.filter((entry) => entry.kind !== "worktree")).toMatchObject([
+        { kind: "browser-artifacts", outcome: "removed", files: 1 },
+        { kind: "logs", outcome: "removed", files: 1 },
+      ]);
+      expect(yield* f.latestReport()).toEqual(result);
+    }),
+  );
+});
+
+describe("storageCleanupPullRequestMerged", () => {
+  const worktree = { branch: "task", defaultBranch: "main", integrated: false, headOnRemote: true };
+  const pr = { state: "merged" as const, headRef: "task", baseRef: "main" };
+  it("accepts a squash-merged PR for this branch whose commits reached the remote", () => {
+    expect(Cleanup.storageCleanupPullRequestMerged(pr, worktree)).toBe(true);
+  });
+  it("rejects local commits made after the merge, open PRs and other branches", () => {
+    expect(Cleanup.storageCleanupPullRequestMerged(pr, { ...worktree, headOnRemote: false })).toBe(
+      false,
+    );
+    expect(Cleanup.storageCleanupPullRequestMerged({ ...pr, state: "open" }, worktree)).toBe(false);
+    expect(Cleanup.storageCleanupPullRequestMerged({ ...pr, headRef: "other" }, worktree)).toBe(
+      false,
+    );
+    expect(Cleanup.storageCleanupPullRequestMerged(null, worktree)).toBe(false);
+  });
 });

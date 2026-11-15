@@ -254,7 +254,9 @@ export function applyServerSettingsPatch(
               ? {
                   mode: "custom" as const,
                   rules: {
+                    worktreeKeepWhen: next.storageCleanup.worktreeKeepWhen,
                     worktreeAfterDays: next.storageCleanup.worktreeAfterDays,
+                    worktreeSettledAfterDays: next.storageCleanup.worktreeSettledAfterDays,
                     worktreeOnMerge: next.storageCleanup.worktreeOnMerge,
                     worktreeOnDelete: next.storageCleanup.worktreeOnDelete,
                     worktreeUnchanged: next.storageCleanup.worktreeUnchanged,
@@ -281,6 +283,21 @@ export function applyServerSettingsPatch(
       : {}),
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
+      : {}),
+    // Moving the worktree folder keeps the old one managed, so cleanup still finds its worktrees.
+    ...(patch.worktreesDirectory !== undefined &&
+    patch.worktreesDirectory !== current.worktreesDirectory
+      ? {
+          previousWorktreesDirectories: [
+            ...current.previousWorktreesDirectories.filter(
+              (directory) => directory !== patch.worktreesDirectory,
+            ),
+            ...(current.worktreesDirectory !== "" &&
+            !current.previousWorktreesDirectories.includes(current.worktreesDirectory)
+              ? [current.worktreesDirectory]
+              : []),
+          ],
+        }
       : {}),
     ...(mcpServersPatch !== undefined
       ? { mcpServers: mergeSettingsEntries(current.mcpServers, mcpServersPatch) }
@@ -344,5 +361,19 @@ export function applyServerSettingsPatch(
   return {
     ...nextWithReplacements,
     textGenerationModelSelection: createModelSelection(instanceId, model, options),
+  };
+}
+
+/**
+ * Folds the legacy `autoRemoveSettledWorktrees: false` switch into the settled-worktree
+ * rule. Default users already get `worktreeSettledAfterDays: 0` from decoding, which is
+ * what the switch meant when on.
+ */
+export function migrateLegacyWorktreeCleanup(settings: ServerSettings): ServerSettings {
+  if (settings.autoRemoveSettledWorktrees) return settings;
+  return {
+    ...settings,
+    autoRemoveSettledWorktrees: true,
+    storageCleanup: { ...settings.storageCleanup, worktreeSettledAfterDays: null },
   };
 }

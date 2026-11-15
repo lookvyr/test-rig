@@ -507,6 +507,21 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("turns settled worktree cleanup off for a saved legacy opt-out", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const config = yield* ServerConfig.ServerConfig;
+      yield* fs.writeFileString(config.settingsPath, '{"autoRemoveSettledWorktrees":false}');
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const settings = yield* service.getSettings;
+      assert.isNull(settings.storageCleanup.worktreeSettledAfterDays);
+      yield* service.updateSettings({ newWorktreesStartFromOrigin: false });
+      const saved = yield* decodeSavedServerSettings(yield* fs.readFileString(config.settingsPath));
+      assert.isNull(saved.storageCleanup.worktreeSettledAfterDays);
+      assert.isTrue(saved.autoRemoveSettledWorktrees);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("preserves a shared settings symlink while saving its destination", () =>
     Effect.gen(function* () {
       const config = yield* ServerConfig.ServerConfig;

@@ -1,5 +1,5 @@
 import { ProjectSetupScriptRunner } from "../src/project/ProjectSetupScriptRunner.ts";
-import { WorktreeCleanup } from "../src/workspace/WorktreeCleanup.ts";
+import { StorageCleanup } from "../src/storageCleanup.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
 
@@ -372,10 +372,8 @@ export const makeOrchestrationIntegrationHarness = (
     );
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
       Layer.provide(
-        Layer.succeed(WorktreeCleanup, {
+        Layer.mock(StorageCleanup, {
           start: () => Effect.void,
-          sweep: Effect.void,
-          drain: Effect.void,
         }),
       ),
       Layer.provideMerge(runtimeIngestionLayer),

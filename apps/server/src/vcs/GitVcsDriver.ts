@@ -156,6 +156,8 @@ export interface CreateWorktreeOptions {
    * own t3.json.
    */
   readonly submodules?: WorktreeSubmodules | null;
+  /** The `worktreesDirectory` setting; empty or omitted uses the server's default folder. */
+  readonly worktreesDirectory?: string;
 }
 
 export interface GitCommitProgress {

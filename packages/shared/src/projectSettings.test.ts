@@ -439,7 +439,9 @@ describe("resolveWorktreeCleanup", () => {
       },
     });
     expect(resolveWorktreeCleanup(off, projectId)).toEqual({
+      worktreeKeepWhen: "uncommitted-changes",
       worktreeAfterDays: null,
+      worktreeSettledAfterDays: null,
       worktreeOnDelete: false,
       worktreeOnMerge: false,
       worktreeUnchanged: false,
@@ -472,7 +474,10 @@ describe("resolveWorktreeCleanup", () => {
       worktreeCleanup: { mode: "custom", rules: { worktreeAfterDays: 15 } },
     });
     expect(resolveWorktreeCleanup(edited, null)).toEqual({
+      worktreeKeepWhen: "uncommitted-changes",
       worktreeAfterDays: 15,
+      // Test Rig removes settled worktrees right away by default.
+      worktreeSettledAfterDays: 0,
       worktreeOnDelete: true,
       worktreeOnMerge: true,
       worktreeUnchanged: false,

@@ -1,5 +1,6 @@
 import {
   DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
@@ -11,6 +12,7 @@ import { createModelSelection } from "./model.ts";
 import {
   applyServerSettingsPatch,
   isModelSelectionProviderEnabled,
+  migrateLegacyWorktreeCleanup,
   resolveSourceControlWriterModelSelection,
 } from "./serverSettings.ts";
 import * as Schema from "effect/Schema";
@@ -562,5 +564,32 @@ describe("serverSettings helpers", () => {
     });
 
     expect(resolved.pauseWhenOnBattery).toBe(false);
+  });
+});
+
+describe("worktree cleanup settings", () => {
+  const decode = Schema.decodeUnknownSync(ServerSettings);
+  it("keeps removing settled worktrees for users who never touched the old switch", () => {
+    const settings = migrateLegacyWorktreeCleanup(decode({}));
+    expect(settings.storageCleanup.worktreeSettledAfterDays).toBe(0);
+    expect(settings.storageCleanup.worktreeKeepWhen).toBe("uncommitted-changes");
+  });
+  it("turns settled cleanup off for users who turned the old switch off", () => {
+    const settings = migrateLegacyWorktreeCleanup(decode({ autoRemoveSettledWorktrees: false }));
+    expect(settings.storageCleanup.worktreeSettledAfterDays).toBeNull();
+    // The legacy key returns to its default so the next save drops it from settings.json.
+    expect(settings.autoRemoveSettledWorktrees).toBe(true);
+    expect(migrateLegacyWorktreeCleanup(settings)).toBe(settings);
+  });
+  it("remembers previous worktree locations so cleanup still manages them", () => {
+    const moved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      worktreesDirectory: "/a",
+    });
+    expect(moved.previousWorktreesDirectories).toEqual([]);
+    const movedAgain = applyServerSettingsPatch(moved, { worktreesDirectory: "/b" });
+    expect(movedAgain.previousWorktreesDirectories).toEqual(["/a"]);
+    const back = applyServerSettingsPatch(movedAgain, { worktreesDirectory: "/a" });
+    expect(back.worktreesDirectory).toBe("/a");
+    expect(back.previousWorktreesDirectories).toEqual(["/b"]);
   });
 });

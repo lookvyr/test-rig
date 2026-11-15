@@ -2001,6 +2001,33 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("creates new worktrees in the configured worktree location", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const location = yield* makeTmpDir("git-worktree-location-");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const created = yield* driver.createWorktree(
+          { cwd, path: null, refName: initialBranch, newRefName: "feature/located" },
+          { worktreesDirectory: location },
+        );
+        assert.equal(
+          created.worktree.path,
+          pathService.join(location, pathService.basename(cwd), "feature-located"),
+        );
+
+        const error = yield* driver
+          .createWorktree(
+            { cwd, path: null, refName: initialBranch, newRefName: "feature/relative" },
+            { worktreesDirectory: "relative/worktrees" },
+          )
+          .pipe(Effect.flip);
+        assert.include(error.message, "must be an absolute folder");
+      }),
+    );
+
     it.effect("keeps hidden nonignored untracked files unless removal is forced", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
