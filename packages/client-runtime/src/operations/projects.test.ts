@@ -13,6 +13,9 @@ import {
   canCreateProjectInEnvironment,
   findExistingAddProject,
   getAddProjectInitialQuery,
+  getCloneDestinationBrowsePath,
+  getCloneDestinationPath,
+  getCloneDirectoryPath,
   resolveAddProjectPath,
   sortAddProjectProviderSources,
 } from "./projects.ts";
@@ -149,5 +152,29 @@ describe("add project shared logic", () => {
       createWorkspaceRootIfMissing: true,
       defaultModelSelection: null,
     });
+  });
+});
+
+describe("clone destination", () => {
+  it("names the clone after the repository, or host/owner/repo with the ghq layout", () => {
+    expect(getCloneDirectoryPath("git@github.com:acme/web.git", false, "acme/web")).toBe("web");
+    expect(getCloneDirectoryPath("git@github.com:acme/web.git", true, "acme/web")).toBe(
+      "github.com/acme/web",
+    );
+    expect(getCloneDestinationPath("~/code", "github.com/acme/web")).toBe(
+      "~/code/github.com/acme/web",
+    );
+  });
+});
+
+describe("clone destination browsing", () => {
+  it("keeps the clone's folder at the end when entering another folder", () => {
+    const base = { browseDirectoryPath: "~/code/", cloneDirectoryName: "web", caseSensitive: true };
+    expect(getCloneDestinationBrowsePath({ ...base, selectedDirectoryName: "work" })).toBe(
+      "~/code/work/web",
+    );
+    expect(getCloneDestinationBrowsePath({ ...base, selectedDirectoryName: "web" })).toBe(
+      "~/code/web",
+    );
   });
 });

@@ -233,7 +233,7 @@ function ProjectPullRequests({
               rel="noreferrer"
               aria-label={`Open PR #${pr.number} in GitHub`}
               title="Open in GitHub"
-              onClick={(event) => openPrLink(event, pr.url)}
+              onClick={(event) => openPrLink(event, pr.url, { external: true })}
               className="absolute top-3 right-3 inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
             >
               <ExternalLinkIcon aria-hidden className="size-3.5" />

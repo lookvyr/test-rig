@@ -2184,6 +2184,51 @@ layer("GitHubPullRequestCli.layer", (it) => {
     }),
   );
 
+  it.effect("strips agent credits from the merge message and pins the head it read", () =>
+    Effect.gen(function* () {
+      route(
+        ["query PullRequestActionState", actionState()],
+        [
+          "query PullRequestMergeMessage",
+          {
+            data: {
+              repository: {
+                pullRequest: {
+                  isMergeQueueEnabled: false,
+                  headRefOid: "abc123",
+                  viewerMergeBodyText:
+                    "Fix the thing\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
+                },
+              },
+            },
+          },
+        ],
+      );
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      yield* cli.runPullRequestAction({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+        action: "merge",
+        mergeMethod: "squash",
+        removeAgentCreditsOnMerge: true,
+      });
+
+      expect(variablesOf("mergePullRequest(")).toEqual([
+        {
+          input: {
+            pullRequestId: "PR_7",
+            mergeMethod: "SQUASH",
+            expectedHeadOid: "abc123",
+            commitBody: "Fix the thing",
+          },
+        },
+      ]);
+    }),
+  );
+
   it.effect("arms auto-merge with the same strategy a merge would have used", () =>
     Effect.gen(function* () {
       route(["query PullRequestActionState", actionState()]);

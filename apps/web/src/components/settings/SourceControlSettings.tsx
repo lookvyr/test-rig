@@ -35,7 +35,10 @@ import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { GitHubIcon, GitIcon, type Icon } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
-import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
+import {
+  RepositoriesSettingsSection,
+  SourceControlWritingSettingsSection,
+} from "./SourceControlWritingSettings";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
@@ -490,6 +493,7 @@ function EnvironmentSourceControlSettingsPanel(props: {
 
   return (
     <SettingsPageContainer>
+      <RepositoriesSettingsSection environmentId={environmentId} />
       {isInitialScanPending ? (
         <SourceControlSectionSkeleton title="Version control" headerAction={scanButton} />
       ) : hasVersionControlSystems ? (

@@ -6,7 +6,9 @@ repository, then opens a new conversation there. Creating a project does not
 publish it.
 
 To work with an existing folder or clone a repository, use **Add project** and
-choose the corresponding source.
+choose the corresponding source. A clone is suggested at `<starting folder>/<repo>`; turn on
+**Settings → Threads → Clone into host folders** to use `<host>/<owner>/<repo>`
+folders, like ghq.
 
 New drafts use the destination project's defaults. Changing a draft's project
 keeps its prompt and attachments. Model and permission choices you made explicitly stay selected; automatic

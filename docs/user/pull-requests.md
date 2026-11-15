@@ -143,7 +143,14 @@ PR actions include title/description editing, labels, reviewers, draft/ready,
 close/reopen, merge, auto-merge, and branch updates where permitted. Host-reported
 stacks offer merge through a selected layer and stack rebase, with confirmation
 showing the affected layers. Rebase rewrites and pushes branch history; a failure
-may leave earlier layers updated.
+may leave earlier layers updated. To drop agent co-author lines and generated-by footers from
+merge commit messages, turn on **Settings → Source control → Remove agent credits
+when merging**; a merge queue keeps its own message, and stack merges are left as
+GitHub writes them.
+
+Pull request links for your saved GitHub projects open on GitHub by default. Turn on
+**Settings → Diffs & pull requests → Open pull requests in Test Rig** to open them
+here instead; Cmd-click (Ctrl-click) still opens GitHub.
 
 In a thread, choose **Add to chat** on a comment or review discussion in Summary,
 Timeline, or Code to attach the PR and the quoted conversation to your composer.

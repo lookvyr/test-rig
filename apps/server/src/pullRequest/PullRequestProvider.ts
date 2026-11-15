@@ -563,6 +563,8 @@ export interface PullRequestProviderApi {
       readonly mergeMethod?: PullRequestMergeMethod;
       /** Only meaningful for `update-branch`; absent takes the host's own default. */
       readonly updateMethod?: PullRequestUpdateMethod;
+      /** Strip agent co-author trailers and generated-by footers from the merge message. */
+      readonly removeAgentCreditsOnMerge?: boolean;
     },
   ) => Effect.Effect<void, PullRequestProviderError>;
 

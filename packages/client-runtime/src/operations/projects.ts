@@ -12,6 +12,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 
+import { cloneUrlRepositoryPath } from "@t3tools/shared/cloneUrl";
 import {
   ensureBrowseDirectoryPath,
   findProjectByPath,
@@ -145,6 +146,74 @@ export function buildAddProjectRemoteSourceReadiness(
 export function getAddProjectInitialQuery(baseDirectory: string | null | undefined): string {
   const trimmed = baseDirectory?.trim() ?? "";
   return trimmed.length === 0 ? "~/" : ensureBrowseDirectoryPath(trimmed);
+}
+
+export function getCloneDirectoryName(repositoryOrRemoteUrl: string | null | undefined): string {
+  const withoutQuery = (repositoryOrRemoteUrl ?? "").split(/[?#]/)[0]?.trim() ?? "";
+  const schemeIndex = withoutQuery.indexOf("://");
+  const hasHost = schemeIndex >= 0 || /^[^/\\:]+@[^/\\:]+:/.test(withoutQuery);
+  const pathPart = schemeIndex >= 0 ? withoutQuery.slice(schemeIndex + "://".length) : withoutQuery;
+  const segments = pathPart.split(/[/\\:]+/).filter((segment) => segment.trim().length > 0);
+  if (hasHost && segments.length < 2) {
+    return "";
+  }
+
+  const lastSegment = segments.at(-1)?.trim() ?? "";
+  if (hasHost && segments.length === 2 && /^\d+$/.test(lastSegment)) {
+    return "";
+  }
+  return lastSegment.endsWith(".git") ? lastSegment.slice(0, -".git".length) : lastSegment;
+}
+
+/** The folder a clone gets below its base: `<repo>`, or `<host>/<owner>/<repo>` like ghq. */
+export function getCloneDirectoryPath(
+  remoteUrl: string,
+  ghqCloneLayout: boolean,
+  repository = remoteUrl,
+): string {
+  return (
+    (ghqCloneLayout ? cloneUrlRepositoryPath(remoteUrl) : null) ?? getCloneDirectoryName(repository)
+  );
+}
+
+export function getCloneDestinationPath(
+  directoryPath: string,
+  directoryName: string | null | undefined,
+): string {
+  const name = directoryName?.trim() ?? "";
+  if (name.length === 0) {
+    return directoryPath;
+  }
+  const base = ensureBrowseDirectoryPath(directoryPath);
+  return `${base}${base.endsWith("\\") ? name.replaceAll("/", "\\") : name}`;
+}
+
+/** The clone's own folder, which folder browsing keeps at the end of the destination. */
+export function getCloneDirectoryLeafName(
+  remoteUrl: string,
+  ghqCloneLayout: boolean,
+  repository = remoteUrl,
+): string {
+  return getCloneDirectoryPath(remoteUrl, ghqCloneLayout, repository).split("/").at(-1) ?? "";
+}
+
+/**
+ * Entering a folder while picking a clone destination keeps the clone's own folder at the end,
+ * unless the folder entered already is that folder.
+ */
+export function getCloneDestinationBrowsePath(input: {
+  readonly browseDirectoryPath: string;
+  readonly selectedDirectoryName: string;
+  readonly cloneDirectoryName: string;
+  readonly caseSensitive: boolean;
+}): string {
+  const selectedDirectoryPath = `${ensureBrowseDirectoryPath(input.browseDirectoryPath)}${input.selectedDirectoryName}`;
+  const selectedDirectoryMatches = input.caseSensitive
+    ? input.selectedDirectoryName === input.cloneDirectoryName
+    : input.selectedDirectoryName.toLowerCase() === input.cloneDirectoryName.toLowerCase();
+  return selectedDirectoryMatches
+    ? selectedDirectoryPath
+    : getCloneDestinationPath(selectedDirectoryPath, input.cloneDirectoryName);
 }
 
 export function resolveAddProjectPath(input: {

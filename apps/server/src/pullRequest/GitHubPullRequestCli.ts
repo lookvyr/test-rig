@@ -1,3 +1,4 @@
+import { removeAgentCredits } from "./mergeMessage.ts";
 import {
   REPOSITORY_MENTIONS_QUERY,
   REPOSITORY_REFERENCES_QUERY,
@@ -736,6 +737,7 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly expectedStackHeads?: ReadonlyArray<PullRequestStackHead>;
       readonly mergeMethod?: PullRequestMergeMethod;
       readonly updateMethod?: PullRequestUpdateMethod;
+      readonly removeAgentCreditsOnMerge?: boolean;
     }) => Effect.Effect<void, GitHubPullRequestCliError>;
 
     readonly commentOnPullRequest: (input: {
@@ -1050,6 +1052,36 @@ const decodeActionStateResponse = Schema.decodeUnknownResult(
 );
 const decodeActionState = (raw: string) =>
   Result.map(decodeActionStateResponse(raw), (response) => response.data.repository.pullRequest);
+
+/** GitHub's own merge message for the method, and whether a merge queue picks its own. */
+const MERGE_MESSAGE_GRAPHQL_QUERY = `
+query PullRequestMergeMessage($owner: String!, $name: String!, $number: Int!, $method: PullRequestMergeMethod!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      isMergeQueueEnabled
+      headRefOid
+      viewerMergeBodyText(mergeType: $method)
+    }
+  }
+}`;
+
+const decodeMergeMessageResponse = Schema.decodeUnknownResult(
+  Schema.fromJsonString(
+    Schema.Struct({
+      data: Schema.Struct({
+        repository: Schema.Struct({
+          pullRequest: Schema.Struct({
+            isMergeQueueEnabled: Schema.optional(Schema.Boolean),
+            headRefOid: Schema.String,
+            viewerMergeBodyText: Schema.String,
+          }),
+        }),
+      }),
+    }),
+  ),
+);
+const decodeMergeMessage = (raw: string) =>
+  Result.map(decodeMergeMessageResponse(raw), (response) => response.data.repository.pullRequest);
 
 const MERGE_PULL_REQUEST_GRAPHQL_MUTATION = `mutation($input: MergePullRequestInput!) {
   mergePullRequest(input: $input) { clientMutationId }
@@ -2669,6 +2701,34 @@ export const make = Effect.gen(function* () {
           state.isMergeQueueEnabled === true ||
           (action === "enable-auto-merge" &&
             !IMMEDIATELY_MERGEABLE.has(state.mergeStateStatus?.toUpperCase() ?? ""));
+        // Rewriting the message pins the head it was read from, so a push in between fails the
+        // merge instead of merging commits the cleaned message never described.
+        let commitBody: string | undefined;
+        let expectedHeadOid: string | undefined;
+        if (input.removeAgentCreditsOnMerge === true && input.mergeMethod !== "rebase") {
+          const message = yield* graphqlRead({
+            cwd: input.cwd,
+            host: input.host,
+            operation: "runPullRequestAction",
+            allowReserve: true,
+            query: MERGE_MESSAGE_GRAPHQL_QUERY,
+            variables: {
+              owner,
+              name,
+              number: input.number,
+              method: input.mergeMethod === "squash" ? "SQUASH" : "MERGE",
+            },
+            decode: decodeMergeMessage,
+          });
+          // A merge queue chooses its own message and ignores custom text.
+          if (message.isMergeQueueEnabled !== true) {
+            const cleaned = removeAgentCredits(message.viewerMergeBodyText);
+            if (cleaned !== message.viewerMergeBodyText) {
+              commitBody = cleaned;
+              expectedHeadOid = message.headRefOid;
+            }
+          }
+        }
         yield* graphql({
           host: input.host,
           operation: "runPullRequestAction",
@@ -2677,6 +2737,8 @@ export const make = Effect.gen(function* () {
             input: {
               pullRequestId: state.id,
               mergeMethod: GRAPHQL_MERGE_METHODS[input.mergeMethod ?? "merge"],
+              ...(expectedHeadOid === undefined ? {} : { expectedHeadOid }),
+              ...(commitBody === undefined ? {} : { commitBody }),
             },
           },
         });

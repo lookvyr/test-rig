@@ -24,6 +24,7 @@ import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+import { searchableSetting } from "./settingsSearch";
 
 const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; description: string }> =
   {
@@ -72,6 +73,42 @@ function instructionDrafts(style: {
     changeRequestTitleInstructions: style.changeRequestTitleInstructions,
     changeRequestDescriptionInstructions: style.changeRequestDescriptionInstructions,
   };
+}
+
+/** Repository behavior for the selected environment: merges and keeping checkouts current. */
+export function RepositoriesSettingsSection({ environmentId }: { environmentId: EnvironmentId }) {
+  const settings = useEnvironmentSettings(environmentId);
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  return (
+    <SettingsSection title="Repositories">
+      <SettingsRow
+        {...searchableSetting("remove-agent-credits")}
+        description="Strip agent co-author lines and generated-by footers from the merge commit message when merging a pull request."
+        resetAction={
+          settings.removeAgentCreditsOnMerge !==
+          DEFAULT_UNIFIED_SETTINGS.removeAgentCreditsOnMerge ? (
+            <SettingResetButton
+              label="remove agent credits when merging"
+              onClick={() =>
+                updateSettings({
+                  removeAgentCreditsOnMerge: DEFAULT_UNIFIED_SETTINGS.removeAgentCreditsOnMerge,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Switch
+            checked={settings.removeAgentCreditsOnMerge}
+            onCheckedChange={(checked) =>
+              updateSettings({ removeAgentCreditsOnMerge: Boolean(checked) })
+            }
+            aria-label="Remove agent credits when merging"
+          />
+        }
+      />
+    </SettingsSection>
+  );
 }
 
 export function SourceControlWritingSettingsSection({

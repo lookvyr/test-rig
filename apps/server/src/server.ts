@@ -330,6 +330,7 @@ const PullRequestServiceLive = PullRequestService.layer.pipe(
   Layer.provide(SourceControlProviderRegistryLayerLive),
   Layer.provide(SourceControlRateLimit.layer),
   Layer.provide(ProjectServiceLayerLive),
+  Layer.provide(ServerSettingsLayerLive),
 );
 
 const OrchestrationWorkersLive = Layer.mergeAll(

@@ -1974,6 +1974,35 @@ function KeepAwakeRow() {
   );
 }
 
+function GhqCloneLayoutRow() {
+  const ghq = usePrimarySettings((settings) => settings.ghqCloneLayout);
+  const updateSettings = useUpdatePrimarySettings();
+  return (
+    <SwitchSettingRow
+      {...searchableSetting("ghq-clone-layout")}
+      description="Clone repositories into host/owner/repo folders below the starting folder, like ghq."
+      checked={ghq}
+      defaultChecked={DEFAULT_UNIFIED_SETTINGS.ghqCloneLayout}
+      onChange={(ghqCloneLayout) => updateSettings({ ghqCloneLayout })}
+    />
+  );
+}
+
+/** Pull request links open in the app's pull requests page instead of on GitHub. */
+function PullRequestLinksInAppRow() {
+  const openInApp = useClientSettings((settings) => settings.pullRequestLinksOpenInApp);
+  const updateSettings = useUpdateClientSettings();
+  return (
+    <SwitchSettingRow
+      {...searchableSetting("pull-request-links-in-app")}
+      description="Open pull request links for your projects in Test Rig. Cmd-click (Ctrl-click) still opens GitHub."
+      checked={openInApp}
+      defaultChecked={DEFAULT_UNIFIED_SETTINGS.pullRequestLinksOpenInApp}
+      onChange={(pullRequestLinksOpenInApp) => updateSettings({ pullRequestLinksOpenInApp })}
+    />
+  );
+}
+
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
@@ -2231,6 +2260,9 @@ export function DiffsSettingsPanel() {
           ]}
         />
       </SettingsSection>
+      <SettingsSection title="Pull requests">
+        <PullRequestLinksInAppRow />
+      </SettingsSection>
     </SettingsPageContainer>
   );
 }
@@ -2292,6 +2324,7 @@ export function ThreadsSettingsPanel() {
             />
           }
         />
+        <GhqCloneLayoutRow />
       </SettingsSection>
       <SettingsSection title="New threads">
         <DefaultModelRow />

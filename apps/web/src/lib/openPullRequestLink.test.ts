@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { openPullRequestLink, PullRequestLinkOpenError } from "./openPullRequestLink";
+import {
+  openPullRequestLink,
+  projectForPullRequestUrl,
+  PullRequestLinkOpenError,
+} from "./openPullRequestLink";
 
 describe("openPullRequestLink", () => {
   it("opens the requested pull request URL", async () => {
@@ -26,5 +30,26 @@ describe("openPullRequestLink", () => {
       }),
     );
     await expect(result).rejects.not.toHaveProperty("message", expect.stringContaining("secret"));
+  });
+});
+
+describe("projectForPullRequestUrl", () => {
+  const project = {
+    id: "p",
+    repositoryIdentity: { provider: "github", canonicalKey: "github.com/Acme/web" },
+  } as never;
+  it("finds the saved GitHub project a pull request belongs to", () => {
+    expect(projectForPullRequestUrl([project], "https://github.com/acme/web/pull/12")).toEqual({
+      project,
+      canonicalUrl: "https://github.com/acme/web/pull/12",
+    });
+    expect(
+      projectForPullRequestUrl([project], "https://github.com/acme/web/pull/12/files#r1"),
+    ).toEqual({ project, canonicalUrl: "https://github.com/acme/web/pull/12" });
+  });
+  it("ignores other repositories and non pull request links", () => {
+    expect(projectForPullRequestUrl([project], "https://github.com/acme/api/pull/12")).toBeNull();
+    expect(projectForPullRequestUrl([project], "https://github.com/acme/web/issues/12")).toBeNull();
+    expect(projectForPullRequestUrl([project], "not a url")).toBeNull();
   });
 });

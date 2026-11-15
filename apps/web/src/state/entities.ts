@@ -202,6 +202,11 @@ export function readProject(ref: ScopedProjectRef): EnvironmentProject | null {
   return appAtomRegistry.get(environmentProjects.projectAtom(ref));
 }
 
+/** Every project, read once without subscribing. */
+export function readProjects(): ReadonlyArray<EnvironmentProject> {
+  return appAtomRegistry.get(environmentProjects.projectsAtom);
+}
+
 /** Wait for the project stream after a create RPC; the response can arrive first. */
 export function waitForProject(ref: ScopedProjectRef): Promise<EnvironmentProject> {
   const atom = environmentProjects.projectAtom(ref);
