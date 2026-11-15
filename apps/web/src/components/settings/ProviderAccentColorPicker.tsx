@@ -1,11 +1,11 @@
 "use client";
 
-import { PipetteIcon, XIcon } from "lucide-react";
+import { PipetteIcon, PlusIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 import { ColorSelector } from "../color-selector";
 import { Button } from "../ui/button";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { normalizeProviderAccentColor } from "../../providerInstances";
 import { cn } from "../../lib/utils";
 
@@ -228,8 +228,17 @@ export function ProviderAccentColorPicker(props: {
   readonly onCommit: (value: string) => void;
   readonly description?: string;
   readonly commitDelayMs?: number;
+  /** `inline` is a single swatch button for a settings row; the choices live in its popover. */
+  readonly layout?: "stacked" | "inline";
 }) {
-  const { commitDelayMs = 0, description, displayName, onCommit, value } = props;
+  const {
+    commitDelayMs = 0,
+    description,
+    displayName,
+    layout = "stacked",
+    onCommit,
+    value,
+  } = props;
   const [optimisticValue, setOptimisticValue] = useState(() => value ?? "");
   const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingCommitRef = useRef<string | null>(null);
@@ -294,6 +303,61 @@ export function ProviderAccentColorPicker(props: {
       ? normalized
       : "";
   const customSelected = Boolean(normalized && selectedValue === "");
+
+  if (layout === "inline") {
+    return (
+      <Popover>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost-muted"
+              className="shrink-0"
+              style={normalized ? { backgroundColor: normalized } : undefined}
+              aria-label={`${normalized ? "Change" : "Add"} accent color for ${displayName}`}
+            >
+              {normalized ? null : <PlusIcon aria-hidden />}
+            </Button>
+          }
+        />
+        <PopoverPopup side="bottom" align="start" sideOffset={6} padding="none">
+          <div className="border-b border-border/60 p-2">
+            <ColorSelector
+              key={selectedValue}
+              colors={[...PROVIDER_ACCENT_SWATCHES]}
+              defaultValue={selectedValue}
+              size="lg"
+              onColorSelect={commitAccentColor}
+              className="flex-wrap gap-1.5"
+            />
+          </div>
+          <ProviderCustomColorPanel
+            value={normalized ?? FALLBACK_ACCENT_COLOR}
+            onCommit={commitAccentColor}
+          />
+          {normalized ? (
+            <div className="border-t border-border/60 p-1">
+              <PopoverClose
+                render={
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="ghost-muted"
+                    className="w-full justify-start"
+                    onClick={() => commitAccentColor("")}
+                  >
+                    <XIcon className="size-3.5" aria-hidden />
+                    Clear color
+                  </Button>
+                }
+              />
+            </div>
+          ) : null}
+        </PopoverPopup>
+      </Popover>
+    );
+  }
 
   return (
     <div className="grid gap-2">

@@ -43,6 +43,10 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 
+vi.mock("../../localApi", () => ({
+  readLocalApi: () => ({ dialogs: { confirm: async () => true } }),
+}));
+
 vi.mock("react/compiler-runtime", async () => {
   const { reactHookHarness } = await import("../../test/reactHookHarness");
   return { c: reactHookHarness.useMemoCache };
@@ -207,7 +211,7 @@ describe("EnvironmentProviderSettings routing", () => {
     ).toBeNull();
   });
 
-  it("deletes and resets provider configuration without erasing shared preferences", () => {
+  it("deletes and resets provider configuration without erasing shared preferences", async () => {
     settingsState.value = {
       ...DEFAULT_UNIFIED_SETTINGS,
       providerInstances: {
@@ -225,10 +229,16 @@ describe("EnvironmentProviderSettings routing", () => {
       },
       favorites: [{ provider: customId, model: "favorite" }],
     };
-    const panel = renderPanel();
-    const customCard = visitElements(panel, (element) => element.props.instanceId === customId);
+    const isCard =
+      (id: string, mode: "list" | "editor") => (element: ReactElement<Record<string, unknown>>) =>
+        element.props.instanceId === id && element.props.mode === mode;
+    // The first provider starts selected; pick the custom one to open its editor.
+    const listCard = visitElements(renderPanel(), isCard(customId, "list"));
+    (listCard?.props.onSelect as (() => void) | undefined)?.();
+    const customCard = visitElements(renderPanel(), isCard(customId, "editor"));
     expect(customCard).not.toBeNull();
     (customCard?.props.onDelete as (() => void) | undefined)?.();
+    await flushPromises();
 
     expect(settingsState.updateSettings).toHaveBeenLastCalledWith({
       providerInstances: {
@@ -237,7 +247,9 @@ describe("EnvironmentProviderSettings routing", () => {
     });
 
     settingsState.updateSettings.mockClear();
-    const defaultCard = visitElements(panel, (element) => element.props.instanceId === codexId);
+    const codexListCard = visitElements(renderPanel(), isCard(codexId, "list"));
+    (codexListCard?.props.onSelect as (() => void) | undefined)?.();
+    const defaultCard = visitElements(renderPanel(), isCard(codexId, "editor"));
     const resetAction = defaultCard?.props.headerAction;
     const resetButton = visitElements(
       resetAction,

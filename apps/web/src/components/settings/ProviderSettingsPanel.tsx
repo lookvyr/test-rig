@@ -64,7 +64,10 @@ import {
 } from "../ui/number-field";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { readLocalApi } from "../../localApi";
+import { ScrollArea } from "../ui/scroll-area";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
+import { SettingsGroup } from "./SettingsGroup";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import { searchableSetting } from "./settingsSearch";
@@ -112,6 +115,9 @@ function withoutProviderInstanceFavorites(
 const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
   provider: definition.value,
 }));
+
+const PROVIDER_CARD_HEIGHT_CLASS_NAME =
+  "@min-[48rem]/providers:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/providers:min-h-[32rem]";
 
 function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }) {
   useRelativeTimeTick();
@@ -202,7 +208,7 @@ export function ProviderSettingsPanel() {
     options.length === 1 && options[0]?.entry.target._tag === "PrimaryConnectionTarget";
 
   return (
-    <SettingsPageContainer>
+    <SettingsPageContainer className="@container/providers">
       {!onlyPrimaryDevice ? (
         <SettingsSection title="Devices">
           {options.length === 0 ? (
@@ -372,7 +378,7 @@ export function EnvironmentProviderSettings({
   const [updatingProviderDrivers, setUpdatingProviderDrivers] = useState<
     ReadonlySet<ProviderDriverKind>
   >(() => new Set());
-  const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({});
+  const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | null>(null);
   const refreshingRef = useRef(false);
   const updatingDriversRef = useRef<Set<ProviderDriverKind>>(new Set());
 
@@ -528,6 +534,8 @@ export function EnvironmentProviderSettings({
     }
   }
 
+  const selectedRow = rows.find((row) => row.instanceId === selectedInstanceId) ?? rows[0] ?? null;
+
   const updateProviderInstance = (
     row: InstanceRow,
     next: ProviderInstanceConfig,
@@ -549,9 +557,13 @@ export function EnvironmentProviderSettings({
     );
   };
 
-  const deleteProviderInstance = (id: ProviderInstanceId) => {
+  const deleteProviderInstance = async (row: InstanceRow) => {
+    const name = row.instance.displayName?.trim() || String(row.instanceId);
+    const confirm = readLocalApi()?.dialogs.confirm;
+    const confirmed = confirm ? await confirm(`Remove the ${name} provider instance?`) : false;
+    if (!confirmed) return;
     updateSettings({
-      providerInstances: withoutProviderInstanceKey(settings.providerInstances, id),
+      providerInstances: withoutProviderInstanceKey(settings.providerInstances, row.instanceId),
     });
   };
 
@@ -617,169 +629,174 @@ export function EnvironmentProviderSettings({
     });
   };
 
+  const renderProviderInstance = (row: InstanceRow, mode: "list" | "editor") => {
+    const driverOption = getDriverOption(row.driver);
+    const liveProvider = serverProviders.find(
+      (candidate) => candidate.instanceId === row.instanceId,
+    );
+    const supportsInlineUpdate =
+      liveProvider?.versionAdvisory?.canUpdate === true &&
+      liveProvider.versionAdvisory.updateCommand !== null;
+    const isDriverUpdateRunning =
+      liveProvider !== undefined &&
+      (updatingProviderDrivers.has(liveProvider.driver) ||
+        serverProviders.some(
+          (provider) => provider.driver === liveProvider.driver && isProviderUpdateActive(provider),
+        ));
+    const canRunInlineUpdate = supportsInlineUpdate && !isDriverUpdateRunning;
+    const modelPreferences = settings.providerModelPreferences?.[row.instanceId] ?? {
+      hiddenModels: [],
+      modelOrder: [],
+    };
+    const favoriteModels = Arr.filterMap(settings.favorites ?? [], (favorite) =>
+      favorite.provider === row.instanceId ? Result.succeed(favorite.model) : Result.failVoid,
+    );
+    const resetLabel = driverOption?.label ?? String(row.driver);
+    const headerAction =
+      mode === "editor" && row.isDefault && row.isDirty ? (
+        <SettingResetButton
+          label={`${resetLabel} provider settings`}
+          onClick={() => resetDefaultInstance(row.driver)}
+        />
+      ) : null;
+    return (
+      <ProviderInstanceCard
+        // The editor keeps unsaved drafts (environment rows), so each instance gets its own.
+        key={`${mode}:${row.instanceId}`}
+        mode={mode}
+        selected={mode === "list" && selectedRow?.instanceId === row.instanceId}
+        onSelect={mode === "list" ? () => setSelectedInstanceId(row.instanceId) : undefined}
+        instanceId={row.instanceId}
+        instance={row.instance}
+        driverOption={driverOption}
+        liveProvider={liveProvider}
+        onUpdate={(next) => {
+          const wasEnabled = row.instance.enabled ?? true;
+          const isDisabling = next.enabled === false && wasEnabled;
+          const shouldClearTextGen = isDisabling && textGenInstanceId === row.instanceId;
+          if (shouldClearTextGen) {
+            updateProviderInstance(row, next, {
+              textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+            });
+          } else {
+            updateProviderInstance(row, next);
+          }
+        }}
+        onDelete={
+          mode === "editor" && !row.isDefault ? () => void deleteProviderInstance(row) : undefined
+        }
+        headerAction={headerAction}
+        hiddenModels={modelPreferences.hiddenModels}
+        favoriteModels={favoriteModels}
+        modelOrder={modelPreferences.modelOrder}
+        onHiddenModelsChange={(hiddenModels) =>
+          updateProviderModelPreferences(row.instanceId, { ...modelPreferences, hiddenModels })
+        }
+        onFavoriteModelsChange={(favoriteModels) =>
+          updateProviderFavoriteModels(row.instanceId, favoriteModels)
+        }
+        onModelOrderChange={(modelOrder) =>
+          updateProviderModelPreferences(row.instanceId, { ...modelPreferences, modelOrder })
+        }
+        onRunUpdate={
+          supportsInlineUpdate && liveProvider
+            ? () => {
+                if (!canRunInlineUpdate) return;
+                void runProviderUpdate(liveProvider);
+              }
+            : undefined
+        }
+        isUpdating={supportsInlineUpdate ? isDriverUpdateRunning : undefined}
+      />
+    );
+  };
+
   return (
     <>
       <SettingsSection
         {...searchableSetting("providers")}
+        variant="plain"
         headerAction={
           <div className="flex items-center gap-1.5">
             <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
             {!readOnly ? (
-              <>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-                        onClick={() => setIsAddInstanceDialogOpen(true)}
-                        aria-label="Add provider instance"
-                      >
-                        <PlusIcon className="size-3" />
-                      </Button>
-                    }
-                  />
-                  <TooltipPopup side="top">Add provider instance</TooltipPopup>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-                        disabled={isRefreshingProviders}
-                        onClick={() => void refreshProviders()}
-                        aria-label="Refresh provider status"
-                      >
-                        {isRefreshingProviders ? (
-                          <LoaderIcon className="size-3 animate-spin" />
-                        ) : (
-                          <RefreshCwIcon className="size-3" />
-                        )}
-                      </Button>
-                    }
-                  />
-                  <TooltipPopup side="top">Refresh provider status</TooltipPopup>
-                </Tooltip>
-              </>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost-muted"
+                      disabled={isRefreshingProviders}
+                      onClick={() => void refreshProviders()}
+                      aria-label="Refresh provider status"
+                    >
+                      {isRefreshingProviders ? (
+                        <LoaderIcon className="animate-spin" />
+                      ) : (
+                        <RefreshCwIcon />
+                      )}
+                    </Button>
+                  }
+                />
+                <TooltipPopup side="top">Refresh provider status</TooltipPopup>
+              </Tooltip>
             ) : null}
           </div>
         }
       >
         {readOnly ? (
-          <SettingsRow
-            title="Limited permissions"
-            description={`This session can view ${environmentLabel}'s providers, but its credential does not allow changing their configuration.`}
-          />
+          <SettingsGroup>
+            <SettingsRow
+              title="Limited permissions"
+              description={`This session can view ${environmentLabel}'s providers, but its credential does not allow changing their configuration.`}
+            />
+          </SettingsGroup>
         ) : null}
-        <div
-          // `inert` blocks focus and interaction in one attribute, so the
-          // read-only view stays byte-for-byte the editable layout without
-          // threading a disabled flag through every control.
+        <SettingsGroup
+          divided={false}
+          // `inert` blocks focus and interaction in one attribute, so the read-only view stays
+          // the editable layout without threading a disabled flag through every control.
           inert={readOnly}
           aria-disabled={readOnly || undefined}
           className={cn(
-            "[&>*+*]:border-t [&>*+*]:border-border/50",
+            PROVIDER_CARD_HEIGHT_CLASS_NAME,
+            "overflow-hidden @min-[48rem]/providers:grid @min-[48rem]/providers:grid-cols-[17rem_minmax(0,1fr)]",
             readOnly && "opacity-50 select-none",
           )}
         >
-          {rows.map((row) => {
-            const driverOption = getDriverOption(row.driver);
-            const liveProvider = serverProviders.find(
-              (candidate) => candidate.instanceId === row.instanceId,
-            );
-            const supportsInlineUpdate =
-              liveProvider?.versionAdvisory?.canUpdate === true &&
-              liveProvider.versionAdvisory.updateCommand !== null;
-            const isDriverUpdateRunning =
-              liveProvider !== undefined &&
-              (updatingProviderDrivers.has(liveProvider.driver) ||
-                serverProviders.some(
-                  (provider) =>
-                    provider.driver === liveProvider.driver && isProviderUpdateActive(provider),
-                ));
-            const canRunInlineUpdate = supportsInlineUpdate && !isDriverUpdateRunning;
-            const modelPreferences = settings.providerModelPreferences?.[row.instanceId] ?? {
-              hiddenModels: [],
-              modelOrder: [],
-            };
-            const favoriteModels = Arr.filterMap(settings.favorites ?? [], (favorite) =>
-              favorite.provider === row.instanceId
-                ? Result.succeed(favorite.model)
-                : Result.failVoid,
-            );
-            const resetLabel = driverOption?.label ?? String(row.driver);
-            const headerAction =
-              row.isDefault && row.isDirty ? (
-                <SettingResetButton
-                  label={`${resetLabel} provider settings`}
-                  onClick={() => resetDefaultInstance(row.driver)}
-                />
-              ) : null;
-            return (
-              <ProviderInstanceCard
-                key={row.instanceId}
-                instanceId={row.instanceId}
-                instance={row.instance}
-                driverOption={driverOption}
-                liveProvider={liveProvider}
-                isExpanded={openInstanceDetails[row.instanceId] ?? false}
-                onExpandedChange={(open) =>
-                  setOpenInstanceDetails((existing) => ({
-                    ...existing,
-                    [row.instanceId]: open,
-                  }))
-                }
-                onUpdate={(next) => {
-                  const wasEnabled = row.instance.enabled ?? true;
-                  const isDisabling = next.enabled === false && wasEnabled;
-                  const shouldClearTextGen = isDisabling && textGenInstanceId === row.instanceId;
-                  if (shouldClearTextGen) {
-                    updateProviderInstance(row, next, {
-                      textGenerationModelSelection:
-                        DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                    });
-                  } else {
-                    updateProviderInstance(row, next);
-                  }
-                }}
-                onDelete={row.isDefault ? undefined : () => deleteProviderInstance(row.instanceId)}
-                headerAction={headerAction}
-                hiddenModels={modelPreferences.hiddenModels}
-                favoriteModels={favoriteModels}
-                modelOrder={modelPreferences.modelOrder}
-                onHiddenModelsChange={(hiddenModels) =>
-                  updateProviderModelPreferences(row.instanceId, {
-                    ...modelPreferences,
-                    hiddenModels,
-                  })
-                }
-                onFavoriteModelsChange={(favoriteModels) =>
-                  updateProviderFavoriteModels(row.instanceId, favoriteModels)
-                }
-                onModelOrderChange={(modelOrder) =>
-                  updateProviderModelPreferences(row.instanceId, {
-                    ...modelPreferences,
-                    modelOrder,
-                  })
-                }
-                onRunUpdate={
-                  supportsInlineUpdate && liveProvider
-                    ? () => {
-                        if (!canRunInlineUpdate) {
-                          return;
-                        }
-                        void runProviderUpdate(liveProvider);
-                      }
-                    : undefined
-                }
-                isUpdating={supportsInlineUpdate ? isDriverUpdateRunning : undefined}
-              />
-            );
-          })}
-        </div>
+          <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/providers:flex @min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-col @min-[48rem]/providers:border-r @min-[48rem]/providers:border-b-0">
+            <ScrollArea
+              scrollFade
+              chainVerticalScroll
+              className="@min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-1"
+            >
+              <div className="divide-y divide-border/50">
+                {rows.map((row) => renderProviderInstance(row, "list"))}
+                {!readOnly ? (
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left text-sm text-muted-foreground transition-colors outline-none hover:bg-muted/25 hover:text-foreground focus-visible:bg-muted/25 focus-visible:text-foreground sm:px-4"
+                    onClick={() => setIsAddInstanceDialogOpen(true)}
+                  >
+                    <PlusIcon className="size-4 shrink-0" />
+                    Add provider
+                  </button>
+                ) : null}
+              </div>
+            </ScrollArea>
+          </div>
+          <div data-provider-detail className="min-w-0 @min-[48rem]/providers:min-h-0">
+            {selectedRow ? (
+              <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/providers:h-full">
+                <div className="space-y-6 py-4">
+                  {renderProviderInstance(selectedRow, "editor")}
+                </div>
+              </ScrollArea>
+            ) : (
+              <div className="p-6 text-sm text-muted-foreground">No providers configured.</div>
+            )}
+          </div>
+        </SettingsGroup>
       </SettingsSection>
 
       <SettingsSection title="Advanced">
@@ -902,6 +919,7 @@ export function EnvironmentProviderSettings({
           environmentId={environmentId}
           environmentLabel={environmentLabel}
           onOpenChange={setIsAddInstanceDialogOpen}
+          onCreated={setSelectedInstanceId}
         />
       ) : null}
     </>

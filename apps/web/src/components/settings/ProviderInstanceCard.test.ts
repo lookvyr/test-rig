@@ -62,32 +62,33 @@ describe("ProviderInstanceCard", () => {
       slashCommands: [],
       skills: [],
     };
-    const html = renderToStaticMarkup(
-      createElement(ProviderInstanceCard, {
-        instanceId,
-        instance: {
-          driver,
-          enabled: true,
-          displayName: "Historical Cursor",
-          config: { binaryPath: "/legacy/cursor-agent" },
-        },
-        driverOption: undefined,
-        liveProvider,
-        isExpanded: true,
-        onExpandedChange: vi.fn(),
-        onUpdate: vi.fn(),
-        onDelete: vi.fn(),
-        hiddenModels: [],
-        favoriteModels: [],
-        modelOrder: [],
-        onHiddenModelsChange: vi.fn(),
-        onFavoriteModelsChange: vi.fn(),
-        onModelOrderChange: vi.fn(),
-      }),
-    );
+    const render = (mode: "list" | "editor") =>
+      renderToStaticMarkup(
+        createElement(ProviderInstanceCard, {
+          instanceId,
+          instance: {
+            driver,
+            enabled: true,
+            displayName: "Historical Cursor",
+            config: { binaryPath: "/legacy/cursor-agent" },
+          },
+          driverOption: undefined,
+          liveProvider,
+          mode,
+          onUpdate: vi.fn(),
+          onDelete: vi.fn(),
+          hiddenModels: [],
+          favoriteModels: [],
+          modelOrder: [],
+          onHiddenModelsChange: vi.fn(),
+          onFavoriteModelsChange: vi.fn(),
+          onModelOrderChange: vi.fn(),
+        }),
+      );
 
-    expect(html).toContain("Historical Cursor");
-    expect(html).toContain("not shipped with the current build");
-    expect(html).toMatch(/aria-label="Enable Historical Cursor"[^>]*disabled/);
+    const editor = render("editor");
+    expect(editor).toContain("Historical Cursor");
+    expect(editor).toContain("not available in this build");
+    expect(render("list")).toMatch(/aria-label="Enable Historical Cursor"[^>]*disabled/);
   });
 });

@@ -184,8 +184,7 @@ export function ProviderModelsSection({
 
   return (
     <div>
-      <div className="text-xs font-medium text-foreground">Models</div>
-      <div className="mt-1 text-xs text-muted-foreground">
+      <div className="text-xs text-muted-foreground">
         {models.length} model{models.length === 1 ? "" : "s"} available.
       </div>
       <div ref={listRef} className="mt-2 max-h-40 overflow-y-auto pb-1">

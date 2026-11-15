@@ -90,6 +90,8 @@ interface AddProviderInstanceDialogProps {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly onOpenChange: (open: boolean) => void;
+  /** Called with the new instance's id so the provider list can select it. */
+  readonly onCreated?: (instanceId: ProviderInstanceId) => void;
 }
 
 export function AddProviderInstanceDialog({
@@ -97,6 +99,7 @@ export function AddProviderInstanceDialog({
   environmentId,
   environmentLabel,
   onOpenChange,
+  onCreated,
 }: AddProviderInstanceDialogProps) {
   const settings = useEnvironmentSettings(environmentId);
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
@@ -188,6 +191,7 @@ export function AddProviderInstanceDialog({
         title: "Provider instance added",
         description: `${driverOption.label} instance '${instanceId}' was added.`,
       });
+      onCreated?.(brandedId);
       onOpenChange(false);
     } catch (error) {
       toastManager.add({
