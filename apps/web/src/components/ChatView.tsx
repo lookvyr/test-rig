@@ -79,7 +79,11 @@ import {
   resolveSelectableModel,
 } from "@t3tools/shared/model";
 import { CHAT_LIST_ANCHOR_OFFSET } from "@t3tools/shared/chatList";
-import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
+import {
+  projectScriptCwd,
+  projectScriptRuntimeEnv,
+  resolveProjectScripts,
+} from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { nextTerminalId, resolveTerminalSessionLabel } from "@t3tools/shared/terminalLabels";
 import { useAtomValue } from "@effect/atom-react";
@@ -208,6 +212,7 @@ import {
   commandForProjectScript,
   nextProjectScriptId,
   projectScriptIdFromCommand,
+  releaseClaimedRoles,
 } from "~/projectScripts";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { resolveSelectableProvider } from "../providerModels";
@@ -245,7 +250,6 @@ import { type ReviewCommentContext } from "../reviewCommentContext";
 import { environmentCatalog } from "../connection/catalog";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
-import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import {
   primaryServerAvailableEditorsAtom,
@@ -373,6 +377,7 @@ import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
 const EMPTY_PROVIDERS: ServerProvider[] = [];
+const NO_PROJECT_SCRIPTS: ReadonlyArray<ProjectScript> = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
@@ -1161,7 +1166,7 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
   usePreviewSession(routeThreadRef);
-  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
   });
@@ -1833,9 +1838,14 @@ function ChatViewContent(props: ChatViewProps) {
       ),
     [sideThreadShells],
   );
+  // Actions live in settings: the environment's defaults or the project's own override.
+  const activeProjectScripts = useMemo(
+    () => (activeProject ? resolveProjectScripts(settings, activeProject) : NO_PROJECT_SCRIPTS),
+    [activeProject, settings],
+  );
   const configuredPreviewUrls = useMemo(
-    () => getConfiguredPreviewUrls(activeProject?.scripts),
-    [activeProject?.scripts],
+    () => getConfiguredPreviewUrls(activeProject ? activeProjectScripts : undefined),
+    [activeProject, activeProjectScripts],
   );
 
   useEffect(() => {
@@ -3203,6 +3213,7 @@ function ChatViewContent(props: ChatViewProps) {
             env: runtimeEnv,
             cols: SCRIPT_TERMINAL_COLS,
             rows: SCRIPT_TERMINAL_ROWS,
+            ...(script.stopOnSettle ? { stopOnSettle: true } : {}),
           }
         : {
             threadId: activeThreadId,
@@ -3210,6 +3221,7 @@ function ChatViewContent(props: ChatViewProps) {
             cwd: targetCwd,
             ...(targetWorktreePath !== null ? { worktreePath: targetWorktreePath } : {}),
             env: runtimeEnv,
+            ...(script.stopOnSettle ? { stopOnSettle: true } : {}),
           };
 
       if (shouldCreateNewTerminal) {
@@ -3277,11 +3289,17 @@ function ChatViewContent(props: ChatViewProps) {
       keybindingCommand: KeybindingCommand;
     }): Promise<AtomCommandResult<void, unknown>> => {
       const updateResult = mapAtomCommandResult(
-        await updateProject({
+        await updateSettings({
           environmentId,
           input: {
-            projectId: input.projectId,
-            scripts: input.nextScripts,
+            patch: {
+              projectSettingsOverrides: {
+                [input.projectId]: {
+                  ...settings.projectSettingsOverrides[input.projectId],
+                  defaultProjectScripts: input.nextScripts,
+                },
+              },
+            },
           },
         }),
         () => undefined,
@@ -3306,7 +3324,7 @@ function ChatViewContent(props: ChatViewProps) {
       }
       return updateResult;
     },
-    [environmentId, updateProject, upsertKeybinding],
+    [environmentId, settings.projectSettingsOverrides, updateSettings, upsertKeybinding],
   );
   const saveProjectScript = useCallback(
     async (input: NewProjectScriptInput): Promise<AtomCommandResult<void, unknown>> => {
@@ -3315,28 +3333,24 @@ function ChatViewContent(props: ChatViewProps) {
       }
       const nextId = nextProjectScriptId(
         input.name,
-        activeProject.scripts.map((script) => script.id),
+        activeProjectScripts.map((script) => script.id),
       );
       const nextScript = buildProjectScript(nextId, input);
-      const nextScripts = input.runOnWorktreeCreate
-        ? [
-            ...activeProject.scripts.map((script) =>
-              script.runOnWorktreeCreate ? { ...script, runOnWorktreeCreate: false } : script,
-            ),
-            nextScript,
-          ]
-        : [...activeProject.scripts, nextScript];
+      const nextScripts = [
+        ...activeProjectScripts.map((script) => releaseClaimedRoles(script, input)),
+        nextScript,
+      ];
 
       return persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.workspaceRoot,
-        previousScripts: activeProject.scripts,
+        previousScripts: activeProjectScripts,
         nextScripts,
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(nextId),
       });
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeProjectScripts, persistProjectScripts],
   );
   const updateProjectScript = useCallback(
     async (
@@ -3346,44 +3360,40 @@ function ChatViewContent(props: ChatViewProps) {
       if (!activeProject) {
         return AsyncResult.success(undefined);
       }
-      const existingScript = activeProject.scripts.find((script) => script.id === scriptId);
+      const existingScript = activeProjectScripts.find((script) => script.id === scriptId);
       if (!existingScript) {
         return AsyncResult.failure(Cause.fail(new Error("Script not found.")));
       }
 
       const updatedScript = buildProjectScript(existingScript.id, input, existingScript);
-      const nextScripts = activeProject.scripts.map((script) =>
-        script.id === scriptId
-          ? updatedScript
-          : input.runOnWorktreeCreate
-            ? { ...script, runOnWorktreeCreate: false }
-            : script,
+      const nextScripts = activeProjectScripts.map((script) =>
+        script.id === scriptId ? updatedScript : releaseClaimedRoles(script, input),
       );
 
       return persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.workspaceRoot,
-        previousScripts: activeProject.scripts,
+        previousScripts: activeProjectScripts,
         nextScripts,
         keybinding: input.keybinding,
         keybindingCommand: commandForProjectScript(scriptId),
       });
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeProjectScripts, persistProjectScripts],
   );
   const deleteProjectScript = useCallback(
     async (scriptId: string): Promise<AtomCommandResult<void, unknown>> => {
       if (!activeProject) {
         return AsyncResult.success(undefined);
       }
-      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
+      const nextScripts = activeProjectScripts.filter((script) => script.id !== scriptId);
 
-      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
+      const deletedName = activeProjectScripts.find((s) => s.id === scriptId)?.name;
 
       const result = await persistProjectScripts({
         projectId: activeProject.id,
         projectCwd: activeProject.workspaceRoot,
-        previousScripts: activeProject.scripts,
+        previousScripts: activeProjectScripts,
         nextScripts,
         keybinding: null,
         keybindingCommand: commandForProjectScript(scriptId),
@@ -3405,7 +3415,7 @@ function ChatViewContent(props: ChatViewProps) {
       }
       return result;
     },
-    [activeProject, persistProjectScripts],
+    [activeProject, activeProjectScripts, persistProjectScripts],
   );
 
   const handleRuntimeModeChange = useCallback(
@@ -5034,7 +5044,7 @@ function ChatViewContent(props: ChatViewProps) {
 
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
-      const script = activeProject.scripts.find((entry) => entry.id === scriptId);
+      const script = activeProjectScripts.find((entry) => entry.id === scriptId);
       if (!script) return;
       event.preventDefault();
       event.stopPropagation();
@@ -7079,7 +7089,7 @@ function ChatViewContent(props: ChatViewProps) {
                 threadRef={activeThreadRef}
                 toggleContainer={threadDetailsToggleContainer}
                 projectName={activeProject.title}
-                scripts={activeProject.scripts}
+                scripts={activeProjectScripts}
                 preferredScriptId={lastInvokedScriptByProjectId[activeProject.id] ?? null}
                 openInCwd={gitCwd}
                 gitCwd={isScratch ? null : gitCwd}

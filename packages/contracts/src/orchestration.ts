@@ -211,6 +211,8 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  runOnSettle: Schema.optional(Schema.Boolean),
+  stopOnSettle: Schema.optional(Schema.Boolean),
   /**
    * URL to open in the in-app browser preview when this script runs (or
    * when the user explicitly requests a preview). Optional; only honored on

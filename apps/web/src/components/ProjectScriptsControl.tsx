@@ -28,7 +28,14 @@ import {
   SettingsIcon,
   WrenchIcon,
 } from "lucide-react";
-import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
+import React, {
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useMemo,
+  useState,
+} from "react";
 
 import {
   keybindingValueForCommand,
@@ -40,6 +47,7 @@ import {
   nextProjectScriptId,
   primaryProjectScript,
 } from "~/projectScripts";
+import { projectScriptMenuLabel } from "@t3tools/shared/projectScripts";
 import { shortcutLabelForCommand } from "~/keybindings";
 import {
   AlertDialog,
@@ -108,6 +116,10 @@ export interface NewProjectScriptInput {
   icon: ProjectScriptIcon;
   runOnWorktreeCreate: boolean;
   async?: boolean;
+  /** Runs in the thread's own worktree each time the thread settles. */
+  runOnSettle: boolean;
+  /** Settling the thread stops this action's terminal and its processes. */
+  stopOnSettle: boolean;
   keybinding: string | null;
   /** Optional URL to open in the in-app preview when this script runs. */
   previewUrl: string | null;
@@ -120,7 +132,12 @@ export type ProjectScriptActionResult = AtomCommandResult<void, unknown>;
 const NO_FILE_SCRIPTS: ReadonlyArray<T3ProjectFileScript> = [];
 
 interface ProjectScriptsControlProps {
-  displayMode?: "toolbar" | "panel";
+  /** `list` renders every action as a settings row with its own add and import controls. */
+  displayMode?: "toolbar" | "panel" | "list";
+  /** Disables editing in `list` mode, for example while a save is in flight. */
+  disabled?: boolean;
+  /** `list` mode: renders the section header around the import and add controls. */
+  listHeader?: (controls: ReactNode) => ReactNode;
   scripts: ReadonlyArray<ProjectScript>;
   /** Scripts declared in the project's checked-in t3.json, offered for import. */
   fileScripts?: ReadonlyArray<T3ProjectFileScript>;
@@ -135,8 +152,57 @@ interface ProjectScriptsControlProps {
   onDeleteScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
 }
 
+const ROLE_BADGE_CLASSNAME =
+  "shrink-0 rounded-sm border border-border/60 px-1.5 py-px text-2xs font-normal text-muted-foreground";
+
+function ProjectActionRow({
+  script,
+  shortcutLabel,
+  disabled,
+  onEdit,
+}: {
+  script: ProjectScript;
+  shortcutLabel: string | null;
+  disabled: boolean;
+  onEdit: () => void;
+}) {
+  return (
+    <div className="group flex items-center gap-3 px-3 py-2 sm:px-4">
+      <ScriptIcon icon={script.icon} className="size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <span className="min-w-0 truncate">{script.name}</span>
+          {script.runOnWorktreeCreate ? <span className={ROLE_BADGE_CLASSNAME}>setup</span> : null}
+          {script.runOnSettle ? <span className={ROLE_BADGE_CLASSNAME}>on settle</span> : null}
+          {script.stopOnSettle ? (
+            <span className={ROLE_BADGE_CLASSNAME}>stops on settle</span>
+          ) : null}
+        </div>
+        <code className="block max-w-full truncate font-mono text-xs text-muted-foreground">
+          {script.command}
+        </code>
+      </div>
+      {shortcutLabel ? (
+        <span className="shrink-0 text-xs text-muted-foreground">{shortcutLabel}</span>
+      ) : null}
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        className="shrink-0 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
+        aria-label={`Edit ${script.name}`}
+        disabled={disabled}
+        onClick={onEdit}
+      >
+        <SettingsIcon className="size-3.5" />
+      </Button>
+    </div>
+  );
+}
+
 export default function ProjectScriptsControl({
   displayMode = "toolbar",
+  disabled = false,
+  listHeader,
   scripts,
   fileScripts = NO_FILE_SCRIPTS,
   keybindings,
@@ -159,6 +225,8 @@ export default function ProjectScriptsControl({
   const [icon, setIcon] = useState<ProjectScriptIcon>("play");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
+  const [runOnSettle, setRunOnSettle] = useState(false);
+  const [stopOnSettle, setStopOnSettle] = useState(false);
   const [keybinding, setKeybinding] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [autoOpenPreview, setAutoOpenPreview] = useState(false);
@@ -232,6 +300,8 @@ export default function ProjectScriptsControl({
         command: trimmedCommand,
         icon,
         runOnWorktreeCreate,
+        runOnSettle,
+        stopOnSettle,
         keybinding: keybindingRule?.key ?? null,
         previewUrl: trimmedPreviewUrl.length > 0 ? trimmedPreviewUrl : null,
         autoOpenPreview: trimmedPreviewUrl.length > 0 ? autoOpenPreview : false,
@@ -262,6 +332,8 @@ export default function ProjectScriptsControl({
     setIcon("play");
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(false);
+    setRunOnSettle(false);
+    setStopOnSettle(false);
     setKeybinding("");
     setPreviewUrl("");
     setAutoOpenPreview(false);
@@ -277,6 +349,8 @@ export default function ProjectScriptsControl({
     setIcon(script.icon);
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(script.runOnWorktreeCreate);
+    setRunOnSettle(script.runOnSettle ?? false);
+    setStopOnSettle(script.stopOnSettle ?? false);
     setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
     setPreviewUrl(script.previewUrl ?? "");
     setAutoOpenPreview(script.autoOpenPreview ?? false);
@@ -298,6 +372,8 @@ export default function ProjectScriptsControl({
       icon: fileScript.icon ?? "play",
       runOnWorktreeCreate: fileScript.runOnWorktreeCreate ?? false,
       ...(fileScript.async === undefined ? {} : { async: fileScript.async }),
+      runOnSettle: fileScript.runOnSettle ?? false,
+      stopOnSettle: fileScript.stopOnSettle ?? false,
       keybinding: null,
       previewUrl: fileScript.previewUrl ?? null,
       autoOpenPreview: fileScript.previewUrl ? (fileScript.autoOpenPreview ?? false) : false,
@@ -313,6 +389,8 @@ export default function ProjectScriptsControl({
       setIcon(payload.icon);
       setIconPickerOpen(false);
       setRunOnWorktreeCreate(payload.runOnWorktreeCreate);
+      setRunOnSettle(payload.runOnSettle);
+      setStopOnSettle(payload.stopOnSettle);
       setKeybinding("");
       setPreviewUrl(payload.previewUrl ?? "");
       setAutoOpenPreview(payload.autoOpenPreview);
@@ -343,9 +421,66 @@ export default function ProjectScriptsControl({
     </>
   );
 
+  const listControls = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {importableScripts.length > 0 ? (
+        <Menu>
+          <MenuTrigger
+            render={<Button size="xs" variant="ghost" type="button" disabled={disabled} />}
+          >
+            Import from t3.json
+            <ChevronDownIcon className="size-3.5" />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            {importableScripts.map((fileScript) => (
+              <MenuItem
+                key={`${fileScript.name} ${fileScript.command}`}
+                onClick={() => void importFileScript(fileScript)}
+              >
+                <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{fileScript.name}</span>
+                  <span className="block truncate font-mono text-xs text-muted-foreground">
+                    {fileScript.command}
+                  </span>
+                </span>
+              </MenuItem>
+            ))}
+          </MenuPopup>
+        </Menu>
+      ) : null}
+      <Button size="xs" variant="outline" disabled={disabled} onClick={openAddDialog}>
+        <PlusIcon className="size-3.5" />
+        Add action
+      </Button>
+    </div>
+  );
+
   return (
     <>
-      {primaryScript ? (
+      {displayMode === "list" ? (
+        <>
+          {listHeader ? listHeader(listControls) : listControls}
+          {scripts.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-muted-foreground sm:px-4">
+              No actions configured.
+            </p>
+          ) : (
+            scripts.map((script) => (
+              <ProjectActionRow
+                key={script.id}
+                script={script}
+                shortcutLabel={shortcutLabelForCommand(
+                  keybindings,
+                  commandForProjectScript(script.id),
+                )}
+                disabled={disabled}
+                onEdit={() => openEditDialog(script)}
+              />
+            ))
+          )}
+        </>
+      ) : primaryScript ? (
         <Group
           aria-label="Project scripts"
           className={panel ? THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS : ""}
@@ -422,9 +557,7 @@ export default function ProjectScriptsControl({
                     onClick={() => onRunScript(script)}
                   >
                     <ScriptIcon icon={script.icon} className="size-4" />
-                    <span className="truncate">
-                      {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
-                    </span>
+                    <span className="truncate">{projectScriptMenuLabel(script)}</span>
                     <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
                       {shortcutLabel && (
                         <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
@@ -554,6 +687,8 @@ export default function ProjectScriptsControl({
           setCommand("");
           setIcon("play");
           setRunOnWorktreeCreate(false);
+          setRunOnSettle(false);
+          setStopOnSettle(false);
           setKeybinding("");
           setPreviewUrl("");
           setAutoOpenPreview(false);
@@ -660,6 +795,30 @@ export default function ProjectScriptsControl({
                 <Switch
                   checked={runOnWorktreeCreate}
                   onCheckedChange={(checked) => setRunOnWorktreeCreate(Boolean(checked))}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm dark:border-transparent dark:bg-white/[0.035]">
+                <span className="min-w-0">
+                  <span className="block">Run when a thread settles</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Runs in the thread's own worktree, for example to delete build output.
+                  </span>
+                </span>
+                <Switch
+                  checked={runOnSettle}
+                  onCheckedChange={(checked) => setRunOnSettle(Boolean(checked))}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm dark:border-transparent dark:bg-white/[0.035]">
+                <span className="min-w-0">
+                  <span className="block">Stop when the thread settles</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Closes this action's terminal and its processes, such as a dev server.
+                  </span>
+                </span>
+                <Switch
+                  checked={stopOnSettle}
+                  onCheckedChange={(checked) => setStopOnSettle(Boolean(checked))}
                 />
               </label>
               <label

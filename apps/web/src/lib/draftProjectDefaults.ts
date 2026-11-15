@@ -48,7 +48,10 @@ export async function resolveDraftProjectDefaults(
     ...defaults,
     defaultModelSelection:
       chosen && isModelSelectionProviderEnabled(settings, chosen) ? chosen : null,
-    seedFallbackModelSelection: defaults.defaultModelSelection,
+    // Once project settings are folded the resolver ignores the project's own model, so it is
+    // read here to remain the fallback it always was.
+    seedFallbackModelSelection:
+      defaults.defaultModelSelection ?? project?.defaultModelSelection ?? null,
   };
 }
 

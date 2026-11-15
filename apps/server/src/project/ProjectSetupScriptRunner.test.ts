@@ -204,3 +204,91 @@ it.effect("unsubscribes completion output when Stop interrupts the initial comma
     }).pipe(Effect.provide(layer));
   }),
 );
+
+it.effect("runs the on-settle action in a fresh terminal that stops on settle", () => {
+  const open = vi.fn((input: Parameters<TerminalManager.TerminalManager["Service"]["open"]>[0]) =>
+    Effect.succeed({
+      threadId: input.threadId,
+      terminalId: input.terminalId,
+      cwd: input.cwd,
+      worktreePath: input.worktreePath ?? null,
+      status: "running" as const,
+      pid: 123,
+      history: "",
+      exitCode: null,
+      exitSignal: null,
+      label: "Shell",
+      updatedAt: "2026-06-20T00:00:00.000Z",
+    }),
+  );
+  const write = vi.fn(
+    (_input: Parameters<TerminalManager.TerminalManager["Service"]["write"]>[0]) => Effect.void,
+  );
+  const projectId = ProjectId.make("project:settle-runner");
+  const scripts = [
+    {
+      id: "setup",
+      name: "Setup",
+      command: "vp install",
+      icon: "configure" as const,
+      runOnWorktreeCreate: true,
+    },
+    {
+      id: "clean",
+      name: "Clean",
+      command: "rm -rf dist",
+      icon: "build" as const,
+      runOnWorktreeCreate: false,
+      runOnSettle: true,
+      stopOnSettle: true,
+    },
+  ];
+  const layer = ProjectSetupScriptRunner.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        Layer.mock(ProjectService.ProjectService)({
+          getById: () => Effect.die("unused"),
+        }),
+        Layer.mock(TerminalManager.TerminalManager)({
+          open,
+          write,
+          subscribe: () => Effect.succeed(() => undefined),
+        }),
+        ServerSettings.layerTest({
+          projectSettingsOverrides: { [projectId]: { defaultProjectScripts: scripts } },
+        }),
+      ),
+    ),
+  );
+
+  return Effect.gen(function* () {
+    const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+    const project = { id: projectId, workspaceRoot: "/repo", scripts: [] };
+    const first = yield* runner.runForThread({
+      threadId: "thread-settle",
+      project,
+      worktreePath: "/repo-worktree",
+      trigger: "settle",
+    });
+    const second = yield* runner.runForThread({
+      threadId: "thread-settle",
+      project,
+      worktreePath: "/repo-worktree",
+      trigger: "settle",
+    });
+    assert.equal(first.status === "started" && first.scriptId, "clean");
+    assert.equal(write.mock.calls[0]?.[0].data, "rm -rf dist\r");
+    assert.equal(open.mock.calls[0]?.[0].stopOnSettle, true);
+    const firstTerminal = open.mock.calls[0]?.[0].terminalId;
+    assert.match(firstTerminal ?? "", /^settle-clean-/);
+    assert.notEqual(firstTerminal, second.status === "started" ? second.terminalId : null);
+
+    const setup = yield* runner.runForThread({
+      threadId: "thread-settle",
+      project,
+      worktreePath: "/repo-worktree",
+    });
+    assert.equal(setup.status === "started" && setup.scriptId, "setup");
+    assert.equal(open.mock.calls[2]?.[0].stopOnSettle, false);
+  }).pipe(Effect.provide(layer));
+});

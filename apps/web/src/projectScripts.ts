@@ -13,6 +13,8 @@ export interface ProjectScriptInput {
   readonly icon: ProjectScript["icon"];
   readonly runOnWorktreeCreate: ProjectScript["runOnWorktreeCreate"];
   readonly async?: boolean;
+  readonly runOnSettle?: boolean;
+  readonly stopOnSettle?: boolean;
   readonly previewUrl: Exclude<ProjectScript["previewUrl"], undefined> | null;
   readonly autoOpenPreview: boolean;
 }
@@ -30,12 +32,29 @@ export function buildProjectScript(
     icon: input.icon,
     runOnWorktreeCreate: input.runOnWorktreeCreate,
     ...(async === undefined ? {} : { async }),
+    ...(input.runOnSettle ? { runOnSettle: true } : {}),
+    ...(input.stopOnSettle ? { stopOnSettle: true } : {}),
     ...(input.previewUrl === null
       ? {}
       : {
           previewUrl: input.previewUrl,
           autoOpenPreview: input.autoOpenPreview,
         }),
+  };
+}
+
+/** Only one action may run on worktree creation and one on settle; saving one releases the other's. */
+export function releaseClaimedRoles(
+  script: ProjectScript,
+  saved: Pick<ProjectScriptInput, "runOnWorktreeCreate" | "runOnSettle">,
+): ProjectScript {
+  const releaseSetup = saved.runOnWorktreeCreate && script.runOnWorktreeCreate;
+  const releaseSettle = saved.runOnSettle === true && script.runOnSettle === true;
+  if (!releaseSetup && !releaseSettle) return script;
+  return {
+    ...script,
+    ...(releaseSetup ? { runOnWorktreeCreate: false } : {}),
+    ...(releaseSettle ? { runOnSettle: false } : {}),
   };
 }
 
@@ -89,6 +108,6 @@ export function nextProjectScriptId(name: string, existingIds: Iterable<string>)
 }
 
 export function primaryProjectScript(scripts: ReadonlyArray<ProjectScript>): ProjectScript | null {
-  const regular = scripts.find((script) => !script.runOnWorktreeCreate);
-  return regular ?? scripts[0] ?? null;
+  const regular = scripts.find((script) => !script.runOnWorktreeCreate && !script.runOnSettle);
+  return regular ?? scripts.find((script) => !script.runOnSettle) ?? null;
 }

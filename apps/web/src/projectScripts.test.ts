@@ -10,6 +10,7 @@ import {
   commandForProjectScript,
   nextProjectScriptId,
   primaryProjectScript,
+  releaseClaimedRoles,
   projectScriptIdFromCommand,
 } from "./projectScripts";
 
@@ -151,5 +152,53 @@ describe("setup script execution mode", () => {
       buildProjectScript("setup", { ...input, name: "Renamed setup" }, existing),
     ).toMatchObject({ name: "Renamed setup", async: false });
     expect(buildProjectScript("setup", { ...input, async: true }, existing).async).toBe(true);
+  });
+});
+
+describe("settle roles", () => {
+  const base = {
+    id: "x",
+    name: "x",
+    command: "x",
+    icon: "play" as const,
+    runOnWorktreeCreate: false,
+  };
+
+  it("keeps a single setup and a single on-settle action", () => {
+    const setup = { ...base, id: "setup", runOnWorktreeCreate: true };
+    const clean = { ...base, id: "clean", runOnSettle: true };
+    expect(releaseClaimedRoles(setup, { runOnWorktreeCreate: false, runOnSettle: true })).toBe(
+      setup,
+    );
+    expect(releaseClaimedRoles(clean, { runOnWorktreeCreate: false, runOnSettle: true })).toEqual({
+      ...clean,
+      runOnSettle: false,
+    });
+    expect(releaseClaimedRoles(setup, { runOnWorktreeCreate: true })).toEqual({
+      ...setup,
+      runOnWorktreeCreate: false,
+    });
+  });
+
+  it("never picks the on-settle action as the primary run button", () => {
+    const clean = { ...base, id: "clean", runOnSettle: true };
+    const setup = { ...base, id: "setup", runOnWorktreeCreate: true };
+    expect(primaryProjectScript([clean, setup])?.id).toBe("setup");
+    expect(primaryProjectScript([clean])).toBeNull();
+  });
+
+  it("stores settle flags only when set", () => {
+    const input = {
+      name: "Clean",
+      command: "rm -rf dist",
+      icon: "build" as const,
+      runOnWorktreeCreate: false,
+      previewUrl: null,
+      autoOpenPreview: false,
+    };
+    expect(buildProjectScript("clean", input)).not.toHaveProperty("runOnSettle");
+    expect(
+      buildProjectScript("clean", { ...input, runOnSettle: true, stopOnSettle: true }),
+    ).toMatchObject({ runOnSettle: true, stopOnSettle: true });
   });
 });

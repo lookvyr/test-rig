@@ -28,6 +28,7 @@ import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -288,6 +289,9 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const terminals = yield* TerminalManager.TerminalManager;
+  const projectScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+  // The settledAt each thread last ran its settle action for, so a replayed event runs it once.
+  const settleActionRunAt = new Map<ThreadId, number>();
 
   const sweep = Effect.fn("ThreadSettlementServiceV2.sweep")(function* (
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
@@ -541,22 +545,52 @@ export const make = Effect.gen(function* () {
     runSweep(null, threadId),
   );
 
-  // Settling closes the thread's shells that sit at an idle prompt, so they stop
-  // holding the worktree. A terminal running a command (a dev server, an
-  // editor) stays for the user to close.
-  const closeIdleTerminals = Effect.fn("ThreadSettlementServiceV2.closeIdleTerminals")(
+  // Settling stops the thread's stop-on-settle actions and closes shells that sit
+  // at an idle prompt, so they stop holding the worktree. Other running commands
+  // (a dev server, an editor) stay for the user to close. Then the project's
+  // on-settle action runs in the thread's own worktree; shared checkouts skip it
+  // because other threads may still work there.
+  const cleanUpSettledThread = Effect.fn("ThreadSettlementServiceV2.cleanUpSettledThread")(
     function* (threadId: ThreadId) {
       // A thread re-engaged before this event ran keeps its shells.
+      const settled = yield* projections.getThread(threadId);
+      if (settled.settledOverride !== "settled") return;
+      yield* terminals.closeOnSettle({ threadId });
+      const worktreePath = settled.worktreePath;
+      if (worktreePath === null || !(yield* fileSystem.exists(worktreePath))) return;
+      // Recheck after closing and worktree I/O; re-engaged threads must not be cleaned up.
       const thread = yield* projections.getThread(threadId);
-      if (thread.settledOverride !== "settled") return;
-      yield* terminals.closeIdle({ threadId });
+      if (thread.settledOverride !== "settled" || thread.settledAt === null) return;
+      const settledAtMs = DateTime.toEpochMillis(thread.settledAt);
+      if (settleActionRunAt.get(threadId) === settledAtMs) return;
+      // A subagent sharing its parent's worktree leaves the cleanup to the parent.
+      if (
+        thread.lineage.relationshipToParent === "subagent" &&
+        thread.lineage.parentThreadId !== null
+      ) {
+        const parent = yield* projections
+          .getThread(thread.lineage.parentThreadId)
+          .pipe(Effect.catch(() => Effect.succeed(null)));
+        if (parent?.worktreePath === worktreePath) return;
+      }
+      const run = yield* projectScripts.runForThread({
+        threadId,
+        projectId: thread.projectId,
+        worktreePath,
+        trigger: "settle",
+        observeCompletion: {},
+      });
+      settleActionRunAt.set(threadId, settledAtMs);
+      if (run.status === "started" && run.completion) {
+        yield* run.completion.pipe(Effect.forkDetach);
+      }
     },
     (effect, threadId) =>
       effect.pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.failCause(cause)
-            : Effect.logWarning("closing idle terminals after settlement failed", {
+            : Effect.logWarning("cleaning up a settled thread failed", {
                 threadId,
                 cause: Cause.pretty(cause),
               }),
@@ -567,7 +601,7 @@ export const make = Effect.gen(function* () {
   const processEvent = (event: OrchestrationV2DomainEvent) => {
     switch (event.type) {
       case "thread.settled":
-        return closeIdleTerminals(event.threadId);
+        return cleanUpSettledThread(event.threadId);
       case "thread.pull-request-link-updated":
       case "thread.pull-request-synced":
       case "provider-session.detached":

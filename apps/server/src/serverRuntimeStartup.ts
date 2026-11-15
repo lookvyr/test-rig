@@ -35,6 +35,7 @@ import * as ProviderRuntimeRecovery from "./orchestration-v2/ProviderRuntimeReco
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { runLegacyProjectSettingsFold } from "./project/legacyProjectSettingsFold.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { forkParked } from "./serverActivation.ts";
@@ -314,6 +315,14 @@ export const make = (options?: StartupOptions) =>
       );
 
       yield* runStartupPhase("orchestration-v2.legacy-shells", legacyImporter.reconcileShells);
+      yield* runStartupPhase(
+        "settings.fold-legacy-project-settings",
+        runLegacyProjectSettingsFold.pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to fold legacy project settings", { cause }),
+          ),
+        ),
+      );
       yield* runStartupPhase(
         "orchestration-v2.expire-side-chats",
         // Side chats used to be temporary threads marked with `sideOfThreadId`. Saved side chats

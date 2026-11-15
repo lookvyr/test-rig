@@ -210,6 +210,22 @@ attempt stays in the history, and the original message runs again in that checko
 Imported setup scripts retain their configured choice to wait for completion or
 run alongside the agent. Editing a script preserves that choice.
 
+## Actions when a thread settles
+
+An action marked **Run when a thread settles** runs in the thread's own
+worktree each time the thread settles, for example to delete build output.
+Threads working in the project checkout skip it, and a subagent that shares its
+parent's worktree leaves it to the parent. Only one action per project can hold
+this role, just as only one runs on worktree creation.
+
+An action marked **Stop when the thread settles** has its terminal and the
+processes it started closed when the thread settles, which suits a dev server
+started for that thread. Settling also closes shells that sit at an idle prompt;
+other running commands stay open until you close them.
+
+A project's `t3.json` can declare both choices on a script with `runOnSettle`
+and `stopOnSettle`, and they carry over when you import it.
+
 ## Move a conversation into a worktree
 
 Ask the agent to move the current conversation into a new worktree, specifying

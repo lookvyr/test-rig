@@ -33,6 +33,10 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  /** Runs in the thread's own worktree each time the thread settles. */
+  runOnSettle: Schema.optional(Schema.Boolean),
+  /** Settling the thread stops this action's terminal and its child processes. */
+  stopOnSettle: Schema.optional(Schema.Boolean),
   /** Start the agent while setup runs unless explicitly disabled. */
   async: Schema.optional(Schema.Boolean),
   previewUrl: Schema.optional(TrimmedNonEmptyString),

@@ -3,6 +3,7 @@ import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hos
 import {
   projectScriptRuntimeEnv,
   resolveProjectScripts,
+  settleProjectScript,
   setupProjectScript,
 } from "@t3tools/shared/projectScripts";
 import * as NodeCrypto from "node:crypto";
@@ -60,6 +61,8 @@ export interface ProjectSetupScriptRunnerInput {
   readonly projectCwd?: string;
   readonly worktreePath: string;
   readonly preferredTerminalId?: string;
+  /** `settle` runs the project's on-settle action instead of its setup action. */
+  readonly trigger?: "setup" | "settle";
   readonly project?: {
     readonly id: ProjectId;
     readonly workspaceRoot: string;
@@ -353,14 +356,22 @@ export const make = Effect.gen(function* () {
           }),
       ),
     );
-    const script = setupProjectScript(resolveProjectScripts(settings, project));
+    const trigger = input.trigger ?? "setup";
+    const scripts = resolveProjectScripts(settings, project);
+    const script =
+      trigger === "settle" ? settleProjectScript(scripts) : setupProjectScript(scripts);
     if (!script) {
       return {
         status: "no-script",
       } as const;
     }
 
-    const terminalId = input.preferredTerminalId ?? `setup-${script.id}`;
+    // Earlier settle shells may still run foreground programs; never type a new settle into one.
+    const terminalId =
+      input.preferredTerminalId ??
+      (trigger === "settle"
+        ? `settle-${script.id}-${NodeCrypto.randomUUID().slice(0, 8)}`
+        : `setup-${script.id}`);
     const cwd = input.worktreePath;
     const env = {
       ...projectScriptRuntimeEnv({
@@ -387,6 +398,7 @@ export const make = Effect.gen(function* () {
       .open({
         threadId: input.threadId,
         terminalId,
+        stopOnSettle: script.stopOnSettle ?? false,
         cwd,
         worktreePath: input.worktreePath,
         // Setup may run before a terminal client attaches to answer color probes.
