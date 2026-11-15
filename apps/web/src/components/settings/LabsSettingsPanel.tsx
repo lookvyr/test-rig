@@ -98,6 +98,9 @@ export function AutoSettleRows() {
   const sidebarAutoSettleOnMerge = usePrimarySettings(
     (settings) => settings.sidebarAutoSettleOnMerge,
   );
+  const keepPullRequests = usePrimarySettings(
+    (settings) => settings.sidebarAutoSettleKeepPullRequests,
+  );
   const updatePrimarySettings = useUpdatePrimarySettings();
   return (
     <>
@@ -137,6 +140,21 @@ export function AutoSettleRows() {
             <AutoSettleDaysInput
               value={sidebarAutoSettleAfterDays}
               onCommit={(days) => updatePrimarySettings({ sidebarAutoSettleAfterDays: days })}
+            />
+          }
+        />
+      ) : null}
+      {sidebarAutoSettleAfterDays !== null ? (
+        <SettingsRow
+          {...searchableSetting("auto-settle-keep-pull-requests")}
+          description="Inactivity never settles a thread that has a pull request."
+          control={
+            <Switch
+              checked={keepPullRequests}
+              onCheckedChange={(checked) =>
+                updatePrimarySettings({ sidebarAutoSettleKeepPullRequests: Boolean(checked) })
+              }
+              aria-label="Keep threads with a pull request"
             />
           }
         />

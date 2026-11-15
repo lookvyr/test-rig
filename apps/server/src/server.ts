@@ -17,6 +17,7 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
+import * as KeepAwake from "./background/KeepAwake.ts";
 import * as ServerConfig from "./config.ts";
 import {
   otlpTracesProxyRouteLayer,
@@ -417,7 +418,11 @@ const RuntimeCoreDependenciesLive = Layer.mergeAll(
     Layer.provideMerge(ServerSecretStore.layer),
   );
 
-const RuntimeDependenciesLive = Layer.merge(CheckpointDiffQuery.layer, WorktreeCleanup.layer).pipe(
+const RuntimeDependenciesLive = Layer.mergeAll(
+  CheckpointDiffQuery.layer,
+  WorktreeCleanup.layer,
+  KeepAwake.layer,
+).pipe(
   Layer.provideMerge(RuntimeCoreDependenciesLive),
   // Misc.
   Layer.provideMerge(ProviderContinuationRequests.layer),

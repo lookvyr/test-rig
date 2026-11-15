@@ -316,6 +316,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Archive confirmation",
     to: "/settings/general",
   },
+  { id: "unpin-confirmation", title: "Unpin confirmation", to: "/settings/general" },
+  { id: "keep-awake", title: "Keep awake while agents work", to: "/settings/maintenance" },
+  {
+    id: "auto-settle-keep-pull-requests",
+    title: "Keep threads with a pull request",
+    to: "/settings/threads",
+  },
   {
     id: "delete-confirmation",
     title: "Delete confirmation",

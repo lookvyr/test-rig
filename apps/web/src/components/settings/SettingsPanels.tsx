@@ -1906,6 +1906,74 @@ function SkillsInSlashMenuRow() {
   );
 }
 
+/** A boolean switch row for one client or primary server setting. */
+function SwitchSettingRow({
+  id,
+  title,
+  description,
+  checked,
+  defaultChecked,
+  onChange,
+}: {
+  id: string;
+  title: string;
+  description: string;
+  checked: boolean;
+  defaultChecked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <SettingsRow
+      id={id}
+      title={title}
+      description={description}
+      resetAction={
+        checked !== defaultChecked ? (
+          <SettingResetButton
+            label={title.toLowerCase()}
+            onClick={() => onChange(defaultChecked)}
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={checked}
+          onCheckedChange={(next) => onChange(Boolean(next))}
+          aria-label={title}
+        />
+      }
+    />
+  );
+}
+
+function UnpinConfirmationRow() {
+  const confirm = useClientSettings((settings) => settings.confirmThreadUnpin);
+  const updateSettings = useUpdateClientSettings();
+  return (
+    <SwitchSettingRow
+      {...searchableSetting("unpin-confirmation")}
+      description="Ask before unpinning a thread."
+      checked={confirm}
+      defaultChecked={DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin}
+      onChange={(confirmThreadUnpin) => updateSettings({ confirmThreadUnpin })}
+    />
+  );
+}
+
+function KeepAwakeRow() {
+  const keepAwake = usePrimarySettings((settings) => settings.keepAwakeWhileAgentsWork);
+  const updateSettings = useUpdatePrimarySettings();
+  return (
+    <SwitchSettingRow
+      {...searchableSetting("keep-awake")}
+      description="Keep this computer from sleeping while agents are working. The display can still turn off."
+      checked={keepAwake}
+      defaultChecked={DEFAULT_UNIFIED_SETTINGS.keepAwakeWhileAgentsWork}
+      onChange={(keepAwakeWhileAgentsWork) => updateSettings({ keepAwakeWhileAgentsWork })}
+    />
+  );
+}
+
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
@@ -2005,6 +2073,7 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+        <UnpinConfirmationRow />
       </SettingsSection>
       <SettingsSection title="Display">
         <SettingsRow
@@ -2628,6 +2697,7 @@ export function MaintenanceSettingsPanel() {
             </>
           }
         />
+        <KeepAwakeRow />
       </SettingsSection>
       <SettingsSection title="Diagnostics">
         <SettingsRow

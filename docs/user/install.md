@@ -78,3 +78,9 @@ For multi-account setups, see [Codex](./providers-codex.md) and [Claude](./provi
 
 - [Permission modes](./permission-modes.md): how much Test Rig asks before acting
 - [Remote access](./remote-access.md): connect from a phone, tablet, or another desktop
+
+## Sleep while agents work
+
+While an agent is working, Test Rig keeps your computer from sleeping and lets it
+sleep again a minute after the last run ends. The display can still turn off. Turn
+this off in **Settings → Maintenance → Keep awake while agents work**.

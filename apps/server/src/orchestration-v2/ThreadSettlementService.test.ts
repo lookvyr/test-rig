@@ -272,6 +272,43 @@ describe("resolveAutoSettlementAt", () => {
     ).toBeNull();
   });
 
+  it("keeps threads with a pull request out of inactivity settlement when asked", () => {
+    const idle = shell({
+      latestUserMessageAt: at(-4 * DAY_MS),
+      latestRunCompletedAt: at(-3 * DAY_MS),
+    });
+    const input = {
+      thread: idle,
+      pullRequest: { state: "closed" as const, mergedAt: null, closedAt: DateTime.formatIso(at(-5 * DAY_MS)) },
+      nowMs: NOW_MS,
+      autoSettleAfterDays: 2,
+      autoSettleOnMerge: false,
+    };
+    expect(ThreadSettlementService.resolveAutoSettlementAt(input)).not.toBeNull();
+    expect(
+      ThreadSettlementService.resolveAutoSettlementAt({
+        ...input,
+        pullRequest: { state: "merged" as const, mergedAt: DateTime.formatIso(at(-5 * DAY_MS)), closedAt: null },
+        autoSettleKeepPullRequests: true,
+      }),
+    ).toBeNull();
+    expect(
+      ThreadSettlementService.resolveAutoSettlementAt({
+        ...input,
+        pullRequest: null,
+        autoSettleKeepPullRequests: true,
+      }),
+    ).toEqual(at(-3 * DAY_MS));
+    expect(
+      ThreadSettlementService.resolveAutoSettlementAt({
+        ...input,
+        thread: { ...idle, branchPullRequest: { number: 7, url: "https://github.com/o/r/pull/7" } },
+        pullRequest: null,
+        autoSettleKeepPullRequests: true,
+      } as never),
+    ).toBeNull();
+  });
+
   it("settles on merge only after the user's last action and preserves the activity time", () => {
     const thread = shell({
       latestUserMessageAt: at(-2 * 60 * 60 * 1_000),

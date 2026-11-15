@@ -117,7 +117,12 @@ with settlement after a pull request merges enabled. These server preferences
 apply to both web and desktop clients. Closed pull requests can also settle
 threads. Work in progress, pending questions or approvals, and background work the
 agent is waiting on prevent automatic settlement; a dev server it left running does
-not. Disabling auto-settle on a thread prevents automatic settlement.
+not. Disabling auto-settle on a thread prevents automatic settlement. Turn on **Keep threads with a pull request** to stop inactivity from settling any
+thread that has a pull request; merged and closed pull requests still settle as
+configured.
+
+To be asked before unpinning a thread, turn on **Settings → General → Unpin
+confirmation**.
 Worktree cleanup never settles a thread; it only considers threads already
 settled or archived.
 

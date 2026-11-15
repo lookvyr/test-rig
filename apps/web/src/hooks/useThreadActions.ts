@@ -170,6 +170,7 @@ export function useThreadActions() {
   });
   const sidebarThreadSortOrder = useClientSettings((settings) => settings.sidebarThreadSortOrder);
   const confirmThreadDelete = useClientSettings((settings) => settings.confirmThreadDelete);
+  const confirmThreadUnpin = useClientSettings((settings) => settings.confirmThreadUnpin);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,
@@ -708,6 +709,28 @@ export function useThreadActions() {
     [confirmThreadDelete, deleteThread, resolveThreadTarget],
   );
 
+  /** Unpin from a user gesture, asking first when Unpin confirmation is on. */
+  const confirmAndUnpinThread = useCallback(
+    async (target: ScopedThreadRef) => {
+      const localApi = readLocalApi();
+      if (confirmThreadUnpin && localApi) {
+        const title = resolveThreadTarget(target)?.thread.title ?? "this thread";
+        const confirmationResult = await settlePromise(() =>
+          localApi.dialogs.confirm(
+            [
+              `Unpin thread "${title}"?`,
+              "This will move the thread out of your pinned section.",
+            ].join("\n"),
+          ),
+        );
+        if (confirmationResult._tag === "Failure") return confirmationResult;
+        if (!confirmationResult.value) return AsyncResult.success(undefined);
+      }
+      return unpinThread(target);
+    },
+    [confirmThreadUnpin, resolveThreadTarget, unpinThread],
+  );
+
   return useMemo(
     () => ({
       archiveThread,
@@ -721,10 +744,12 @@ export function useThreadActions() {
       unsnoozeThread,
       pinThread,
       unpinThread,
+      confirmAndUnpinThread,
     }),
     [
       archiveThread,
       confirmAndDeleteThread,
+      confirmAndUnpinThread,
       deleteThread,
       pinThread,
       settleThread,
