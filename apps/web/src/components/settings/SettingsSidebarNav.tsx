@@ -32,6 +32,7 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
+import { useAtomValue } from "@effect/atom-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { Button } from "../ui/button";
@@ -44,10 +45,12 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "../ui/sidebar";
+import { primaryServerConfigAtom } from "../../state/server";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
   SETTINGS_NAV_GROUPS,
+  SETTINGS_SEARCH_ITEMS,
   SETTINGS_SECTION_LABELS,
   type SettingsPath,
   type SettingsSearchItem,
@@ -104,7 +107,19 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const [query, setQuery] = useState("");
   const [compactSearchOpen, setCompactSearchOpen] = useState(false);
   const [activeResultIndex, setActiveResultIndex] = useState(0);
-  const results = useMemo(() => searchSettings(query), [query]);
+  // Fast checkout only renders when the primary server is a Mac, so its result would lead nowhere.
+  const fastCheckoutSupported =
+    useAtomValue(primaryServerConfigAtom)?.environment.capabilities.fastWorktreeCheckout === true;
+  const results = useMemo(
+    () =>
+      searchSettings(
+        query,
+        fastCheckoutSupported
+          ? SETTINGS_SEARCH_ITEMS
+          : SETTINGS_SEARCH_ITEMS.filter((item) => item.id !== "worktree-fast-checkout"),
+      ),
+    [query, fastCheckoutSupported],
+  );
   const isSearching = query.trim().length > 0;
   const hasResults = results.length > 0;
 
