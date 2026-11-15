@@ -4,6 +4,7 @@ import {
   BROWSER_RECORDING_FRAME_RATES,
   BrowserSearchEngine,
   DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW,
+  DEFAULT_BROWSER_LINK_TARGET,
   DEFAULT_BROWSER_RECORDING_FRAME_RATE,
   DEFAULT_BROWSER_VIEWPORT,
   DEFAULT_PREVIEW_APPEARANCE,
@@ -693,6 +694,48 @@ function BrowserSearchEngineSetting() {
   );
 }
 
+const LINK_TARGET_LABELS = { system: "System browser", app: "Test Rig" } as const;
+
+/** Where plain clicks on web links in chat open; Cmd/Ctrl-click always uses the system browser. */
+function BrowserLinkTargetSetting() {
+  const linkTarget = useClientSettings((settings) => settings.browserLinkTarget);
+  const update = useUpdateClientSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("browser-link-target")}
+      description="Where links in chat open. Cmd-click (Ctrl-click) always opens your system browser."
+      resetAction={
+        linkTarget !== DEFAULT_BROWSER_LINK_TARGET ? (
+          <SettingResetButton
+            label="open links in"
+            onClick={() => update({ browserLinkTarget: DEFAULT_BROWSER_LINK_TARGET })}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={linkTarget}
+          onValueChange={(value) => {
+            if (value === "system" || value === "app") update({ browserLinkTarget: value });
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Open links in">
+            <SelectValue>{LINK_TARGET_LABELS[linkTarget]}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem hideIndicator value="system">
+              {LINK_TARGET_LABELS.system}
+            </SelectItem>
+            <SelectItem hideIndicator value="app">
+              {LINK_TARGET_LABELS.app}
+            </SelectItem>
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
 export function BrowserSettingsPanel() {
   const desktopOnly = !isElectron;
   const desktopOnlyMessage = desktopOnly ? "Only available in the desktop app." : undefined;
@@ -704,6 +747,7 @@ export function BrowserSettingsPanel() {
       </SettingsSection>
       <SettingsSection id="browser" title="Browsing">
         <BrowserProfilesSetting />
+        <BrowserLinkTargetSetting />
         <SettingsUnavailableGroup message={desktopOnlyMessage}>
           <BrowserAutoShowFloatingPreviewSetting disabled={desktopOnly} />
         </SettingsUnavailableGroup>

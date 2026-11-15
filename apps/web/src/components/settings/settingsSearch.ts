@@ -119,6 +119,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/browser",
     targetId: "browser-search",
   },
+  { id: "browser-link-target", title: "Open links in", to: "/settings/browser" },
   { id: "agent-browser-access", title: "Agent browser access", to: "/settings/browser" },
   {
     id: "browser-auto-show-floating-preview",

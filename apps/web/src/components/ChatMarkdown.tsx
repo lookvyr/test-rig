@@ -1102,6 +1102,22 @@ const CHAT_MARKDOWN_COMPONENTS = {
             onClick?.(event);
             if (isSameDocumentLink && href) {
               handleMarkdownFragmentClick(event, href);
+              return;
+            }
+            // "Open links in: Test Rig" sends plain clicks on web links to the in-app browser;
+            // Cmd/Ctrl-click and middle clicks still open the system browser.
+            if (
+              href &&
+              faviconHost &&
+              canOpenInPreview &&
+              !event.defaultPrevented &&
+              !event.metaKey &&
+              !event.ctrlKey &&
+              event.button === 0 &&
+              getClientSettings().browserLinkTarget === "app"
+            ) {
+              event.preventDefault();
+              void openExternalLinkInPreview(href);
             }
           }}
           onContextMenu={(event) => {

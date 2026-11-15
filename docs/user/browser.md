@@ -188,6 +188,10 @@ to use the file preview.
 
 ## Browser settings
 
+**Settings → Browser → Open links in** chooses where links in chat open: your
+system browser (the default) or a Test Rig browser tab. Cmd-click (Ctrl-click)
+always opens the system browser.
+
 **Settings → Browser** controls whether agents may use the shared browser
 (**Agent browser access**, applied when an agent session next starts), whether the
 floating preview opens when an agent opens a browser, and the address-bar search
