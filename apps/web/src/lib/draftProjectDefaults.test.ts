@@ -71,13 +71,27 @@ describe("destination draft defaults", () => {
     });
     expect(mocks.file).not.toHaveBeenCalled();
   });
+  it("keeps a model saved on the project itself as a fallback rather than a chosen default", async () => {
+    mocks.configs.set("destination", { settings: { ...settings, defaultModelSelection: null } });
+    const legacy = { instanceId: ProviderInstanceId.make("codex"), model: "legacy-seed" };
+    mocks.project.mockReturnValue({
+      id: ref.projectId,
+      workspaceRoot: "/b",
+      defaultModelSelection: legacy,
+      defaultThreadEnvMode: null,
+    });
+    expect(await resolveDraftProjectDefaults(ref)).toMatchObject({
+      defaultModelSelection: null,
+      seedFallbackModelSelection: legacy,
+    });
+  });
   it("consults t3.json only when the workspace setting is unset", async () => {
     mocks.configs.set("destination", { settings: { ...settings, defaultThreadEnvMode: null } });
     mocks.file.mockResolvedValue({ defaultThreadEnvMode: "worktree" });
     expect((await resolveDraftProjectDefaults(ref)).defaultThreadEnvMode).toBe("worktree");
     expect(mocks.file).toHaveBeenCalledWith("destination", "/b");
   });
-  it("keeps the last launch model when changing projects and preserves composer content", () => {
+  it("applies the configured default model when changing projects and preserves composer content", () => {
     const store = useComposerDraftStore.getState();
     store.setLogicalProjectDraftThreadId(
       "a",
@@ -114,8 +128,8 @@ describe("destination draft defaults", () => {
     expect(store.getComposerDraft(draftId)).toMatchObject({
       prompt: "Keep this rich prompt",
       threadContexts: [context],
-      activeProvider: "codex",
-      modelSelectionByProvider: { codex: { model: "sticky" } },
+      activeProvider: "claude-code",
+      modelSelectionByProvider: { "claude-code": { model: "project-model" } },
     });
   });
   it("preserves deliberately selected model and permission overrides through retargeting", () => {

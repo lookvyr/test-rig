@@ -449,9 +449,13 @@ interface ComposerDraftStoreState {
       | null
       | undefined,
   ) => void;
-  /** Seed an untouched draft from the last launched thread, always at normal speed. */
+  /**
+   * Seed an untouched draft, always at normal speed: a configured default model wins, then the
+   * last launched thread's model ("Automatic"), then `fallbackSelection`.
+   */
   applyStickyState: (
     threadRef: ComposerThreadTarget,
+    configuredSelection?: ModelSelection | null,
     fallbackSelection?: ModelSelection | null,
   ) => void;
   setProviderModelOptions: (
@@ -2726,12 +2730,14 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             };
           });
         },
-        applyStickyState: (threadRef, fallbackSelection) => {
+        applyStickyState: (threadRef, configuredSelection, fallbackSelection) => {
           const state = get();
           const selection =
+            configuredSelection ??
             (state.stickyActiveProvider
               ? state.stickyModelSelectionByProvider[state.stickyActiveProvider]
-              : null) ?? fallbackSelection;
+              : null) ??
+            fallbackSelection;
           if (!selection) return;
           // Remember model options without speed; new drafts derive Normal
           // until the user explicitly chooses a faster speed.

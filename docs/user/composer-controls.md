@@ -1,6 +1,6 @@
 # Composer controls
 
-New chats start with the provider, model, and reasoning effort from the last chat you started in this browser or desktop profile, including when you switch projects. The remembered choice updates after the first message is accepted; browsing older chats, changing an unsent draft, and sending follow-ups do not change it.
+New chats start with the provider, model, and reasoning effort from the last chat you started in this browser or desktop profile, including when you switch projects. To always start with one model instead, choose it in **Settings → Threads → New threads → Model**; resetting that row returns to the most recent model. **Permissions** in the same section sets the permission mode new chats start in. The remembered choice updates after the first message is accepted; browsing older chats, changing an unsent draft, and sending follow-ups do not change it.
 
 Each model also remembers the effort you last chose for it. Picking that model again, from the list or from **Favorites**, brings back that effort, so switching between Opus at High and Sonnet at Low keeps each at its own level. A model you have not set an effort for keeps the current one. This memory does not change what new chats start with.
 
@@ -25,3 +25,7 @@ With an empty composer, press **Arrow Up** to recall your previous sent text. Pr
 At the start of bold, italic, or inline code text, press **Arrow Left** to type before the formatting. At its end, press **Arrow Right** to type after it. The opposite arrow moves back into the formatting without inserting a space.
 
 Click a question's header to hide or show its options. The next question opens automatically. Number shortcuts work while its options are visible. If the provider process is gone, the question explains why an answer cannot be submitted; interrupt or restart the run to recover.
+
+## Response streaming
+
+Agent replies appear one finished paragraph or code block at a time. To show each reply only once the agent finishes its turn, choose **Wait for the full response** in **Settings → Threads → Text generation → Advanced → Response streaming**.

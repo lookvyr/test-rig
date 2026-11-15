@@ -117,6 +117,34 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/browser",
     targetId: "browser-search",
   },
+  { id: "agent-browser-access", title: "Agent browser access", to: "/settings/browser" },
+  {
+    id: "browser-auto-show-floating-preview",
+    title: "Auto-show floating preview",
+    to: "/settings/browser",
+  },
+  { id: "browser-default-viewport", title: "Default browser viewport", to: "/settings/browser" },
+  { id: "browser-default-zoom", title: "Default browser zoom", to: "/settings/browser" },
+  {
+    id: "browser-default-appearance",
+    title: "Default browser appearance",
+    to: "/settings/browser",
+  },
+  {
+    id: "browser-recording-frame-rate",
+    title: "Browser recording frame rate",
+    to: "/settings/browser",
+  },
+  {
+    id: "browser-recording-key-presses",
+    title: "Show key presses in recordings",
+    to: "/settings/browser",
+  },
+  {
+    id: "browser-recording-mouse-presses",
+    title: "Show mouse presses in recordings",
+    to: "/settings/browser",
+  },
   { id: "scheduled-tasks", title: "Scheduled tasks", to: "/settings/scheduled-tasks" },
   {
     id: "color-scheme",
@@ -192,6 +220,31 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "project-order",
+    title: "Project order",
+    to: "/settings/general",
+  },
+  {
+    id: "worktree-submodules",
+    title: "Submodules",
+    to: "/settings/worktrees",
+  },
+  {
+    id: "continue-threads-after-restart",
+    title: "Continue threads after restarts",
+    to: "/settings/maintenance",
+  },
+  {
+    id: "default-model",
+    title: "Default model",
+    to: "/settings/threads",
+  },
+  {
+    id: "default-permissions",
+    title: "Default permissions",
+    to: "/settings/threads",
+  },
+  {
     id: "time-format",
     title: "Time format",
     to: "/settings/general",
@@ -202,8 +255,8 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/diffs",
   },
   {
-    id: "assistant-output",
-    title: "Assistant output",
+    id: "response-streaming",
+    title: "Response streaming",
     to: "/settings/threads",
   },
   {

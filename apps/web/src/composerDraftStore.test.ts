@@ -1736,6 +1736,17 @@ describe("composerDraftStore sticky composer settings", () => {
     },
   );
 
+  it("starts new drafts with a configured default model over the most recent one", () => {
+    const store = useComposerDraftStore.getState();
+    const next = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("configured-default"));
+    store.setStickyModelSelection(modelSelection(CODEX_DRIVER, "gpt-6-sol"));
+    store.applyStickyState(next, modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-5-5"));
+    expect(store.getComposerDraft(next)?.activeProvider).toBe(CLAUDE_AGENT_INSTANCE);
+    const automatic = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("automatic-default"));
+    store.applyStickyState(automatic, null);
+    expect(store.getComposerDraft(automatic)?.activeProvider).toBe(CODEX_INSTANCE);
+  });
+
   it("remembers a new launch rather than model and effort edits on another thread", () => {
     const store = useComposerDraftStore.getState();
     const viewed = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("viewed"));

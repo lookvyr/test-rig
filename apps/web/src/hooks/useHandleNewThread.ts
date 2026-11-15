@@ -188,6 +188,7 @@ export function useNewThreadHandler() {
               applyStickyState(
                 reusableStoredDraftThread.draftId,
                 projectDefaults.defaultModelSelection,
+                projectDefaults.seedFallbackModelSelection,
               );
             }
           }
@@ -272,7 +273,11 @@ export function useNewThreadHandler() {
           runtimeMode: projectDefaults.defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
         });
-        applyStickyState(draftId, projectDefaults.defaultModelSelection);
+        applyStickyState(
+          draftId,
+          projectDefaults.defaultModelSelection,
+          projectDefaults.seedFallbackModelSelection,
+        );
 
         await router.navigate({
           to: "/draft/$draftId",

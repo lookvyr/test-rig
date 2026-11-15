@@ -15,8 +15,13 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   type BackgroundActivityProfile,
   ProviderDriverKind,
+  type ResponseStreamingMode,
   type SidebarProjectGroupingMode,
+  type SidebarProjectSortOrder,
+  type WorktreeSubmodules,
 } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
@@ -59,7 +64,12 @@ import {
   useTheme,
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  useUpdateClientSettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import {
   getCustomModelOptionsByInstance,
@@ -142,6 +152,16 @@ const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, s
   artwork: "Artwork",
   pill: "Version pill",
   none: "None",
+};
+
+const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
+  turn: "Wait for the full response",
+  paragraph: "Show finished paragraphs",
+};
+
+const RESPONSE_STREAMING_MODE_DESCRIPTIONS: Record<ResponseStreamingMode, string> = {
+  turn: "Text appears once the agent finishes its turn.",
+  paragraph: "Each paragraph or code block appears as soon as it is complete.",
 };
 
 const TIMESTAMP_FORMAT_LABELS = {
@@ -295,8 +315,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
-      ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
-        ? ["Assistant output"]
+      ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
+        ? ["Response streaming"]
         : []),
       ...(isBackgroundActivityDirty ? ["Background activity"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
@@ -360,9 +380,12 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.fontSizePrompt,
       settings.fontSizeTerminal,
       settings.glassOpacity,
-      settings.enableAssistantStreaming,
+      settings.responseStreamingMode,
       settings.sidebarProjectGroupingMode,
       settings.sidebarWorkingShelfEnabled,
+      settings.sidebarProjectSortOrder,
+      settings.defaultModelSelection,
+      settings.defaultRuntimeMode,
       settings.threadDetailsItems,
       settings.fontSmoothing,
       settings.timestampFormat,
@@ -443,6 +466,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
+      sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
+      defaultModelSelection: null,
+      defaultRuntimeMode: DEFAULT_UNIFIED_SETTINGS.defaultRuntimeMode,
       threadDetailsItems: {},
       fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
       fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
@@ -450,7 +476,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       fontSizeTerminal: DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal,
       fontSmoothing: DEFAULT_UNIFIED_SETTINGS.fontSmoothing,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
-      enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+      responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
@@ -1402,6 +1428,282 @@ const TOOL_CALL_VISIBILITY_LABELS: Record<ToolCallVisibility, string> = {
 
 const isToolCallVisibility = Schema.is(ToolCallVisibility);
 
+const SIDEBAR_PROJECT_SORT_ORDER_LABELS: Record<SidebarProjectSortOrder, string> = {
+  updated_at: "Last user message",
+  created_at: "Created at",
+  manual: "Manual",
+};
+
+/** Order of projects in the sidebar, the project picker, and the command palette. */
+function ProjectOrderRow() {
+  const sortOrder = useClientSettings((settings) => settings.sidebarProjectSortOrder);
+  const updateSettings = useUpdateClientSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("project-order")}
+      description="Order of projects in the sidebar, the project picker, and the command palette."
+      resetAction={
+        sortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder ? (
+          <SettingResetButton
+            label="project order"
+            onClick={() =>
+              updateSettings({
+                sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={sortOrder}
+          onValueChange={(value) => {
+            if (value === "updated_at" || value === "created_at" || value === "manual") {
+              updateSettings({ sidebarProjectSortOrder: value });
+            }
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Project order">
+            <SelectValue>{SIDEBAR_PROJECT_SORT_ORDER_LABELS[sortOrder]}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {(["updated_at", "created_at", "manual"] as const).map((value) => (
+              <SelectItem hideIndicator key={value} value={value}>
+                {SIDEBAR_PROJECT_SORT_ORDER_LABELS[value]}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+/**
+ * The model new threads start with. Unset is "Automatic": the model of the last launched thread.
+ * A configured model wins over that memory.
+ */
+function DefaultModelRow() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const entries = sortProviderInstanceEntries(
+    applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
+  );
+  const modelOptions = getCustomModelOptionsByInstance(settings, serverProviders);
+  const configured = settings.defaultModelSelection;
+  const automaticEntry = entries.find((entry) => entry.enabled && entry.isAvailable);
+  const selection =
+    configured ??
+    (automaticEntry
+      ? createModelSelection(
+          automaticEntry.instanceId,
+          modelOptions.get(automaticEntry.instanceId)?.[0]?.slug ?? "",
+        )
+      : null);
+  const activeEntry = entries.find((entry) => entry.instanceId === selection?.instanceId);
+  return (
+    <SettingsRow
+      id="default-model"
+      title="Model"
+      description="Default model for new threads."
+      status={
+        configured === null
+          ? "Automatic: new threads start with the model you used most recently. Choose a model to always start with it."
+          : undefined
+      }
+      resetAction={
+        configured !== null ? (
+          <SettingResetButton
+            label="default model"
+            tooltip="Use the most recent model"
+            onClick={() => updateSettings({ defaultModelSelection: null })}
+          />
+        ) : null
+      }
+      control={
+        selection ? (
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+            <ProviderModelPicker
+              activeInstanceId={selection.instanceId}
+              model={selection.model}
+              lockedProvider={null}
+              instanceEntries={entries}
+              modelOptionsByInstance={modelOptions}
+              triggerVariant="outline"
+              triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+              onInstanceModelChange={(instanceId, model) =>
+                updateSettings({ defaultModelSelection: createModelSelection(instanceId, model) })
+              }
+            />
+            {configured !== null && activeEntry ? (
+              <TraitsPicker
+                provider={activeEntry.driverKind}
+                models={activeEntry.models}
+                model={configured.model}
+                prompt=""
+                onPromptChange={() => {}}
+                modelOptions={configured.options ?? []}
+                allowPromptInjectedEffort={false}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onModelOptionsChange={(options) =>
+                  updateSettings({
+                    defaultModelSelection: createModelSelection(
+                      configured.instanceId,
+                      configured.model,
+                      options,
+                    ),
+                  })
+                }
+              />
+            ) : null}
+          </div>
+        ) : (
+          <span className="text-sm text-muted-foreground">No providers available</span>
+        )
+      }
+    />
+  );
+}
+
+/** Approval level new threads start in. */
+function DefaultPermissionsRow() {
+  const runtimeMode = usePrimarySettings((settings) => settings.defaultRuntimeMode);
+  const updateSettings = useUpdatePrimarySettings();
+  const Icon = runtimeModeConfig[runtimeMode].icon;
+  return (
+    <SettingsRow
+      id="default-permissions"
+      title="Permissions"
+      description={runtimeModeConfig[runtimeMode].description}
+      resetAction={
+        runtimeMode !== DEFAULT_UNIFIED_SETTINGS.defaultRuntimeMode ? (
+          <SettingResetButton
+            label="default permissions"
+            onClick={() =>
+              updateSettings({ defaultRuntimeMode: DEFAULT_UNIFIED_SETTINGS.defaultRuntimeMode })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={runtimeMode}
+          onValueChange={(value) => {
+            const next = runtimeModeOptions.find((mode) => mode === value);
+            if (next) updateSettings({ defaultRuntimeMode: next });
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-48" aria-label="Default permissions">
+            <SelectValue>
+              <span className="flex items-center gap-1.5">
+                <Icon className="size-3.5" />
+                {runtimeModeConfig[runtimeMode].label}
+              </span>
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {runtimeModeOptions.map((mode) => {
+              const ModeIcon = runtimeModeConfig[mode].icon;
+              return (
+                <SelectItem hideIndicator key={mode} value={mode}>
+                  <span className="flex items-center gap-1.5">
+                    <ModeIcon className="size-3.5" />
+                    {runtimeModeConfig[mode].label}
+                  </span>
+                </SelectItem>
+              );
+            })}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+const WORKTREE_SUBMODULES_LABELS: Record<WorktreeSubmodules, string> = {
+  recursive: "Recursive",
+  "top-level": "Top level only",
+  none: "Skip",
+};
+const WORKTREE_SUBMODULES_OPTIONS = ["recursive", "top-level", "none"] as const;
+
+/** How new worktrees populate git submodules; projects' t3.json can override it. */
+function WorktreeSubmodulesRow() {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  const effective = resolveProjectSettings(settings, null, null, null).settings.worktreeSubmodules;
+  return (
+    <SettingsRow
+      {...searchableSetting("worktree-submodules")}
+      description="How new worktrees populate git submodules. A project's t3.json can override it."
+      resetAction={
+        settings.worktreeSubmodules !== null ? (
+          <SettingResetButton
+            label="worktree submodules"
+            onClick={() => updateSettings({ worktreeSubmodules: null })}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={effective}
+          onValueChange={(value) => {
+            const next = WORKTREE_SUBMODULES_OPTIONS.find((option) => option === value);
+            if (next) updateSettings({ worktreeSubmodules: next });
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Worktree submodules">
+            <SelectValue>{effective ? WORKTREE_SUBMODULES_LABELS[effective] : null}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {WORKTREE_SUBMODULES_OPTIONS.map((option) => (
+              <SelectItem hideIndicator key={option} value={option}>
+                {WORKTREE_SUBMODULES_LABELS[option]}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+/** Resume interrupted threads once the server comes back. */
+function ContinueThreadsRow() {
+  const enabled = usePrimarySettings((settings) => settings.continueThreadsAfterServerUpdate);
+  const updateSettings = useUpdatePrimarySettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("continue-threads-after-restart")}
+      description="Automatically resume interrupted threads after an update, crash, or machine restart."
+      resetAction={
+        enabled !== DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate ? (
+          <SettingResetButton
+            label="continue threads after restarts"
+            onClick={() =>
+              updateSettings({
+                continueThreadsAfterServerUpdate:
+                  DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={enabled}
+          onCheckedChange={(checked) =>
+            updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
+          }
+          aria-label="Continue threads after restarts"
+        />
+      }
+    />
+  );
+}
+
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
@@ -1447,6 +1749,7 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+        <ProjectOrderRow />
         <SidebarWorkingShelfRow />
       </SettingsSection>
       <SettingsSection title="Confirmations">
@@ -1693,6 +1996,8 @@ export function ThreadsSettingsPanel() {
         />
       </SettingsSection>
       <SettingsSection title="New threads">
+        <DefaultModelRow />
+        <DefaultPermissionsRow />
         <SettingsRow
           {...searchableSetting("new-threads")}
           description="Where new threads start."
@@ -1861,34 +2166,48 @@ export function ThreadsSettingsPanel() {
         <AdvancedSettings
           targetIds={[
             searchableSetting("thread-title-instructions").id,
-            searchableSetting("assistant-output").id,
+            searchableSetting("response-streaming").id,
           ]}
         >
           <ThreadTitleInstructionsSettings />
           <SettingsRow
-            {...searchableSetting("assistant-output")}
-            description="Show token-by-token output while a response is in progress."
+            {...searchableSetting("response-streaming")}
+            description={RESPONSE_STREAMING_MODE_DESCRIPTIONS[settings.responseStreamingMode]}
             resetAction={
-              settings.enableAssistantStreaming !==
-              DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming ? (
+              settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode ? (
                 <SettingResetButton
-                  label="assistant output"
+                  label="response streaming"
                   onClick={() =>
                     updateSettings({
-                      enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+                      responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
                     })
                   }
                 />
               ) : null
             }
             control={
-              <Switch
-                checked={settings.enableAssistantStreaming}
-                onCheckedChange={(checked) =>
-                  updateSettings({ enableAssistantStreaming: Boolean(checked) })
-                }
-                aria-label="Stream assistant messages"
-              />
+              <Select
+                value={settings.responseStreamingMode}
+                onValueChange={(value) => {
+                  if (value === "turn" || value === "paragraph") {
+                    updateSettings({ responseStreamingMode: value });
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Response streaming">
+                  <SelectValue>
+                    {RESPONSE_STREAMING_MODE_LABELS[settings.responseStreamingMode]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="turn">
+                    {RESPONSE_STREAMING_MODE_LABELS.turn}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="paragraph">
+                    {RESPONSE_STREAMING_MODE_LABELS.paragraph}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
             }
           />
         </AdvancedSettings>
@@ -1931,6 +2250,9 @@ export function WorktreesSettingsPanel() {
             />
           }
         />
+        <AdvancedSettings targetIds={[searchableSetting("worktree-submodules").id]}>
+          <WorktreeSubmodulesRow />
+        </AdvancedSettings>
       </SettingsSection>
       <SettingsSection title="Branches">
         <BranchNamingSection />
@@ -1990,6 +2312,10 @@ export function MaintenanceSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <SettingsSection title="Restarts">
+        <ContinueThreadsRow />
+      </SettingsSection>
+
       <SettingsSection title="Background activity">
         <SettingsRow
           id={searchableSetting("background-activity").id}

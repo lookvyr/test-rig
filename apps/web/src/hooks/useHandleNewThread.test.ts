@@ -101,7 +101,7 @@ describe("Scratch draft reuse", () => {
   });
 });
 
-it("creates a fresh project draft using the last launch model and the target workspace defaults", async () => {
+it("creates a fresh project draft using the configured default model and the target workspace defaults", async () => {
   const store = useComposerDraftStore.getState();
   store.clearDraftThread(DraftId.make("existing"));
   mocks.readProject.mockReturnValue({
@@ -109,7 +109,7 @@ it("creates a fresh project draft using the last launch model and the target wor
     environmentId: "remote",
     workspaceRoot: "/target",
   });
-  const selection = { instanceId: ProviderInstanceId.make("claude-code"), model: "target-model" };
+  const selection = { instanceId: ProviderInstanceId.make("codex"), model: "target-model" };
   mocks.configs.set("remote", {
     settings: {
       ...DEFAULT_SERVER_SETTINGS,
@@ -120,7 +120,7 @@ it("creates a fresh project draft using the last launch model and the target wor
     },
   });
   store.setStickyModelSelection({
-    instanceId: ProviderInstanceId.make("codex"),
+    instanceId: ProviderInstanceId.make("claude-code"),
     model: "sticky-model",
   });
   await useNewThreadHandler()(
@@ -138,7 +138,7 @@ it("creates a fresh project draft using the last launch model and the target wor
   });
   expect(store.getComposerDraft(draft.draftId)).toMatchObject({
     activeProvider: "codex",
-    modelSelectionByProvider: { codex: { model: "sticky-model" } },
+    modelSelectionByProvider: { codex: { model: "target-model" } },
   });
 });
 

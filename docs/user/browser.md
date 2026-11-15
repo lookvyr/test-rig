@@ -185,3 +185,13 @@ Expand a tool call to see raster images it returned, including browser and MCP
 screenshots. Select an image to enlarge it. A tool result can show up to eight
 images; oversized images are unavailable. Images read from local files continue
 to use the file preview.
+
+## Browser settings
+
+**Settings → Browser** controls whether agents may use the shared browser
+(**Agent browser access**, applied when an agent session next starts), whether the
+floating preview opens when an agent opens a browser, and the address-bar search
+engine. Under **Advanced**, set the viewport, zoom, and color scheme new tabs start
+with. **Recordings** sets the recording frame rate and whether key and mouse
+presses appear in new recordings. Floating preview, viewport, zoom, appearance, and
+recording settings apply in the desktop app.
