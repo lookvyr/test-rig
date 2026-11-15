@@ -30,7 +30,11 @@ the available width changes. Use **Copy table** to copy as Markdown or CSV.
 **Enter sends the prompt**, including from a list or code block. **Shift+Enter**
 continues the current list or inserts a line in code. Use Shift+Enter on an empty
 list item to leave the list; in code, use it after two trailing blank lines to
-continue below the block. **Tab** accepts a file, chat, skill, or command suggestion.
+continue below the block. **Tab** accepts a file, chat, skill, or command suggestion. To send with **Cmd+Enter** (**Ctrl+Enter** on
+Windows and Linux) instead, choose it in **Settings → Chat → Send shortcut**; plain
+Enter then inserts a new line. **Cmd+Enter for multiline** needs the modifier only
+once the prompt has more than one line. The `/` menu also lists skills; turn that off
+in **Settings → Chat → Advanced → Show skills in slash menu**.
 File and skill references inside code remain literal text.
 
 Context references use colored text and icons in the composer and messages.

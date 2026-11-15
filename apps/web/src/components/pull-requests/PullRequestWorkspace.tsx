@@ -191,10 +191,10 @@ function ProjectPullRequests({
                 </span>
                 {matchingStats ? (
                   <span className="pr-counts-reveal inline-flex gap-3" data-pr-counts="ready">
-                    <span className="text-emerald-600 dark:text-emerald-400">
+                    <span className="text-diff-addition-foreground">
                       +{matchingStats.additions}
                     </span>
-                    <span className="text-red-600 dark:text-red-400">
+                    <span className="text-diff-deletion-foreground">
                       −{matchingStats.deletions}
                     </span>
                     <span>

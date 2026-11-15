@@ -33,6 +33,7 @@ import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { ComposerControl, ComposerControlChevron, ComposerControlIcon } from "./ComposerControl";
+import { resolveEffortGlyph } from "./EffortGlyph";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
@@ -565,7 +566,13 @@ export function getComposerEffortSummary(input: {
   modelOptions?: ProviderOptions | null | undefined;
   reportedModelSelection?: ModelSelection | null | undefined;
   allowPromptInjectedEffort?: boolean;
-}): { word: string | null; contextWindow: string | null; fast: boolean; detail: string } | null {
+}): {
+  word: string | null;
+  glyph: ReturnType<typeof resolveEffortGlyph>;
+  contextWindow: string | null;
+  fast: boolean;
+  detail: string;
+} | null {
   const selected = getTraitsSectionVisibility({
     ...input,
     modelOptions: input.modelOptions,
@@ -602,8 +609,27 @@ export function getComposerEffortSummary(input: {
         input.reportedModelSelection,
       ) ?? null)
     : null;
+  const ultrathink =
+    selected.ultrathinkPromptControlled && reasoning?.id === selected.primarySelectDescriptor?.id;
+  const currentReasoning = getProviderOptionCurrentValue(
+    reasoning,
+    modelSelection,
+    input.reportedModelSelection,
+  );
+  const glyph =
+    reasoning?.type === "select"
+      ? resolveEffortGlyph(
+          reasoning,
+          ultrathink
+            ? "ultrathink"
+            : typeof currentReasoning === "string"
+              ? currentReasoning
+              : null,
+        )
+      : null;
   return {
     word,
+    glyph,
     contextWindow,
     fast: display.showFastModeIcon || display.label === "Fast",
     detail: display.label,

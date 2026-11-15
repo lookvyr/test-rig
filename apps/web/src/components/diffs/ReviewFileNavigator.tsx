@@ -146,8 +146,8 @@ export function ReviewFileNavigator({
         <span className="mr-auto font-medium">
           Files <span className="text-muted-foreground">{files.length}</span>
         </span>
-        <span className="text-success-foreground">+{totals.additions}</span>
-        <span className="text-destructive">−{totals.deletions}</span>
+        <span className="text-diff-addition-foreground">+{totals.additions}</span>
+        <span className="text-diff-deletion-foreground">−{totals.deletions}</span>
       </div>
       <div className="relative mx-2 mb-2">
         <SearchIcon
@@ -268,8 +268,12 @@ export function ReviewFileNavigator({
                       <span className="text-[10px] text-muted-foreground">Binary</span>
                     ) : (
                       <span aria-hidden className="flex shrink-0 gap-1 text-[10px] tabular-nums">
-                        <span className="text-success-foreground">+{node.file.additions ?? 0}</span>
-                        <span className="text-destructive">−{node.file.deletions ?? 0}</span>
+                        <span className="text-diff-addition-foreground">
+                          +{node.file.additions ?? 0}
+                        </span>
+                        <span className="text-diff-deletion-foreground">
+                          −{node.file.deletions ?? 0}
+                        </span>
                       </span>
                     )}
                     <span

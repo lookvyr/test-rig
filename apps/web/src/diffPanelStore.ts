@@ -13,7 +13,6 @@ export type DiffPanelSelection =
   | { kind: "turn"; runId: RunId; filePath: string | null; revealRequestId: number };
 
 export type GitReviewScope = "working-tree" | "unstaged" | "staged" | "branch" | "commit";
-export type DiffRenderMode = "stacked" | "split";
 
 export interface DiffPanelFileSelection {
   scope: string;
@@ -29,8 +28,6 @@ interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>;
   branchBaseRefByThreadKey: Record<string, string | null>;
   fileSelectionByThreadKey: Record<string, DiffPanelFileSelection>;
-  diffRenderMode: DiffRenderMode;
-  setDiffRenderMode: (mode: DiffRenderMode) => void;
   selectGitScope: (ref: ScopedThreadRef, scope: GitReviewScope) => void;
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
   selectCommit: (ref: ScopedThreadRef, commitRef: string | null) => void;
@@ -55,8 +52,6 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
       fileSelectionByThreadKey: {},
-      diffRenderMode: "stacked",
-      setDiffRenderMode: (diffRenderMode) => set({ diffRenderMode }),
       selectGitScope: (ref, scope) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
@@ -206,7 +201,6 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
         byThreadKey: state.byThreadKey,
         branchBaseRefByThreadKey: state.branchBaseRefByThreadKey,
         fileSelectionByThreadKey: state.fileSelectionByThreadKey,
-        diffRenderMode: state.diffRenderMode,
       }),
     },
   ),

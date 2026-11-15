@@ -210,10 +210,12 @@ function FileTree({ nodes, depth = 0 }: { nodes: readonly FileTreeNode[]; depth?
               <FileIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate font-mono">{node.name}</span>
               <span className="sr-only">{node.file.status}</span>
-              <span className="shrink-0 tabular-nums text-success-foreground">
+              <span className="shrink-0 tabular-nums text-diff-addition-foreground">
                 +{node.file.additions}
               </span>
-              <span className="shrink-0 tabular-nums text-destructive">−{node.file.deletions}</span>
+              <span className="shrink-0 tabular-nums text-diff-deletion-foreground">
+                −{node.file.deletions}
+              </span>
             </div>
           )}
         </li>
@@ -231,8 +233,8 @@ export function PullRequestFiles({ details }: { details: GitGetPullRequestDetail
         <h3 className="mr-auto font-medium">
           Changed files <span className="text-muted-foreground">({pr.changedFiles})</span>
         </h3>
-        <span className="tabular-nums text-success-foreground">+{pr.additions}</span>
-        <span className="tabular-nums text-destructive">−{pr.deletions}</span>
+        <span className="tabular-nums text-diff-addition-foreground">+{pr.additions}</span>
+        <span className="tabular-nums text-diff-deletion-foreground">−{pr.deletions}</span>
       </div>
       {details.files.length ? (
         <FileTree nodes={tree} />

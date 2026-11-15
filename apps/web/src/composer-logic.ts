@@ -1,3 +1,4 @@
+import type { SendShortcut } from "@t3tools/contracts/settings";
 import {
   collectComposerMarkdownCodeRanges,
   isComposerMarkdownCode,
@@ -15,11 +16,29 @@ export interface ComposerTrigger {
   rangeEnd: number;
 }
 
+/** Whether the send shortcut needs Cmd/Ctrl for this prompt. */
+export function composerRequiresModifier(
+  sendShortcut: SendShortcut | undefined,
+  prompt: string,
+): boolean {
+  return (
+    sendShortcut === "mod-enter" ||
+    (sendShortcut === "mod-enter-multiline" && /[\r\n]/.test(prompt))
+  );
+}
+
 export function shouldSubmitComposerOnEnter(input: {
   isMobileViewport: boolean;
   shiftKey: boolean;
+  modKey?: boolean;
+  sendShortcut?: SendShortcut;
+  prompt?: string;
 }): boolean {
-  return !input.shiftKey;
+  if (input.shiftKey) return false;
+  if (composerRequiresModifier(input.sendShortcut, input.prompt ?? "")) {
+    return input.modKey === true;
+  }
+  return true;
 }
 
 const isInlineTokenSegment = (

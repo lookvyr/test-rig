@@ -1,10 +1,12 @@
 import type { ProviderOptionDescriptor, RuntimeMode } from "@t3tools/contracts";
+import type { EffortDisplay } from "@t3tools/contracts/settings";
 import { CheckIcon, ZapIcon } from "lucide-react";
 import { createContext, type KeyboardEvent, type ReactNode, use } from "react";
 
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ComposerTraitsInput } from "./composerProviderState";
+import { EffortGlyph } from "./EffortGlyph";
 import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
 import {
   getComposerEffortSummary,
@@ -27,10 +29,14 @@ function isSpeedDescriptor(descriptor: ProviderOptionDescriptor) {
 }
 
 /**
- * What the model trigger shows after the model name: the effort word, a bolt for Fast, and the
- * context window. `detail` names every trait for the tooltip and screen readers.
+ * What the model trigger shows after the model name: the effort word (or bars, per the
+ * Appearance setting), a bolt for Fast, and the context window. `detail` names every trait for
+ * the tooltip and screen readers.
  */
-export function describeComposerEffort(traits: ComposerTraitsInput | null): {
+export function describeComposerEffort(
+  traits: ComposerTraitsInput | null,
+  effortDisplay: EffortDisplay = "label",
+): {
   suffix: ReactNode;
   detail: string | null;
 } {
@@ -39,11 +45,23 @@ export function describeComposerEffort(traits: ComposerTraitsInput | null): {
   if (!summary.word && !summary.fast && !summary.contextWindow) {
     return { suffix: null, detail: summary.detail || null };
   }
+  // Max, prompt-injected, and workflow levels keep their name; bars draw the ordinary scale.
+  const bars =
+    effortDisplay === "bars" && summary.glyph && summary.glyph.special === null
+      ? summary.glyph
+      : null;
   return {
     detail: summary.detail || null,
     suffix: (
       <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
-        {summary.word ? <span className="max-w-24 truncate">{summary.word}</span> : null}
+        {bars ? (
+          <>
+            <EffortGlyph count={bars.count} filled={bars.filled} />
+            <span className="sr-only">{summary.word}</span>
+          </>
+        ) : summary.word ? (
+          <span className="max-w-24 truncate">{summary.word}</span>
+        ) : null}
         {summary.fast ? (
           <>
             <ZapIcon aria-hidden="true" className="size-3 fill-current" />

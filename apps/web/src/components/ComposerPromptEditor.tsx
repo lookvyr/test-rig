@@ -413,9 +413,9 @@ export function ComposerPromptEditor(props: ComposerPromptEditorProps) {
           if (event.key === "Enter") {
             event.preventDefault();
             event.stopPropagation();
-            // Enter belongs to the composer. Shift-Enter performs the editor's
-            // normal block continuation, including lists and literal code lines.
-            if (!event.shiftKey) return true;
+            // Enter belongs to the composer. An Enter it declines (Shift-Enter, or plain Enter
+            // under a modifier send shortcut) performs the editor's normal block
+            // continuation, including lists and literal code lines.
             const instance = editorHolder.current;
             if (!instance) return true;
             return continueComposerBlock(instance);

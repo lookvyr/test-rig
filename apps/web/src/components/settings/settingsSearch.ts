@@ -104,6 +104,8 @@ export const MOVED_SETTINGS_PATHS: Readonly<Record<string, SettingsPath>> = {
  * here once instead of separately in the panel and the index.
  */
 export const SETTINGS_SEARCH_ITEMS = [
+  { id: "send-shortcut", title: "Send shortcut", to: "/settings/chat" },
+  { id: "skills-in-slash-menu", title: "Show skills in slash menu", to: "/settings/chat" },
   { id: "tool-call-visibility", title: "Tool calls in chat", to: "/settings/chat" },
   {
     id: "browser-profiles",
@@ -249,6 +251,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Time format",
     to: "/settings/general",
   },
+  { id: "chat-width", title: "Chat width", to: "/settings/appearance" },
+  { id: "effort-display", title: "Effort display", to: "/settings/appearance" },
+  { id: "diff-layout", title: "Diff layout", to: "/settings/diffs" },
+  { id: "diff-files-collapsed", title: "Default diff file state", to: "/settings/diffs" },
+  { id: "diff-color-scheme", title: "Diff colors", to: "/settings/diffs" },
   {
     id: "hide-whitespace-changes",
     title: "Hide whitespace changes",

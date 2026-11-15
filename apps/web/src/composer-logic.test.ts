@@ -17,6 +17,24 @@ import {
   insertInlineTerminalContextPlaceholder,
 } from "./lib/terminalContext";
 
+describe("send shortcut", () => {
+  it("needs Cmd/Ctrl+Enter to send under mod-enter", () => {
+    const base = { isMobileViewport: false, shiftKey: false, sendShortcut: "mod-enter" as const };
+    expect(shouldSubmitComposerOnEnter({ ...base, prompt: "hi" })).toBe(false);
+    expect(shouldSubmitComposerOnEnter({ ...base, prompt: "hi", modKey: true })).toBe(true);
+  });
+  it("needs Cmd/Ctrl+Enter only for multiline prompts under mod-enter-multiline", () => {
+    const base = {
+      isMobileViewport: false,
+      shiftKey: false,
+      sendShortcut: "mod-enter-multiline" as const,
+    };
+    expect(shouldSubmitComposerOnEnter({ ...base, prompt: "one line" })).toBe(true);
+    expect(shouldSubmitComposerOnEnter({ ...base, prompt: "two\nlines" })).toBe(false);
+    expect(shouldSubmitComposerOnEnter({ ...base, prompt: "two\nlines", modKey: true })).toBe(true);
+  });
+});
+
 describe("shouldSubmitComposerOnEnter", () => {
   it("submits plain Enter on desktop", () => {
     expect(shouldSubmitComposerOnEnter({ isMobileViewport: false, shiftKey: false })).toBe(true);

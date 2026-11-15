@@ -182,9 +182,9 @@ function PullRequestRow({
               <span className="text-destructive">Conflicts</span>
             )}
             {snapshot?.additions !== undefined && (
-              <span className="ml-auto font-mono text-success-foreground">
+              <span className="ml-auto font-mono text-diff-addition-foreground">
                 +{snapshot.additions}{" "}
-                <span className="text-destructive">−{snapshot.deletions ?? 0}</span>
+                <span className="text-diff-deletion-foreground">−{snapshot.deletions ?? 0}</span>
               </span>
             )}
           </span>

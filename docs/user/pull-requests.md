@@ -92,7 +92,9 @@ change against its own base, including incremental changes within a stack.
 Summary loads separately from the diff and conversation. Open **Code** to read
 the files in one continuous diff; large changes load more files as you scroll.
 Use the file tree to jump to a file, or collapse individual files and switch
-between unified and split views.
+between unified and split views. The choice is shared with the review panel and saved
+as **Settings → Diffs & pull requests → Diff layout**. That page also sets whether files
+start collapsed and offers blue and orange diff colors.
 **Viewed** saves your progress on GitHub and folds that file's diff. Untick it
 to expand the file again. Shift-click marks the files between your last mark
 and the current file. Files updated after review show **Changed**.
@@ -134,7 +136,7 @@ pending inline comments. Discussions support replies, editing your comments,
 reactions, and resolve/unresolve. Drafts stay separate by PR, environment, and head
 revision; comments on an older revision are not submitted on a newer head.
 
-Code opens with files folded. Expand a file or select it in the tree to read its diff. Switching between Summary, Timeline, and Code preserves your place and file folds. In a narrow review, the file tree sits above the code. Code supports commit selection, whitespace and test-file filters, and expanding unchanged lines. The open review refreshes when you return and periodically while
+Code opens with files folded unless **Default diff file state** in **Settings → Diffs & pull requests** is Expanded. Expand a file or select it in the tree to read its diff. Switching between Summary, Timeline, and Code preserves your place and file folds. In a narrow review, the file tree sits above the code. Code supports commit selection, whitespace and test-file filters, and expanding unchanged lines. The open review refreshes when you return and periodically while
 visible. GitHub changes made here refresh related review data.
 
 PR actions include title/description editing, labels, reviewers, draft/ready,

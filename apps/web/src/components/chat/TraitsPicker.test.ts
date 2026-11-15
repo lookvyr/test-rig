@@ -191,10 +191,32 @@ describe("getComposerEffortSummary", () => {
   it("names the effort level and context window, with every trait in the detail", () => {
     expect(summary([EFFORT, fastModeDescriptor(false), CONTEXT_WINDOW])).toEqual({
       word: "High",
+      glyph: null,
       contextWindow: "1M",
       fast: false,
       detail: "High · 1M",
     });
+  });
+
+  it("draws bars for an ordinary effort scale and names Max", () => {
+    const scale = (current: string) =>
+      selectDescriptor(
+        "reasoningEffort",
+        [
+          { id: "low", label: "Low" },
+          { id: "medium", label: "Medium" },
+          { id: "high", label: "High" },
+          { id: "max", label: "Max" },
+        ],
+        current,
+      );
+    expect(summary([scale("medium")])?.glyph).toEqual({
+      count: 3,
+      filled: 2,
+      special: null,
+      label: "Medium",
+    });
+    expect(summary([scale("max")])?.glyph?.special).toBe("Max");
   });
 
   it("flags fast mode for the bolt", () => {

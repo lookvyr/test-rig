@@ -17,10 +17,12 @@ import {
   ProviderDriverKind,
   type ResponseStreamingMode,
   type SidebarProjectGroupingMode,
+  type SendShortcut,
   type SidebarProjectSortOrder,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -875,7 +877,28 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+        <ClientSelectRow
+          settingKey="chatWidth"
+          {...searchableSetting("chat-width")}
+          description="Maximum width of messages and the composer."
+          ariaLabel="Chat width"
+          options={[
+            ["comfortable", "Comfortable"],
+            ["wide", "Wide"],
+            ["full", "Full"],
+          ]}
+        />
         <ThreadDetailsItemsRow />
+        <ClientSelectRow
+          settingKey="effortDisplay"
+          {...searchableSetting("effort-display")}
+          description="Show reasoning effort in the composer as its name or as bars."
+          ariaLabel="Effort display"
+          options={[
+            ["label", "Word"],
+            ["bars", "Bars"],
+          ]}
+        />
         <AdvancedSettings
           targetIds={[
             "appearance-interface",
@@ -1704,6 +1727,185 @@ function ContinueThreadsRow() {
   );
 }
 
+/** A client-setting select row; `options` lists values in display order. */
+function ClientSelectRow<
+  K extends "chatWidth" | "effortDisplay" | "diffLayout" | "diffColorScheme",
+>({
+  settingKey,
+  id,
+  title,
+  description,
+  options,
+  ariaLabel,
+}: {
+  settingKey: K;
+  id: string;
+  title: string;
+  description: string;
+  options: ReadonlyArray<readonly [UnifiedSettings[K], string]>;
+  ariaLabel: string;
+}) {
+  const value = useClientSettings((settings) => settings[settingKey]);
+  const updateSettings = useUpdateClientSettings();
+  const defaultValue = DEFAULT_UNIFIED_SETTINGS[settingKey];
+  return (
+    <SettingsRow
+      id={id}
+      title={title}
+      description={description}
+      resetAction={
+        value !== defaultValue ? (
+          <SettingResetButton
+            label={title.toLowerCase()}
+            onClick={() => updateSettings({ [settingKey]: defaultValue })}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={value}
+          onValueChange={(next) => {
+            const match = options.find(([option]) => option === next);
+            if (match) updateSettings({ [settingKey]: match[0] });
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label={ariaLabel}>
+            <SelectValue>{options.find(([option]) => option === value)?.[1]}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {options.map(([option, label]) => (
+              <SelectItem hideIndicator key={option} value={option}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+/** Whether review and pull request diffs open with every file folded. */
+function DiffFilesCollapsedRow() {
+  const collapsed = useClientSettings((settings) => settings.diffFilesCollapsed);
+  const updateSettings = useUpdateClientSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("diff-files-collapsed")}
+      description="Whether files in a diff start expanded or collapsed."
+      resetAction={
+        collapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed ? (
+          <SettingResetButton
+            label="default diff file state"
+            onClick={() =>
+              updateSettings({ diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={collapsed ? "collapsed" : "expanded"}
+          onValueChange={(next) => {
+            if (next === "collapsed" || next === "expanded")
+              updateSettings({ diffFilesCollapsed: next === "collapsed" });
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Default diff file state">
+            <SelectValue>{collapsed ? "Collapsed" : "Expanded"}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem hideIndicator value="expanded">
+              Expanded
+            </SelectItem>
+            <SelectItem hideIndicator value="collapsed">
+              Collapsed
+            </SelectItem>
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+const SEND_SHORTCUT_LABELS: Record<SendShortcut, string> = {
+  enter: "Enter",
+  "mod-enter-multiline": `${isMacPlatform(typeof navigator === "undefined" ? "" : navigator.platform) ? "⌘" : "Ctrl"}+Enter for multiline`,
+  "mod-enter": `${isMacPlatform(typeof navigator === "undefined" ? "" : navigator.platform) ? "⌘" : "Ctrl"}+Enter`,
+};
+
+/** When Enter sends a prompt and when it inserts a new line. */
+function SendShortcutRow() {
+  const sendShortcut = useClientSettings((settings) => settings.sendShortcut);
+  const updateSettings = useUpdateClientSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("send-shortcut")}
+      description="Choose when Enter sends a prompt or inserts a new line. Shift+Enter always inserts a new line."
+      resetAction={
+        sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? (
+          <SettingResetButton
+            label="send shortcut"
+            onClick={() => updateSettings({ sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut })}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={sendShortcut}
+          onValueChange={(value) => {
+            if (value === "enter" || value === "mod-enter-multiline" || value === "mod-enter") {
+              updateSettings({ sendShortcut: value });
+            }
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Send shortcut">
+            <SelectValue>{SEND_SHORTCUT_LABELS[sendShortcut]}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {(["enter", "mod-enter-multiline", "mod-enter"] as const).map((value) => (
+              <SelectItem hideIndicator key={value} value={value}>
+                {SEND_SHORTCUT_LABELS[value]}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+/** Whether skills also appear in the / command menu; they always appear under $. */
+function SkillsInSlashMenuRow() {
+  const show = useClientSettings((settings) => settings.showSkillsInSlashMenu);
+  const updateSettings = useUpdateClientSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("skills-in-slash-menu")}
+      description="Also include skills in the / command menu. Skills always appear when you type $."
+      resetAction={
+        show !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu ? (
+          <SettingResetButton
+            label="skills in slash menu"
+            onClick={() =>
+              updateSettings({
+                showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
+              })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={show}
+          onCheckedChange={(checked) => updateSettings({ showSkillsInSlashMenu: Boolean(checked) })}
+          aria-label="Show skills in slash menu"
+        />
+      }
+    />
+  );
+}
+
 export function GeneralSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
@@ -1857,6 +2059,12 @@ export function ChatSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <SettingsSection title="Composer">
+        <SendShortcutRow />
+        <AdvancedSettings targetIds={[searchableSetting("skills-in-slash-menu").id]}>
+          <SkillsInSlashMenuRow />
+        </AdvancedSettings>
+      </SettingsSection>
       <SettingsSection title="Activity">
         <SettingsRow
           {...searchableSetting("tool-call-visibility")}
@@ -1907,6 +2115,16 @@ export function DiffsSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title="Diffs">
+        <ClientSelectRow
+          settingKey="diffLayout"
+          {...searchableSetting("diff-layout")}
+          description="Show changes stacked in one column or side by side."
+          ariaLabel="Diff layout"
+          options={[
+            ["stacked", "Stacked"],
+            ["split", "Split"],
+          ]}
+        />
         <SettingsRow
           {...searchableSetting("hide-whitespace-changes")}
           description="Set whether the diff panel ignores whitespace-only edits by default."
@@ -1931,6 +2149,17 @@ export function DiffsSettingsPanel() {
               aria-label="Hide whitespace changes by default"
             />
           }
+        />
+        <DiffFilesCollapsedRow />
+        <ClientSelectRow
+          settingKey="diffColorScheme"
+          {...searchableSetting("diff-color-scheme")}
+          description="Colors for added and removed lines. Blue and orange are easier to tell apart for some color vision."
+          ariaLabel="Diff colors"
+          options={[
+            ["red-green", "Red & green"],
+            ["blue-orange", "Blue & orange"],
+          ]}
         />
       </SettingsSection>
     </SettingsPageContainer>

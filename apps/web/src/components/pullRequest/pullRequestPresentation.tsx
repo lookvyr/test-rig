@@ -492,8 +492,8 @@ export function PullRequestDiffStat({
   }
   return (
     <span className={cn("inline-flex items-baseline gap-1 tabular-nums", className)}>
-      <span className="text-emerald-600 dark:text-emerald-400">+{formatDiffCount(additions)}</span>
-      <span className="text-red-600 dark:text-red-400">-{formatDiffCount(deletions)}</span>
+      <span className="text-diff-addition-foreground">+{formatDiffCount(additions)}</span>
+      <span className="text-diff-deletion-foreground">-{formatDiffCount(deletions)}</span>
     </span>
   );
 }

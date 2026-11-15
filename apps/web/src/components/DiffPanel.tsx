@@ -63,11 +63,11 @@ import {
   resolveFileDiffPath,
   DIFF_SURFACE_THEME_UNSAFE_CSS,
 } from "../lib/diffRendering";
-import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
+import { areAllDiffFilesCollapsed } from "../lib/diffCollapse";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useProject } from "../state/entities";
 import { resolveThreadRouteRef } from "../threadRoutes";
-import { useClientSettings } from "../hooks/useSettings";
+import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
 import { DiffStatLabel } from "./chat/DiffStatLabel";
@@ -105,9 +105,10 @@ import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices
 type DiffThemeType = "light" | "dark";
 const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
 
+/** Files whose fold differs from the Settings default, per review scope. */
 interface CollapsedDiffFilesState {
   readonly scopeKey: string | null;
-  readonly fileKeys: ReadonlySet<string>;
+  readonly toggledFileKeys: ReadonlySet<string>;
 }
 
 const EMPTY_COLLAPSED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set();
@@ -340,8 +341,9 @@ export default function DiffPanel({
   const diffThemeName = useDiffTheme(resolvedTheme);
   const settings = useClientSettings();
   const [initialGitScope] = useState(initialGitScopeProp);
-  const diffRenderMode = useDiffPanelStore((state) => state.diffRenderMode);
-  const setDiffRenderMode = useDiffPanelStore((state) => state.setDiffRenderMode);
+  const updateClientSettings = useUpdateClientSettings();
+  const diffRenderMode = settings.diffLayout;
+  const diffFilesCollapsedByDefault = settings.diffFilesCollapsed;
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
   const [baseRefQuery, setBaseRefQuery] = useState("");
@@ -361,7 +363,7 @@ export default function DiffPanel({
   const showFiles = filesVisibility ?? wideReview;
   const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<CollapsedDiffFilesState>(() => ({
     scopeKey: null,
-    fileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
+    toggledFileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
   }));
   const [codeViewRevision, setCodeViewRevision] = useState(0);
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
@@ -504,9 +506,9 @@ export default function DiffPanel({
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
     : null;
   const codeViewMountKey = `${collapseScopeKey ?? reviewSectionId}:${codeViewRevision}`;
-  const collapsedDiffFileKeys =
+  const toggledDiffFileKeys =
     collapsedDiffFiles.scopeKey === collapseScopeKey
-      ? collapsedDiffFiles.fileKeys
+      ? collapsedDiffFiles.toggledFileKeys
       : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
   const reviewSectionTitle = selectedScopeLabel;
   const selectedCheckpointRange = useMemo(
@@ -834,6 +836,17 @@ export default function DiffPanel({
       })),
     [renderableFiles],
   );
+  // Every file follows the Settings default unless the user folded or opened it here, so files
+  // that appear later still start in the default state.
+  const collapsedDiffFileKeys = useMemo(
+    () =>
+      new Set(
+        renderableFileEntries
+          .map((entry) => entry.fileKey)
+          .filter((fileKey) => diffFilesCollapsedByDefault !== toggledDiffFileKeys.has(fileKey)),
+      ),
+    [diffFilesCollapsedByDefault, renderableFileEntries, toggledDiffFileKeys],
+  );
   const codeViewFiles = useMemo(
     () =>
       renderableFileEntries.map(({ fileDiff, fileKey, fileVersion }) => {
@@ -864,17 +877,37 @@ export default function DiffPanel({
     ? (codeViewFiles.find((candidate) => candidate.filePath === activeFilePath)?.fileKey ?? null)
     : null;
 
+  // Opens a file someone asked to see (a chat diff link or a file-tree pick) once per request,
+  // so later diff updates do not undo the user's folds.
+  const revealedDiffFileRef = useRef<string | null>(null);
+  // The same precedence as resolveReviewFilePath: a tree pick in this scope, then a chat link.
+  const explicitRevealPath =
+    (fileSelection?.scope === navigationScope &&
+    fileSelection.turnRevealRequestId === selectedFileRevealRequestId
+      ? fileSelection.path
+      : null) ?? selectedFilePath;
   useEffect(() => {
-    if (!selectedDiffFileKey) return;
+    if (!selectedDiffFileKey || explicitRevealPath !== activeFilePath) return;
+    const requestKey = JSON.stringify([
+      collapseScopeKey,
+      selectedDiffFileKey,
+      selectedFileRevealRequestId,
+      fileSelection?.revealRequestId ?? 0,
+    ]);
+    if (revealedDiffFileRef.current === requestKey) return;
+    revealedDiffFileRef.current = requestKey;
+    if (!collapsedDiffFileKeys.has(selectedDiffFileKey)) return;
     setCollapsedDiffFiles((current) => {
-      if (current.scopeKey !== collapseScopeKey || !current.fileKeys.has(selectedDiffFileKey))
-        return current;
-      const fileKeys = new Set(current.fileKeys);
-      fileKeys.delete(selectedDiffFileKey);
-      return { scopeKey: collapseScopeKey, fileKeys };
+      const toggled = new Set(current.scopeKey === collapseScopeKey ? current.toggledFileKeys : []);
+      if (toggled.has(selectedDiffFileKey)) toggled.delete(selectedDiffFileKey);
+      else toggled.add(selectedDiffFileKey);
+      return { scopeKey: collapseScopeKey, toggledFileKeys: toggled };
     });
   }, [
+    activeFilePath,
     collapseScopeKey,
+    collapsedDiffFileKeys,
+    explicitRevealPath,
     selectedDiffFileKey,
     selectedFileRevealRequestId,
     fileSelection?.revealRequestId,
@@ -941,13 +974,13 @@ export default function DiffPanel({
   const toggleDiffFileCollapsed = useCallback(
     (fileKey: string) => {
       setCollapsedDiffFiles((current) => {
-        const next = new Set(current.scopeKey === collapseScopeKey ? current.fileKeys : []);
+        const next = new Set(current.scopeKey === collapseScopeKey ? current.toggledFileKeys : []);
         if (next.has(fileKey)) {
           next.delete(fileKey);
         } else {
           next.add(fileKey);
         }
-        return { scopeKey: collapseScopeKey, fileKeys: next };
+        return { scopeKey: collapseScopeKey, toggledFileKeys: next };
       });
     },
     [collapseScopeKey],
@@ -955,16 +988,16 @@ export default function DiffPanel({
 
   const toggleDiffFileCollapse = useCallback(() => {
     setCodeViewRevision((current) => current + 1);
-    setCollapsedDiffFiles((current) => {
-      const currentKeys =
-        current.scopeKey === collapseScopeKey ? current.fileKeys : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
-
-      return {
-        scopeKey: collapseScopeKey,
-        fileKeys: toggleAllDiffFiles(diffFileKeys, currentKeys),
-      };
+    // Collapse all, or expand all when everything is already collapsed.
+    const collapseAll = !areAllDiffFilesCollapsed(diffFileKeys, collapsedDiffFileKeys);
+    setCollapsedDiffFiles({
+      scopeKey: collapseScopeKey,
+      toggledFileKeys:
+        collapseAll === diffFilesCollapsedByDefault
+          ? EMPTY_COLLAPSED_DIFF_FILE_KEYS
+          : new Set(diffFileKeys),
     });
-  }, [collapseScopeKey, diffFileKeys]);
+  }, [collapseScopeKey, collapsedDiffFileKeys, diffFileKeys, diffFilesCollapsedByDefault]);
 
   const selectTurn = (runId: RunId) => {
     if (!routeThreadRef) return;
@@ -1374,7 +1407,7 @@ export default function DiffPanel({
             onValueChange={(value) => {
               const next = value[0];
               if (next === "stacked" || next === "split") {
-                setDiffRenderMode(next);
+                updateClientSettings({ diffLayout: next });
               }
             }}
           >

@@ -280,8 +280,8 @@ export function AnnotatableCodeView({
             className="inline-flex gap-1 text-[11px] tabular-nums"
             aria-label={`${additions} additions, ${deletions} deletions`}
           >
-            {deletions > 0 && <span className="text-destructive">−{deletions}</span>}
-            {additions > 0 && <span className="text-success-foreground">+{additions}</span>}
+            {deletions > 0 && <span className="text-diff-deletion-foreground">−{deletions}</span>}
+            {additions > 0 && <span className="text-diff-addition-foreground">+{additions}</span>}
           </span>
         );
       }}

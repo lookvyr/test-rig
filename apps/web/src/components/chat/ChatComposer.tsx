@@ -316,6 +316,10 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import * as Schema from "effect/Schema";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
+import {
+  getProviderSkillsForSlashMenu,
+  getProviderSlashCommandsForSlashMenu,
+} from "@t3tools/client-runtime/providerSkills";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
@@ -1329,18 +1333,38 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             ] as const)
           : []),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
-      const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
-        (command) => ({
-          id: `provider-slash-command:${selectedProvider}:${command.name}`,
-          type: "provider-slash-command" as const,
-          provider: selectedProvider,
-          command,
-          label: `/${command.name}`,
-          description: command.description ?? command.input?.hint ?? "Run provider command",
-        }),
+      const slashMenuSkills = getProviderSkillsForSlashMenu(
+        selectedProviderStatus?.skills ?? [],
+        settings.showSkillsInSlashMenu,
       );
+      const providerSlashCommandItems = getProviderSlashCommandsForSlashMenu(
+        selectedProviderStatus?.slashCommands ?? [],
+        slashMenuSkills,
+      ).map((command) => ({
+        id: `provider-slash-command:${selectedProvider}:${command.name}`,
+        type: "provider-slash-command" as const,
+        provider: selectedProvider,
+        command,
+        label: `/${command.name}`,
+        description: command.description ?? command.input?.hint ?? "Run provider command",
+      }));
+      const skillItems = slashMenuSkills.map((skill) => ({
+        id: `skill:${selectedProvider}:${skill.name}`,
+        type: "skill" as const,
+        provider: selectedProvider,
+        skill,
+        label: `/${skill.name}`,
+        description:
+          skill.shortDescription ??
+          skill.description ??
+          (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
+      }));
       const query = composerTrigger.query.trim().toLowerCase();
-      const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
+      const slashCommandItems = [
+        ...builtInSlashCommandItems,
+        ...providerSlashCommandItems,
+        ...skillItems,
+      ];
       if (!query) {
         return slashCommandItems;
       }
@@ -1368,6 +1392,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     planModeUiEnabled,
     selectedProvider,
     selectedProviderStatus,
+    settings.showSkillsInSlashMenu,
     workspaceEntries.entries,
     threadShells,
     environmentId,
@@ -1494,7 +1519,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     prompt,
     onPromptChange: setPromptFromTraits,
   });
-  const providerEffort = describeComposerEffort(providerTraitsInput);
+  const providerEffort = describeComposerEffort(providerTraitsInput, settings.effortDisplay);
   const { accessDisplay } = resolveComposerControlsOwnership({
     // Without a known default, keep the chip so the mode stays visible.
     matchesDefault:
@@ -2210,7 +2235,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ) => {
     if (key === "Enter") {
       if (event.isComposing || event.keyCode === 229) return true;
-      if (!shouldSubmitComposerOnEnter({ isMobileViewport, shiftKey: event.shiftKey })) {
+      if (
+        !shouldSubmitComposerOnEnter({
+          isMobileViewport,
+          shiftKey: event.shiftKey,
+          modKey: event.metaKey || event.ctrlKey,
+          sendShortcut: settings.sendShortcut,
+          prompt: promptRef.current,
+        })
+      ) {
         return false;
       }
       submitComposer();

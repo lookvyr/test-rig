@@ -42,7 +42,7 @@ import {
 
 import { observeIntersection } from "~/lib/observeIntersection";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
-import { useClientSettings } from "~/hooks/useSettings";
+import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
 import { areAllDiffFilesCollapsed } from "~/lib/diffCollapse";
 import {
@@ -375,17 +375,18 @@ function PullRequestCodeTab({
   const settings = useClientSettings((settings) => ({
     diffIgnoreWhitespace: settings.diffIgnoreWhitespace,
     wordWrap: settings.wordWrap,
+    diffFilesCollapsed: settings.diffFilesCollapsed,
+    diffLayout: settings.diffLayout,
   }));
+  const updateClientSettings = useUpdateClientSettings();
   const [toggledFiles, setToggledFiles] = useState<ReadonlySet<string>>(() => new Set());
   const [lastViewedFileKey, setLastViewedFileKey] = useState<string | null>(null);
   const [visibleCommitCount, setVisibleCommitCount] = useState(COMMIT_PAGE_SIZE);
   const [foldOverride, setFoldOverride] = useState<DiffFoldOverride>(null);
-  const effectiveFoldOverride = foldOverride ?? "folded";
-  const [diffLayout, setDiffLayout] = useLocalStorage(
-    "test-rig:pr-diff-layout",
-    "stacked",
-    Schema.Literals(["split", "stacked"]),
-  );
+  const effectiveFoldOverride =
+    foldOverride ?? (settings.diffFilesCollapsed ? "folded" : "expanded");
+  const diffLayout = settings.diffLayout;
+  const setDiffLayout = (next: "stacked" | "split") => updateClientSettings({ diffLayout: next });
   const [wordWrap, setWordWrap] = useState(settings.wordWrap);
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
   const [fileTreeOpen, setFileTreeOpen] = useLocalStorage(

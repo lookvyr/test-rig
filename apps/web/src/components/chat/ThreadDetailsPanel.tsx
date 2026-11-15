@@ -207,8 +207,12 @@ export function ThreadDetailsPanel(props: {
                       <FileDiffIcon />
                       <span className="flex-1 text-left">Changes</span>
                       <span className="flex items-center gap-1 font-mono text-2xs tabular-nums">
-                        <span className="text-success">+{changesTotals?.insertions ?? "…"}</span>
-                        <span className="text-destructive">-{changesTotals?.deletions ?? "…"}</span>
+                        <span className="text-diff-addition-foreground">
+                          +{changesTotals?.insertions ?? "…"}
+                        </span>
+                        <span className="text-diff-deletion-foreground">
+                          -{changesTotals?.deletions ?? "…"}
+                        </span>
                       </span>
                     </ThreadDetailsControl>
                   ) : null}
