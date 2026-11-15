@@ -301,13 +301,37 @@ export function changedThemePaintKinds(
   return THEME_PAINT_KIND_ORDER.filter((kind) => before[kind] !== after[kind]);
 }
 
+const NEUTRAL_APPEARANCE_CONTRAST = [
+  ["--appearance-contrast-base", "100%"],
+  ["--appearance-contrast-boost", "0%"],
+  ["--appearance-contrast-border-boost", "0%"],
+] as const;
+
+function neutralizeAppearanceContrast(root: HTMLElement): () => void {
+  const saved = NEUTRAL_APPEARANCE_CONTRAST.map(([name, value]) => {
+    const original = root.style.getPropertyValue(name);
+    root.style.setProperty(name, value);
+    return [name, original] as const;
+  });
+  return () => {
+    for (const [name, original] of saved) {
+      if (original) root.style.setProperty(name, original);
+      else root.style.removeProperty(name);
+    }
+  };
+}
+
 function withThemeTokenProbeSession<Result>(run: () => Result): Result {
   const root = document.documentElement;
   const wasAlreadyProbing = root.hasAttribute(THEME_TOKEN_PROBE_ATTRIBUTE);
   if (!wasAlreadyProbing) root.setAttribute(THEME_TOKEN_PROBE_ATTRIBUTE, "");
+  // Away from 100%, contrast mixes text with the canvas and borders with text, so a probe of
+  // one role would repaint another. Neutralize it for the session.
+  const restoreContrast = wasAlreadyProbing ? () => {} : neutralizeAppearanceContrast(root);
   try {
     return run();
   } finally {
+    restoreContrast();
     // Flush every restored token while transitions are still suppressed. The
     // browser never gets a paint opportunity between the probe and restore.
     void window.getComputedStyle(root).color;
