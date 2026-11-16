@@ -11,6 +11,8 @@ import {
   type OrchestrationV2ProviderCapabilities,
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2Run,
+  type OrchestrationV2ThreadProjection,
   type OrchestrationV2ProviderTurnTokenUsage,
   ProjectId,
   ProviderInstanceId,
@@ -114,6 +116,8 @@ function makeTestAdapter(input: {
   readonly failedRunOrdinals?: ReadonlySet<number>;
   readonly interruptedRunOrdinals?: ReadonlySet<number>;
   readonly holdRunOrdinal?: number;
+  /** Runs that leave a background command running in their provider thread. */
+  readonly backgroundWorkRunOrdinals?: ReadonlySet<number>;
   readonly holdFirstTurn?: Deferred.Deferred<void>;
   readonly releaseFirstTurn?: Deferred.Deferred<void>;
 }): ProviderAdapterV2Shape {
@@ -349,6 +353,20 @@ function makeTestAdapter(input: {
                     status: "running",
                     completedAt: null,
                     tokenUsage: { ...reportedUsage, updatedAt: DateTime.formatIso(eventTime) },
+                  },
+                });
+              }
+              if (input.backgroundWorkRunOrdinals?.has(turnInput.runOrdinal)) {
+                yield* PubSub.publish(events, {
+                  type: "provider_thread.updated",
+                  driver: input.driver,
+                  providerThread: {
+                    ...turnInput.providerThread,
+                    providerSessionId: sessionInput.providerSessionId,
+                    pendingBackgroundTasks: [
+                      { taskId: `background:${turnInput.runOrdinal}`, kind: "command" },
+                    ],
+                    updatedAt: eventTime,
                   },
                 });
               }
@@ -1194,6 +1212,119 @@ describe("orchestration v2 provider switching", () => {
           );
         }),
       ),
+  );
+
+  it.live.each([
+    { name: "Claude", driver: CLAUDE_DRIVER, selection: CLAUDE_MODEL_SELECTION },
+    { name: "Codex", driver: CODEX_DRIVER, selection: CODEX_MODEL_SELECTION },
+  ] as const)("starts a fresh $name session when a message asks for fresh context", (target) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = yield* checkpointWorkspace(`fresh-context-${target.name}`);
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const injectedHistory = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        const generation = yield* Ref.make(0);
+        const registry = ProviderAdapterRegistry.makeLayer([
+          makeTestAdapter({
+            instanceId: target.selection.instanceId,
+            driver: target.driver,
+            capabilities:
+              target.driver === CLAUDE_DRIVER
+                ? ClaudeProviderCapabilitiesV2
+                : CodexProviderCapabilitiesV2,
+            modelSelection: target.selection,
+            responseByRunOrdinal: {},
+            capturedTurns,
+            injectedHistory,
+            nativeThreadGeneration: generation,
+          }),
+        ]);
+        yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+          const run = Effect.fn("run")(function* (ordinal: number, freshContext: boolean) {
+            yield* orchestrator.dispatch({
+              type: "message.dispatch",
+              commandId: CommandId.make(`fresh-context:${ordinal}`),
+              threadId,
+              messageId: MessageId.make(`fresh-context:${ordinal}`),
+              createdBy: "user",
+              creationSource: "web",
+              text: `Request ${ordinal}`,
+              attachments: [],
+              modelSelection: target.selection,
+              dispatchMode: { type: "start_immediately" },
+              ...(freshContext ? { freshContext: true } : {}),
+            });
+            yield* orchestrator.streamStoredEvents.pipe(
+              Stream.filter(
+                ({ event }) =>
+                  event.type === "run.updated" &&
+                  event.payload.ordinal === ordinal &&
+                  (event.payload.status === "completed" || event.payload.status === "failed"),
+              ),
+              Stream.runHead,
+            );
+            yield* worker.drain();
+            return yield* orchestrator.getThreadProjection(threadId);
+          });
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make("fresh-context:create"),
+            threadId,
+            projectId,
+            createdBy: "user",
+            creationSource: "web",
+            title: "Fresh context",
+            modelSelection: target.selection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+          });
+          const first = yield* run(1, false);
+          const firstSessionId = first.providerThreads[0]?.providerSessionId;
+          const fresh = yield* run(2, true);
+          assert.equal(fresh.runs.at(-1)?.status, "completed");
+          assert.isTrue(fresh.runs.at(-1)?.freshContext);
+          yield* run(3, false);
+
+          const turns = yield* Ref.get(capturedTurns);
+          assert.equal(turns.length, 3);
+          // The fresh turn opens a new native conversation with no handoff of the old one.
+          assert.notEqual(turns[1]?.providerThreadId, turns[0]?.providerThreadId);
+          assert.notEqual(turns[1]?.nativeThreadId, turns[0]?.nativeThreadId);
+          assert.notInclude(turns[1]?.text ?? "", "Request 1");
+          assert.deepEqual(yield* Ref.get(injectedHistory), []);
+          // Later turns continue the fresh conversation.
+          assert.equal(turns[2]?.providerThreadId, turns[1]?.providerThreadId);
+          const freshThread = fresh.providerThreads.find(
+            (providerThread) => providerThread.id === turns[1]?.providerThreadId,
+          );
+          if (target.driver === CLAUDE_DRIVER) {
+            // Claude hosts one conversation per session, so the old session is released.
+            assert.notEqual(freshThread?.providerSessionId, firstSessionId);
+            assert.isFalse(fresh.providerSessions.some((session) => session.id === firstSessionId));
+          } else {
+            assert.equal(freshThread?.providerSessionId, firstSessionId);
+          }
+        }).pipe(
+          Effect.provide(
+            makeOrchestratorV2ReplayLayerWithRegistry(
+              {
+                name: `fresh-context-${target.name}`,
+                runtimePolicyOverride: {
+                  cwd,
+                  approvalPolicy: "never",
+                  sandboxPolicy: { type: "readOnly" },
+                },
+              },
+              registry,
+            ),
+          ),
+        );
+      }),
+    ),
   );
 
   it.live("keeps the native session after turns refused before reaching the provider", () =>
@@ -3332,5 +3463,381 @@ describe("orchestration v2 provider switching", () => {
           );
         }),
       ),
+  );
+});
+
+describe("orchestration v2 fresh sessions", () => {
+  const freshThreadId = ThreadId.make("thread:fresh-session");
+
+  /** A Claude (and optionally Codex) thread with helpers to send, queue and settle messages. */
+  const withFreshThread = <A, E, R>(
+    name: string,
+    options: {
+      readonly holdFirstTurn?: boolean;
+      readonly withCodex?: boolean;
+      readonly responses?: Readonly<Record<number, string>>;
+      readonly backgroundWorkRunOrdinals?: ReadonlySet<number>;
+    },
+    body: (context: {
+      readonly capturedTurns: Ref.Ref<ReadonlyArray<CapturedTurn>>;
+      readonly injectedHistory: Ref.Ref<ReadonlyArray<unknown>>;
+      readonly started: Deferred.Deferred<void>;
+      readonly release: Deferred.Deferred<void>;
+      readonly send: (
+        key: string,
+        input?: {
+          readonly fresh?: boolean;
+          readonly queue?: boolean;
+          readonly selection?: ModelSelection;
+          readonly scheduledTaskId?: string;
+        },
+      ) => Effect.Effect<void, Orchestrator.OrchestratorV2Error, Orchestrator.OrchestratorV2>;
+      readonly settle: () => Effect.Effect<
+        OrchestrationV2ThreadProjection,
+        Orchestrator.OrchestratorV2Error | EffectWorker.OrchestrationEffectWorkerError,
+        Orchestrator.OrchestratorV2 | EffectWorker.OrchestrationEffectWorkerV2
+      >;
+      readonly runFor: (
+        projection: OrchestrationV2ThreadProjection,
+        key: string,
+      ) => OrchestrationV2Run;
+    }) => Effect.Effect<A, E, R>,
+  ) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const cwd = yield* checkpointWorkspace(`fresh-session-${name}`);
+        const capturedTurns = yield* Ref.make<ReadonlyArray<CapturedTurn>>([]);
+        const injectedHistory = yield* Ref.make<ReadonlyArray<unknown>>([]);
+        const generation = yield* Ref.make(0);
+        const started = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const registry = ProviderAdapterRegistry.makeLayer([
+          makeTestAdapter({
+            instanceId: CLAUDE_MODEL_SELECTION.instanceId,
+            driver: CLAUDE_DRIVER,
+            capabilities: ClaudeProviderCapabilitiesV2,
+            modelSelection: CLAUDE_MODEL_SELECTION,
+            responseByRunOrdinal: options.responses ?? {},
+            capturedTurns,
+            injectedHistory,
+            nativeThreadGeneration: generation,
+            ...(options.backgroundWorkRunOrdinals === undefined
+              ? {}
+              : { backgroundWorkRunOrdinals: options.backgroundWorkRunOrdinals }),
+            ...(options.holdFirstTurn === true
+              ? { holdFirstTurn: started, releaseFirstTurn: release }
+              : {}),
+          }),
+          ...(options.withCodex === true
+            ? [
+                makeTestAdapter({
+                  instanceId: CODEX_MODEL_SELECTION.instanceId,
+                  driver: CODEX_DRIVER,
+                  capabilities: CodexProviderCapabilitiesV2,
+                  modelSelection: CODEX_MODEL_SELECTION,
+                  responseByRunOrdinal: options.responses ?? {},
+                  capturedTurns,
+                  injectedHistory,
+                  nativeThreadGeneration: generation,
+                }),
+              ]
+            : []),
+        ]);
+        return yield* Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          yield* orchestrator.dispatch({
+            type: "thread.create",
+            commandId: CommandId.make(`fresh-session:${name}:create`),
+            threadId: freshThreadId,
+            projectId,
+            createdBy: "user",
+            creationSource: "web",
+            title: "Fresh session",
+            modelSelection: CLAUDE_MODEL_SELECTION,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+          });
+          const send = (
+            key: string,
+            input: {
+              readonly fresh?: boolean;
+              readonly queue?: boolean;
+              readonly selection?: ModelSelection;
+              readonly scheduledTaskId?: string;
+            } = {},
+          ) =>
+            Effect.gen(function* () {
+              const orchestrator = yield* Orchestrator.OrchestratorV2;
+              yield* orchestrator.dispatch({
+                type: "message.dispatch",
+                commandId: CommandId.make(`fresh-session:${name}:${key}`),
+                threadId: freshThreadId,
+                messageId: MessageId.make(`fresh-session:${name}:${key}`),
+                createdBy: "user",
+                creationSource: input.scheduledTaskId === undefined ? "web" : "mcp",
+                text: `Request ${key}`,
+                attachments: [],
+                modelSelection: input.selection ?? CLAUDE_MODEL_SELECTION,
+                dispatchMode: {
+                  type: input.queue === true ? "queue_after_active" : "start_immediately",
+                },
+                ...(input.fresh === true ? { freshContext: true } : {}),
+                ...(input.scheduledTaskId === undefined
+                  ? {}
+                  : { scheduledTaskId: input.scheduledTaskId as never }),
+              });
+            });
+          const settle = () =>
+            Effect.gen(function* () {
+              const orchestrator = yield* Orchestrator.OrchestratorV2;
+              const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+              for (let attempt = 0; attempt < 1_000; attempt += 1) {
+                yield* worker.drain();
+                const projection = yield* orchestrator.getThreadProjection(freshThreadId);
+                if (
+                  projection.runs.every(
+                    (run) => !["queued", "starting", "running", "waiting"].includes(run.status),
+                  )
+                ) {
+                  return projection;
+                }
+                yield* Effect.sleep("5 millis");
+              }
+              return yield* Effect.die(new Error("Fresh session test timed out waiting for idle"));
+            });
+          const runFor = (projection: OrchestrationV2ThreadProjection, key: string) => {
+            const run = projection.runs.find(
+              (candidate) => candidate.userMessageId === `fresh-session:${name}:${key}`,
+            );
+            assert.isDefined(run, `run for ${key}`);
+            return run!;
+          };
+          return yield* body({
+            capturedTurns,
+            injectedHistory,
+            started,
+            release,
+            send,
+            settle,
+            runFor,
+          });
+        }).pipe(
+          Effect.provide(
+            makeOrchestratorV2ReplayLayerWithRegistry(
+              {
+                name: `fresh-session-${name}`,
+                runtimePolicyOverride: {
+                  cwd,
+                  approvalPolicy: "never",
+                  sandboxPolicy: { type: "readOnly" },
+                },
+              },
+              registry,
+            ),
+          ),
+        );
+      }),
+    );
+
+  const turnFor = (turns: ReadonlyArray<CapturedTurn>, key: string) => {
+    const turn = turns.find((candidate) => candidate.text.includes(`Request ${key}`));
+    assert.isDefined(turn, `turn for ${key}`);
+    return turn!;
+  };
+
+  it.live("does not hand the conversation before a fresh session to another provider", () =>
+    withFreshThread(
+      "switch-after-fresh",
+      { withCodex: true, responses: { 1: "OLD-ANSWER-ONE", 2: "NEW-ANSWER-TWO" } },
+      ({ capturedTurns, injectedHistory, send, settle }) =>
+        Effect.gen(function* () {
+          yield* send("OLD-QUESTION-ONE");
+          yield* settle();
+          yield* send("NEW-QUESTION-TWO", { fresh: true });
+          yield* settle();
+          yield* send("three", { selection: CODEX_MODEL_SELECTION });
+          const projection = yield* settle();
+          const handoff = projection.contextHandoffs.find(
+            (candidate) => candidate.targetRunId === projection.runs.at(-1)?.id,
+          );
+          assert.isDefined(handoff);
+          const delivered = yield* encodeJson([
+            turnFor(yield* Ref.get(capturedTurns), "three").text,
+            yield* Ref.get(injectedHistory),
+            handoff,
+          ]);
+          assert.include(delivered, "NEW-ANSWER-TWO");
+          assert.notInclude(delivered, "OLD-QUESTION-ONE");
+          assert.notInclude(delivered, "OLD-ANSWER-ONE");
+        }),
+    ),
+  );
+
+  it.live("continues a fresh session queued ahead, or the conversation when it is cancelled", () =>
+    Effect.gen(function* () {
+      for (const cancelFresh of [false, true]) {
+        yield* withFreshThread(
+          `queued-follower-${cancelFresh ? "cancelled" : "kept"}`,
+          { holdFirstTurn: true },
+          ({ capturedTurns, started, release, send, settle, runFor }) =>
+            Effect.gen(function* () {
+              const orchestrator = yield* Orchestrator.OrchestratorV2;
+              yield* send("one");
+              yield* Deferred.await(started);
+              yield* send("two", { fresh: true, queue: true });
+              yield* send("three", { queue: true });
+              if (cancelFresh) {
+                const queued = yield* orchestrator.getThreadProjection(freshThreadId);
+                yield* orchestrator.dispatch({
+                  type: "queued-run.cancel",
+                  commandId: CommandId.make("fresh-session:cancel-two"),
+                  threadId: freshThreadId,
+                  runId: runFor(queued, "two").id,
+                });
+              }
+              yield* Deferred.succeed(release, undefined);
+              const projection = yield* settle();
+              assert.equal(runFor(projection, "three").status, "completed");
+              const turns = yield* Ref.get(capturedTurns);
+              const one = turnFor(turns, "one");
+              const three = turnFor(turns, "three");
+              if (cancelFresh) {
+                // The fresh run never started, so the follower continues the original conversation.
+                assert.equal(three.providerThreadId, one.providerThreadId);
+                assert.equal(three.nativeThreadId, one.nativeThreadId);
+                assert.isUndefined(runFor(projection, "three").freshContext);
+              } else {
+                const two = turnFor(turns, "two");
+                assert.notEqual(two.nativeThreadId, one.nativeThreadId);
+                assert.equal(three.providerThreadId, two.providerThreadId);
+              }
+            }),
+        );
+      }
+    }),
+  );
+
+  it.live(
+    "moves a message queued before a fresh one onto the fresh session when it starts later",
+    () =>
+      withFreshThread(
+        "reordered-fresh",
+        { holdFirstTurn: true },
+        ({ capturedTurns, started, release, send, settle, runFor }) =>
+          Effect.gen(function* () {
+            const orchestrator = yield* Orchestrator.OrchestratorV2;
+            yield* send("one");
+            yield* Deferred.await(started);
+            yield* send("two", { queue: true });
+            yield* send("three", { fresh: true, queue: true });
+            const queued = yield* orchestrator.getThreadProjection(freshThreadId);
+            yield* orchestrator.dispatch({
+              type: "queued-run.reorder",
+              commandId: CommandId.make("fresh-session:reorder"),
+              threadId: freshThreadId,
+              runId: runFor(queued, "three").id,
+              beforeRunId: runFor(queued, "two").id,
+            });
+            yield* Deferred.succeed(release, undefined);
+            yield* settle();
+            yield* send("four");
+            const projection = yield* settle();
+            const turns = yield* Ref.get(capturedTurns);
+            assert.deepEqual(
+              turns.map((turn) => turn.text),
+              ["Request one", "Request three", "Request two", "Request four"],
+            );
+            const one = turnFor(turns, "one");
+            const three = turnFor(turns, "three");
+            assert.notEqual(three.nativeThreadId, one.nativeThreadId);
+            // Both later messages stay in the fresh session instead of reviving the old one.
+            assert.equal(turnFor(turns, "two").providerThreadId, three.providerThreadId);
+            assert.equal(turnFor(turns, "four").providerThreadId, three.providerThreadId);
+            assert.equal(projection.thread.activeProviderThreadId, three.providerThreadId);
+          }),
+      ),
+  );
+
+  it.live("keeps the user's conversation when a schedule starts a fresh session", () =>
+    withFreshThread("scheduled-fresh", {}, ({ capturedTurns, send, settle }) =>
+      Effect.gen(function* () {
+        yield* send("one");
+        yield* settle();
+        yield* send("scheduled", { fresh: true, scheduledTaskId: "scheduled-task:fresh" });
+        yield* settle();
+        yield* send("three");
+        yield* settle();
+        const turns = yield* Ref.get(capturedTurns);
+        const one = turnFor(turns, "one");
+        const scheduled = turnFor(turns, "scheduled");
+        assert.notEqual(scheduled.providerThreadId, one.providerThreadId);
+        // The scheduled run was a side conversation; the user's next message continues theirs.
+        assert.equal(turnFor(turns, "three").providerThreadId, one.providerThreadId);
+      }),
+    ),
+  );
+
+  it.live("refuses to promote a queued fresh message to steer", () =>
+    withFreshThread(
+      "promote-fresh",
+      { holdFirstTurn: true },
+      ({ started, release, send, settle, runFor }) =>
+        Effect.gen(function* () {
+          const orchestrator = yield* Orchestrator.OrchestratorV2;
+          yield* send("one");
+          yield* Deferred.await(started);
+          yield* send("two", { fresh: true, queue: true });
+          const queued = yield* orchestrator.getThreadProjection(freshThreadId);
+          const error = yield* orchestrator
+            .dispatch({
+              type: "queued-message.promote-to-steer",
+              commandId: CommandId.make("fresh-session:promote"),
+              threadId: freshThreadId,
+              queuedRunId: runFor(queued, "two").id,
+              targetRunId: runFor(queued, "one").id,
+            })
+            .pipe(Effect.flip);
+          assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
+          assert.include(String(error.cause), "can't steer the current turn");
+          yield* Deferred.succeed(release, undefined);
+          const projection = yield* settle();
+          assert.isTrue(runFor(projection, "two").freshContext);
+          assert.equal(runFor(projection, "two").status, "completed");
+        }),
+    ),
+  );
+
+  it.live("refuses a fresh session while the current session runs background work", () =>
+    withFreshThread(
+      "background-fresh",
+      { backgroundWorkRunOrdinals: new Set([1]) },
+      ({ send, settle }) =>
+        Effect.gen(function* () {
+          yield* send("one");
+          const before = yield* settle();
+          assert.isTrue(
+            before.providerThreads.some(
+              (providerThread) => (providerThread.pendingBackgroundTasks?.length ?? 0) > 0,
+            ),
+          );
+          const error = yield* send("two", { fresh: true }).pipe(Effect.flip);
+          assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
+          assert.include(
+            String((error as Orchestrator.OrchestratorDispatchError).cause),
+            "background",
+          );
+          // A schedule has nobody to wait, so it starts the fresh session and leaves the work running.
+          yield* send("scheduled", { fresh: true, scheduledTaskId: "scheduled-task:background" });
+          const after = yield* settle();
+          assert.equal(after.runs.at(-1)?.status, "completed");
+          assert.isTrue(
+            after.providerSessions.some((session) =>
+              before.providerSessions.some((earlier) => earlier.id === session.id),
+            ),
+          );
+        }),
+    ),
   );
 });

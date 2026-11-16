@@ -131,6 +131,7 @@ import {
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   resolveClaudeCatalogContextWindowTokens,
+  resolveClaudeReportedModelSlug,
   scopeClaudeModelCatalog,
   type ClaudeModelCatalog,
 } from "../../provider/ClaudeModelCatalog.ts";
@@ -1158,6 +1159,7 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__test_rig__list_scheduled_tasks",
   "mcp__test_rig__t3_thread_list",
   "mcp__test_rig__t3_thread_wait",
+  "mcp__test_rig__t3_background_wait",
   "mcp__test_rig__t3_pending_request_list",
   "mcp__test_rig__t3_pending_request_read",
   "mcp__test_rig__t3_thread_configuration",
@@ -1174,10 +1176,10 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
 ];
 
 // Claude Code aborts an HTTP MCP call after 60 s ("The operation timed out.")
-// unless the server config sets `timeout`. T3's wait tools (t3_thread_wait,
-// delegate_task mode=wait) legitimately block for up to an hour
-// (MAX_WAIT_TIMEOUT_MS in OrchestratorMcpService), so the budget sits just
-// above that and the server's own wait timeout is what ends a long call.
+// unless the server config sets `timeout`. Task and thread waits end within
+// 45 s, but request_secret waits for the user to answer its card for up to an
+// hour (MAX_SECRET_REQUEST_TIMEOUT_MS in OrchestratorMcpService), so the budget
+// sits just above that and the server's own timeout is what ends a long call.
 export const CLAUDE_T3_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 
 // The SDK's `allowedTools` only pre-approves tool calls; availability is the
@@ -2992,6 +2994,8 @@ interface ActiveClaudeTurnContext {
   readonly rejectedRateLimitTypes: Set<string>;
   readonly rateLimitResetTimes: Map<string, string | null>;
   latestAssistantRateLimited: boolean;
+  // Claude can run another model than requested, such as when an organization disallows it.
+  executedModel: string | undefined;
   readonly subagentsByTaskId: Map<string, ActiveClaudeSubagent>;
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
   readonly subagentNodesByTaskId: Map<string, OrchestrationV2ExecutionNode["id"]>;
@@ -4547,6 +4551,9 @@ export function makeClaudeAdapterV2(
           status: input.status,
           startedAt: input.context.startedAt,
           completedAt: input.completedAt,
+          ...(input.context.executedModel === undefined
+            ? {}
+            : { model: input.context.executedModel }),
         });
 
         const buildToolCallArtifacts = (input: {
@@ -7293,6 +7300,13 @@ export function makeClaudeAdapterV2(
           if (message.type === "assistant" && input.replayed !== true) {
             context.nativeMessageCursor = message.uuid;
             if (message.parent_tool_use_id === null) {
+              // CLI notices and API errors arrive as assistant messages from "<synthetic>".
+              if (message.message.model && message.message.model !== "<synthetic>") {
+                context.executedModel = resolveClaudeReportedModelSlug(
+                  modelCatalog,
+                  message.message.model,
+                );
+              }
               context.latestAssistantRateLimited = message.error === "rate_limit";
               if (message.error === "authentication_failed") {
                 context.authenticationFailureMessage = claudeSignedOutMessage({
@@ -7420,6 +7434,7 @@ export function makeClaudeAdapterV2(
                     ...claudeAutoCompactThreshold(context.autoCompactWindow, maxTokens),
                     updatedAt: DateTime.formatIso(now),
                   },
+                  ...(context.executedModel === undefined ? {} : { model: context.executedModel }),
                 },
               });
             }
@@ -7555,6 +7570,7 @@ export function makeClaudeAdapterV2(
                       : undefined,
                     context.autoCompactWindow,
                   ),
+                  ...(context.executedModel === undefined ? {} : { model: context.executedModel }),
                 },
               });
             }
@@ -9166,6 +9182,7 @@ export function makeClaudeAdapterV2(
               rejectedRateLimitTypes: new Set(),
               rateLimitResetTimes: new Map(),
               latestAssistantRateLimited: false,
+              executedModel: undefined,
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),
               subagentNodesByTaskId: new Map(),

@@ -153,21 +153,27 @@ export {
   OrchestratorMcpThreadWaitResult,
   OrchestratorMcpThreadInterruptInput,
   OrchestratorMcpThreadInterruptResult,
+  OrchestratorMcpThreadBackgroundTask,
+  OrchestratorMcpCapabilitiesInput,
+  OrchestratorMcpModelOption,
   OrchestratorMcpProviderCapability,
   OrchestratorMcpCapabilitiesResult,
   OrchestratorMcpScheduleTaskInput,
+  OrchestratorMcpSaveScheduledTaskInput,
   OrchestratorMcpScheduledTask,
   OrchestratorMcpScheduleTaskResult,
+  OrchestratorMcpListScheduledTasksInput,
   OrchestratorMcpListScheduledTasksResult,
   OrchestratorMcpUpdateScheduledTaskInput,
   OrchestratorMcpDeleteScheduledTaskInput,
   OrchestratorMcpDeleteScheduledTaskResult,
   OrchestratorMcpFailure,
+  ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
+  clampedPositiveInt,
 } from "./orchestratorMcp.ts";
 
 export {
   ThreadMetadataMcpAction,
-  ThreadMetadataMcpPullRequest,
   ThreadMetadataMcpUpdateInput,
   ThreadMetadataMcpUpdateResult,
 } from "./threadMetadataMcp.ts";

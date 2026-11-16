@@ -19,7 +19,7 @@ import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 
 it.effect(
-  "list and read agree on effective snooze and every visible PR, with filtering before pagination",
+  "list and read agree on effective snooze and the open PR preview, with filtering before pagination",
   () =>
     Effect.gen(function* () {
       const now = DateTime.makeUnsafe("2026-10-19T12:00:00Z");
@@ -121,7 +121,8 @@ it.effect(
             assert.equal(projectId, base.projectId);
             return Effect.succeed(shells);
           },
-          getTimelinePage: () => Effect.succeed({ items: [], totalItems: 0, hasMore: false }),
+          getTimelinePage: () =>
+            Effect.succeed({ items: [], totalItems: 0, hasMore: false, hasEarlier: false }),
         }),
       );
       yield* Effect.gen(function* () {
@@ -138,11 +139,10 @@ it.effect(
           assert.deepEqual(read.thread.pullRequests, item.pullRequests);
           assert.deepEqual(
             item.pullRequests?.map(({ number, state }) => ({ number, state })),
-            [
-              { number: 1, state: null },
-              { number: 2, state: "merged" },
-            ],
+            [{ number: 1, state: null }],
           );
+          assert.equal(item.pullRequestCount, 2);
+          assert.equal(item.openPullRequestCount, 1);
         }
         const page = yield* service.listThreads(scope, { snoozed: true, limit: 1, cursor: 1 });
         assert.equal(page.total, 3);

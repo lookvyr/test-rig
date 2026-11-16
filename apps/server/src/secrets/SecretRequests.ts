@@ -5,6 +5,9 @@
  * one-use SecretRef; orchestration only records the request and its status.
  * A tool that needs the value takes the ref and consumes it, so the value
  * is not included in orchestration records or the tool response.
+ * A `file` request instead moves its value to an owner-only file for the
+ * agent's own shell, and a secret the user pasted in chat goes straight to
+ * such a file, with no card. Files are deleted after 24 hours.
  *
  * @module SecretRequests
  */
@@ -24,6 +27,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -39,6 +43,7 @@ const REF_PATTERN = /^secret-ref:[0-9a-f]{32}$/;
 /** A value nobody used within this long is dropped; the agent can ask again. */
 const SECRET_REF_TTL_MS = 24 * 60 * 60 * 1000;
 const STORE_NAME_PATTERN = /^(secret-request-[0-9a-f]{32})\.bin$/;
+const FILE_NAME_PATTERN = /^[0-9a-f]{32}(\.partial)?$/;
 
 /**
  * Each request has exactly one ref, derived from where it was asked. Its
@@ -82,6 +87,19 @@ export class SecretRequests extends Context.Service<
       readonly ref: SecretRef;
       readonly projectId: ProjectId;
     }) => Effect.Effect<string, SecretRequestError>;
+    /** Moves a saved `file` request's value to an owner-only file and returns its path. */
+    readonly saveToFile: (input: {
+      readonly threadId: ThreadId;
+      readonly turnItemId: string;
+    }) => Effect.Effect<string, SecretRequestError>;
+    /** Writes a secret the user pasted in chat to an owner-only file and returns its path. */
+    readonly savePasted: (input: {
+      readonly threadId: ThreadId;
+      /** The provider session, so two sessions' retry keys never share a file. */
+      readonly requestNamespace: string;
+      readonly requestKey: string;
+      readonly value: string;
+    }) => Effect.Effect<string, SecretRequestError>;
   }
 >()("t3/secrets/SecretRequests") {}
 
@@ -89,6 +107,9 @@ const make = Effect.gen(function* () {
   const store = yield* ServerSecretStore.ServerSecretStore;
   const fileSystem = yield* FileSystem.FileSystem;
   const config = yield* ServerConfig;
+  const path = yield* Path.Path;
+  // Beside the store's own files so the same owner-only directory applies.
+  const filesDir = path.join(config.secretsDir, "files");
   const storageLock = yield* Semaphore.make(1);
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
 
@@ -143,7 +164,9 @@ const make = Effect.gen(function* () {
           turnItemId: item.id,
           label: item.label,
           reason: item.reason,
+          ...(item.url === undefined ? {} : { url: item.url }),
           ...(item.placeholder === undefined ? {} : { placeholder: item.placeholder }),
+          ...(item.delivery === undefined ? {} : { delivery: item.delivery }),
           secretStatus,
         })
         .pipe(
@@ -221,6 +244,90 @@ const make = Effect.gen(function* () {
       return decoded.value.value;
     });
 
+  /** A live ref's value, left in the store. */
+  const readRef = (input: { readonly ref: SecretRef; readonly projectId: ProjectId }) =>
+    Effect.gen(function* () {
+      const stored = yield* store
+        .get(storeName(input.ref))
+        .pipe(Effect.mapError(() => new SecretRequestError({ reason: "read_failed" })));
+      const decoded = Option.flatMap(stored, (bytes) =>
+        decodeStored(new TextDecoder().decode(bytes)),
+      );
+      if (Option.isNone(decoded) || decoded.value.projectId !== input.projectId) {
+        return yield* new SecretRequestError({ reason: "ref_unavailable" });
+      }
+      if ((yield* Clock.currentTimeMillis) - decoded.value.savedAt > SECRET_REF_TTL_MS) {
+        yield* removeLogged(storeName(input.ref));
+        return yield* new SecretRequestError({ reason: "ref_expired" });
+      }
+      return decoded.value.value;
+    });
+
+  const writeSecretFile = (file: string, value: string) => {
+    const partial = `${file}.partial`;
+    return fileSystem.makeDirectory(filesDir, { recursive: true, mode: 0o700 }).pipe(
+      Effect.andThen(fileSystem.chmod(filesDir, 0o700)),
+      Effect.andThen(fileSystem.remove(partial, { force: true })),
+      // `wx` never follows or replaces an existing path.
+      Effect.andThen(
+        fileSystem.writeFile(partial, new TextEncoder().encode(value), { flag: "wx", mode: 0o600 }),
+      ),
+      Effect.andThen(fileSystem.rename(partial, file)),
+      Effect.mapError(() => new SecretRequestError({ reason: "store_failed" })),
+    );
+  };
+
+  const fileExists = (file: string) =>
+    fileSystem.exists(file).pipe(Effect.orElseSucceed(() => false));
+
+  const saveToFile: SecretRequests["Service"]["saveToFile"] = (input) =>
+    Effect.gen(function* () {
+      const records = yield* threadManagement
+        .getThreadRecords(input.threadId, ["turnItems"], {
+          turnItemTypes: ["secret_request"],
+          messageRoles: [],
+        })
+        .pipe(Effect.mapError(() => new SecretRequestError({ reason: "load_failed" })));
+      const item = records.turnItems.find((candidate) => candidate.id === input.turnItemId);
+      // Only a card that told the user the agent's commands can read the value may write it out.
+      if (
+        item?.type !== "secret_request" ||
+        item.secretStatus !== "saved" ||
+        item.delivery !== "file"
+      ) {
+        return yield* new SecretRequestError({ reason: "not_a_file_request" });
+      }
+      const ref = refFor(salt, input.threadId, item.id);
+      const file = path.join(filesDir, ref.slice(SECRET_REF_PREFIX.length));
+      // One use: the file counts as delivered only once the stored copy is gone. A retry with the
+      // same clientRequestId gets the file the first call wrote and finishes that removal.
+      const removeStored = removeLogged(storeName(ref)).pipe(
+        Effect.flatMap((removed) =>
+          removed ? Effect.succeed(file) : new SecretRequestError({ reason: "consume_failed" }),
+        ),
+      );
+      if (yield* fileExists(file)) return yield* removeStored;
+      // The stored value goes only after the file is complete, so a failed write can retry.
+      const value = yield* readRef({ ref, projectId: records.thread.projectId });
+      yield* writeSecretFile(file, value);
+      return yield* removeStored;
+    }).pipe(storageLock.withPermits(1), Effect.withSpan("SecretRequests.saveToFile"));
+
+  const savePasted: SecretRequests["Service"]["savePasted"] = (input) =>
+    Effect.gen(function* () {
+      const ref = refFor(
+        salt,
+        input.threadId,
+        `pasted\u0000${input.requestNamespace}\u0000${input.requestKey}`,
+      );
+      const file = path.join(filesDir, ref.slice(SECRET_REF_PREFIX.length));
+      // A retry with the same clientRequestId gets the file the first call wrote, unchanged, so a
+      // command already holding that path never reads another value.
+      if (yield* fileExists(file)) return file;
+      yield* writeSecretFile(file, input.value);
+      return file;
+    }).pipe(storageLock.withPermits(1), Effect.withSpan("SecretRequests.savePasted"));
+
   /**
    * Drops values nobody used before they expired, so an agent that never
    * consumed its ref does not leave the user's secret on disk.
@@ -251,15 +358,30 @@ const make = Effect.gen(function* () {
     Effect.catchCause(() => Effect.logWarning("Could not sweep expired secret refs")),
     Effect.withSpan("SecretRequests.sweepExpired"),
   );
-  // Once at startup, then hourly; a value lingers at most an hour past expiry.
-  yield* sweepExpired;
-  yield* sweepExpired.pipe(
-    Effect.delay("1 hour"),
-    Effect.repeat(Schedule.forever),
-    Effect.forkScoped,
+  const sweepExpiredFiles = Effect.gen(function* () {
+    if (!(yield* fileExists(filesDir))) return;
+    const now = yield* Clock.currentTimeMillis;
+    let removed = 0;
+    for (const name of yield* fileSystem.readDirectory(filesDir)) {
+      if (!FILE_NAME_PATTERN.test(name)) continue;
+      const file = path.join(filesDir, name);
+      const { mtime } = yield* fileSystem.stat(file);
+      if (Option.exists(mtime, (time) => now - time.getTime() <= SECRET_REF_TTL_MS)) continue;
+      yield* fileSystem.remove(file);
+      removed += 1;
+    }
+    yield* Effect.annotateCurrentSpan({ "secret_request.expired_files_removed": removed });
+  }).pipe(
+    storageLock.withPermits(1),
+    Effect.catchCause(() => Effect.logWarning("Could not sweep expired secret files")),
+    Effect.withSpan("SecretRequests.sweepExpiredFiles"),
   );
+  const sweep = Effect.andThen(sweepExpired, sweepExpiredFiles);
+  // Once at startup, then hourly; a value lingers at most an hour past expiry.
+  yield* sweep;
+  yield* sweep.pipe(Effect.delay("1 hour"), Effect.repeat(Schedule.forever), Effect.forkScoped);
 
-  return SecretRequests.of({ answer, savedRef, consume });
+  return SecretRequests.of({ answer, savedRef, consume, saveToFile, savePasted });
 });
 
 export const layer = Layer.effect(SecretRequests, make);

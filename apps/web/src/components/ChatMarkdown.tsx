@@ -2,6 +2,7 @@ import { isPreviewAvailableFor } from "~/browser/previewRuntime";
 import { ChatMarkdownAssetImage, ChatMarkdownDirectMedia } from "./ChatMarkdownAssetImage";
 export { ChatMarkdownAssetImage };
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
+import { formatThreadLink, parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
 import { resolveMediaSource } from "@t3tools/client-runtime/media-source";
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -12,6 +13,7 @@ export interface ChatMarkdownContextReference {
 }
 
 import { tableHasClippedCells } from "./chatMarkdownTable";
+import { ThreadContextChip } from "./ThreadContextChip";
 import { MarkdownPre, nodeToPlainText, remarkPreserveCodeMeta } from "./MarkdownCodeBlock";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -818,6 +820,7 @@ function useChatMarkdownState({
   const markdownUrlTransform = useCallback(
     (href: string, key: string) => {
       if (parseComposerContextHref(href)) return href;
+      if (key === "href" && parseThreadLinkHref(href)) return href;
       if (key === "src" && classifyMarkdownImageSource(href, cwd)._tag === "WorkspaceFile")
         return href;
       const screenshot = key === "src" ? resolveMarkdownBrowserScreenshotFileName(href) : null;
@@ -1076,6 +1079,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       renderContextReference,
       markdownFileLinkMetaByHref,
       threadRef,
+      environmentId,
       openExternalLinkInPreview,
     } = use(ChatMarkdownRendererContext);
     const fileLinkChip = useMarkdownFileLinkChip();
@@ -1083,6 +1087,27 @@ const CHAT_MARKDOWN_COMPONENTS = {
     if (context) {
       const label = nodeToPlainText(children) || context.contextId;
       return renderContextReference?.({ ...context, label }) ?? <span>{label}</span>;
+    }
+    // Agents mention threads with `t3-thread://` links; they show as thread chips.
+    const threadLink = href ? parseThreadLinkHref(href) : null;
+    const threadLinkEnvironmentId =
+      threadLink?.environmentId ?? threadRef?.environmentId ?? environmentId;
+    if (threadLink && threadLinkEnvironmentId) {
+      const text = nodeToPlainText(children).trim();
+      const label = text === "" || text === href ? threadLink.threadId : text;
+      return (
+        <ThreadContextChip
+          record={{
+            environmentId: threadLinkEnvironmentId,
+            threadId: threadLink.threadId,
+            title: label,
+          }}
+          copyMarkdown={formatThreadLink(
+            threadLink,
+            label === threadLink.threadId ? undefined : label,
+          )}
+        />
+      );
     }
     const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
     const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;

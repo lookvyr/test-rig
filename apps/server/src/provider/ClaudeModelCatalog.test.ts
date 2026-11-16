@@ -13,6 +13,7 @@ import {
   resolveClaudeModelCatalog,
   resolveClaudeModelsForVersion,
   resolveClaudeModelSlug,
+  resolveClaudeReportedModelSlug,
   scopeClaudeModelCatalog,
 } from "./ClaudeModelCatalog.ts";
 
@@ -249,5 +250,15 @@ describe("Claude model catalog", () => {
       resolveClaudeModelsForVersion(catalog, "3.2.0").map((model) => model.slug),
       ["claude-synthetic-next", "claude-custom-tuned"],
     );
+  });
+
+  it("maps a model id Claude reported, dated or not, to its catalog slug", () => {
+    const catalog = resolveClaudeModelCatalog(manifest());
+    assert.equal(
+      resolveClaudeReportedModelSlug(catalog, "claude-synthetic-next-20260101"),
+      "claude-synthetic-next",
+    );
+    assert.equal(resolveClaudeReportedModelSlug(catalog, "synthetic"), "claude-synthetic-next");
+    assert.equal(resolveClaudeReportedModelSlug(catalog, "claude-unknown-1"), "claude-unknown-1");
   });
 });

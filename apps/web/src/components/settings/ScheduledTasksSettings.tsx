@@ -118,6 +118,7 @@ const EMPTY_DRAFT: DraftState = {
   weekdays: new Set([1, 2, 3, 4, 5]),
   projectId: "",
   threadId: "",
+  freshSession: false,
   workspaceMode: "worktree",
   baseRef: "main",
   branch: "",
@@ -445,6 +446,9 @@ function ScheduledTaskRow({
           {task.threadId !== null ? (
             <ScheduledTaskThreadLink environmentId={environmentId} threadId={task.threadId} />
           ) : null}
+          {task.threadId !== null && task.freshSession === true ? (
+            <Badge variant="outline">Fresh session</Badge>
+          ) : null}
           {task.lastRunError ? <span className="text-destructive">{task.lastRunError}</span> : null}
         </div>
       }
@@ -668,6 +672,7 @@ function ScheduledTaskEditorDialog({
       schedule,
       projectId: projectId as ProjectId,
       threadId: draft.threadId ? (draft.threadId as ThreadId) : null,
+      ...(draft.threadId ? { freshSession: draft.freshSession } : {}),
       workspaceStrategy: workspaceFromDraft(draft),
       modelSelection,
       runtimeMode,
@@ -1046,6 +1051,29 @@ function ScheduledTaskEditorDialog({
                 </div>
               )}
             </div>
+
+            {draft.threadId ? (
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0 space-y-1">
+                  <Label htmlFor="scheduled-task-fresh-session">Fresh session each run</Label>
+                  <p
+                    id="scheduled-task-fresh-session-description"
+                    className="text-sm text-muted-foreground"
+                  >
+                    Runs start without the thread&apos;s earlier context. Your own messages keep
+                    their conversation.
+                  </p>
+                </div>
+                <Switch
+                  id="scheduled-task-fresh-session"
+                  aria-describedby="scheduled-task-fresh-session-description"
+                  checked={draft.freshSession}
+                  onCheckedChange={(freshSession) =>
+                    setDraft((current) => ({ ...current, freshSession }))
+                  }
+                />
+              </div>
+            ) : null}
 
             <div className="flex items-center justify-between gap-4">
               <div className="min-w-0 space-y-1">

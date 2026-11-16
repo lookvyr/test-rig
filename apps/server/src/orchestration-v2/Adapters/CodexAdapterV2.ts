@@ -1824,6 +1824,13 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
         const turnWaiters = yield* Ref.make(new Map<string, Deferred.Deferred<void, never>>());
         const subagentThreads = yield* Ref.make(new Map<string, CodexSubagentThreadContext>());
         const subagentModels = new Map<string, string>();
+        // A reroute names one turn, so its model is reported for that turn first.
+        const reroutedTurnModels = new Map<string, string>();
+        const reportedTurnModel = (nativeThreadId: string, nativeTurnId: string) => {
+          const rerouted = reroutedTurnModels.get(nativeTurnId);
+          reroutedTurnModels.delete(nativeTurnId);
+          return rerouted ?? subagentModels.get(nativeThreadId);
+        };
         const pendingSubagentTurns = yield* Ref.make(
           new Map<string, ReadonlyArray<PendingCodexSubagentTurnStarted>>(),
         );
@@ -4212,9 +4219,11 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
         yield* client.handleServerNotification("thread/settings/updated", (payload) =>
           updateSubagentModel(payload.threadId, payload.threadSettings.model),
         );
-        yield* client.handleServerNotification("model/rerouted", (payload) =>
-          updateSubagentModel(payload.threadId, payload.toModel),
-        );
+        yield* client.handleServerNotification("model/rerouted", (payload) => {
+          const toModel = payload.toModel.trim();
+          if (toModel) reroutedTurnModels.set(payload.turnId, toModel);
+          return updateSubagentModel(payload.threadId, payload.toModel);
+        });
 
         yield* client.handleServerNotification("turn/started", (payload) =>
           Effect.gen(function* () {
@@ -5713,6 +5722,10 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                 nativeThreadId != null &&
                 (goalsByNativeThread.get(nativeThreadId)?.status === "active" ||
                   (activation !== undefined && !activation.stopped));
+              const executedModel = reportedTurnModel(
+                input.context.providerThread.nativeThreadRef?.nativeId ?? "",
+                input.nativeTurnId,
+              );
               const completedTurn: OrchestrationV2ProviderTurn = {
                 id: input.context.providerTurnId,
                 providerThreadId: input.context.providerThread.id,
@@ -5736,6 +5749,7 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                   input.nativeTurnId,
                   input.status === "completed",
                 ),
+                ...(executedModel === undefined ? {} : { model: executedModel }),
               };
               if (!holdsForGoal) {
                 yield* emitProviderEvent({

@@ -5,6 +5,8 @@ import {
   OrchestratorMcpCreateThreadsInput,
   OrchestratorMcpDelegateTaskInput,
   OrchestratorMcpDelegateTaskResult,
+  OrchestratorMcpRequestSecretInput,
+  OrchestratorMcpSaveScheduledTaskInput,
   OrchestratorMcpScheduleTaskInput,
   OrchestratorMcpUpdateScheduledTaskInput,
   OrchestratorMcpThreadInterruptInput,
@@ -17,6 +19,10 @@ import {
 const decodeCreateThreadsInput = Schema.decodeUnknownSync(OrchestratorMcpCreateThreadsInput);
 const decodeDelegateTaskInput = Schema.decodeUnknownSync(OrchestratorMcpDelegateTaskInput);
 const decodeDelegateTaskResult = Schema.decodeUnknownSync(OrchestratorMcpDelegateTaskResult);
+const decodeRequestSecretInput = Schema.decodeUnknownSync(OrchestratorMcpRequestSecretInput);
+const decodeSaveScheduledTaskInput = Schema.decodeUnknownSync(
+  OrchestratorMcpSaveScheduledTaskInput,
+);
 const decodeThreadInterruptInput = Schema.decodeUnknownSync(OrchestratorMcpThreadInterruptInput);
 const decodeThreadListInput = Schema.decodeUnknownSync(OrchestratorMcpThreadListInput);
 const decodeThreadReadInput = Schema.decodeUnknownSync(OrchestratorMcpThreadReadInput);
@@ -71,12 +77,31 @@ describe("orchestrator MCP contracts", () => {
       latestTerminalSummary: "Workspace inspected.",
       latestTerminalResultContextTransferId: "context-transfer-result-1",
       hasPendingQuestion: false,
+      pendingApproval: null,
       waitTimedOut: false,
     });
 
     expect(request.target?.providerInstanceId).toBe("claudeAgent");
     expect(result.status).toBe("completed");
     expect(result.summary).toBe("Workspace inspected.");
+    expect(result.pendingApproval).toBeNull();
+    const pendingApproval = {
+      requestId: "request-approval-1",
+      kind: "command",
+      runId: "run-child-1",
+    };
+    expect(
+      decodeDelegateTaskResult({
+        ...result,
+        pendingApproval: { ...pendingApproval, input: { command: "private command" } },
+      }).pendingApproval,
+    ).toEqual(pendingApproval);
+    expect(() =>
+      decodeDelegateTaskResult({
+        ...result,
+        pendingApproval: { ...pendingApproval, kind: "user_input" },
+      }),
+    ).toThrow();
   });
 
   it("decodes target model options in canonical and shorthand shapes", () => {
@@ -182,6 +207,71 @@ describe("orchestrator MCP contracts", () => {
         reason: "Loop converged.",
       }).reason,
     ).toBe("Loop converged.");
+  });
+
+  it("clamps limits above their maximum instead of failing", () => {
+    expect(decodeThreadListInput({ limit: 500 }).limit).toBe(100);
+    const read = decodeThreadReadInput({
+      threadId: "thread-loop-1",
+      limit: 1_000,
+      runLimit: 99,
+      maxCharsPerItem: 1_000_000,
+    });
+    expect([read.limit, read.runLimit, read.maxCharsPerItem]).toEqual([100, 50, 20_000]);
+    expect(() => decodeThreadListInput({ limit: 0 })).toThrow();
+  });
+
+  it("decodes newest-first paging, fresh sends, and cross-project lists", () => {
+    expect(
+      decodeThreadReadInput({ threadId: "thread-loop-1", beforePosition: 40 }).beforePosition,
+    ).toBe(40);
+    expect(
+      decodeThreadSendInput({
+        threadId: "thread-loop-1",
+        message: "Start over.",
+        freshContext: true,
+      }).freshContext,
+    ).toBe(true);
+    expect(decodeThreadListInput({ allProjects: true }).allProjects).toBe(true);
+  });
+
+  it("saves a scheduled task by create or partial update", () => {
+    expect(
+      decodeSaveScheduledTaskInput({ scheduledTaskId: "scheduled-task-1", enabled: false }),
+    ).toEqual({ scheduledTaskId: "scheduled-task-1", enabled: false });
+    const created = decodeSaveScheduledTaskInput({
+      prompt: "Check the build.",
+      schedule: { type: "interval", everyMs: 3_600_000 },
+      projectId: "project-2",
+      freshSession: true,
+    });
+    expect(created.projectId).toBe("project-2");
+    expect(created.freshSession).toBe(true);
+  });
+
+  it("accepts secret delivery, sign-in links, and pasted values", () => {
+    const request = decodeRequestSecretInput({
+      label: "Pairing code",
+      reason: "Pair the device.",
+      url: "https://example.com/pair",
+      delivery: "file",
+    });
+    expect(request.delivery).toBe("file");
+    expect(request.url).toBe("https://example.com/pair");
+    expect(
+      decodeRequestSecretInput({
+        label: "API key",
+        reason: "For the script.",
+        value: "sk-test-1234",
+      }).value,
+    ).toBe("sk-test-1234");
+    expect(() =>
+      decodeRequestSecretInput({
+        label: "API key",
+        reason: "Sign in.",
+        url: "javascript:alert(1)",
+      }),
+    ).toThrow();
   });
 });
 

@@ -117,6 +117,8 @@ it.effect("retrieves whole omitted handoff items through paged MCP history", () 
       Layer.mock(ThreadManagementService.ThreadManagementService)({
         getThreadRecords: (id, fields, filter) =>
           store.getThreadRecords(id, fields, filter).pipe(Effect.orDie),
+        getProjectThreadRecords: ({ threadId }, fields, filter) =>
+          store.getThreadRecords(threadId, fields, filter).pipe(Effect.orDie),
         getThreadShell: (id) =>
           store
             .getThreadProjection(id)

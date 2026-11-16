@@ -219,6 +219,10 @@
       "types": "./src/composerContextReferences.ts",
       "import": "./src/composerContextReferences.ts"
     },
+    "./threadLinks": {
+      "types": "./src/threadLinks.ts",
+      "import": "./src/threadLinks.ts"
+    },
     "./array": {
       "types": "./src/array.ts",
       "default": "./src/array.ts"

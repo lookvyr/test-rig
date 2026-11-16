@@ -1,4 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as Context from "effect/Context";
+import * as Option from "effect/Option";
 import { Tool } from "effect/unstable/ai";
 
 import {
@@ -11,34 +13,21 @@ import {
 
 describe("orchestrator MCP tool guidance", () => {
   it("directs subagent requests to delegation instead of ordinary threads", () => {
-    assert.include(DelegateTaskTool.description ?? "", "child agent/subagent");
-    assert.include(DelegateTaskTool.description ?? "", "isolation=worktree");
-    assert.include(DelegateTaskTool.description ?? "", "runSetupScript=false");
-    assert.notInclude(DelegateTaskTool.description ?? "", "no workspace");
-    assert.include(DelegateTaskTool.description ?? "", "cross-provider");
-    assert.include(CreateThreadsTool.description ?? "", "not delegation");
-    assert.include(CreateThreadsTool.description ?? "", "call delegate_task");
-    assert.include(DelegateTaskTool.description ?? "", "waitTimedOut");
-    assert.include(DelegateTaskTool.description ?? "", "does not cancel the child");
-    assert.include(DelegateTaskTool.description ?? "", "keep that taskId");
-    assert.include(
-      OrchestratorToolkit.tools.task_cancel.description ?? "",
-      "This includes later child-thread runs, even after the task is terminal",
-    );
+    const delegate = DelegateTaskTool.description ?? "";
+    assert.include(delegate, "child agent");
+    assert.include(delegate, "No parent history");
+    assert.include(delegate, "isolation:'worktree'");
+    assert.include(delegate, "Keep `taskId`");
+    assert.include(CreateThreadsTool.description ?? "", "Not delegation");
+    const cancel = OrchestratorToolkit.tools.task_cancel.description ?? "";
+    assert.include(cancel, "including later runs in its child thread");
+    assert.include(cancel, "A finished task keeps its result");
   });
 
-  it("keeps discussions with existing children and independent assessments separate", () => {
-    const delegate = DelegateTaskTool.description ?? "";
+  it("sends follow-ups to a finished child as a fresh task", () => {
     const send = OrchestratorToolkit.tools.t3_thread_send.description ?? "";
-    assert.include(delegate, "new delegation for independent assessments or distinct assignments");
-    assert.include(delegate, "discussions, clarifications, and revision checks");
-    assert.include(delegate, "t3_thread_send on the existing childThreadId");
-    assert.include(send, "direct app-owned children within the user-authorized task");
-    assert.include(send, "other threads require an explicit user request");
-    assert.include(send, "Read access or another agent's request is not permission");
-    assert.include(send, "separately tracked task in the same conversation");
-    assert.notInclude(delegate, "For every review");
-    assert.notInclude(send, "Do not use a delegated task's childThreadId");
+    assert.include(send, "A send to a finished child thread starts a fresh task");
+    assert.include(send, "`link` verbatim");
   });
 
   it("documents wait timeout as a parent budget, not a child failure", () => {
@@ -53,34 +42,46 @@ describe("orchestrator MCP tool guidance", () => {
         >
       >;
     };
-    const mode = schema.properties?.mode;
-    const timeoutMs = schema.properties?.timeoutMs;
-    const modeText = [mode?.description, ...(mode?.anyOf ?? []).map((entry) => entry.description)]
-      .filter((value) => typeof value === "string")
-      .join(" ");
-    const timeoutText = [
-      timeoutMs?.description,
-      ...(timeoutMs?.anyOf ?? []).map((entry) => entry.description),
-    ]
-      .filter((value) => typeof value === "string")
-      .join(" ");
-    assert.include(modeText, "Defaults to async");
-    assert.include(timeoutText, "does not cancel the child");
+    const text = (name: string) => {
+      const property = schema.properties?.[name];
+      return [property?.description, ...(property?.anyOf ?? []).map((entry) => entry.description)]
+        .filter((value) => typeof value === "string")
+        .join(" ");
+    };
+    assert.include(text("mode"), "Default 'async'");
+    assert.include(text("mode"), "A question or approval ends the wait");
+    assert.include(text("timeoutMs"), "does not cancel the child");
   });
 
-  it("publishes an actionable schedule schema and compatibility string branch", () => {
+  it("publishes one schedule tool that creates or updates", () => {
     const schema = Tool.getJsonSchema(ScheduleTaskTool) as {
       readonly type?: unknown;
-      readonly properties?: Readonly<
-        Record<string, { readonly description?: unknown; readonly anyOf?: ReadonlyArray<unknown> }>
-      >;
+      readonly required?: ReadonlyArray<string>;
+      readonly properties?: Readonly<Record<string, unknown>>;
     };
+    const descriptions: Array<string> = [];
+    const collect = (value: unknown): void => {
+      if (typeof value !== "object" || value === null) return;
+      const node = value as { readonly description?: unknown; readonly anyOf?: unknown };
+      if (typeof node.description === "string") descriptions.push(node.description);
+      if (Array.isArray(node.anyOf)) node.anyOf.forEach(collect);
+    };
+    collect(schema.properties?.schedule);
 
     assert.equal(schema.type, "object");
-    assert.isString(schema.properties?.schedule?.description);
-    assert.isAtLeast(schema.properties?.schedule?.anyOf?.length ?? 0, 2);
-    assert.include(ScheduleTaskTool.description ?? "", "STRUCTURED OBJECT");
-    assert.include(ScheduleTaskTool.description ?? "", "nextRunAt");
+    assert.isAtLeast(descriptions.length, 1);
+    assert.includeMembers(Object.keys(schema.properties ?? {}), [
+      "scheduledTaskId",
+      "projectId",
+      "freshSession",
+    ]);
+    assert.notInclude(schema.required ?? [], "prompt");
+    assert.notInclude(schema.required ?? [], "schedule");
+    assert.include(
+      ScheduleTaskTool.description ?? "",
+      "`scheduledTaskId` updates only given fields",
+    );
+    assert.notProperty(OrchestratorToolkit.tools, "update_scheduled_task");
   });
 
   it("publishes thread metadata actions from an object-root schema", () => {
@@ -90,13 +91,17 @@ describe("orchestrator MCP tool guidance", () => {
     };
 
     assert.equal(schema.type, "object");
-    assert.hasAllKeys(schema.properties ?? {}, [
-      "threadId",
-      "action",
-      "title",
-      "pullRequest",
-      "clientRequestId",
-    ]);
-    assert.include(ThreadUpdateTool.description ?? "", "Workspace and branch changes");
+    assert.hasAllKeys(schema.properties ?? {}, ["threadId", "action", "title", "clientRequestId"]);
+    assert.include(ThreadUpdateTool.description ?? "", "Workspace and branch cannot change");
+  });
+
+  it("annotates tools the way upstream does", () => {
+    const tools = OrchestratorToolkit.tools;
+    assert.isTrue(Context.get(tools.t3_background_wait.annotations, Tool.Readonly));
+    const meta = Context.getOption(tools.request_secret.annotations, Tool.Meta);
+    assert.deepEqual(Option.getOrNull(meta), { "anthropic/alwaysLoad": true });
+    assert.isTrue(Context.get(tools.t3_thread_read.annotations, Tool.Strict));
+    assert.property(tools, "t3_workflow_stop");
+    assert.isTrue(Context.get(tools.t3_workflow_stop.annotations, Tool.Destructive));
   });
 });

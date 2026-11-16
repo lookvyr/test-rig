@@ -18,6 +18,11 @@ vi.mock("../hooks/useSettings", () => ({
   useClientSettings: (select: (settings: { redesignEnabled: boolean }) => unknown) =>
     select({ redesignEnabled: false }),
 }));
+vi.mock("./ThreadContextChip", () => ({
+  ThreadContextChip: (props: {
+    record: { environmentId: string; threadId: string; title: string };
+  }) => <span data-thread-chip={JSON.stringify(props.record)} />,
+}));
 vi.mock("./ui/collapsible", () => ({
   Collapsible: (props: { children?: ReactNode }) => <div {...props} />,
   CollapsibleTrigger: (props: { children?: ReactNode }) => <button {...props} />,
@@ -30,6 +35,23 @@ afterEach(() => {
   act(() => renderer?.unmount());
   renderer = undefined;
   vi.unstubAllGlobals();
+});
+
+describe("thread links", () => {
+  it("renders an agent's thread link as a thread chip, through the sanitizer", () => {
+    const text = "[Fix login](t3-thread://v2/env-1/thread-1) and <t3-thread://v2/env-1/t2>";
+    act(() => {
+      renderer = create(<ChatMarkdown cwd={undefined} text={text} />);
+    });
+    const chips = renderer!.root.findAll(
+      (node) => node.type === "span" && node.props["data-thread-chip"] !== undefined,
+    );
+    expect(chips.map((chip) => JSON.parse(chip.props["data-thread-chip"]))).toEqual([
+      { environmentId: "env-1", threadId: "thread-1", title: "Fix login" },
+      // An autolink shows the thread id until the chip loads the current title.
+      { environmentId: "env-1", threadId: "t2", title: "t2" },
+    ]);
+  });
 });
 
 describe("streamed markdown state", () => {

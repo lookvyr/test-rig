@@ -1,17 +1,21 @@
 import {
   SECRET_REQUEST_DEFAULT_PLACEHOLDER,
-  SECRET_REQUEST_PRIVACY_NOTE,
   secretRequestAnswerInput,
   secretRequestDisplay,
   secretRequestFailureMessage,
+  secretRequestPrivacyNote,
   type SecretRequestItem,
 } from "@t3tools/client-runtime/secret-request";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
-import { CheckIcon, LockIcon, MinusIcon, ShieldCheckIcon } from "lucide-react";
+import {
+  secretRequestPageUrl,
+  type EnvironmentId,
+  type OrchestrationV2ProjectedTurnItem,
+} from "@t3tools/contracts";
+import { CheckIcon, ExternalLinkIcon, LockIcon, MinusIcon, ShieldCheckIcon } from "lucide-react";
 import { useId, useRef, useState, type FormEvent } from "react";
 
 import { serverEnvironment } from "../../state/server";
@@ -73,6 +77,8 @@ function PendingSecretRequestForm(props: {
   const [error, setError] = useState<string | null>(null);
   // Enter then a click can both run before a re-render; this guard is synchronous.
   const inFlight = useRef(false);
+  // Only http(s) pages with a host: the agent chose this link.
+  const page = item.url === undefined ? null : secretRequestPageUrl(item.url);
 
   const send = async (
     reply: { readonly type: "save"; readonly secret: string } | { readonly type: "decline" },
@@ -123,6 +129,19 @@ function PendingSecretRequestForm(props: {
         </label>
         {item.reason.trim() ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
       </div>
+      {page !== null ? (
+        <div className="flex min-w-0 flex-col items-start gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            render={<a href={page.href} target="_blank" rel="noopener noreferrer" />}
+          >
+            Open {page.host}
+            <ExternalLinkIcon aria-hidden />
+          </Button>
+          <p className="font-mono text-xs wrap-anywhere text-muted-foreground">{page.href}</p>
+        </div>
+      ) : null}
       <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0 flex-1">
           <Input
@@ -159,7 +178,7 @@ function PendingSecretRequestForm(props: {
           className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
         >
           <ShieldCheckIcon className="size-3.5 shrink-0" aria-hidden />
-          {SECRET_REQUEST_PRIVACY_NOTE}
+          {secretRequestPrivacyNote(item)}
         </p>
         <Button
           type="button"

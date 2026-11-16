@@ -331,6 +331,8 @@ export type ProjectionRecords<K extends ProjectionRecordField> = Pick<
 
 export interface ProjectionTimelinePageOptions {
   readonly afterPosition?: number;
+  /** Page backward: the `limit` matches just before this position, oldest first. */
+  readonly beforePosition?: number;
   readonly itemId?: TurnItemId;
   readonly view?: "messages" | "activity";
   readonly limit: number;
@@ -338,7 +340,51 @@ export interface ProjectionTimelinePageOptions {
 export interface ProjectionTimelinePage {
   readonly items: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;
   readonly totalItems: number;
+  /** Matches exist after the page. */
   readonly hasMore: boolean;
+  /** Matches exist before the page. */
+  readonly hasEarlier: boolean;
+}
+
+const TIMELINE_MESSAGE_TYPES: ReadonlySet<string> = new Set([
+  "user_message",
+  "assistant_message",
+  "proposed_plan",
+]);
+
+/** Selects one timeline page from rows in position order. */
+export function selectTimelinePage<
+  Row extends {
+    readonly position: number;
+    readonly sourceItemId: TurnItemId;
+    readonly item: { readonly type: string };
+  },
+>(rows: ReadonlyArray<Row>, options: ProjectionTimelinePageOptions) {
+  const inView = rows.filter((row) =>
+    options.itemId === undefined
+      ? options.view === "activity" || TIMELINE_MESSAGE_TYPES.has(row.item.type)
+      : row.sourceItemId === options.itemId,
+  );
+  const before = options.beforePosition ?? Number.POSITIVE_INFINITY;
+  const matching =
+    options.itemId === undefined
+      ? inView.filter(
+          (row) => row.position > (options.afterPosition ?? -1) && row.position < before,
+        )
+      : inView;
+  const page =
+    options.beforePosition === undefined
+      ? matching.slice(0, options.limit)
+      : matching.slice(Math.max(0, matching.length - options.limit));
+  const pageStart = page[0]?.position ?? (options.afterPosition ?? -1) + 1;
+  return {
+    page,
+    hasMore:
+      options.beforePosition === undefined
+        ? matching.length > page.length
+        : (inView.at(-1)?.position ?? -1) >= before,
+    hasEarlier: (inView[0]?.position ?? Number.POSITIVE_INFINITY) < pageStart,
+  };
 }
 
 export interface ActiveShellIndexEntry extends Pick<
@@ -5161,18 +5207,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         .withTransaction(
           Effect.gen(function* () {
             const index = yield* readTimelineIndex(threadId, new Set());
-            const matching = index.visible
-              .map((row, position) => ({ ...row, position }))
-              .filter((row) =>
-                options.itemId === undefined
-                  ? row.position > (options.afterPosition ?? -1) &&
-                    (options.view === "activity" ||
-                      ["user_message", "assistant_message", "proposed_plan"].includes(
-                        row.item.type,
-                      ))
-                  : row.sourceItemId === options.itemId,
-              );
-            const page = matching.slice(0, options.limit);
+            const { page, hasMore, hasEarlier } = selectTimelinePage(
+              index.visible.map((row, position) => ({ ...row, position })),
+              options,
+            );
             const items = yield* Effect.forEach(page, (row) =>
               Effect.gen(function* () {
                 if (row.synthetic !== undefined)
@@ -5208,7 +5246,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             return {
               items,
               totalItems: index.visible.length,
-              hasMore: matching.length > page.length,
+              hasMore,
+              hasEarlier,
             };
           }),
         )
@@ -7039,17 +7078,15 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
       getTimelinePage: (threadId, options) =>
         service.getThreadProjection(threadId).pipe(
           Effect.map((projection) => {
-            const matching = projection.visibleTurnItems.filter((row) =>
-              options.itemId === undefined
-                ? row.position > (options.afterPosition ?? -1) &&
-                  (options.view === "activity" ||
-                    ["user_message", "assistant_message", "proposed_plan"].includes(row.item.type))
-                : row.sourceItemId === options.itemId,
+            const { page, hasMore, hasEarlier } = selectTimelinePage(
+              projection.visibleTurnItems,
+              options,
             );
             return {
-              items: matching.slice(0, options.limit),
+              items: page,
               totalItems: projection.visibleTurnItems.length,
-              hasMore: matching.length > options.limit,
+              hasMore,
+              hasEarlier,
             };
           }),
         ),

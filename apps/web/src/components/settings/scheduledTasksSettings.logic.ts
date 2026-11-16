@@ -46,6 +46,8 @@ export interface DraftState {
   readonly weekdays: ReadonlySet<number>;
   readonly projectId: string;
   readonly threadId: string;
+  /** Bound tasks only: each run starts a new provider session beside the thread's conversation. */
+  readonly freshSession: boolean;
   readonly workspaceMode: WorkspaceMode;
   readonly baseRef: string;
   readonly branch: string;
@@ -112,6 +114,7 @@ export function taskToDraft(task: ScheduledTask): DraftState {
     weekdays,
     projectId: task.projectId,
     threadId: task.threadId ?? "",
+    freshSession: task.freshSession === true,
     workspaceMode: task.workspaceStrategy.type,
     branch: task.workspaceStrategy.branch ?? "",
     baseRef: task.workspaceStrategy.type === "worktree" ? task.workspaceStrategy.baseRef : "main",

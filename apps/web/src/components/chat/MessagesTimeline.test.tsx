@@ -1514,6 +1514,51 @@ describe("MessagesTimeline", () => {
     expect(userMarkup).not.toContain("Sent by another agent");
   });
 
+  it("marks a message that started a fresh session", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const entry = buildUserTimelineEntry("Start over");
+    const projectedItem = (freshContext: boolean) =>
+      ({
+        position: 0,
+        visibility: "local",
+        sourceThreadId: "thread-1",
+        sourceItemId: "user-item-1",
+        item: {
+          id: "user-item-1",
+          threadId: "thread-1",
+          runId: "run-1",
+          nodeId: null,
+          providerThreadId: null,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 0,
+          status: "completed",
+          title: null,
+          startedAt: null,
+          completedAt: null,
+          updatedAt: {},
+          type: "user_message",
+          messageId: "message-1",
+          inputIntent: "turn_start",
+          text: "Start over",
+          attachments: [],
+          ...(freshContext ? { freshContext: true } : {}),
+        },
+      }) as never;
+    const render = (freshContext: boolean) =>
+      renderToStaticMarkup(
+        <MessagesTimeline
+          {...buildProps()}
+          timelineEntries={[{ ...entry, projectedItem: projectedItem(freshContext) }]}
+        />,
+      );
+
+    expect(render(true)).toContain("data-fresh-session-divider");
+    expect(render(true)).toContain("New session");
+    expect(render(false)).not.toContain("data-fresh-session-divider");
+  });
+
   it("attributes server-sent messages such as idle compactions to Test Rig", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const entry = buildUserTimelineEntry("/compact");

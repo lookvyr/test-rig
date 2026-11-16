@@ -3,6 +3,16 @@ import * as Schema from "effect/Schema";
 
 import { ThreadId, TurnItemId } from "./baseSchemas.ts";
 
+/** The page a secret request links to, when it is an http(s) URL with a host. */
+export function secretRequestPageUrl(value: string): URL | null {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "https:" || url.protocol === "http:") && url.host !== "" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The user's answer to an agent's request for a secret. A saved value is kept
  * by the server under a one-use SecretRef; the thread learns only the status.
@@ -37,6 +47,17 @@ const SECRET_REQUEST_FAILURE_MESSAGES = {
     "That secretRef was already used or does not exist. Ask the user again with request_secret.",
   ref_expired: "That secretRef expired. Ask the user again with request_secret.",
   consume_failed: "Could not use that secretRef. Try again.",
+  not_a_file_request: 'Only a saved request with `delivery: "file"` can be written to a file.',
+} as const;
+
+/** What an agent does after a secret request ends without a value. */
+export const SECRET_REQUEST_UNSAVED_NOTE = {
+  declined:
+    "The user declined. Don't ask for it in chat or another way; say what's blocked and go on without it.",
+  cancelled:
+    "The card closed with the run. Ask again with a new clientRequestId only if the secret is still needed.",
+  timed_out:
+    "No answer in time. Don't ask in chat; ask again with a new clientRequestId only if it is still needed.",
 } as const;
 
 export const SecretRequestFailureReason = Schema.Literals(

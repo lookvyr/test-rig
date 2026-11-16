@@ -12,11 +12,11 @@ const handlers = {
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
       return yield* service.requestSecret(scope, input);
     }),
-  orchestrator_capabilities: () =>
+  orchestrator_capabilities: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-      return yield* service.capabilities(scope);
+      return yield* service.capabilities(scope, input);
     }),
   delegate_task: (input) =>
     Effect.gen(function* () {
@@ -36,6 +36,13 @@ const handlers = {
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
       return yield* service.cancelTask(scope, input);
     }),
+  t3_workflow_stop: (input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      yield* service.stopWorkflow(scope, input);
+      return {};
+    }),
   t3_background_wait: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
@@ -46,19 +53,13 @@ const handlers = {
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-      return yield* service.scheduleTask(scope, input);
+      return yield* service.saveScheduledTask(scope, input);
     }),
-  list_scheduled_tasks: () =>
+  list_scheduled_tasks: (input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-      return yield* service.listScheduledTasks(scope);
-    }),
-  update_scheduled_task: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext.McpInvocationContext;
-      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-      return yield* service.updateScheduledTask(scope, input);
+      return yield* service.listScheduledTasks(scope, input);
     }),
   delete_scheduled_task: (input) =>
     Effect.gen(function* () {

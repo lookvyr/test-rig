@@ -726,3 +726,77 @@ it.effect("keeps a one-time run after a restart interrupts an earlier manual run
     }).pipe(Effect.provide(slowLaunchLayer), Effect.scoped);
   }).pipe(Effect.provide(SqlitePersistenceMemory)),
 );
+
+it.effect("starts each run of a fresh-session bound task in a new provider session", () =>
+  Effect.gen(function* () {
+    const now = "2026-10-06T12:00:00.000Z";
+    yield* TestClock.setTime(Date.parse(now));
+    const sends: Array<
+      Parameters<ThreadManagementService.ThreadManagementService["Service"]["sendToThread"]>[0]
+    > = [];
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const base = {
+        title: "Nightly check",
+        prompt: "Check the build.",
+        enabled: false,
+        schedule: { type: "interval" as const, everyMs: 3_600_000 },
+        projectId: "project:test" as never,
+        workspaceStrategy: { type: "root" as const },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+        runtimeMode: "full-access" as const,
+        interactionMode: "default" as const,
+      };
+      // Unbound tasks start a new thread every run, so the flag is not kept.
+      const unbound = yield* service.upsert({ ...base, freshSession: true });
+      assert.isFalse(unbound.task.freshSession ?? false);
+      const bound = yield* service.upsert({
+        ...base,
+        threadId: "thread:bound" as never,
+        freshSession: true,
+      });
+      assert.isTrue(bound.task.freshSession);
+      // An update that omits the flag keeps it.
+      const renamed = yield* service.upsert({
+        ...base,
+        id: bound.task.id,
+        title: "Renamed",
+        threadId: "thread:bound" as never,
+      });
+      assert.isTrue(renamed.task.freshSession);
+      yield* service.runNow({ id: bound.task.id });
+      assert.equal(sends.length, 1);
+      assert.isTrue(sends[0]!.freshContext);
+      const cleared = yield* service.upsert({
+        ...base,
+        id: bound.task.id,
+        threadId: "thread:bound" as never,
+        freshSession: false,
+      });
+      assert.isFalse(cleared.task.freshSession);
+      yield* TestClock.adjust("1 second");
+      yield* service.runNow({ id: bound.task.id });
+      assert.isUndefined(sends[1]!.freshContext);
+    }).pipe(
+      Effect.provide(
+        ScheduledTaskService.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+              Layer.mock(ThreadManagementService.ThreadManagementService)({
+                sendToThread: (input) =>
+                  Effect.sync(() => {
+                    sends.push(input);
+                    return {} as never;
+                  }),
+              }),
+              NodeCrypto.layer,
+              Scheduler.layer,
+            ),
+          ),
+        ),
+      ),
+      Effect.scoped,
+    );
+  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);

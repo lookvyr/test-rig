@@ -88,6 +88,7 @@ it.effect.each(["completed", "queued", "running", "waiting_for_children"] as con
         turnItems: [],
         contextTransfers: [],
         providerThreads: [],
+        providerTurns: [],
         runtimeRequests: [],
         subagents:
           state === "waiting_for_children" ? [{ runId: followupRunId, status: "running" }] : [],
@@ -227,6 +228,7 @@ it.effect.each(["original", "followup", "stale_original"] as const)(
         contextTransfers: [],
         subagents: [],
         providerThreads: [],
+        providerTurns: [],
         runtimeRequests: [
           {
             nodeId: NodeId.make("question-node"),

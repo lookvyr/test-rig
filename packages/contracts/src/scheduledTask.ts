@@ -121,6 +121,8 @@ export const ScheduledTask = Schema.Struct({
   lastRunStatus: ScheduledTaskRunStatus,
   lastRunError: Schema.NullOr(Schema.String),
   runCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** A bound task starts each run in a new provider session on its thread. Older servers omit it. */
+  freshSession: Schema.optional(Schema.Boolean),
 });
 export type ScheduledTask = typeof ScheduledTask.Type;
 
@@ -151,6 +153,8 @@ export const ScheduledTaskUpsertInput = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   createdBy: Schema.optional(OrchestrationV2Actor),
   creationSource: Schema.optional(OrchestrationV2CreationSource),
+  /** Omitted keeps the saved value; only a bound task uses it. */
+  freshSession: Schema.optional(Schema.Boolean),
 });
 export type ScheduledTaskUpsertInput = typeof ScheduledTaskUpsertInput.Type;
 

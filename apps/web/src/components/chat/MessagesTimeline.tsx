@@ -136,6 +136,7 @@ import {
   ChevronUpIcon,
   CircleAlertIcon,
   DownloadIcon,
+  EraserIcon,
   EyeIcon,
   GitForkIcon,
   GlobeIcon,
@@ -2332,8 +2333,16 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     ],
   );
 
+  // `/clear` and fresh-session schedules start a new provider session at this message.
+  const startsFreshSession =
+    row.projectedItem?.item.type === "user_message" && row.projectedItem.item.freshContext === true;
   return (
     <div className="group flex flex-col items-end gap-1">
+      {startsFreshSession ? (
+        <div className="self-stretch" data-fresh-session-divider="">
+          <TimelineSystemDivider label="New session" icon={EraserIcon} />
+        </div>
+      ) : null}
       {userMessage.isAutomation ? (
         <p
           className="me-1 text-2xs text-muted-foreground/70"

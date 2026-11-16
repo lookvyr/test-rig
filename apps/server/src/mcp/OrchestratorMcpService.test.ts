@@ -4,6 +4,7 @@ import { OrchestratorProjectionError } from "../orchestration-v2/Orchestrator.ts
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
+  ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
   EnvironmentId,
   NodeId,
   ProjectId,
@@ -99,6 +100,7 @@ describe("OrchestratorMcpService", () => {
         messages: [],
         subagents: [],
         providerThreads: [],
+        providerTurns: [],
         runtimeRequests: [],
         turnItems: [],
       } as unknown as OrchestrationV2ThreadProjection;
@@ -187,6 +189,7 @@ describe("OrchestratorMcpService", () => {
         messages: [],
         subagents: [],
         providerThreads: [],
+        providerTurns: [],
         runtimeRequests: [],
       } as unknown as OrchestrationV2ThreadProjection;
       let hasNestedWork = true;
@@ -301,6 +304,7 @@ describe("OrchestratorMcpService", () => {
         messages: [],
         subagents: [],
         providerThreads: [],
+        providerTurns: [],
         runtimeRequests: [],
       } as unknown as OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
@@ -377,6 +381,7 @@ describe("OrchestratorMcpService", () => {
         messages: [],
         subagents: [],
         providerThreads: [],
+        providerTurns: [],
         runtimeRequests: [],
       } as unknown as OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
@@ -458,6 +463,7 @@ describe("OrchestratorMcpService", () => {
         turnItems: [],
         subagents: [],
         providerThreads: [],
+        providerTurns: [],
         runtimeRequests: [],
       } as unknown as OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
@@ -536,6 +542,7 @@ describe("OrchestratorMcpService", () => {
         messages: [],
         subagents: [],
         providerThreads: [],
+        providerTurns: [],
         runtimeRequests: [],
       } as unknown as OrchestrationV2ThreadProjection;
       const dependencies = Layer.mergeAll(
@@ -690,6 +697,7 @@ describe("OrchestratorMcpService provider resolution", () => {
     messages: [],
     subagents: [],
     providerThreads: [],
+    providerTurns: [],
     runtimeRequests: [],
     turnItems: [],
   } as unknown as OrchestrationV2ThreadProjection;
@@ -1708,10 +1716,17 @@ describe("OrchestratorMcpService provider resolution", () => {
             event: { type: "runtime-request.updated", threadId: childThreadId },
           } as unknown as OrchestrationV2StoredEvent);
         }
-        if (outcome !== "live-question") yield* TestClock.adjust("500 millis");
+        // A live question or approval ends the wait at once; anything else waits out the budget.
+        const endsWait = outcome === "live-question" || outcome === "approval";
+        if (!endsWait) yield* TestClock.adjust("500 millis");
         const result = yield* Fiber.join(waiting);
-        assert.equal(result.waitTimedOut, outcome !== "live-question");
+        assert.equal(result.waitTimedOut, !endsWait);
         assert.equal(result.hasPendingQuestion, outcome === "live-question");
+        assert.equal(
+          result.pendingApproval?.kind ?? null,
+          outcome === "approval" ? "command" : null,
+        );
+        assert.equal(result.next ?? null, endsWait ? null : ORCHESTRATOR_MCP_RUNNING_TASK_NEXT);
         assert.equal(result.status, "running");
         assert.equal(result.childThreadId, childThreadId);
         const later = yield* service.taskStatus(scope, result.taskId);

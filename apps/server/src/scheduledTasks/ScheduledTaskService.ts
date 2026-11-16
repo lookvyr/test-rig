@@ -66,6 +66,7 @@ interface ScheduledTaskRow {
   readonly last_run_status: string;
   readonly last_run_error: string | null;
   readonly run_count: number;
+  readonly fresh_session: number;
 }
 
 export class ScheduledTaskService extends Context.Service<
@@ -176,6 +177,7 @@ const decodeRow = (row: ScheduledTaskRow) =>
       lastRunStatus: row.last_run_status,
       lastRunError: row.last_run_error,
       runCount: row.run_count,
+      freshSession: row.fresh_session === 1,
     });
   }).pipe(
     Effect.mapError((cause) => {
@@ -261,7 +263,8 @@ export const layer = Layer.effect(
         last_run_at,
         last_run_status,
         last_run_error,
-        run_count
+        run_count,
+        fresh_session
       FROM scheduled_tasks
       ORDER BY updated_at DESC, task_id ASC
     `;
@@ -293,7 +296,8 @@ export const layer = Layer.effect(
         last_run_at,
         last_run_status,
         last_run_error,
-        run_count
+        run_count,
+        fresh_session
       FROM scheduled_tasks
       WHERE task_id = ${id}
     `;
@@ -345,7 +349,8 @@ export const layer = Layer.effect(
           last_run_at,
           last_run_status,
           last_run_error,
-          run_count
+          run_count,
+          fresh_session
         )
         SELECT
           ${task.id},
@@ -367,7 +372,8 @@ export const layer = Layer.effect(
           ${task.lastRunAt},
           ${task.lastRunStatus},
           ${task.lastRunError},
-          ${task.runCount}
+          ${task.runCount},
+          ${task.freshSession === true ? 1 : 0}
         WHERE ${requireExisting ? 0 : 1} = 1
            OR EXISTS (SELECT 1 FROM scheduled_tasks WHERE task_id = ${task.id})
         ON CONFLICT (task_id)
@@ -384,7 +390,8 @@ export const layer = Layer.effect(
           interaction_mode = excluded.interaction_mode,
           creation_source = excluded.creation_source,
           updated_at = excluded.updated_at,
-          next_run_at = excluded.next_run_at
+          next_run_at = excluded.next_run_at,
+          fresh_session = excluded.fresh_session
         RETURNING task_id
       `.pipe(
         Effect.mapError((cause) =>
@@ -570,6 +577,7 @@ export const layer = Layer.effect(
                   modelSelection: active.modelSelection,
                   // Scheduled prompts must not interrupt tools in the bound thread.
                   mode: "queue",
+                  ...(active.freshSession === true ? { freshContext: true } : {}),
                   createdBy: active.createdBy,
                   creationSource: active.creationSource,
                 }),
@@ -811,6 +819,10 @@ export const layer = Layer.effect(
           lastRunStatus: existingTask?.lastRunStatus ?? "never",
           lastRunError: existingTask?.lastRunError ?? null,
           runCount: existingTask?.runCount ?? 0,
+          // Only a bound task has a thread to start fresh sessions on.
+          freshSession:
+            (input.threadId ?? null) !== null &&
+            (input.freshSession ?? existingTask?.freshSession ?? false),
         };
         yield* saveTask(task, input.requireExisting === true);
         yield* notifyChanged;

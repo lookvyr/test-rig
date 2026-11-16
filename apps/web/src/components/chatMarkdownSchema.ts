@@ -1,3 +1,4 @@
+import { THREAD_LINK_PROTOCOL } from "@t3tools/shared/threadLinks";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 
 export const CHAT_MARKDOWN_SANITIZE_SCHEMA: NonNullable<Parameters<typeof rehypeSanitize>[0]> = {
@@ -9,6 +10,7 @@ export const CHAT_MARKDOWN_SANITIZE_SCHEMA: NonNullable<Parameters<typeof rehype
   },
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "file"],
+    // Thread links render as chips; the URL transform checks the rest of the link's shape.
+    href: [...(defaultSchema.protocols?.href ?? []), "file", THREAD_LINK_PROTOCOL],
   },
 };

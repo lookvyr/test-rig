@@ -7,6 +7,11 @@ export type SecretRequestItem = Extract<
 
 /** Shown under the field: the one promise the card makes about the value. */
 export const SECRET_REQUEST_PRIVACY_NOTE = "Kept out of chat; shared with the page when used";
+/** A `file` request lets the agent's commands read the value, so its card must not promise more. */
+export const SECRET_REQUEST_FILE_PRIVACY_NOTE =
+  "Kept out of chat, in a private file this agent's commands can read for 24 hours";
+export const secretRequestPrivacyNote = (item: { readonly delivery?: "file" | undefined }) =>
+  item.delivery === "file" ? SECRET_REQUEST_FILE_PRIVACY_NOTE : SECRET_REQUEST_PRIVACY_NOTE;
 export const SECRET_REQUEST_DEFAULT_PLACEHOLDER = "Paste the secret";
 
 /** What a secret request card shows: the form while pending, otherwise a one-line outcome. */
