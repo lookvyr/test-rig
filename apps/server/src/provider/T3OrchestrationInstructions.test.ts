@@ -15,14 +15,14 @@ describe("T3 orchestration provider instructions", () => {
     assert.include(T3_CODE_ORCHESTRATION_INSTRUCTIONS, "cross-provider");
   });
 
-  it("continues authorized child discussions while keeping independent assessments fresh", () => {
+  it("sends later review rounds to the same child unless a fresh look is asked", () => {
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-      "new delegation for independent assessments or distinct assignments",
+      "Start a new delegation for a different assignment, or when the user asks for a fresh or independent look",
     );
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,
-      "discussions, clarifications, and revision checks with `t3_thread_send` on the existing `childThreadId`",
+      "Send later rounds of the same review, revision checks, and follow-ups to the existing child with `t3_thread_send`",
     );
     assert.include(
       T3_CODE_ORCHESTRATION_INSTRUCTIONS,

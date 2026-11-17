@@ -24,9 +24,16 @@ describe("orchestrator MCP tool guidance", () => {
     assert.include(cancel, "A finished task keeps its result");
   });
 
-  it("sends follow-ups to a finished child as a fresh task", () => {
+  it("sends follow-ups to a finished child as a new task with its history", () => {
     const send = OrchestratorToolkit.tools.t3_thread_send.description ?? "";
-    assert.include(send, "A send to a finished child thread starts a fresh task");
+    assert.include(
+      send,
+      "starts a new task in the same conversation, with its history unless `freshContext`",
+    );
+    assert.include(
+      OrchestratorToolkit.tools.delegate_task.description ?? "",
+      "Later rounds: `t3_thread_send`",
+    );
     assert.include(send, "`link` verbatim");
   });
 
