@@ -1158,6 +1158,8 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__test_rig__orchestrator_capabilities",
   "mcp__test_rig__list_scheduled_tasks",
   "mcp__test_rig__t3_thread_list",
+  "mcp__test_rig__t3_thread_read",
+  "mcp__test_rig__task_status",
   "mcp__test_rig__t3_thread_wait",
   "mcp__test_rig__t3_background_wait",
   "mcp__test_rig__t3_pending_request_list",

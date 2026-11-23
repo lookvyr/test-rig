@@ -86,7 +86,9 @@ const TaskStatusTool = Tool.make("task_status", {
   dependencies,
 })
   .annotate(Tool.Title, "Get delegated task status")
-  .annotate(Tool.Readonly, false)
+  // Reading a finished task acknowledges its completion wake, which is the caller's own
+  // bookkeeping and changes nothing else, so it counts as a read.
+  .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
@@ -219,7 +221,7 @@ const ThreadReadTool = Tool.make("t3_thread_read", {
 })
   .annotate(Tool.Title, "Read a T3 thread")
   .annotate(Tool.Strict, true)
-  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
