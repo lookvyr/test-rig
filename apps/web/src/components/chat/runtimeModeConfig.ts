@@ -28,4 +28,15 @@ export const runtimeModeConfig: Record<
   },
 };
 
-export const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[];
+/**
+ * The modes a new thread, setting or scheduled task can pick. The manual modes stay in
+ * `runtimeModeConfig` only so a thread already running in one still shows its name.
+ */
+export const runtimeModeOptions: ReadonlyArray<RuntimeMode> = ["auto", "full-access"];
+
+/** The pickable modes, plus the thread's current one when it is a retired manual mode. */
+export function runtimeModeOptionsFor(current: RuntimeMode): ReadonlyArray<RuntimeMode> {
+  return runtimeModeOptions.includes(current)
+    ? runtimeModeOptions
+    : [current, ...runtimeModeOptions];
+}

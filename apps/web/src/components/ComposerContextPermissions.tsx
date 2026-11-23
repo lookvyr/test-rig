@@ -1,7 +1,7 @@
 import type { RuntimeMode } from "@t3tools/contracts";
 import { ChevronDownIcon } from "lucide-react";
 
-import { runtimeModeConfig, runtimeModeOptions } from "./chat/runtimeModeConfig";
+import { runtimeModeConfig, runtimeModeOptionsFor } from "./chat/runtimeModeConfig";
 import { Button } from "./ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 
@@ -43,7 +43,7 @@ export function ComposerContextPermissions(props: {
             if (value !== props.runtimeMode) props.onRuntimeModeChange(value as RuntimeMode);
           }}
         >
-          {runtimeModeOptions.map((mode) => {
+          {runtimeModeOptionsFor(props.runtimeMode).map((mode) => {
             const option = runtimeModeConfig[mode];
             const OptionIcon = option.icon;
             return (

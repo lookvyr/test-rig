@@ -4,6 +4,7 @@ import {
   OrchestratorMcpFailure,
   type ThreadId,
   type OrchestrationV2ThreadShell,
+  type RuntimeMode,
 } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -30,6 +31,29 @@ export const dispatchFailure = (error: OrchestratorV2Error) =>
         message: Array.from(error.cause).slice(0, 1000).join(""),
       })
     : unavailable();
+
+/**
+ * Modes whose tool calls are not each approved by a person: full access, and auto, where
+ * the provider's classifier reviews every call. Tools that change the app itself (launching
+ * threads, editing projects, running scheduled tasks, environment preferences) need one.
+ */
+export const runsUnattended = (mode: RuntimeMode) => mode === "full-access" || mode === "auto";
+
+/** A live, unarchived caller in an unattended mode outside Plan mode. */
+export const assertUnattendedCaller = (
+  caller: OrchestrationV2ThreadShell,
+  action: string,
+): Effect.Effect<void, OrchestratorMcpFailure> =>
+  caller.archivedAt === null &&
+  runsUnattended(caller.runtimeMode) &&
+  caller.interactionMode === "default"
+    ? Effect.void
+    : Effect.fail(
+        new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: `${action} require a live auto or full-access thread outside Plan mode.`,
+        }),
+      );
 
 export const readCaller = Effect.fn("mcp.readCaller")(function* () {
   const scope = yield* McpInvocationContext.McpInvocationContext;

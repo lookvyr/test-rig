@@ -161,7 +161,7 @@ describe("orchestrator MCP contracts", () => {
         {
           prompt: "Review the API.",
           target: { driverKind: "claudeAgent" },
-          runtimeMode: "approval-required",
+          runtimeMode: "full-access",
         },
       ],
     });
@@ -285,4 +285,19 @@ it("normalizes structured and JSON-text schedules for create and update requests
       decodeUpdateScheduledTask({ scheduledTaskId: "task-1", schedule: input }).schedule,
     ).toEqual(schedule);
   }
+});
+
+describe("spawned thread runtime modes", () => {
+  it.each(["approval-required", "auto-accept-edits"])("rejects a %s child", (runtimeMode) => {
+    expect(() =>
+      decodeCreateThreadsInput({ threads: [{ title: "Child", runtimeMode }] }),
+    ).toThrow();
+  });
+
+  it.each(["inherit", "auto", "full-access"])("accepts a %s child", (runtimeMode) => {
+    expect(
+      decodeCreateThreadsInput({ threads: [{ title: "Child", runtimeMode }] }).threads[0]
+        ?.runtimeMode,
+    ).toBe(runtimeMode);
+  });
 });

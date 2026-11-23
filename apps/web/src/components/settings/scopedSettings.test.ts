@@ -646,7 +646,7 @@ describe("scoped settings mixed values", () => {
   });
 
   it("agrees while a save is in flight and follows the environment once it reports back", () => {
-    const patch = { defaultRuntimeMode: "auto" as const };
+    const patch = { defaultRuntimeMode: "full-access" as const };
     const saved = environment("Laptop", { settings: patch });
     let waiting = environment("Server");
     const save = {};
@@ -676,7 +676,7 @@ describe("scoped settings mixed values", () => {
     expect(writes.map(({ environmentId }) => environmentId)).toEqual([waiting.environmentId]);
     expect(mixed()).toBe(false);
 
-    waiting = environment("Server", { settings: { defaultRuntimeMode: "approval-required" } });
+    waiting = environment("Server", { settings: { defaultRuntimeMode: "auto" } });
     expect(mixed()).toBe(true);
 
     writes = [{ save, environmentId: waiting.environmentId, patch }];

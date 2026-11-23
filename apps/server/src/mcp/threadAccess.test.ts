@@ -11,7 +11,8 @@ import * as Layer from "effect/Layer";
 import * as DateTime from "effect/DateTime";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
-import { readMutationCaller } from "./threadAccess.ts";
+import { resolveRuntimeMode, resolveSpawnRuntimeMode } from "./OrchestratorMcpService.ts";
+import { assertUnattendedCaller, readMutationCaller } from "./threadAccess.ts";
 
 const owner = ProviderInstanceId.make("codex");
 const other = ProviderInstanceId.make("claude");
@@ -78,5 +79,55 @@ it.effect.each([
       result,
       allowed ? "allowed" : shell.deletedAt === null ? "parent_not_active" : "thread_not_found",
     );
+  }),
+);
+
+const shell = (fields: Partial<OrchestrationV2ThreadShell>) =>
+  ({
+    ...background,
+    runtimeMode: "auto",
+    interactionMode: "default",
+    ...fields,
+  }) as OrchestrationV2ThreadShell;
+
+it.effect.each([
+  ["full access", shell({ runtimeMode: "full-access" }), true],
+  ["auto", shell({ runtimeMode: "auto" }), true],
+  ["auto-accept edits", shell({ runtimeMode: "auto-accept-edits" }), false],
+  ["approval required", shell({ runtimeMode: "approval-required" }), false],
+  ["auto in Plan mode", shell({ interactionMode: "plan" }), false],
+  ["archived auto", shell({ archivedAt: DateTime.makeUnsafe(1) }), false],
+] as const)("allows app changes from unattended callers only: %s", ([, caller, allowed]) =>
+  Effect.gen(function* () {
+    const result = yield* assertUnattendedCaller(caller, "Project changes").pipe(
+      Effect.match({ onSuccess: () => "allowed", onFailure: (error) => error.code }),
+    );
+    assert.strictEqual(result, allowed ? "allowed" : "capability_denied");
+  }),
+);
+
+it.effect.each([
+  ["auto inherits auto", "auto", undefined, "auto"],
+  ["auto asks for full access", "auto", "full-access", "full-access"],
+  ["full access asks for auto", "full-access", "auto", "auto"],
+  ["supervised inherits", "approval-required", undefined, "capability_denied"],
+  ["auto-accept edits inherits", "auto-accept-edits", "inherit", "capability_denied"],
+] as const)(
+  "spawned work runs in Auto or Full access only: %s",
+  ([, parent, requested, expected]) =>
+    Effect.gen(function* () {
+      const result = yield* resolveSpawnRuntimeMode(parent, requested).pipe(
+        Effect.match({ onSuccess: (mode) => mode, onFailure: (error) => error.code }),
+      );
+      assert.strictEqual(result, expected);
+    }),
+);
+
+it.effect("auto and full-access threads may drive each other", () =>
+  Effect.gen(function* () {
+    assert.strictEqual(yield* resolveRuntimeMode("auto", "full-access"), "full-access");
+    assert.strictEqual(yield* resolveRuntimeMode("full-access", "auto"), "auto");
+    const denied = yield* resolveRuntimeMode("approval-required", "auto").pipe(Effect.flip);
+    assert.strictEqual(denied.code, "runtime_mode_escalation_denied");
   }),
 );

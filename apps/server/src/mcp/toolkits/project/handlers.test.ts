@@ -267,3 +267,94 @@ it.effect("starts a project from just a title when workspaceRoot is omitted", ()
     expect(named).toEqual(["Pinball Stats"]);
   }),
 );
+
+const launchFrom = (
+  runtimeMode: OrchestrationV2ThreadShell["runtimeMode"],
+  requested?: "auto" | "full-access",
+) =>
+  Effect.gen(function* () {
+    const sourceThreadId = ThreadId.make("auto-source-thread");
+    const projectId = ProjectId.make("project");
+    const providerInstanceId = ProviderInstanceId.make("claudeAgent");
+    const modelSelection = { instanceId: providerInstanceId, model: "claude-opus" };
+    const caller = {
+      id: sourceThreadId,
+      projectId,
+      providerInstanceId,
+      modelSelection,
+      runtimeMode,
+      interactionMode: "default",
+      activeRunId: "active-run",
+      archivedAt: null,
+      deletedAt: null,
+    } as OrchestrationV2ThreadShell;
+    const launched: Array<ThreadLaunch.ThreadLaunchInput["runtimeMode"]> = [];
+    const dependencies = Layer.mergeAll(
+      NodeCrypto.layer,
+      Layer.succeed(McpInvocationContext.McpInvocationContext, {
+        environmentId: EnvironmentId.make("environment"),
+        threadId: sourceThreadId,
+        providerSessionId: "session",
+        providerInstanceId,
+        issuedAt: 0,
+        capabilities: new Set(["orchestration" as const]),
+      }),
+      Layer.mock(ThreadManagement.ThreadManagementService)({
+        getThreadShell: () => Effect.succeed(caller),
+      }),
+      Layer.mock(ThreadLaunch.ThreadLaunchService)({
+        launch: (input) => {
+          launched.push(input.runtimeMode);
+          return Effect.succeed({
+            threadId: input.threadId,
+            projection: { thread: { id: input.threadId, projectId, modelSelection }, runs: [] },
+            resumed: false,
+          } as unknown as ThreadLaunch.ThreadLaunchResult);
+        },
+      }),
+      Layer.mock(Project.ProjectService)({}),
+      ServerSettings.layerTest(),
+      Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/projects" }),
+      NodeServices.layer,
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-auto-launch-" }).pipe(
+        Layer.provide(NodeServices.layer),
+      ),
+    );
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(ProjectHandlersLive.pipe(Layer.provide(dependencies))),
+    );
+    const result = yield* toolkit
+      .handle("t3_thread_launch", {
+        title: "Audit",
+        message: "Review the change",
+        ...(requested === undefined ? {} : { runtimeMode: requested }),
+      })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+    return { result: result.at(-1), launched };
+  });
+
+it.effect("an auto thread launches threads that inherit Auto", () =>
+  Effect.gen(function* () {
+    const { result, launched } = yield* launchFrom("auto");
+    expect(result?.isFailure).toBe(false);
+    expect(launched).toEqual(["auto"]);
+  }),
+);
+
+it.effect("an auto thread may launch a full-access thread when it asks for one", () =>
+  Effect.gen(function* () {
+    const { launched } = yield* launchFrom("auto", "full-access");
+    expect(launched).toEqual(["full-access"]);
+  }),
+);
+
+it.effect.each(["approval-required", "auto-accept-edits"] as const)(
+  "a %s thread cannot launch threads",
+  (mode) =>
+    Effect.gen(function* () {
+      const { result, launched } = yield* launchFrom(mode);
+      expect(result?.isFailure).toBe(true);
+      expect(result?.result).toMatchObject({ code: "capability_denied" });
+      expect(launched).toEqual([]);
+    }),
+);

@@ -10,7 +10,9 @@ import {
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
 
+import * as OrchestrationMcp from "../../OrchestratorMcpService.ts";
 import {
+  assertUnattendedCaller,
   dispatchFailure,
   newCommandId,
   readCaller,
@@ -80,15 +82,8 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
   run_scheduled_task_now: (input) =>
     Effect.gen(function* () {
       const { caller } = yield* readMutationCaller();
-      if (
-        caller.archivedAt !== null ||
-        caller.runtimeMode !== "full-access" ||
-        caller.interactionMode !== "default"
-      )
-        return yield* new OrchestratorMcpFailure({
-          code: "capability_denied",
-          message: "Running a scheduled task requires a live full-access/default thread.",
-        });
+      // Auto and full access are one tier, so such a caller may run any task in its project.
+      yield* assertUnattendedCaller(caller, "Scheduled task runs");
       const scheduler = yield* ScheduledTasks.ScheduledTaskService;
       const { tasks } = yield* scheduler.list().pipe(Effect.mapError(unavailable));
       if (!tasks.some((task) => task.id === input.taskId && task.projectId === caller.projectId))
@@ -117,6 +112,8 @@ export const ThreadToolkitHandlersLive = ThreadToolkit.toLayer({
   t3_thread_fork: (input) =>
     Effect.gen(function* () {
       const { threads, projection } = yield* readWritableThread();
+      // A fork keeps the thread's mode, and spawned threads never run in a manual one.
+      yield* OrchestrationMcp.resolveSpawnRuntimeMode(projection.thread.runtimeMode, undefined);
       const commandId = yield* newCommandId();
       const targetThreadId = ThreadId.make(`${commandId}:fork`);
       const result = yield* threads

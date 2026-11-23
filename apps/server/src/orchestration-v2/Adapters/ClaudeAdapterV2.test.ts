@@ -624,6 +624,36 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     });
   });
 
+  it("leaves mutating test_rig tools to the classifier in auto mode", () => {
+    const threadId = ThreadId.make("thread-claude-mcp-auto-mode");
+    withMcpSession(threadId, () => {
+      const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
+        threadId,
+        readOnlySandbox: false,
+        autoMode: true,
+      });
+
+      assert.deepEqual(overrides.allowedTools, [
+        ...ClaudeAdapterV2.CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS,
+      ]);
+      assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD));
+      assert.isFalse(overrides.allowedTools?.includes("mcp__test_rig__delegate_task"));
+      assert.deepEqual(overrides.mcpServers, T3_MCP_SERVERS);
+    });
+  });
+
+  it("runs auto-mode sessions in Claude's auto permission mode", () => {
+    const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
+      ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "auto",
+        interactionMode: "default",
+        cwd: "/workspace",
+      }),
+    );
+    assert.strictEqual(queryPolicy.permissionMode, "auto");
+    assert.isFalse(queryPolicy.installPermissionCallback);
+  });
+
   it("keys live-query reuse on the MCP-derived pre-approvals", () => {
     const threadId = ThreadId.make("thread-claude-mcp-query-key");
     withMcpSession(threadId, () => {

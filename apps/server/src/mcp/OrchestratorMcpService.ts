@@ -7,6 +7,7 @@ import * as Exit from "effect/Exit";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   CommandId,
+  isOfferedRuntimeMode,
   latestProviderTurnForAttempt,
   ORCHESTRATOR_MCP_RUNNING_TASK_NEXT,
   ProviderRequestKind,
@@ -669,10 +670,11 @@ function runtimeModeRank(mode: RuntimeMode): number {
       return 0;
     case "auto-accept-edits":
       return 1;
+    // Auto and full access are one tier: an auto thread may drive a full-access
+    // one, and the classifier reviews each tool call it makes to do so.
     case "auto":
-      return 2;
     case "full-access":
-      return 3;
+      return 2;
   }
 }
 
@@ -682,7 +684,7 @@ function interactionModeRank(mode: ProviderInteractionMode): number {
 
 export function resolveRuntimeMode(
   parentMode: RuntimeMode,
-  requested: OrchestratorMcpRuntimeMode | undefined,
+  requested: OrchestratorMcpRuntimeMode | RuntimeMode | undefined,
 ): Effect.Effect<RuntimeMode, OrchestratorMcpFailure> {
   const resolved = requested === undefined || requested === "inherit" ? parentMode : requested;
   return runtimeModeRank(resolved) > runtimeModeRank(parentMode)
@@ -693,6 +695,24 @@ export function resolveRuntimeMode(
         ),
       )
     : Effect.succeed(resolved);
+}
+
+/**
+ * The mode a new thread or scheduled task starts in. Spawned work runs in Auto or Full access
+ * only, so a thread in a manual mode cannot start any.
+ */
+export function resolveSpawnRuntimeMode(
+  parentMode: RuntimeMode,
+  requested: OrchestratorMcpRuntimeMode | undefined,
+): Effect.Effect<RuntimeMode, OrchestratorMcpFailure> {
+  return isOfferedRuntimeMode(parentMode)
+    ? resolveRuntimeMode(parentMode, requested)
+    : Effect.fail(
+        failure(
+          "capability_denied",
+          `A thread in the ${parentMode} permission mode cannot start threads or scheduled tasks. Ask the user to switch it to Auto.`,
+        ),
+      );
 }
 
 export function resolveInteractionMode(
@@ -1828,6 +1848,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* requireCapability(scope);
       const parent = yield* loadProjection(scope.threadId);
+      const runtimeMode = yield* resolveSpawnRuntimeMode(parent.thread.runtimeMode, undefined);
       const projectId = input.projectId ?? parent.thread.projectId;
       const ownProject = projectId === parent.thread.projectId;
       if (!ownProject) yield* requireProject(projectId);
@@ -1858,7 +1879,7 @@ const make = Effect.gen(function* () {
         threadId: bindToCurrentThread ? scope.threadId : null,
         workspaceStrategy: yield* scheduledTaskWorkspaceStrategy(bindToCurrentThread, projectId),
         modelSelection: parent.thread.modelSelection,
-        runtimeMode: parent.thread.runtimeMode,
+        runtimeMode,
         interactionMode: parent.thread.interactionMode,
         createdBy: "agent",
         creationSource: "mcp",
@@ -2267,7 +2288,10 @@ const make = Effect.gen(function* () {
           target: input.target,
           providers,
         });
-        const runtimeMode = yield* resolveRuntimeMode(parent.thread.runtimeMode, input.runtimeMode);
+        const runtimeMode = yield* resolveSpawnRuntimeMode(
+          parent.thread.runtimeMode,
+          input.runtimeMode,
+        );
         const interactionMode = yield* resolveInteractionMode(
           parent.thread.interactionMode,
           input.interactionMode,
@@ -2551,7 +2575,7 @@ const make = Effect.gen(function* () {
                 target: request.target,
                 providers,
               });
-              const runtimeMode = yield* resolveRuntimeMode(
+              const runtimeMode = yield* resolveSpawnRuntimeMode(
                 parent.thread.runtimeMode,
                 request.runtimeMode,
               );

@@ -607,3 +607,29 @@ describe("usage-limit recovery opt-in", () => {
     });
   });
 });
+
+describe("default runtime mode", () => {
+  it("starts new threads in Auto", () => {
+    expect(decodeServerSettings({}).defaultRuntimeMode).toBe("auto");
+  });
+
+  it("reads a saved manual default as Auto and keeps Full access", () => {
+    expect(
+      decodeServerSettings({ defaultRuntimeMode: "approval-required" }).defaultRuntimeMode,
+    ).toBe("auto");
+    expect(
+      decodeServerSettings({ defaultRuntimeMode: "auto-accept-edits" }).defaultRuntimeMode,
+    ).toBe("auto");
+    expect(decodeServerSettings({ defaultRuntimeMode: "full-access" }).defaultRuntimeMode).toBe(
+      "full-access",
+    );
+    expect(
+      decodeServerSettings({
+        projectSettingsOverrides: { p: { defaultRuntimeMode: "approval-required" } },
+      }).projectSettingsOverrides["p" as never]?.defaultRuntimeMode,
+    ).toBe("auto");
+    expect(decodeServerSettingsPatch({ defaultRuntimeMode: "approval-required" })).toMatchObject({
+      defaultRuntimeMode: "auto",
+    });
+  });
+});

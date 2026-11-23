@@ -4,7 +4,12 @@ import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
-import { readCaller, readMutationCaller, unavailable } from "../../threadAccess.ts";
+import {
+  assertUnattendedCaller,
+  readCaller,
+  readMutationCaller,
+  unavailable,
+} from "../../threadAccess.ts";
 import { EnvironmentToolkit } from "./tools.ts";
 
 export function preferences(settings: ServerSettings) {
@@ -69,15 +74,7 @@ export const EnvironmentHandlersLive = EnvironmentToolkit.toLayer({
         scope.threadId,
         Effect.gen(function* () {
           const { caller, settings } = yield* access(true);
-          if (
-            caller.archivedAt !== null ||
-            caller.runtimeMode !== "full-access" ||
-            caller.interactionMode !== "default"
-          )
-            return yield* new OrchestratorMcpFailure({
-              code: "capability_denied",
-              message: "Preference updates require a live full-access/default thread.",
-            });
+          yield* assertUnattendedCaller(caller, "Preference updates");
           return preferences(
             yield* settings.updateSettings(patch).pipe(Effect.mapError(unavailable)),
           );

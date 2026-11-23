@@ -1472,13 +1472,13 @@ describe("OrchestratorMcpService provider resolution", () => {
   );
   it.effect.each([
     {
-      name: "broader runtime permissions",
+      name: "a manual-mode parent",
       parentRuntime: "approval-required",
       parentInteraction: "default",
-      requestedRuntime: "full-access",
+      requestedRuntime: "inherit",
       requestedInteraction: "inherit",
       enabled: true,
-      code: "runtime_mode_escalation_denied",
+      code: "capability_denied",
     },
     {
       name: "leaving the parent's plan mode",

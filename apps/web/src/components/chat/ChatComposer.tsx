@@ -290,7 +290,7 @@ import {
   PencilRulerIcon,
   XIcon,
 } from "lucide-react";
-import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
+import { runtimeModeConfig, runtimeModeOptionsFor } from "./runtimeModeConfig";
 import { proposedPlanTitle } from "../../proposedPlan";
 import { getProviderInteractionModeToggle } from "../../providerModels";
 import {
@@ -435,7 +435,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
               </span>
             </TooltipTrigger>
             <SelectPopup alignItemWithTrigger={false}>
-              {runtimeModeOptions.map((mode) => {
+              {runtimeModeOptionsFor(props.runtimeMode).map((mode) => {
                 const option = runtimeModeConfig[mode];
                 const OptionIcon = option.icon;
                 return (

@@ -14,7 +14,14 @@ import * as Project from "../../../project/ProjectService.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as Settings from "../../../serverSettings.ts";
-import { newCommandId, readCaller, readMutationCaller, unavailable } from "../../threadAccess.ts";
+import * as OrchestrationMcp from "../../OrchestratorMcpService.ts";
+import {
+  assertUnattendedCaller,
+  newCommandId,
+  readCaller,
+  readMutationCaller,
+  unavailable,
+} from "../../threadAccess.ts";
 import { ProjectToolkit } from "./tools.ts";
 import { assertPendingUploadOwnership } from "../attachment/handlers.ts";
 
@@ -35,15 +42,7 @@ const access = Effect.gen(function* () {
 });
 const mutation = Effect.gen(function* () {
   const { caller } = yield* readMutationCaller();
-  if (
-    caller.archivedAt !== null ||
-    caller.runtimeMode !== "full-access" ||
-    caller.interactionMode !== "default"
-  )
-    return yield* new OrchestratorMcpFailure({
-      code: "capability_denied",
-      message: "Project changes require a live full-access/default calling thread.",
-    });
+  yield* assertUnattendedCaller(caller, "Project changes");
   return yield* Project.ProjectService;
 });
 /** Saves an agent's action list as the project's settings override, where the app reads it. */
@@ -73,11 +72,15 @@ export const ProjectHandlersLive = ProjectToolkit.toLayer({
   t3_thread_launch: (input) =>
     Effect.gen(function* () {
       const { caller, scope } = yield* readMutationCaller();
-      if (caller.runtimeMode !== "full-access" || caller.interactionMode !== "default")
-        return yield* new OrchestratorMcpFailure({
-          code: "capability_denied",
-          message: "Project launches require a full-access/default calling thread.",
-        });
+      yield* assertUnattendedCaller(caller, "Project launches");
+      const runtimeMode = yield* OrchestrationMcp.resolveSpawnRuntimeMode(
+        caller.runtimeMode,
+        input.runtimeMode,
+      );
+      const interactionMode = yield* OrchestrationMcp.resolveInteractionMode(
+        caller.interactionMode,
+        input.interactionMode,
+      );
       const commandId = yield* newCommandId();
       const threadId = ThreadId.make(commandId);
       const messageId = MessageId.make(commandId);
@@ -116,8 +119,8 @@ export const ProjectHandlersLive = ProjectToolkit.toLayer({
         projectId,
         title: input.title,
         modelSelection: input.modelSelection ?? caller.modelSelection,
-        runtimeMode: input.runtimeMode ?? caller.runtimeMode,
-        interactionMode: input.interactionMode ?? caller.interactionMode,
+        runtimeMode,
+        interactionMode,
         workspaceStrategy: input.workspaceStrategy ?? { type: "root" },
         ...(input.message === undefined && attachments.length === 0
           ? {}

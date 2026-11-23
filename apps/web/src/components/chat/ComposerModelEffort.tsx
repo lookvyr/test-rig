@@ -7,7 +7,7 @@ import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ComposerTraitsInput } from "./composerProviderState";
 import { EffortGlyph } from "./EffortGlyph";
-import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
+import { runtimeModeConfig, runtimeModeOptionsFor } from "./runtimeModeConfig";
 import {
   getComposerEffortSummary,
   getReasoningDescriptor,
@@ -321,7 +321,7 @@ function PermissionsControl(props: {
     <div className="ms-auto flex items-center gap-2">
       <span className="text-muted-foreground text-xs">{current.label}</span>
       <div role="radiogroup" aria-label="Permissions" className="flex rounded-lg bg-input/40 p-0.5">
-        {runtimeModeOptions.map((mode) => {
+        {runtimeModeOptionsFor(props.runtimeMode).map((mode) => {
           const option = runtimeModeConfig[mode];
           const OptionIcon = option.icon;
           return (

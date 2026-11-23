@@ -7,7 +7,7 @@ import {
   RunId,
   OrchestrationV2RunStatus,
   OrchestrationV2ThreadLaunchWorkspaceStrategy,
-  RuntimeMode,
+  OfferedRuntimeMode,
   ProviderInteractionMode,
   Project,
   ProjectCreatePayload,
@@ -100,7 +100,7 @@ const ProjectCloneTool = Tool.make("t3_project_clone", {
 const ThreadLaunchTool = Tool.make("t3_thread_launch", {
   ...shared,
   description:
-    'Create an ordinary TOP-LEVEL thread with an explicit workspace binding before its agent starts. Use this when the user requests independent work, a new thread, or a PR stack in its own worktree; use delegate_task for child subagents. Set workspaceStrategy to {type:"worktree",baseRef:"parent-branch",branch:"new-branch",startFromOrigin:false} for a new worktree based on local commits, or {type:"existing_worktree",worktreePath:"/absolute/path",branch:"existing-branch"} to use an existing checkout. For upstream commits, set startFromOrigin:true. Omitted workspaceStrategy means the project root, NOT the caller\'s worktree. Omit projectId/modelSelection/modes to inherit those settings. Set scratch:true instead of projectId for a thread without a project: it runs in a fresh folder of its own, outside any repository. Put the task in message. Do not ask the agent to create its own worktree via shell: that does not update the thread binding. Each call creates a new launch with no retry key; retain threadId and use t3_thread_read/t3_thread_wait to follow preparation. After errors or lost responses, inspect t3_thread_list before retrying. Attachments must be pending uploads. Requires a full-access/default caller.',
+    'Create an ordinary TOP-LEVEL thread with an explicit workspace binding before its agent starts. Use this when the user requests independent work, a new thread, or a PR stack in its own worktree; use delegate_task for child subagents. Set workspaceStrategy to {type:"worktree",baseRef:"parent-branch",branch:"new-branch",startFromOrigin:false} for a new worktree based on local commits, or {type:"existing_worktree",worktreePath:"/absolute/path",branch:"existing-branch"} to use an existing checkout. For upstream commits, set startFromOrigin:true. Omitted workspaceStrategy means the project root, NOT the caller\'s worktree. Omit projectId/modelSelection/modes to inherit those settings. Set scratch:true instead of projectId for a thread without a project: it runs in a fresh folder of its own, outside any repository. Put the task in message. Do not ask the agent to create its own worktree via shell: that does not update the thread binding. Each call creates a new launch with no retry key; retain threadId and use t3_thread_read/t3_thread_wait to follow preparation. After errors or lost responses, inspect t3_thread_list before retrying. Attachments must be pending uploads. Requires an auto or full-access caller outside Plan mode. Omit runtimeMode to inherit yours; set full-access only when the user asks.',
   parameters: Schema.Struct({
     projectId: Schema.optional(ProjectId),
     scratch: Schema.optional(
@@ -111,7 +111,7 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     ),
     title: TrimmedNonEmptyString,
     modelSelection: Schema.optional(ModelSelection),
-    runtimeMode: Schema.optional(RuntimeMode),
+    runtimeMode: Schema.optional(OfferedRuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),
     workspaceStrategy: Schema.optional(
       OrchestrationV2ThreadLaunchWorkspaceStrategy.annotate({

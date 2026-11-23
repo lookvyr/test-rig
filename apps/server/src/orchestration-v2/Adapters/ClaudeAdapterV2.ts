@@ -1187,7 +1187,10 @@ export const CLAUDE_T3_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 // pre-approves its tools (headless modes like `dontAsk` deny anything that is
 // not pre-approved), but read-only sandboxes pre-approve only the annotated
 // read-only orchestrator tools so a read-only session cannot silently spawn
-// threads or scheduled tasks.
+// threads or scheduled tasks. Auto mode pre-approves the same read-only set:
+// an allow rule skips Claude's auto-mode classifier, so every other test_rig
+// tool (delegation, launches, sends, schedules, browser actions, secrets) is
+// reviewed by the classifier like any other tool call.
 // The SDK serializes mcpServers into --mcp-config. Keep the credential in the
 // child environment and let the Claude CLI expand the header reference.
 const CLAUDE_MCP_AUTHORIZATION_ENV = "TEST_RIG_MCP_AUTHORIZATION";
@@ -1195,6 +1198,8 @@ const CLAUDE_MCP_AUTHORIZATION_ENV = "TEST_RIG_MCP_AUTHORIZATION";
 export function claudeMcpQueryOverrides(input: {
   readonly threadId: ThreadId;
   readonly readOnlySandbox: boolean;
+  /** The session runs in Claude's auto permission mode. */
+  readonly autoMode?: boolean;
   readonly allowedTools?: ReadonlyArray<string>;
 }): {
   readonly allowedTools?: ReadonlyArray<string>;
@@ -1206,9 +1211,10 @@ export function claudeMcpQueryOverrides(input: {
     return input.allowedTools === undefined ? {} : { allowedTools: input.allowedTools };
   }
   const appConfig = claudeAppMcpConfig(appMcpProviderServers(session));
-  const mcpAllowedTools = input.readOnlySandbox
-    ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
-    : [CLAUDE_T3_MCP_TOOL_WILDCARD];
+  const mcpAllowedTools =
+    input.readOnlySandbox || input.autoMode === true
+      ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
+      : [CLAUDE_T3_MCP_TOOL_WILDCARD];
   return {
     allowedTools: Array.from(new Set([...(input.allowedTools ?? []), ...mcpAllowedTools])),
     mcpServers: {
@@ -8855,6 +8861,7 @@ export function makeClaudeAdapterV2(
             threadId: turnInput.threadId,
             readOnlySandbox:
               sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
+            autoMode: queryPolicy.permissionMode === "auto",
             ...(queryPolicy.allowedTools === undefined
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),

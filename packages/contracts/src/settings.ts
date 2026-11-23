@@ -28,7 +28,7 @@ import {
   ProviderOptionSelections,
 } from "./model.ts";
 import { ModelSelection } from "./modelSelection.ts";
-import { RuntimeMode, DEFAULT_RUNTIME_MODE } from "./providerPolicy.ts";
+import { RuntimeMode, DEFAULT_RUNTIME_MODE, DefaultRuntimeModeSetting } from "./providerPolicy.ts";
 import { WorktreeSubmodules } from "./environment.ts";
 import { ProjectScript } from "./project.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
@@ -843,7 +843,7 @@ export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTIN
 export const ProjectSettingsOverrides = Schema.Struct({
   worktreeCleanup: Schema.optionalKey(WorktreeCleanup),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
-  defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
+  defaultRuntimeMode: Schema.optionalKey(DefaultRuntimeModeSetting),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
   worktreeSubmodules: ForwardCompatibleOptional(WorktreeSubmodules),
@@ -972,7 +972,7 @@ export const ServerSettings = Schema.Struct({
   defaultModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
-  defaultRuntimeMode: RuntimeMode.pipe(
+  defaultRuntimeMode: DefaultRuntimeModeSetting.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
   ),
   projectSettingsOverrides: Schema.Record(ProjectId, ProjectSettingsOverrides).pipe(
@@ -1205,7 +1205,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(ProjectId, Schema.NullOr(Schema.Boolean)),
   ),
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
-  defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
+  defaultRuntimeMode: Schema.optionalKey(DefaultRuntimeModeSetting),
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
   ),

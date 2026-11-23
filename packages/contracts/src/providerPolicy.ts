@@ -4,6 +4,7 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
 } from "./chatAttachment.ts";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -29,7 +30,32 @@ export const RuntimeMode = Schema.Literals([
   "full-access",
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
-export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
+/** New threads, settings and scheduled tasks start in Auto. */
+export const DEFAULT_RUNTIME_MODE: RuntimeMode = "auto";
+
+/**
+ * The modes new work may start in. The manual modes ("approval-required",
+ * "auto-accept-edits") remain valid for threads already running in them.
+ */
+export const OFFERED_RUNTIME_MODES = [
+  "auto",
+  "full-access",
+] as const satisfies ReadonlyArray<RuntimeMode>;
+export const OfferedRuntimeMode = Schema.Literals(OFFERED_RUNTIME_MODES);
+export type OfferedRuntimeMode = typeof OfferedRuntimeMode.Type;
+export const isOfferedRuntimeMode = (mode: RuntimeMode): mode is OfferedRuntimeMode =>
+  mode === "auto" || mode === "full-access";
+
+/** A runtime-mode default: a saved manual mode is read as Auto. */
+export const DefaultRuntimeModeSetting = RuntimeMode.pipe(
+  Schema.decodeTo(
+    RuntimeMode,
+    SchemaTransformation.transform<RuntimeMode, RuntimeMode>({
+      decode: (mode) => (isOfferedRuntimeMode(mode) ? mode : "auto"),
+      encode: (mode) => mode,
+    }),
+  ),
+);
 
 export const ProviderInteractionMode = Schema.Literals(["default", "plan"]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;

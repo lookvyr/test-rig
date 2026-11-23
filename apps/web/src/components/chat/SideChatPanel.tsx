@@ -61,7 +61,7 @@ import { type ElementContextDraft } from "../../lib/elementContext";
 import { newMessageId } from "../../lib/utils";
 import { resolveShortcutCommand } from "../../keybindings";
 import { parseStandaloneComposerSlashCommand } from "../../composer-logic";
-import type { Thread, TurnDiffSummary } from "../../types";
+import { DEFAULT_RUNTIME_MODE, type Thread, type TurnDiffSummary } from "../../types";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { MessagesTimeline } from "./MessagesTimeline";
 import { useTimelineScroll } from "./useTimelineScroll";
@@ -147,7 +147,7 @@ export function SideChatPanel(props: {
   const interactionModeDraft = useComposerDraftStore(
     (store) => store.getComposerDraft(threadRef)?.interactionMode,
   );
-  const runtimeMode = runtimeModeDraft ?? settingsThread.runtimeMode ?? "full-access";
+  const runtimeMode = runtimeModeDraft ?? settingsThread.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode = settings.planModeEnabled
     ? (interactionModeDraft ?? settingsThread.interactionMode ?? "default")
     : "default";

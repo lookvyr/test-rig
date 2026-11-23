@@ -19,7 +19,12 @@ import type {
   ScheduledTaskUpsertInput,
   ThreadId,
 } from "@t3tools/contracts";
-import { MIN_SCHEDULED_TASK_INTERVAL_MS, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  DEFAULT_RUNTIME_MODE,
+  MIN_SCHEDULED_TASK_INTERVAL_MS,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
+import { runtimeModeOptionsFor } from "../chat/runtimeModeConfig";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -125,7 +130,7 @@ const EMPTY_DRAFT: DraftState = {
   startFromOrigin: true,
   existingWorktreePath: "",
   modelKey: "",
-  runtimeMode: "full-access",
+  runtimeMode: DEFAULT_RUNTIME_MODE,
   interactionMode: "default",
   baseModelSelection: null,
 };
@@ -733,7 +738,7 @@ function ScheduledTaskEditorDialog({
                     baseModelSelection: null,
                     runtimeMode: runtimeModeExplicit
                       ? current.runtimeMode
-                      : (next.serverConfig?.settings.defaultRuntimeMode ?? "approval-required"),
+                      : (next.serverConfig?.settings.defaultRuntimeMode ?? DEFAULT_RUNTIME_MODE),
                     baseRef: "main",
                     branch: "",
                     startFromOrigin: true,
@@ -915,14 +920,10 @@ function ScheduledTaskEditorDialog({
                 value={runtimeMode}
                 disabled={!!draft.threadId}
                 onValueChange={(value) => {
-                  if (
-                    value === "full-access" ||
-                    value === "approval-required" ||
-                    value === "auto" ||
-                    value === "auto-accept-edits"
-                  ) {
+                  const next = runtimeModeOptionsFor(runtimeMode).find((mode) => mode === value);
+                  if (next) {
                     setRuntimeModeExplicit(true);
-                    setDraft((current) => ({ ...current, runtimeMode: value }));
+                    setDraft((current) => ({ ...current, runtimeMode: next }));
                   }
                 }}
               >
@@ -932,16 +933,17 @@ function ScheduledTaskEditorDialog({
                   </SelectValue>
                 </SelectTrigger>
                 <SelectPopup>
-                  <SelectItem value="approval-required">Supervised</SelectItem>
-                  <SelectItem value="auto-accept-edits">Auto-accept edits</SelectItem>
-                  <SelectItem value="auto">Auto</SelectItem>
-                  <SelectItem value="full-access">Full access</SelectItem>
+                  {runtimeModeOptionsFor(runtimeMode).map((mode) => (
+                    <SelectItem key={mode} value={mode}>
+                      {PERMISSION_LABELS[mode]}
+                    </SelectItem>
+                  ))}
                 </SelectPopup>
               </Select>
               <p className="text-xs text-muted-foreground">
                 {draft.threadId
                   ? "This task sends to its existing thread and uses that thread’s workspace and permissions."
-                  : "Tasks that ask for approval may wait for you before running tools."}
+                  : "Auto has a classifier review each action. Full access runs every action unchecked."}
               </p>
             </Field>
 

@@ -55,7 +55,7 @@ const EnvironmentReadTool = Tool.make("t3_environment_read", {
 const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update", {
   ...shared,
   description:
-    "Update selected environment-wide preferences through normal settings persistence and notifications. Requires a live full-access/default calling thread. Omitted fields are preserved; empty writing instructions clear the corresponding field.",
+    "Update selected environment-wide preferences through normal settings persistence and notifications. Requires a live auto or full-access calling thread outside Plan mode. Omitted fields are preserved; empty writing instructions clear the corresponding field.",
   parameters: Schema.Struct({
     defaultThreadEnvMode: ServerSettingsPatch.fields.defaultThreadEnvMode,
     newWorktreesStartFromOrigin: ServerSettingsPatch.fields.newWorktreesStartFromOrigin,

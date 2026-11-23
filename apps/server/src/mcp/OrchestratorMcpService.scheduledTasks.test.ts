@@ -83,6 +83,7 @@ const tasks = [
 
 const run = (scenario: {
   readonly liveCaller: boolean;
+  readonly callerRuntimeMode?: RuntimeMode;
   readonly body: (context: {
     readonly service: OrchestratorMcpService.OrchestratorMcpService["Service"];
     readonly upserts: Ref.Ref<ReadonlyArray<ScheduledTaskUpsertInput>>;
@@ -96,7 +97,7 @@ const run = (scenario: {
       thread: {
         id: callerThreadId,
         projectId: ownProjectId,
-        runtimeMode: "approval-required",
+        runtimeMode: scenario.callerRuntimeMode ?? "auto",
         interactionMode: "default",
         modelSelection: { instanceId: codex, model: "gpt-5" },
         archivedAt: null,
@@ -195,6 +196,7 @@ describe("OrchestratorMcpService scheduled tasks", () => {
   it.effect("refuses to change a task that runs above the caller's modes", () =>
     run({
       liveCaller: true,
+      callerRuntimeMode: "approval-required",
       body: ({ service, upserts, deletes }) =>
         Effect.gen(function* () {
           for (const scheduledTaskId of ["task:full-access", "task:bound-full-access"]) {
@@ -312,6 +314,59 @@ describe("OrchestratorMcpService scheduled tasks", () => {
             freshSession: true,
           });
           assert.equal((yield* Ref.get(upserts))[0]?.freshSession, true);
+        }),
+    }),
+  );
+  it.effect("an auto caller may change tasks that run at full access", () =>
+    run({
+      liveCaller: true,
+      body: ({ service, upserts, deletes }) =>
+        Effect.gen(function* () {
+          for (const scheduledTaskId of ["task:full-access", "task:bound-full-access"]) {
+            yield* service.saveScheduledTask(scope, {
+              scheduledTaskId: ScheduledTaskId.make(scheduledTaskId),
+              prompt: "Check the build again",
+            });
+            yield* service.deleteScheduledTask(scope, {
+              scheduledTaskId: ScheduledTaskId.make(scheduledTaskId),
+            });
+          }
+          assert.equal((yield* Ref.get(upserts)).length, 2);
+          assert.deepEqual(yield* Ref.get(deletes), ["task:full-access", "task:bound-full-access"]);
+        }),
+    }),
+  );
+
+  it.effect.each(["approval-required", "auto-accept-edits"] as const)(
+    "a %s caller cannot schedule tasks",
+    (callerRuntimeMode) =>
+      run({
+        liveCaller: true,
+        callerRuntimeMode,
+        body: ({ service, upserts }) =>
+          Effect.gen(function* () {
+            const failure = yield* service
+              .saveScheduledTask(scope, {
+                prompt: "Check the build",
+                schedule: { type: "interval", everyMs: 3_600_000 },
+              })
+              .pipe(Effect.flip);
+            assert.equal(failure.code, "capability_denied");
+            assert.deepEqual(yield* Ref.get(upserts), []);
+          }),
+      }),
+  );
+
+  it.effect("tasks scheduled from an auto thread run in Auto", () =>
+    run({
+      liveCaller: true,
+      body: ({ service, upserts }) =>
+        Effect.gen(function* () {
+          yield* service.saveScheduledTask(scope, {
+            prompt: "Check the build",
+            schedule: { type: "interval", everyMs: 3_600_000 },
+          });
+          assert.equal((yield* Ref.get(upserts))[0]?.runtimeMode, "auto");
         }),
     }),
   );

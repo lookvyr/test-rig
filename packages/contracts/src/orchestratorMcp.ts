@@ -23,7 +23,12 @@ import {
   ScheduledTaskSchedule,
   ScheduledTaskUpsertSchedule,
 } from "./scheduledTask.ts";
-import { ProviderInteractionMode, ProviderRequestKind, RuntimeMode } from "./providerPolicy.ts";
+import {
+  OfferedRuntimeMode,
+  ProviderInteractionMode,
+  ProviderRequestKind,
+  RuntimeMode,
+} from "./providerPolicy.ts";
 import { PullRequestState } from "./pullRequest.ts";
 import {
   ThreadLinkedPullRequest,
@@ -117,7 +122,11 @@ export const OrchestratorMcpTarget = Schema.Struct({
 });
 export type OrchestratorMcpTarget = typeof OrchestratorMcpTarget.Type;
 
-export const OrchestratorMcpRuntimeMode = Schema.Union([Schema.Literal("inherit"), RuntimeMode]);
+/** Spawned threads run in Auto or Full access; the manual modes are not offered. */
+export const OrchestratorMcpRuntimeMode = Schema.Union([
+  Schema.Literal("inherit"),
+  OfferedRuntimeMode,
+]);
 export type OrchestratorMcpRuntimeMode = typeof OrchestratorMcpRuntimeMode.Type;
 
 export const OrchestratorMcpInteractionMode = Schema.Union([
@@ -184,7 +193,7 @@ export const OrchestratorMcpDelegateTaskInput = Schema.Struct({
   runtimeMode: Schema.optional(
     OrchestratorMcpRuntimeMode.annotate({
       description:
-        "Omit unless the user asks for a supervised child. Narrow modes pause for human approval, not read-only. Above yours is rejected.",
+        "Omit to inherit yours. Use full-access only when the user asks for it; auto has a classifier review each action.",
     }),
   ),
   interactionMode: Schema.optional(OrchestratorMcpInteractionMode),
