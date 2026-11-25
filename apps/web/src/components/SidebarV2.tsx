@@ -8,6 +8,7 @@ import {
 } from "../state/olderSettledShelf";
 import { useThreadSearch } from "../state/queries";
 import { useLocation } from "@tanstack/react-router";
+import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
 import { THREAD_CONTEXT_DRAG_TYPE } from "./chat/threadContextDrag";
 import { useUnlinkPullRequest } from "../hooks/useUnlinkPullRequest";
@@ -74,7 +75,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { useParams, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 
 import {
   isAtomCommandInterrupted,
@@ -129,14 +130,11 @@ import { useProjects, useThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
 import { environmentThreadShells, threadEnvironment } from "../state/threads";
+import { useThreadIntentPrefetch } from "./sidebar/useThreadIntentPrefetch";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
-import {
-  buildThreadRouteParams,
-  resolveActiveThreadRouteRef,
-  resolveThreadRouteTarget,
-} from "../threadRoutes";
+import { buildThreadRouteParams, resolveActiveThreadRouteRef } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
@@ -704,6 +702,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     />
   );
 
+  const intentPrefetch = useThreadIntentPrefetch(threadRef);
   const handleClick = useCallback(
     (event: ReactMouseEvent) => {
       onThreadClick(event, threadRef);
@@ -971,6 +970,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 aria-busy={isRegeneratingTitle || undefined}
                 className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
                 onClick={handleClick}
+                onPointerEnter={intentPrefetch.onPointerEnter}
+                onPointerLeave={intentPrefetch.onPointerLeave}
+                onPointerDown={intentPrefetch.onPointerDown}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
                 onContextMenu={handleContextMenu}
@@ -1127,6 +1129,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               aria-busy={isRegeneratingTitle || undefined}
               className={rowSurfaceClassName}
               onClick={handleClick}
+              onPointerEnter={intentPrefetch.onPointerEnter}
+              onPointerLeave={intentPrefetch.onPointerLeave}
+              onPointerDown={intentPrefetch.onPointerDown}
               onDoubleClick={handleDoubleClick}
               onKeyDown={handleKeyDown}
               onContextMenu={handleContextMenu}
@@ -1402,6 +1407,7 @@ const SidebarV2SearchResultRow = memo(function SidebarV2SearchResultRow(props: {
     threadId: thread.id,
   });
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
+  const intentPrefetch = useThreadIntentPrefetch(scopeThreadRef(thread.environmentId, thread.id));
   return (
     <li role="presentation" className="list-none">
       <Tooltip>
@@ -1421,6 +1427,9 @@ const SidebarV2SearchResultRow = memo(function SidebarV2SearchResultRow(props: {
               }
               onMouseMove={props.onHighlight}
               onClick={props.onSelect}
+              onPointerEnter={intentPrefetch.onPointerEnter}
+              onPointerLeave={intentPrefetch.onPointerLeave}
+              onPointerDown={intentPrefetch.onPointerDown}
               className={cn(
                 "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none",
                 props.isHighlighted || props.isRouteActive
@@ -1565,10 +1574,7 @@ export default function SidebarV2() {
     },
     [markThreadVisited],
   );
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
-  });
+  const routeTarget = useThreadRouteTarget();
   const routeDraftThread = useComposerDraftStore((store) =>
     routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
   );

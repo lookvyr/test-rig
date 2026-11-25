@@ -7,7 +7,8 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { type ScopedProjectRef } from "@t3tools/contracts";
-import { useParams, useRouter } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
+import { useThreadRouteTarget } from "./useThreadRouteTarget";
 import { useCallback, useMemo, useRef } from "react";
 import {
   markPromotedDraftThreadByRef,
@@ -292,10 +293,7 @@ export function useNewThreadHandler() {
 
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
-  });
+  const routeTarget = useThreadRouteTarget();
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const activeThread = useThread(routeThreadRef);
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);

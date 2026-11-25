@@ -13,7 +13,7 @@ import {
 import { useAtomValue } from "@effect/atom-react";
 import type { FileDiffContentsLoader } from "@pierre/diffs";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
-import { useParams } from "@tanstack/react-router";
+import { useThreadRouteRef } from "../hooks/useThreadRouteTarget";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -66,7 +66,6 @@ import {
 import { areAllDiffFilesCollapsed } from "../lib/diffCollapse";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useProject } from "../state/entities";
-import { resolveThreadRouteRef } from "../threadRoutes";
 import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
 import { formatShortTimestamp } from "../timestampFormat";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
@@ -369,10 +368,7 @@ export default function DiffPanel({
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
   const reviewBodyRef = useRef<HTMLDivElement>(null);
 
-  const routedThreadRef = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteRef(params),
-  });
+  const routedThreadRef = useThreadRouteRef();
   const { threadRef: routeThreadRef, thread: activeThread } = useReviewThread(
     threadRef ?? routedThreadRef,
     composerDraftTarget,
