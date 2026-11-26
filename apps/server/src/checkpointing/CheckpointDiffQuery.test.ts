@@ -37,6 +37,7 @@ function makeProjection(): ProjectionCheckpointContext {
         scopeId: secondScopeId,
         runId: secondRunId,
         appRunOrdinal: 2,
+        ordinalWithinScope: 2,
         status: "ready",
         ref: secondRef,
       },
@@ -206,4 +207,112 @@ it.effect("preserves the explicit whitespace choice without preflighting refs", 
   }).pipe(
     Effect.provide(makeLayer({ projection: Effect.succeed(makeProjection()), diffCheckpoints })),
   );
+});
+
+it.effect("joins a plain folder's repositories into one patch, each under its folder", () => {
+  const apiScopeId = CheckpointScopeId.make("scope:checkpoint-diff-v2:api");
+  const webScopeId = CheckpointScopeId.make("scope:checkpoint-diff-v2:web");
+  const ref = (name: string) => CheckpointRef.make(`refs/t3/test/${name}`);
+  const projection: ProjectionCheckpointContext = {
+    runs: [
+      { id: firstRunId, ordinal: 1, status: "completed" },
+      { id: secondRunId, ordinal: 2, status: "completed" },
+    ],
+    checkpointScopes: [
+      { id: firstScopeId, runId: firstRunId, kind: "root_run", cwd: "/shop" },
+      {
+        id: apiScopeId,
+        runId: firstRunId,
+        kind: "repository",
+        cwd: "/shop/api",
+        label: "api",
+        relativePath: "api",
+      },
+      {
+        id: webScopeId,
+        runId: secondRunId,
+        kind: "repository",
+        cwd: "/shop/web",
+        label: "web",
+        relativePath: "web",
+      },
+    ],
+    checkpoints: [
+      // The plain folder itself has no snapshots.
+      {
+        scopeId: firstScopeId,
+        runId: firstRunId,
+        appRunOrdinal: 1,
+        ordinalWithinScope: 1,
+        status: "missing",
+        ref: ref("root-1"),
+      },
+      {
+        scopeId: firstScopeId,
+        runId: secondRunId,
+        appRunOrdinal: 2,
+        ordinalWithinScope: 2,
+        status: "missing",
+        ref: ref("root-2"),
+      },
+      // api changed in turn 1, web in turn 2.
+      {
+        scopeId: apiScopeId,
+        runId: null,
+        appRunOrdinal: null,
+        ordinalWithinScope: 0,
+        status: "ready",
+        ref: ref("api-0"),
+      },
+      {
+        scopeId: apiScopeId,
+        runId: firstRunId,
+        appRunOrdinal: null,
+        ordinalWithinScope: 1,
+        status: "ready",
+        ref: ref("api-1"),
+      },
+      {
+        scopeId: webScopeId,
+        runId: null,
+        appRunOrdinal: null,
+        ordinalWithinScope: 1,
+        status: "ready",
+        ref: ref("web-1"),
+      },
+      {
+        scopeId: webScopeId,
+        runId: secondRunId,
+        appRunOrdinal: null,
+        ordinalWithinScope: 2,
+        status: "ready",
+        ref: ref("web-2"),
+      },
+    ],
+  };
+  const diffCheckpoints = vi.fn((input: CheckpointStore.DiffCheckpointsInput) =>
+    Effect.succeed(`diff --git a/${input.pathPrefix}/x b/${input.pathPrefix}/x\n`),
+  );
+  const layer = makeLayer({ projection: Effect.succeed(projection), diffCheckpoints });
+
+  return Effect.gen(function* () {
+    const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+    const turnTwo = yield* query.getTurnDiff({ threadId, fromTurnCount: 1, toTurnCount: 2 });
+    assert.equal(turnTwo.diff, "diff --git a/web/x b/web/x\n");
+    assert.deepEqual(
+      diffCheckpoints.mock.calls.map(([input]) => [input.fromCheckpointRef, input.toCheckpointRef]),
+      [[ref("web-1"), ref("web-2")]],
+    );
+
+    // Turn 1 ends at api's own checkpoint, not at a later run's baseline at the same ordinal.
+    diffCheckpoints.mockClear();
+    yield* query.getTurnDiff({ threadId, fromTurnCount: 0, toTurnCount: 1 });
+    assert.deepEqual(
+      diffCheckpoints.mock.calls.map(([input]) => [input.fromCheckpointRef, input.toCheckpointRef]),
+      [[ref("api-0"), ref("api-1")]],
+    );
+
+    const whole = yield* query.getFullThreadDiff({ threadId, toTurnCount: 2 });
+    assert.equal(whole.diff, "diff --git a/api/x b/api/x\ndiff --git a/web/x b/web/x\n");
+  }).pipe(Effect.provide(layer));
 });

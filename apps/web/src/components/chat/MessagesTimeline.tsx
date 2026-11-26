@@ -1,4 +1,5 @@
 import { checkpointFileTotals } from "@t3tools/client-runtime/state/thread-checkpoints";
+import { threadRepositoryFile } from "@t3tools/client-runtime/state/thread-repositories";
 import { useDiffTheme } from "~/hooks/useDiffTheme";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
@@ -44,6 +45,7 @@ import { observeResize } from "../../lib/observeResize";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { environmentThreadDetails } from "../../state/threads";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
@@ -4182,20 +4184,34 @@ function AssistantChangedFilesSectionInner({
         setExpanded(routeThreadKey, turnSummary.runId, !allDirectoriesExpanded)
       }
       onOpenTurnDiff={onOpenTurnDiff}
-      onFileContextMenu={(filePath, event) =>
+      onFileContextMenu={(filePath, event) => {
+        // Another repository's file is named from the thread's folder (`../lib/x.ts` for one
+        // outside it), so it resolves in that repository's folder. Read at click time: a
+        // subscription would re-render every card on each streamed event.
+        const scopes = ctx.threadRef
+          ? appAtomRegistry.get(environmentThreadDetails.threadAtom(ctx.threadRef))?.projection
+              .checkpointScopes
+          : undefined;
+        const repositoryFile = threadRepositoryFile(scopes ?? [], filePath);
         onFileContextMenu(
-          {
-            environmentId: ctx.activeThreadEnvironmentId,
-            filePath,
-            workspaceRoot: ctx.workspaceRoot,
-            repositoryRoot:
-              thread?.worktreePath == null
-                ? activeProject?.repositoryIdentity?.rootPath
-                : undefined,
-          },
+          repositoryFile
+            ? {
+                environmentId: ctx.activeThreadEnvironmentId,
+                filePath: repositoryFile.path,
+                workspaceRoot: repositoryFile.cwd,
+              }
+            : {
+                environmentId: ctx.activeThreadEnvironmentId,
+                filePath,
+                workspaceRoot: ctx.workspaceRoot,
+                repositoryRoot:
+                  thread?.worktreePath == null
+                    ? activeProject?.repositoryIdentity?.rootPath
+                    : undefined,
+              },
           event,
-        )
-      }
+        );
+      }}
     />
   );
 }

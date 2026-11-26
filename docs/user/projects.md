@@ -24,6 +24,10 @@ removal.
 If a worktree launch encounters a concurrent Git reference update, Test Rig retries
 the fetch once automatically.
 
+A project can cover several repositories: every repository inside its folder, and any folder you
+add under **Settings → Projects → Repositories**. See
+[Projects with several repositories](multi-repo-projects.md).
+
 ## Projects settings
 
 Open **Settings → Projects** and choose a project to manage it in one place:

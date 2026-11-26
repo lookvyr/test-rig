@@ -11,6 +11,7 @@ import {
   type OrchestrationV2CreationSource,
   type PlanId,
   type ProjectId,
+  type ProjectAddedFolder,
   type ProjectScript,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
@@ -50,6 +51,10 @@ export interface UpdateProjectInput extends CommandMetadata {
   readonly workspaceRoot?: string;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;
+  /** Folders from outside the project folder to add; merged with the list the server has. */
+  readonly addFolders?: ReadonlyArray<ProjectAddedFolder>;
+  /** Paths of added folders to take out. Never deletes files. */
+  readonly removeFolders?: ReadonlyArray<string>;
 }
 
 export interface DeleteProjectInput extends CommandMetadata {
@@ -161,6 +166,8 @@ interface StartThreadBootstrap {
     readonly baseBranch: string;
     readonly branch?: string;
     readonly startFromOrigin?: boolean;
+    /** For a project with several repositories: which of them get a worktree. */
+    readonly repositories?: ReadonlyArray<{ readonly path: string }>;
   };
   readonly runSetupScript?: boolean;
 }
@@ -315,6 +322,8 @@ const mutateProject = Effect.fn("EnvironmentCommands.mutateProject")(function* (
         readonly workspaceRoot?: string;
         readonly defaultModelSelection?: ModelSelection | null;
         readonly scripts?: ReadonlyArray<ProjectScript>;
+        readonly addFolders?: ReadonlyArray<ProjectAddedFolder>;
+        readonly removeFolders?: ReadonlyArray<string>;
       }
     | {
         readonly type: "project.delete";
@@ -358,6 +367,8 @@ export const updateProject = Effect.fn("EnvironmentCommands.updateProject")(func
       ? {}
       : { defaultModelSelection: input.defaultModelSelection }),
     ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+    ...(input.addFolders === undefined ? {} : { addFolders: input.addFolders }),
+    ...(input.removeFolders === undefined ? {} : { removeFolders: input.removeFolders }),
   });
 });
 
@@ -666,6 +677,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
             ...(prepareWorktree.startFromOrigin === undefined
               ? {}
               : { startFromOrigin: prepareWorktree.startFromOrigin }),
+            ...(prepareWorktree.repositories === undefined
+              ? {}
+              : { repositories: prepareWorktree.repositories }),
           }
         : bootstrap?.worktreePath
           ? {

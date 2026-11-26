@@ -114,6 +114,46 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
     );
   });
 
+  describe("captureCheckpoint", () => {
+    it.effect("leaves out nested repositories, including ones the root ignores", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const fileSystem = yield* FileSystem.FileSystem;
+        yield* writeTextFile(NodePath.join(tmp, ".gitignore"), "vendor/\n");
+        for (const nested of ["vendor/lib", ":api"]) {
+          const cwd = NodePath.join(tmp, nested);
+          yield* fileSystem.makeDirectory(cwd, { recursive: true });
+          yield* initRepoWithCommit(cwd);
+        }
+        yield* writeTextFile(NodePath.join(tmp, "notes.md"), "root change\n");
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const threadId = ThreadId.make("thread-checkpoint-store-nested");
+        const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+        yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef: fromCheckpointRef,
+          excludePaths: ["vendor/lib", ":api"],
+        });
+        yield* writeTextFile(NodePath.join(tmp, "notes.md"), "root change again\n");
+        yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef: toCheckpointRef,
+          excludePaths: ["vendor/lib", ":api"],
+        });
+        const diff = yield* checkpointStore.diffCheckpoints({
+          cwd: tmp,
+          fromCheckpointRef,
+          toCheckpointRef,
+          ignoreWhitespace: false,
+        });
+        expect(diff).toContain("+root change again");
+        expect(diff).not.toContain(":api");
+      }),
+    );
+  });
+
   describe("diffCheckpoints", () => {
     it.effect("returns full oversized checkpoint diffs without truncation", () =>
       Effect.gen(function* () {

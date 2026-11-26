@@ -109,6 +109,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   { id: "projects", title: "Projects", to: "/settings/projects" },
   { id: "project-actions", title: "Project actions", to: "/settings/projects" },
   { id: "project-checkouts", title: "Project checkouts", to: "/settings/projects" },
+  { id: "project-repositories", title: "Project repositories", to: "/settings/projects" },
   { id: "send-shortcut", title: "Send shortcut", to: "/settings/chat" },
   { id: "skills-in-slash-menu", title: "Show skills in slash menu", to: "/settings/chat" },
   { id: "tool-call-visibility", title: "Tool calls in chat", to: "/settings/chat" },

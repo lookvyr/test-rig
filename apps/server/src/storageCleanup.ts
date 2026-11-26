@@ -42,6 +42,7 @@ import { forkParked } from "./serverActivation.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Manager.ts";
 import { GitVcsDriver } from "./vcs/GitVcsDriver.ts";
+import * as TaskFolders from "./workspace/TaskFolders.ts";
 import { withWorktreeLease } from "./workspace/worktreeLifecycle.ts";
 import { isFilesystemRoot, managedWorktreesDirectories } from "./worktreesDirectory.ts";
 
@@ -165,6 +166,7 @@ export const make = Effect.gen(function* () {
   const terminals = yield* TerminalManager;
   const git = yield* GitVcsDriver;
   const manager = yield* GitManager;
+  const taskFolders = yield* TaskFolders.TaskFolders;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const liveTerminals = new Map<string, TerminalSummary>();
@@ -443,12 +445,17 @@ export const make = Effect.gen(function* () {
     if (!(yield* fs.exists(checkout))) return;
     const realCheckout = yield* fs.realPath(checkout);
     if (realCheckout !== checkout || !context.roots.some((root) => inside(root, checkout))) return;
-    if ((yield* fs.stat(path.join(checkout, ".git"))).type !== "File") return;
+    // A task folder holds a worktree of each of several repositories; each is checked on its own.
+    const taskFolder = Option.getOrUndefined(yield* taskFolders.find(checkout));
+    if (taskFolder === undefined && (yield* fs.stat(path.join(checkout, ".git"))).type !== "File")
+      return;
+    // Terminals, sessions and project folders anywhere in a task folder protect all of it.
+    const guarded = taskFolder?.root ?? checkout;
     const initialSnapshot = yield* readSnapshot;
     const project = initialSnapshot.projects.find((entry) => entry.id === initial[0]!.projectId);
     if (!project || initial.some((thread) => thread.projectId !== project.id)) return;
     for (const entry of initialSnapshot.projects) {
-      if (atCheckout(path.resolve(entry.workspaceRoot), checkout)) return;
+      if (atCheckout(path.resolve(entry.workspaceRoot), guarded)) return;
     }
     const rules = resolveWorktreeCleanup(context.settings, project.id);
     if (!worktreeCleanupEnabled(rules)) return;
@@ -467,19 +474,25 @@ export const make = Effect.gen(function* () {
     const keep = (reason: string) => {
       context.entries.push({ ...entry, reason: sentence(reason) });
     };
-    const local = yield* git.statusDetailsLocal(checkout);
+    // A task folder's checkouts are each held to the thread's branch when they are inspected.
+    const readBranch =
+      taskFolder === undefined
+        ? git
+            .statusDetailsLocal(checkout)
+            .pipe(Effect.map((local) => (local.isRepo ? local.branch : null)))
+        : Effect.succeed(owner.branch ?? null);
+    const localBranch = yield* readBranch;
     // A side chat keeps the branch it was opened on; the parent's branch is the one that counts.
     const branchMatches = (thread: Thread) =>
-      thread.lineage.sideChat === true || thread.branch === local.branch;
+      thread.lineage.sideChat === true || thread.branch === localBranch;
     if (
-      !local.isRepo ||
-      local.branch === null ||
+      localBranch === null ||
       initial.some(
         (thread) => (!thread.branch && thread.lineage.sideChat !== true) || !branchMatches(thread),
       )
     )
       return keep("repository or branch changed");
-    const branch = local.branch;
+    const branch = localBranch;
 
     const settled = settledIn(initialSnapshot.threads);
     const allSettled = initial.every(settled);
@@ -532,7 +545,10 @@ export const make = Effect.gen(function* () {
       }
       // A worktree is unchanged before its first commit, so only finished threads qualify.
       const gitRules = allSettled ? rules : { ...rules, worktreeUnchanged: false };
-      if (!gitRules.worktreeOnMerge && !gitRules.worktreeUnchanged) return keep(notDue);
+      // Merged and unchanged compare one branch with one default branch; a task folder has a
+      // repository per folder, so only age and settling remove it.
+      if (taskFolder !== undefined || (!gitRules.worktreeOnMerge && !gitRules.worktreeUnchanged))
+        return keep(notDue);
       if (context.mode === "quick") {
         // Git-based rules run hourly; leave whatever that pass decided.
         for (const thread of initial) context.untouched.add(thread.id);
@@ -577,7 +593,8 @@ export const make = Effect.gen(function* () {
       waitingForWork();
       return keep("thread is running, pinned, snoozed or has pending work");
     }
-    const changes = yield* localChangesReason(checkout, rules.worktreeKeepWhen);
+    const changes =
+      taskFolder === undefined ? yield* localChangesReason(checkout, rules.worktreeKeepWhen) : null;
     if (changes !== null) {
       for (const thread of initial) {
         if (!settled(thread)) continue;
@@ -586,7 +603,7 @@ export const make = Effect.gen(function* () {
       return keep(changes);
     }
     if (
-      checkoutTerminals(checkout).some(
+      checkoutTerminals(guarded).some(
         (terminal) =>
           terminal.hasRunningSubprocess ||
           terminal.status === "starting" ||
@@ -608,7 +625,7 @@ export const make = Effect.gen(function* () {
       session: (typeof providers.residencies extends Effect.Effect<infer A> ? A : never)[number],
     ) =>
       session.threadIds.some((id) => initial.some((thread) => thread.id === id)) ||
-      (session.cwd != null && atCheckout(session.cwd, checkout));
+      (session.cwd != null && atCheckout(session.cwd, guarded));
     for (const session of (yield* providers.residencies).filter(atResidency)) {
       if (
         session.closing ||
@@ -620,7 +637,7 @@ export const make = Effect.gen(function* () {
       }
       yield* providers.close(session.providerSessionId);
     }
-    for (const terminal of checkoutTerminals(checkout)) {
+    for (const terminal of checkoutTerminals(guarded)) {
       if (terminal.hasRunningSubprocess || settleActionStarting(terminal, now))
         return keep("open terminal");
       yield* terminals.close({ threadId: terminal.threadId, terminalId: terminal.terminalId });
@@ -633,12 +650,54 @@ export const make = Effect.gen(function* () {
     if (
       (yield* workspaceEffectsPending) ||
       (yield* providers.residencies).some(atResidency) ||
-      checkoutTerminals(checkout).length > 0
+      checkoutTerminals(guarded).length > 0
     )
       return keep("work started on this worktree since check");
+    if (taskFolder !== undefined) {
+      // Each checkout passes the checks a single worktree does, or it stays with its folders.
+      const result = yield* taskFolders.remove({
+        taskFolder,
+        force: false,
+        // The thread keeps its folder's record, so a later turn lays the folder out again.
+        keepRecord: true,
+        inspect: (part) =>
+          Effect.gen(function* () {
+            const status = yield* git.statusDetailsLocal(part.worktreePath);
+            if (!status.isRepo || status.branch !== branch) return "repository or branch changed";
+            const reason = yield* localChangesReason(part.worktreePath, rules.worktreeKeepWhen);
+            if (reason !== null) return reason;
+            // Clean only untracked files; Git's non-forced removal still refuses tracked edits.
+            if (rules.worktreeKeepWhen === "tracked-changes")
+              yield* cleanupGit(part.worktreePath, ["clean", "-ffdx"], "git clean");
+            return null;
+          }).pipe(Effect.catch((error) => Effect.succeed(cleanupFailureReason(error)))),
+      });
+      for (const removedPath of result.removed)
+        context.entries.push({
+          ...entry,
+          path: removedPath,
+          outcome: "removed",
+          reason: sentence(removalReason),
+        });
+      for (const keptPart of result.kept)
+        context.entries.push({ ...entry, path: keptPart.path, reason: sentence(keptPart.reason) });
+      if (result.kept.length > 0)
+        notice("retained", "Worktree cleanup kept the repositories that have local work.");
+      yield* Effect.forEach(
+        [project.workspaceRoot, ...taskFolder.repositories.map((part) => part.repositoryPath)],
+        (cwd) => manager.invalidateStatus(cwd),
+        { discard: true },
+      );
+      yield* Effect.logInfo("storage cleanup removed task folder", {
+        checkout,
+        removed: result.removed.length,
+        kept: result.kept.length,
+      });
+      return;
+    }
     const finalStatus = yield* git.statusDetailsLocal(checkout);
     const finalChanges =
-      finalStatus.branch !== local.branch
+      finalStatus.branch !== localBranch
         ? "repository or branch changed since check"
         : yield* localChangesReason(checkout, rules.worktreeKeepWhen);
     if (finalChanges !== null) {

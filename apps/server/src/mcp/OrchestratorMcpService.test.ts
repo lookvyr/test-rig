@@ -39,10 +39,12 @@ import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
 
 const layerOrchestratorService = OrchestratorMcpService.layer.pipe(
   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
   Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+  Layer.provide(TaskFolders.layerTest),
 );
 
 describe("OrchestratorMcpService", () => {

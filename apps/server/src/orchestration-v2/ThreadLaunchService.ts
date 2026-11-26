@@ -19,6 +19,10 @@ import {
   type RunId,
   type RuntimeMode,
   type ScheduledTaskId,
+  GitCommandError,
+  type GitManagerServiceError,
+  type TaskFolder,
+  type TaskFolderError,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -27,7 +31,9 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -42,6 +48,8 @@ import {
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
+import { freeBranchName } from "../workspace/TaskFolders.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -164,6 +172,9 @@ const make = Effect.gen(function* () {
   const ids = yield* IdAllocator.IdAllocatorV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+  const taskFolders = yield* TaskFolders.TaskFolders;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
   yield* Effect.addFinalizer(() => Scope.close(preparationScope, Exit.void));
@@ -208,6 +219,38 @@ const make = Effect.gen(function* () {
     }
   });
 
+  /** Renames `oldBranch` in each checkout, undoing the ones done when a later one fails. */
+  const renameOtherCheckouts = (
+    checkouts: ReadonlyArray<string>,
+    oldBranch: string,
+    newBranch: string,
+  ): Effect.Effect<void, GitManagerServiceError> =>
+    Effect.gen(function* () {
+      const renamed: Array<string> = [];
+      for (const cwd of checkouts) {
+        const result = yield* git
+          .renameBranch({ cwd, oldBranch, newBranch, exactName: true })
+          .pipe(Effect.result);
+        if (result._tag === "Failure") {
+          yield* Effect.forEach(
+            renamed,
+            (done) =>
+              git
+                .renameBranch({
+                  cwd: done,
+                  oldBranch: newBranch,
+                  newBranch: oldBranch,
+                  exactName: true,
+                })
+                .pipe(Effect.ignore),
+            { discard: true },
+          );
+          return yield* Effect.fail(result.failure);
+        }
+        renamed.push(cwd);
+      }
+    });
+
   const prepareInBackground = Effect.fn("ThreadLaunchService.prepareInBackground")(function* (
     input: ThreadLaunchInput,
     threadId: ThreadId,
@@ -226,6 +269,8 @@ const make = Effect.gen(function* () {
 
     const tracked = input.workspaceStrategy.type === "worktree";
     let createdWorktreePath: string | null = null;
+    // Set when the thread's folder is a task folder: its repositories' worktrees go with it.
+    let createdTaskFolder: TaskFolder | null = null;
     let setupTerminalId: string | null = null;
     let workspaceRecorded = false;
     let runReleased = false;
@@ -315,9 +360,23 @@ const make = Effect.gen(function* () {
             .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
         }
         let startRef = input.workspaceStrategy.baseRef;
+        // A project covering other repositories gets a task folder: a worktree of each of them
+        // beside the project folder's own, which a plain project folder does not have.
+        const coversRepositories = yield* taskFolders.covers({
+          workspaceRoot: project.workspaceRoot,
+          addedFolders: project.addedFolders ?? [],
+        });
+        // Only a project covering other repositories can have a plain folder at its root; every
+        // other worktree launch takes the single-repository path unchanged.
+        const projectIsRepository =
+          !coversRepositories ||
+          (yield* fileSystem
+            .exists(path.join(project.workspaceRoot, ".git"))
+            .pipe(Effect.orElseSucceed(() => false)));
         // "Start from origin" is a stored default; repos without the requested
         // remote branch fall back to the local base branch.
         const startFromOrigin =
+          projectIsRepository &&
           input.workspaceStrategy.startFromOrigin === true &&
           (yield* git
             .remoteExists({ cwd: project.workspaceRoot, remoteName: "origin" })
@@ -354,6 +413,7 @@ const make = Effect.gen(function* () {
         if (startFromOrigin) yield* setupTracker.stageStatus(threadId, "fetch", "done");
         if (
           requestedBranch === undefined &&
+          projectIsRepository &&
           (yield* Effect.forEach(
             [DEFAULT_NEW_WORKTREE_BRANCH_PREFIX, `${DEFAULT_NEW_WORKTREE_BRANCH_PREFIX}/_worktree`],
             (name) => git.hasCommit({ cwd: project.workspaceRoot, refName: `refs/heads/${name}` }),
@@ -365,32 +425,60 @@ const make = Effect.gen(function* () {
           branch = flattenTemporaryWorktreeBranchName(branch!);
         }
         yield* setupTracker.stageStatus(threadId, "checkout", "running");
-        const worktree = yield* git
-          .createWorktree(
-            {
-              cwd: project.workspaceRoot,
-              refName: startRef,
-              newRefName: branch!,
-              baseRefName: input.workspaceStrategy.baseRef,
-              path: null,
-            },
-            {
-              progress: {
-                onWorktreeClaimed: (path) =>
-                  Effect.sync(() => {
-                    createdWorktreePath = path;
-                  }),
-                onCheckoutProgress: (progress) =>
-                  setupTracker.stage(threadId, "checkout", { percent: progress.percent }),
+        if (coversRepositories) {
+          const taskFolder = yield* taskFolders
+            .create({
+              projectId: project.id,
+              branch: branch!,
+              baseRef: input.workspaceStrategy.baseRef,
+              projectStartRef: startRef,
+              repositories: input.workspaceStrategy.repositories,
+              startFromOrigin: input.workspaceStrategy.startFromOrigin === true,
+            })
+            .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+          createdTaskFolder = taskFolder;
+          // A repository that has the branch already gives the thread the next free name.
+          branch = taskFolder.branch;
+          worktreePath = taskFolder.projectPath;
+          createdWorktreePath = worktreePath;
+          yield* setupTracker.update(threadId, (snapshot) => ({
+            ...snapshot,
+            worktreePath,
+            branch,
+          }));
+          yield* setupTracker.stageStatus(threadId, "checkout", "done");
+        } else {
+          const worktree = yield* git
+            .createWorktree(
+              {
+                cwd: project.workspaceRoot,
+                refName: startRef,
+                newRefName: branch!,
+                baseRefName: input.workspaceStrategy.baseRef,
+                path: null,
               },
-            },
-          )
-          .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
-        worktreePath = worktree.worktree.path;
-        branch = worktree.worktree.refName;
-        createdWorktreePath = worktreePath;
-        yield* setupTracker.update(threadId, (snapshot) => ({ ...snapshot, worktreePath, branch }));
-        yield* setupTracker.stageStatus(threadId, "checkout", "done");
+              {
+                progress: {
+                  onWorktreeClaimed: (path) =>
+                    Effect.sync(() => {
+                      createdWorktreePath = path;
+                    }),
+                  onCheckoutProgress: (progress) =>
+                    setupTracker.stage(threadId, "checkout", { percent: progress.percent }),
+                },
+              },
+            )
+            .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+          worktreePath = worktree.worktree.path;
+          branch = worktree.worktree.refName;
+          createdWorktreePath = worktreePath;
+          yield* setupTracker.update(threadId, (snapshot) => ({
+            ...snapshot,
+            worktreePath,
+            branch,
+          }));
+          yield* setupTracker.stageStatus(threadId, "checkout", "done");
+        }
       }
 
       yield* threads
@@ -424,14 +512,68 @@ const make = Effect.gen(function* () {
       ) {
         const oldBranch = branch;
         const worktreeCwd = worktreePath;
+        // Every checkout of a task folder is on the thread's branch, so each is renamed; the
+        // first decides the name the rest take exactly.
+        const renamedCheckouts =
+          createdTaskFolder === null
+            ? [worktreeCwd]
+            : [
+                ...(createdTaskFolder.projectIsWorktree ? [createdTaskFolder.projectPath] : []),
+                ...createdTaskFolder.repositories.map((repository) => repository.worktreePath),
+              ];
+        const [firstCheckout, ...otherCheckouts] = renamedCheckouts;
+        // A task folder takes one name no checkout has yet, so every repository can take it.
+        const renameTaskFolder = (newBranch: string, exactName: boolean) =>
+          Effect.forEach(renamedCheckouts, (cwd) =>
+            git.listLocalBranchNames(cwd).pipe(Effect.orElseSucceed(() => [])),
+          ).pipe(
+            Effect.flatMap((names) => {
+              const free = freeBranchName(newBranch, names, exactName);
+              return free === null
+                ? Effect.fail(
+                    new GitCommandError({
+                      operation: "ThreadLaunchService.renameTaskFolderBranch",
+                      command: "git branch -m",
+                      cwd: worktreeCwd,
+                      detail: `No branch name based on "${newBranch}" is free in every repository.`,
+                    }),
+                  )
+                : renameOtherCheckouts(renamedCheckouts, oldBranch, free).pipe(
+                    Effect.as({ branch: free }),
+                  );
+            }),
+          );
         branchRenameFiber = yield* generateBranchNameFor(worktreeCwd, initialMessage).pipe(
           Effect.flatMap(({ branch: newBranch, exactName }) =>
-            git.renameBranch({
-              cwd: worktreeCwd,
-              oldBranch,
-              newBranch,
-              ...(exactName ? { exactName: true } : {}),
-            }),
+            createdTaskFolder !== null
+              ? renameTaskFolder(newBranch, exactName === true)
+              : firstCheckout === undefined
+                ? Effect.succeed({ branch: oldBranch })
+                : git
+                    .renameBranch({
+                      cwd: firstCheckout,
+                      oldBranch,
+                      newBranch,
+                      ...(exactName ? { exactName: true } : {}),
+                    })
+                    .pipe(
+                      Effect.tap((renamed) =>
+                        renameOtherCheckouts(otherCheckouts, oldBranch, renamed.branch).pipe(
+                          // A checkout that could not take the name puts the ones already renamed
+                          // back, so the thread's checkouts never end up on different branches.
+                          Effect.tapError(() =>
+                            git
+                              .renameBranch({
+                                cwd: firstCheckout,
+                                oldBranch: renamed.branch,
+                                newBranch: oldBranch,
+                                exactName: true,
+                              })
+                              .pipe(Effect.ignore),
+                          ),
+                        ),
+                      ),
+                    ),
           ),
           Effect.flatMap((renamed) =>
             threads.dispatch({
@@ -443,14 +585,19 @@ const make = Effect.gen(function* () {
             }),
           ),
           Effect.tap(() =>
-            vcsStatus.refreshLocalStatus(worktreeCwd, { onlyIfBranchChanged: true }).pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Failed to refresh worktree branch after automatic rename", {
-                  threadId,
-                  cwd: worktreeCwd,
-                  cause,
-                }),
-              ),
+            Effect.forEach(
+              [...new Set([worktreeCwd, ...renamedCheckouts])],
+              (cwd) =>
+                vcsStatus.refreshLocalStatus(cwd, { onlyIfBranchChanged: true }).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("Failed to refresh worktree branch after automatic rename", {
+                      threadId,
+                      cwd,
+                      cause,
+                    }),
+                  ),
+                ),
+              { discard: true },
             ),
           ),
           Effect.catchCause((cause) =>
@@ -606,13 +753,15 @@ const make = Effect.gen(function* () {
             createdWorktreePath &&
             ((cancelled && !runReleased) || !workspaceRecorded)
           ) {
-            const removed = yield* git
-              .removeWorktree({
-                cwd: project.workspaceRoot,
-                path: createdWorktreePath,
-                force: true,
-              })
-              .pipe(Effect.result);
+            const removal: Effect.Effect<void, GitCommandError | TaskFolderError> =
+              createdTaskFolder === null
+                ? git.removeWorktree({
+                    cwd: project.workspaceRoot,
+                    path: createdWorktreePath,
+                    force: true,
+                  })
+                : taskFolders.remove({ taskFolder: createdTaskFolder, force: true });
+            const removed = yield* removal.pipe(Effect.result);
             if (removed._tag === "Success") {
               yield* threads
                 .dispatch({

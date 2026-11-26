@@ -225,14 +225,17 @@ const ProjectionCheckpointContext = Schema.Struct({
       runId,
       kind,
       cwd,
+      label: Schema.optionalKey(Schema.String),
+      relativePath: Schema.optionalKey(Schema.String),
     })),
   ),
   checkpoints: Schema.Array(
     OrchestrationV2CheckpointJsonSchema.mapFields(
-      ({ scopeId, runId, appRunOrdinal, status, ref }) => ({
+      ({ scopeId, runId, appRunOrdinal, ordinalWithinScope, status, ref }) => ({
         scopeId,
         runId,
         appRunOrdinal,
+        ordinalWithinScope,
         status,
         ref,
       }),
@@ -249,6 +252,17 @@ export interface ProjectionCheckpointCaptureContext {
   readonly scope: OrchestrationV2CheckpointScope | undefined;
   readonly providerThread: OrchestrationV2ProviderThread | undefined;
   readonly readyCheckpointOrdinals: ReadonlyArray<number>;
+  /** What resolves the repositories the thread reaches; undefined for a side chat. */
+  readonly thread:
+    | { readonly projectId: ProjectId; readonly worktreePath: string | null }
+    | undefined;
+  /** Every repository scope the thread has recorded so far. */
+  readonly repositoryScopes: ReadonlyArray<OrchestrationV2CheckpointScope>;
+  /** Ready checkpoints of repository scopes, by scope and ordinal. */
+  readonly repositoryCheckpoints: ReadonlyArray<{
+    readonly scopeId: CheckpointScopeId;
+    readonly ordinal: number;
+  }>;
 }
 
 /** Exact durable targets used by interrupt, restart, and steering effects. */
@@ -4873,21 +4887,33 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `,
               sql`
               SELECT scope_id AS id, run_id AS "runId", kind,
-                json_extract(payload_json, '$.cwd') AS cwd
+                json_extract(payload_json, '$.cwd') AS cwd,
+                json_extract(payload_json, '$.label') AS label,
+                json_extract(payload_json, '$.relativePath') AS "relativePath"
               FROM orchestration_v2_projection_checkpoint_scopes
               WHERE thread_id = ${threadId}
               ORDER BY ordinal_within_parent ASC, scope_id ASC
             `,
               sql`
               SELECT scope_id AS "scopeId", run_id AS "runId",
-                app_run_ordinal AS "appRunOrdinal", status,
+                app_run_ordinal AS "appRunOrdinal",
+                ordinal_within_scope AS "ordinalWithinScope", status,
                 json_extract(payload_json, '$.ref') AS ref
               FROM orchestration_v2_projection_checkpoints
               WHERE thread_id = ${threadId}
               ORDER BY scope_id ASC, ordinal_within_scope ASC
             `,
             ]);
-            return yield* decodeCheckpointContext({ runs, checkpointScopes, checkpoints });
+            return yield* decodeCheckpointContext({
+              runs,
+              // Only repository scopes carry these; SQLite reads an absent key as null.
+              checkpointScopes: checkpointScopes.map(({ label, relativePath, ...scope }) => ({
+                ...scope,
+                ...(label == null ? {} : { label }),
+                ...(relativePath == null ? {} : { relativePath }),
+              })),
+              checkpoints,
+            });
           }),
         )
         .pipe(
@@ -4927,6 +4953,26 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             FROM orchestration_v2_projection_checkpoints
             WHERE thread_id = ${threadId} AND scope_id = ${target.scopeId} AND status = 'ready'`,
             ]);
+            const [threadRows, repositoryScopeRows, repositoryCheckpointRows] = yield* Effect.all([
+              sql<{
+                readonly project_id: ProjectId;
+                readonly worktree_path: string | null;
+                readonly side_chat: number | null;
+              }>`SELECT project_id,
+                json_extract(payload_json, '$.worktreePath') AS worktree_path,
+                json_extract(payload_json, '$.lineage.sideChat') AS side_chat
+              FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`,
+              sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_checkpoint_scopes
+              WHERE thread_id = ${threadId} AND kind = 'repository'`,
+              sql<{ readonly scopeId: CheckpointScopeId; readonly ordinal: number }>`
+              SELECT checkpoints.scope_id AS "scopeId", checkpoints.ordinal_within_scope AS ordinal
+              FROM orchestration_v2_projection_checkpoints AS checkpoints
+              JOIN orchestration_v2_projection_checkpoint_scopes AS scopes
+                ON scopes.scope_id = checkpoints.scope_id
+              WHERE checkpoints.thread_id = ${threadId} AND scopes.kind = 'repository'
+                AND checkpoints.status = 'ready'`,
+            ]);
+            const threadRow = threadRows[0];
             return {
               run,
               rootNode:
@@ -4942,6 +4988,17 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   ? undefined
                   : yield* decodeProviderThreadPayload(providerRows[0].payload_json),
               readyCheckpointOrdinals: readyRows.map(({ ordinal }) => ordinal),
+              thread:
+                threadRow === undefined || threadRow.side_chat
+                  ? undefined
+                  : { projectId: threadRow.project_id, worktreePath: threadRow.worktree_path },
+              repositoryScopes: yield* Effect.forEach(repositoryScopeRows, (row) =>
+                decodeCheckpointScopePayload(row.payload_json),
+              ),
+              repositoryCheckpoints: repositoryCheckpointRows.map((row) => ({
+                scopeId: row.scopeId,
+                ordinal: row.ordinal,
+              })),
             };
           }),
         )
@@ -6921,17 +6978,22 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           }
           return {
             runs: projection.runs.map(({ id, ordinal, status }) => ({ id, ordinal, status })),
-            checkpointScopes: projection.checkpointScopes.map(({ id, runId, kind, cwd }) => ({
-              id,
-              runId,
-              kind,
-              cwd,
-            })),
+            checkpointScopes: projection.checkpointScopes.map(
+              ({ id, runId, kind, cwd, label, relativePath }) => ({
+                id,
+                runId,
+                kind,
+                cwd,
+                ...(label === undefined ? {} : { label }),
+                ...(relativePath === undefined ? {} : { relativePath }),
+              }),
+            ),
             checkpoints: projection.checkpoints.map(
-              ({ scopeId, runId, appRunOrdinal, status, ref }) => ({
+              ({ scopeId, runId, appRunOrdinal, ordinalWithinScope, status, ref }) => ({
                 scopeId,
                 runId,
                 appRunOrdinal,
+                ordinalWithinScope,
                 status,
                 ref,
               }),
@@ -6956,6 +7018,23 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
                 (candidate) => candidate.scopeId === target.scopeId && candidate.status === "ready",
               )
               .map((candidate) => candidate.ordinalWithinScope),
+            thread: projection.thread.lineage.sideChat
+              ? undefined
+              : {
+                  projectId: projection.thread.projectId,
+                  worktreePath: projection.thread.worktreePath,
+                },
+            repositoryScopes: projection.checkpointScopes.filter(
+              (candidate) => candidate.kind === "repository",
+            ),
+            repositoryCheckpoints: projection.checkpoints.flatMap((candidate) =>
+              candidate.status === "ready" &&
+              projection.checkpointScopes.some(
+                (scope) => scope.id === candidate.scopeId && scope.kind === "repository",
+              )
+                ? [{ scopeId: candidate.scopeId, ordinal: candidate.ordinalWithinScope }]
+                : [],
+            ),
           };
         }),
       getRunMessage: (threadId, runId) =>

@@ -123,6 +123,26 @@ captures state as hidden Git refs through the VCS driver's checkpoint operations
 baseline capture, completed-turn capture, and diff projection in the retained V1 code. The storage contract is `VcsCheckpointOps` in
 [`VcsDriver.ts`](../../apps/server/src/vcs/VcsDriver.ts), implemented for Git in the same directory.
 
+A thread also gets one `repository` checkpoint scope per other Git repository it reaches (the
+project's discovered and added repositories, and their submodules), under its root scope. These
+scopes are sparse: a turn costs one `git status` per repository, and only a repository the turn
+changed gets a snapshot ref and a `checkpoint.captured` record (with `appRunOrdinal: null`, so
+consumers keyed on turn counts ignore them). A clean repository's state before a turn is only
+remembered in memory; a dirty one is snapshotted. The root snapshot leaves nested repositories to
+their own scopes. `CheckpointDiffQuery` joins each changed repository's patch, prefixed with its
+folder relative to the thread, into the turn's patch. See
+[`CheckpointService.ts`](../../apps/server/src/orchestration-v2/CheckpointService.ts) and
+[`WorkspaceFolders.ts`](../../apps/server/src/workspace/WorkspaceFolders.ts).
+
+A worktree thread of a project with other repositories works in a task folder: one directory under
+the worktrees folder that mirrors the project, with a worktree of each chosen repository at the
+same relative place, all on the thread's branch. A `.t3-task-folder.json` record at its root
+describes the layout; every path in it must stay inside the root. Storage cleanup removes a task
+folder checkout by checkout, keeping any with local work and keeping the record, and turn start
+restores whatever is missing from the record. Both refuse a checkout that is not the repository's
+own linked worktree, such as a link back to the original. See
+[`TaskFolders.ts`](../../apps/server/src/workspace/TaskFolders.ts).
+
 Conversation rewind and checkpoint-based file restoration are unsupported. The current
 [V2 orchestrator](../../apps/server/src/orchestration-v2/Orchestrator.ts) rejects
 `checkpoint.rollback`, and

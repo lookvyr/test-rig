@@ -15,6 +15,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   WorktreeMcpHandoffInput,
+  type TaskFolder,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
@@ -39,6 +40,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import type * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as WorktreeMcpService from "./WorktreeMcpService.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
 
 const decodeDomainEvent = Schema.decodeUnknownSync(OrchestrationV2DomainEvent);
 const encodeTurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
@@ -124,6 +126,8 @@ interface HarnessOptions {
   readonly removeWorktreeFails?: boolean;
   readonly deleteLocalBranchFails?: boolean;
   readonly createWorktreeGate?: Effect.Effect<void>;
+  /** The project covers other repositories, so the handoff lays out a task folder. */
+  readonly taskFolder?: boolean;
 }
 
 const makeHarness = (options: HarnessOptions = {}) => {
@@ -358,9 +362,40 @@ const makeHarness = (options: HarnessOptions = {}) => {
             } as unknown as Path.Path),
           ),
         );
+  const createTaskFolder = vi.fn(
+    (
+      input: Parameters<TaskFolders.TaskFolders["Service"]["create"]>[0],
+    ): Effect.Effect<TaskFolder & { readonly branch: string }> =>
+      Effect.succeed({
+        branch: input.branch,
+        root: "/worktrees/shop/feature",
+        projectId: input.projectId,
+        projectRoot: "/repo/project",
+        anchor: "/repo/project",
+        projectPath: "/worktrees/shop/feature/project",
+        projectIsWorktree: false,
+        repositories: [],
+        baseRef: input.baseRef,
+      }),
+  );
+  const taskFoldersLayer =
+    options.taskFolder === true
+      ? Layer.succeed(
+          TaskFolders.TaskFolders,
+          TaskFolders.TaskFolders.of({
+            covers: () => Effect.succeed(true),
+            find: () => Effect.succeed(Option.none()),
+            create: createTaskFolder,
+            addRepository: () => Effect.die("unused"),
+            remove: () => Effect.succeed({ removed: [], kept: [] }),
+            restore: () => Effect.succeed(false),
+          }),
+        )
+      : TaskFolders.layerTest;
   const layer = serviceLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        taskFoldersLayer,
         Layer.mock(EventSink.EventSinkV2)({ write: writeEvents }),
         Layer.mock(ThreadManagementService.ThreadManagementService)({
           dispatch,
@@ -396,6 +431,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
 
   return {
     layer,
+    createTaskFolder,
     writeEvents,
     scope,
     dispatch,
@@ -445,6 +481,18 @@ const runStatus = (harness: ReturnType<typeof makeHarness>) =>
   }).pipe(Effect.provide(harness.layer));
 
 describe("t3_worktree_handoff", () => {
+  it.effect("lays out a task folder for a project that covers other repositories", () => {
+    const harness = makeHarness({ taskFolder: true, notARepo: true });
+    return Effect.gen(function* () {
+      const result = yield* runHandoff(harness, { branch: "feature/multi" });
+      // A plain project folder has no branch of its own: each repository starts from its own.
+      expect(harness.createTaskFolder).toHaveBeenCalledWith(
+        expect.objectContaining({ branch: "feature/multi", baseRef: "HEAD" }),
+      );
+      expect(result.worktreePath).toBe("/worktrees/shop/feature/project");
+      expect(result.branch).toBe("feature/multi");
+    });
+  });
   it.effect("records the app-owned result against the calling run after binding", () => {
     const harness = makeHarness({ activeRun: true });
     return Effect.gen(function* () {

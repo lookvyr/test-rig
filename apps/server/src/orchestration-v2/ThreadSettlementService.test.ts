@@ -17,6 +17,7 @@ import {
   type ThreadPullRequestLink,
   type ServerSettings as ContractServerSettings,
   type ServerSettingsPatch,
+  GitManagerError,
 } from "@t3tools/contracts";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import * as Crypto from "effect/Crypto";
@@ -850,6 +851,45 @@ describe("ThreadSettlementServiceV2 worker", () => {
           expect(commands).toHaveLength(1);
           expect(commands[0]?.settledAt).toEqual(thread.latestRunCompletedAt);
           expect(commands[0]?.snapshotAt).toEqual(thread.updatedAt);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("settles an inactive thread whose folder is not a repository", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        // A worktree thread of a plain folder holding several repositories: its own folder has no
+        // branch pull request, so the lookup there fails rather than finding none.
+        const worktreePath = "/worktrees/shop/feature/shop";
+        const thread = makeThread("plain-folder", {
+          branch: "feature",
+          worktreePath,
+          latestRunCompletedAt: DateTime.makeUnsafe("2026-08-25T00:00:00.000Z"),
+        });
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([thread]),
+          existingWorktreePaths: [worktreePath],
+          settings: {
+            ...DEFAULT_SERVER_SETTINGS,
+            sidebarAutoSettleAfterDays: 2,
+            sidebarAutoSettleKeepPullRequests: true,
+          },
+          branchPullRequest: () =>
+            Effect.fail(
+              new GitManagerError({
+                operation: "branchPullRequest",
+                cwd: worktreePath,
+                detail: "not a git repository",
+              }),
+            ),
+        });
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadSettlementService.ThreadSettlementServiceV2;
+          yield* startHarness(service, fixture.activation, fixture.snapshotReads);
+          const commands = yield* Ref.get(fixture.commands);
+          expect(commands.map((command) => command.threadId)).toEqual([thread.id]);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

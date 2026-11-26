@@ -439,6 +439,20 @@ export const make = Effect.gen(function* () {
       });
     });
 
+    // A thread whose folder is not a repository, such as a plain folder holding several, has no
+    // branch pull request of its own; its repositories' pull requests are linked to it instead.
+    const branchPullRequestOf = (cwd: string, branch: string, options?: { refresh: boolean }) =>
+      git.branchPullRequest({ cwd, branch }, options).pipe(
+        Effect.catch((error) =>
+          fileSystem.exists(`${cwd}/.git`).pipe(
+            Effect.orElseSucceed(() => true),
+            Effect.flatMap((isRepository) =>
+              isRepository ? Effect.fail(error) : Effect.succeed(null),
+            ),
+          ),
+        ),
+      );
+
     const pullRequestFor = Effect.fn("ThreadSettlementServiceV2.pullRequestFor")(function* (
       group: ReadonlyArray<(typeof lookupCandidates)[number]>,
     ) {
@@ -482,10 +496,7 @@ export const make = Effect.gen(function* () {
           // Recheck reused branches only when this sweep would settle a thread.
           // Eligibility that changes after this check waits for the next sweep.
           if (!(yield* wouldSettle(group, terminal))) return undefined;
-          const current = yield* git.branchPullRequest(
-            { cwd, branch: thread.branch },
-            { refresh: true },
-          );
+          const current = yield* branchPullRequestOf(cwd, thread.branch, { refresh: true });
           const project = projects.get(thread.projectId);
           if (
             current?.state === "open" &&
@@ -502,7 +513,7 @@ export const make = Effect.gen(function* () {
       if (cwd === undefined) {
         return yield* Effect.die(new Error("thread project not found"));
       }
-      return yield* git.branchPullRequest({ cwd, branch: thread.branch });
+      return yield* branchPullRequestOf(cwd, thread.branch);
     });
 
     yield* Effect.forEach(

@@ -704,7 +704,10 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     }
 
     const ignoredPaths = new Set<string>();
-    const chunks = chunkPathsForGitCheckIgnore(relativePaths);
+    // ./ avoids leading : pathspec magic; check-ignore rejects --literal-pathspecs.
+    const chunks = chunkPathsForGitCheckIgnore(
+      relativePaths.map((relativePath) => `./${relativePath}`),
+    );
 
     for (const chunk of chunks) {
       const result = yield* gitCommand(
@@ -732,7 +735,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       }
 
       for (const ignoredPath of splitNullSeparatedGitStdoutPaths(result)) {
-        ignoredPaths.add(ignoredPath);
+        ignoredPaths.add(ignoredPath.slice(2));
       }
     }
 
@@ -968,6 +971,12 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           }
         }
 
+        // git add rejects a pathspec naming an ignored folder, and skips that folder anyway.
+        const nestedExclusions = (
+          input.excludePaths === undefined || input.excludePaths.length === 0
+            ? []
+            : yield* filterIgnoredPaths(input.cwd, input.excludePaths)
+        ).map((entry) => `:(exclude,literal)${entry}`);
         const stageFiles = (exclusions: ReadonlyArray<string>) =>
           execute({
             operation,
@@ -981,6 +990,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               "-A",
               "--",
               ".",
+              ...nestedExclusions,
               ...exclusions,
             ],
             env: commitEnv,
@@ -1085,6 +1095,58 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       resolveCheckpointCommit(input.cwd, input.checkpointRef).pipe(
         Effect.map((commit) => commit !== null),
       ),
+
+    readWorkingState: Effect.fn("GitVcsDriver.checkpoints.readWorkingState")(function* (cwd) {
+      // One process: the branch header carries HEAD, and any entry after it means changes.
+      // Untracked files count whatever the repository's own status settings say.
+      const status = yield* execute({
+        operation: "GitVcsDriver.checkpoints.readWorkingState",
+        cwd,
+        args: [
+          "-c",
+          "core.fsmonitor=false",
+          "status",
+          "--porcelain=v2",
+          "--branch",
+          "--untracked-files=normal",
+          "-z",
+        ],
+        // Runs in the user's own checkouts every turn: never hold their index lock.
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+        maxOutputBytes: 4_096,
+        outputMode: "truncate",
+      });
+      const records = status.stdout.split("\0").filter((record) => record !== "");
+      const oid = records
+        .find((record) => record.startsWith("# branch.oid "))
+        ?.slice("# branch.oid ".length);
+      return {
+        head: oid === undefined || oid === "(initial)" ? null : oid,
+        clean: !status.stdoutTruncated && records.every((record) => record.startsWith("# ")),
+      };
+    }),
+
+    pointCheckpointRef: Effect.fn("GitVcsDriver.checkpoints.pointCheckpointRef")(function* (input) {
+      yield* execute({
+        operation: "GitVcsDriver.checkpoints.pointCheckpointRef",
+        cwd: input.cwd,
+        args: [...durableWrite, "update-ref", input.checkpointRef, input.commit],
+      });
+    }),
+
+    checkpointMatchesHead: Effect.fn("GitVcsDriver.checkpoints.checkpointMatchesHead")(
+      function* (input) {
+        const trees = yield* execute({
+          operation: "GitVcsDriver.checkpoints.checkpointMatchesHead",
+          cwd: input.cwd,
+          args: ["rev-parse", `${input.checkpointRef}^{tree}`, "HEAD^{tree}"],
+          allowNonZeroExit: true,
+        });
+        if (trees.exitCode !== 0) return false;
+        const [checkpointTree, headTree] = trees.stdout.trim().split(/\s+/);
+        return checkpointTree !== undefined && checkpointTree === headTree;
+      },
+    ),
 
     restoreCheckpoint: Effect.fn("GitVcsDriver.checkpoints.restoreCheckpoint")(function* (input) {
       const operation = "GitVcsDriver.checkpoints.restoreCheckpoint";
@@ -1205,7 +1267,9 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           "--no-color",
           "--no-ext-diff",
           "--no-textconv",
-          ...PATCH_RENDER_PREFIX_ARGS,
+          ...(input.pathPrefix === undefined
+            ? PATCH_RENDER_PREFIX_ARGS
+            : [`--src-prefix=a/${input.pathPrefix}/`, `--dst-prefix=b/${input.pathPrefix}/`]),
           ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
           `${fromRevision}^{commit}`,
           `${input.toCheckpointRef}^{commit}`,

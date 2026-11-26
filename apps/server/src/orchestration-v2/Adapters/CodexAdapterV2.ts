@@ -90,6 +90,7 @@ import {
   codexContextEntries,
   buildCodexDeveloperInstructions,
 } from "../../provider/CodexDeveloperInstructions.ts";
+import { buildWorkspaceInstructions } from "../../provider/RuntimeInstructions.ts";
 import {
   describeMcpElicitation,
   toMcpElicitationResponse,
@@ -746,10 +747,21 @@ export function buildCodexTurnStartParams(input: {
       input.runtimePolicy.approvalPolicy === undefined
         ? runtimeModeDefaults.approvalPolicy
         : yield* decodeTurnApprovalPolicy(input.runtimePolicy.approvalPolicy);
-    const sandboxPolicy =
+    const baseSandboxPolicy =
       input.runtimePolicy.sandboxPolicy === undefined
         ? runtimeModeDefaults.sandboxPolicy
         : yield* decodeTurnSandboxPolicy(input.runtimePolicy.sandboxPolicy);
+    // Folders outside the thread's cwd are writable only when granted.
+    const extraRoots = input.runtimePolicy.workspace?.extraRoots ?? [];
+    const sandboxPolicy =
+      baseSandboxPolicy?.type === "workspaceWrite" && extraRoots.length > 0
+        ? {
+            ...baseSandboxPolicy,
+            writableRoots: [
+              ...new Set([...(baseSandboxPolicy.writableRoots ?? []), ...extraRoots]),
+            ],
+          }
+        : baseSandboxPolicy;
     const selectedEffort = getModelSelectionStringOptionValue(
       input.modelSelection,
       "reasoningEffort",
@@ -774,11 +786,21 @@ export function buildCodexTurnStartParams(input: {
             },
           )
         : undefined;
+    // Its own entry, so the folder list reaches the model without Test Rig's MCP tools too.
+    const workspaceInstructions = buildWorkspaceInstructions(input.runtimePolicy);
+    const workspaceContext =
+      workspaceInstructions === ""
+        ? undefined
+        : { test_rig_workspace: { kind: "application" as const, value: workspaceInstructions } };
+    const withWorkspace =
+      builtInContext === undefined && workspaceContext === undefined
+        ? undefined
+        : { ...builtInContext, ...workspaceContext };
     const additionalContext =
       input.skillCatalogue === undefined
-        ? builtInContext
+        ? withWorkspace
         : {
-            ...builtInContext,
+            ...withWorkspace,
             ...codexContextEntries("test_rig_skill_library", input.skillCatalogue),
           };
     const collaborationMode: CodexSchema.ClientRequest__CollaborationMode | undefined =

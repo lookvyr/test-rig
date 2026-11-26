@@ -47,6 +47,13 @@ export interface BranchToolbarProps {
   environmentId: EnvironmentId;
   threadId: ThreadId;
   showGitControls: boolean;
+  /**
+   * The workspace picker; defaults to `showGitControls`. A plain folder covering other
+   * repositories has no branch of its own but can still start worktree threads.
+   */
+  showEnvModeSelector?: boolean;
+  /** Beside the workspace picker: which repositories a new worktree thread includes. */
+  repositoriesControl?: ReactNode;
   draftId?: DraftId;
   onEnvModeChange: (mode: EnvMode) => void;
   effectiveEnvModeOverride?: EnvMode;
@@ -317,6 +324,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   environmentId,
   threadId,
   showGitControls,
+  showEnvModeSelector = showGitControls,
+  repositoriesControl,
   draftId,
   onEnvModeChange,
   effectiveEnvModeOverride,
@@ -454,7 +463,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 ) : null}
               </>
             )}
-            {showGitControls ? (
+            {showEnvModeSelector ? (
               <BranchToolbarEnvModeSelector
                 displayMode={layout === "panel" ? "panel" : "toolbar"}
                 envLocked={envModeLocked}
@@ -466,6 +475,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 onUsePreviousWorktree={onUsePreviousWorktree}
               />
             ) : null}
+            {repositoriesControl ?? null}
           </div>
         ))}
 

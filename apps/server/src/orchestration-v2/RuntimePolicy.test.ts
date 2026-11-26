@@ -17,6 +17,7 @@ import * as Stream from "effect/Stream";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 
 const projectId = ProjectId.make("project:runtime-policy");
@@ -78,6 +79,11 @@ const providerInstanceFor = (instanceId: ProviderInstanceId) =>
 
 const TestLayer = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(
+    Layer.mock(WorkspaceFolders.WorkspaceFolders)({
+      forThread: () => Effect.succeed(WorkspaceFolders.EMPTY_THREAD_WORKSPACE),
+    }),
+  ),
+  Layer.provide(
     Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
       getInstance: (instanceId) => Effect.succeed(providerInstanceFor(instanceId)),
       listInstances: Effect.succeed([]),
@@ -100,6 +106,7 @@ const TestLayer = RuntimePolicy.layerFromProjectStore.pipe(
             faviconPath: null,
             projectIcon: null,
             scripts: [],
+            addedFolders: [],
             createdAt: "2026-06-21T00:00:00.000Z",
             updatedAt: "2026-06-21T00:00:00.000Z",
             deletedAt: null,

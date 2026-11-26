@@ -66,6 +66,14 @@ export function createProjectEnvironmentAtoms<R, E>(
       staleTimeMs: 30_000,
       idleTtlMs: 5 * 60_000,
     }),
+    // The repositories a project covers are read from disk, so they are fetched rather than
+    // carried on the project; a short stale time picks up a clone without a reload.
+    listFolders: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:list-folders",
+      tag: WS_METHODS.workspaceListFolders,
+      staleTimeMs: 10_000,
+      idleTtlMs: 5 * 60_000,
+    }),
     readFile: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projects:read-file",
       tag: WS_METHODS.projectsReadFile,
@@ -95,6 +103,13 @@ export function createProjectEnvironmentAtoms<R, E>(
     createNew: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:projects:create-new",
       tag: WS_METHODS.projectsCreateNew,
+      scheduler: projectScheduler,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
+    // Gives a running worktree thread a worktree of one more of the project's repositories.
+    addTaskFolderRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:projects:add-task-folder-repository",
+      tag: WS_METHODS.workspaceAddTaskFolderRepository,
       scheduler: projectScheduler,
       concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
     }),

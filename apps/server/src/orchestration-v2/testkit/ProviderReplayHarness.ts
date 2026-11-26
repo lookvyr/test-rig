@@ -21,6 +21,7 @@ import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as CheckpointCaptureService from "../CheckpointCaptureService.ts";
 import * as CheckpointService from "../CheckpointService.ts";
+import * as WorkspaceFolders from "../../workspace/WorkspaceFolders.ts";
 import * as CheckpointRollbackService from "../CheckpointRollbackService.ts";
 import * as CommandPolicy from "../CommandPolicy.ts";
 import * as CommandReceiptStore from "../CommandReceiptStore.ts";
@@ -42,6 +43,7 @@ import * as ProviderRuntimeRecoveryService from "../ProviderRuntimeRecoveryServi
 import * as ProviderSessionManager from "../ProviderSessionManager.ts";
 import * as ProviderSwitchService from "../ProviderSwitchService.ts";
 import * as ProviderTurnControlService from "../ProviderTurnControlService.ts";
+import * as TaskFolders from "../../workspace/TaskFolders.ts";
 import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
 import { worktreeRepairDependenciesTestLayer } from "../ProviderTurnStartService.testkit.ts";
 import * as PreviewAgentActivity from "../../preview/PreviewAgentActivity.ts";
@@ -315,7 +317,9 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
     Layer.provide(NodeServices.layer),
   );
   const checkpointServiceProvided = CheckpointService.layer.pipe(
-    Layer.provide(Layer.mergeAll(checkpointStoreLayer, IdAllocator.layer)),
+    Layer.provide(
+      Layer.mergeAll(checkpointStoreLayer, IdAllocator.layer, WorkspaceFolders.layerTest),
+    ),
   );
   const contextHandoffServiceProvided = ContextHandoffService.layer.pipe(
     Layer.provide(IdAllocator.layer),
@@ -360,6 +364,7 @@ export function makeOrchestratorV2ReplayLayerWithRegistry<Error>(
   const providerTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        TaskFolders.layerTest,
         contextHandoffServiceProvided,
         eventSinkProvided,
         IdAllocator.layer,

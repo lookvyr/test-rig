@@ -102,6 +102,7 @@ import {
 } from "../orchestration-v2/SubagentProjection.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
@@ -1154,6 +1155,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
+  const taskFolders = yield* TaskFolders.TaskFolders;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const projects = yield* ProjectService.ProjectService;
@@ -2337,20 +2339,51 @@ const make = Effect.gen(function* () {
             );
           if (Option.isNone(project))
             return yield* failure("invalid_request", "The parent project was not found.");
-          const base = yield* gitDriver
-            .resolveCommit({
-              cwd: parent.thread.worktreePath ?? project.value.workspaceRoot,
-              revision: "HEAD",
+          // Across several repositories no one commit names them all: each starts from the
+          // parent's branch where it has one, so the child sees the parent's committed work.
+          if (
+            yield* taskFolders.covers({
+              workspaceRoot: project.value.workspaceRoot,
+              addedFolders: project.value.addedFolders ?? [],
             })
-            .pipe(
-              Effect.mapError(() =>
-                failure(
-                  "invalid_request",
-                  "Unable to resolve the parent checkout commit. Worktree isolation requires a Git repository with a commit.",
+          ) {
+            // A parent in its own task folder hands down the repositories it works in.
+            const parentTaskFolder =
+              parent.thread.worktreePath === null
+                ? Option.none()
+                : yield* taskFolders.find(parent.thread.worktreePath);
+            workspaceStrategy = {
+              type: "worktree",
+              baseRef: parent.thread.branch ?? "HEAD",
+              startFromOrigin: false,
+              ...(Option.isSome(parentTaskFolder)
+                ? {
+                    repositories: parentTaskFolder.value.repositories.map((repository) => ({
+                      path: repository.repositoryPath,
+                    })),
+                  }
+                : {}),
+            };
+          } else {
+            const base = yield* gitDriver
+              .resolveCommit({
+                cwd: parent.thread.worktreePath ?? project.value.workspaceRoot,
+                revision: "HEAD",
+              })
+              .pipe(
+                Effect.mapError(() =>
+                  failure(
+                    "invalid_request",
+                    "Unable to resolve the parent checkout commit. Worktree isolation requires a Git repository with a commit.",
+                  ),
                 ),
-              ),
-            );
-          workspaceStrategy = { type: "worktree", baseRef: base.commitSha, startFromOrigin: false };
+              );
+            workspaceStrategy = {
+              type: "worktree",
+              baseRef: base.commitSha,
+              startFromOrigin: false,
+            };
+          }
         }
         const result = Option.isSome(previous)
           ? previous.value
@@ -3053,4 +3086,5 @@ export const layer: Layer.Layer<
   | ProviderAdapterRegistry.ProviderAdapterRegistryV2
   | ScheduledTaskService.ScheduledTaskService
   | SecretRequests.SecretRequests
+  | TaskFolders.TaskFolders
 > = Layer.effect(OrchestratorMcpService, make);

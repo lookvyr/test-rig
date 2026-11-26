@@ -26,6 +26,7 @@ import * as Schema from "effect/Schema";
 
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import {
@@ -152,6 +153,7 @@ export const layer: Layer.Layer<
   | ProviderSessionManager.ProviderSessionManagerV2
   | RunExecutionService.RunExecutionServiceV2
   | RuntimePolicy.RuntimePolicyV2
+  | TaskFolders.TaskFolders
 > = Layer.effect(
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
@@ -161,6 +163,7 @@ export const layer: Layer.Layer<
     const fileSystem = yield* FileSystem.FileSystem;
     const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
     const projects = yield* ProjectService.ProjectService;
+    const taskFolders = yield* TaskFolders.TaskFolders;
     const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
@@ -522,7 +525,58 @@ export const layer: Layer.Layer<
         return;
       }
       const { worktreePath, branch } = projection.thread;
-      if (worktreePath !== null && branch !== null) {
+      // A task folder can miss its project folder or one repository's worktree, for example
+      // after storage cleanup; each comes back on the thread's branch.
+      const taskFolder =
+        worktreePath !== null && branch !== null
+          ? Option.getOrUndefined(yield* taskFolders.find(worktreePath))
+          : undefined;
+      if (taskFolder !== undefined && branch !== null) {
+        // The agent must not start in a folder that is not the thread's own: a worktree that came
+        // back as a link would put its edits in the original checkout.
+        const restoreFailure = yield* taskFolders.restore({ taskFolder, branch }).pipe(
+          Effect.tap((restored) =>
+            restored
+              ? Effect.logWarning("provider turn start recreated missing task folder checkouts", {
+                  threadId: projection.thread.id,
+                  root: taskFolder.root,
+                })
+              : Effect.void,
+          ),
+          Effect.as(null),
+          Effect.catch((error) => Effect.succeed(error)),
+        );
+        if (restoreFailure !== null) {
+          const now = yield* DateTime.now;
+          yield* Effect.logWarning("provider turn start failed to recreate task folder", {
+            threadId: projection.thread.id,
+            root: taskFolder.root,
+            detail: restoreFailure.detail,
+          });
+          yield* settleRunBeforeStart({
+            signal: "task-folder-restore-failure",
+            status: "failed",
+            now,
+            startedAt: now,
+            providerInstanceId: run.providerInstanceId,
+            itemProviderThreadId: providerThread.id,
+            item: {
+              type: "error",
+              title: "Could not lay out the thread's folder",
+              failure: makeProviderFailure({
+                class: "validation_error",
+                message: restoreFailure.detail,
+              }),
+            },
+            providerThreadUpdate: {
+              ...providerThread,
+              status: providerThread.nativeThreadRef === null ? "not_loaded" : "idle",
+              updatedAt: now,
+            },
+          });
+          return;
+        }
+      } else if (worktreePath !== null && branch !== null) {
         const exists = yield* fileSystem
           .exists(worktreePath)
           .pipe(Effect.orElseSucceed(() => true));

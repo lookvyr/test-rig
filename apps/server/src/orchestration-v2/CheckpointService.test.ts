@@ -12,9 +12,11 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import * as CheckpointService from "./CheckpointService.ts";
+import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 
 it.effect.each([false, true, "interrupt"] as const)(
@@ -48,6 +50,7 @@ it.effect.each([false, true, "interrupt"] as const)(
           : Effect.succeed(true),
     );
     const testLayer = CheckpointService.layer.pipe(
+      Layer.provide(Layer.merge(WorkspaceFolders.layerTest, Path.layer)),
       Layer.provide(
         Layer.mergeAll(
           IdAllocator.layer,

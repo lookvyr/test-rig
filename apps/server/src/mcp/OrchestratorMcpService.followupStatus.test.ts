@@ -22,6 +22,7 @@ import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterReg
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
 import * as Service from "./OrchestratorMcpService.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 
@@ -141,6 +142,7 @@ it.effect.each(["completed", "queued", "running", "waiting_for_children"] as con
                 Layer.mock(SecretRequests.SecretRequests)({}),
                 Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
                 Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+                TaskFolders.layerTest,
                 Layer.mock(ThreadManagementService.ThreadManagementService)({
                   getThreadRecords: (id) => Effect.succeed(id === parentId ? parent : child),
                   delegatedTaskResultPending: (_id, taskId) =>
@@ -269,6 +271,7 @@ it.effect.each(["original", "followup", "stale_original"] as const)(
                 Layer.mock(SecretRequests.SecretRequests)({}),
                 Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
                 Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+                TaskFolders.layerTest,
                 Layer.mock(ThreadManagementService.ThreadManagementService)({
                   getThreadRecords: (id) => Effect.succeed(id === parentId ? parent : child),
                   delegatedTaskResultPending: () => Effect.succeed(false),

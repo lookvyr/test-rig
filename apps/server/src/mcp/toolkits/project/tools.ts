@@ -16,6 +16,7 @@ import {
   OrchestratorMcpFailure,
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
+  WorkspaceFolder,
 } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
 import * as ServerConfig from "../../../config.ts";
@@ -29,6 +30,7 @@ import * as ThreadManagementService from "../../../orchestration-v2/ThreadManage
 import * as SourceControlRepositoryService from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as Settings from "../../../serverSettings.ts";
+import * as WorkspaceFolders from "../../../workspace/WorkspaceFolders.ts";
 
 const shared = {
   success: Project,
@@ -58,8 +60,19 @@ const ProjectListTool = Tool.make("t3_project_list", {
   .annotate(Tool.Destructive, false);
 const ProjectReadTool = Tool.make("t3_project_read", {
   ...shared,
-  description: "Read one project: workspace and the actions it uses.",
+  description:
+    "Read one project: workspace, the actions it uses, and the repositories and folders it covers.",
   parameters: Schema.Struct({ projectId: ProjectId }),
+  success: Schema.Struct({
+    ...Project.fields,
+    folders: Schema.optional(
+      Schema.Array(WorkspaceFolder).annotate({
+        description:
+          "Repositories inside the project folder and folders added to it. A worktree thread can take a repository's path in workspaceStrategy.repositories.",
+      }),
+    ),
+  }),
+  dependencies: [...shared.dependencies, WorkspaceFolders.WorkspaceFolders],
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false);

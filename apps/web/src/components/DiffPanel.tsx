@@ -20,7 +20,14 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ReviewDiffPreviewSourceKind, ScopedThreadRef, RunId } from "@t3tools/contracts";
+import { threadRepositoryFile } from "@t3tools/client-runtime/state/thread-repositories";
+import type {
+  ReviewDiffPreviewSourceKind,
+  ScopedThreadRef,
+  RunId,
+  WorkspaceListFoldersResult,
+} from "@t3tools/contracts";
+import { projectEnvironment } from "../state/projects";
 import {
   ArrowRightIcon,
   ArrowUpIcon,
@@ -390,7 +397,32 @@ export default function DiffPanel({
       : null,
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
-  const activeRepositoryRoot = activeThread?.worktreePath
+  // A project can cover several repositories; the Git views read one at a time.
+  // For a worktree thread, its task folder's worktrees; a single worktree has none.
+  const projectFolders = useEnvironmentQuery(
+    activeThread && activeProjectId
+      ? projectEnvironment.listFolders({
+          environmentId: activeThread.environmentId,
+          input: {
+            projectId: activeProjectId,
+            ...(activeThread.worktreePath ? { worktreePath: activeThread.worktreePath } : {}),
+          },
+        })
+      : null,
+  );
+  const reviewRepositories = useMemo(
+    () => deriveReviewRepositories(activeCwd ?? null, projectFolders.data),
+    [activeCwd, projectFolders.data],
+  );
+  const [pickedRepositoryPath, setPickedRepositoryPath] = useState<string | null>(null);
+  const reviewCwd =
+    reviewRepositories.find((repository) => repository.path === pickedRepositoryPath)?.path ??
+    reviewRepositories[0]?.path ??
+    activeCwd;
+  const coversRepositories = reviewRepositories.some((repository) => repository.path !== activeCwd);
+  // The thread folder's own paths are named from the project's repository root (the project's
+  // other repositories' from the thread's folder); a picked repository's from its own root.
+  const threadRepositoryRoot = activeThread?.worktreePath
     ? undefined
     : activeProject?.repositoryIdentity?.rootPath;
   const serverConfig = useAtomValue(
@@ -401,7 +433,7 @@ export default function DiffPanel({
     serverConfig?.availableEditors ?? [],
   );
   const isGitActionRunning = useSourceControlActionRunning(
-    { environmentId: activeThread?.environmentId ?? null, cwd: activeCwd ?? null },
+    { environmentId: activeThread?.environmentId ?? null, cwd: reviewCwd ?? null },
     ["runStackedAction", "pull", "publishRepository"],
   );
   const getDiffFileContents = useAtomCommand(reviewEnvironment.diffFileContents);
@@ -409,10 +441,10 @@ export default function DiffPanel({
   const [staging, setStaging] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const gitStatusQuery = useEnvironmentQuery(
-    activeThread !== null && activeThread !== undefined && activeCwd != null
+    activeThread !== null && activeThread !== undefined && reviewCwd != null
       ? vcsEnvironment.status({
           environmentId: activeThread.environmentId,
-          input: { cwd: activeCwd },
+          input: { cwd: reviewCwd },
         })
       : null,
   );
@@ -423,7 +455,8 @@ export default function DiffPanel({
       initialGitScope === "working-tree",
     ),
   );
-  const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  // Turn diffs also cover the project's other repositories, so a plain folder still has them.
+  const isGitRepo = (gitStatusQuery.data?.isRepo ?? true) || coversRepositories;
   const { turnDiffSummaries, inferredCheckpointTurnCountByRunId } =
     useTurnDiffSummaries(activeThread);
   const orderedTurnDiffSummaries = useMemo(
@@ -529,18 +562,18 @@ export default function DiffPanel({
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
   const stagedFilesPreview = useEnvironmentQuery(
-    activeThread && activeCwd
+    activeThread && reviewCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
-          input: { cwd: activeCwd, sourceKind: "staged", includePatch: false },
+          input: { cwd: reviewCwd, sourceKind: "staged", includePatch: false },
         })
       : null,
   );
   const unstagedFilesPreview = useEnvironmentQuery(
-    !isTurnScope && selectedGitScope === "working-tree" && activeThread && activeCwd
+    !isTurnScope && selectedGitScope === "working-tree" && activeThread && reviewCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
-          input: { cwd: activeCwd, sourceKind: "unstaged", includePatch: false },
+          input: { cwd: reviewCwd, sourceKind: "unstaged", includePatch: false },
         })
       : null,
   );
@@ -551,11 +584,11 @@ export default function DiffPanel({
     ? undefined
     : unstagedFilesPreview.data?.sources.find((source) => source.kind === "unstaged")?.files;
   const branchDiffPreview = useEnvironmentQuery(
-    !isTurnScope && activeThread && activeCwd
+    !isTurnScope && activeThread && reviewCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: activeCwd,
+            cwd: reviewCwd,
             sourceKind: selectedSourceKind,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
             ...(selectedCommitRef ? { commitRef: selectedCommitRef } : {}),
@@ -621,11 +654,11 @@ export default function DiffPanel({
     return loader(fileDiff);
   }, []);
   const localBranchRefs = useEnvironmentQuery(
-    !isTurnScope && selectedGitScope === "branch" && activeThread && activeCwd
+    !isTurnScope && selectedGitScope === "branch" && activeThread && reviewCwd
       ? vcsEnvironment.listRefs({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: activeCwd,
+            cwd: reviewCwd,
             includeMatchingRemoteRefs: true,
             refKind: "local",
             ...(baseRefQuery.trim().length > 0 ? { query: baseRefQuery.trim() } : {}),
@@ -635,11 +668,11 @@ export default function DiffPanel({
       : null,
   );
   const remoteBranchRefs = useEnvironmentQuery(
-    !isTurnScope && selectedGitScope === "branch" && activeThread && activeCwd
+    !isTurnScope && selectedGitScope === "branch" && activeThread && reviewCwd
       ? vcsEnvironment.listRefs({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: activeCwd,
+            cwd: reviewCwd,
             includeMatchingRemoteRefs: true,
             refKind: "remote",
             ...(baseRefQuery.trim().length > 0 ? { query: baseRefQuery.trim() } : {}),
@@ -718,11 +751,11 @@ export default function DiffPanel({
   const singleFileMode =
     !isTurnScope && (selectedGitSource?.truncated === true || reviewFiles.length > 100);
   const fileDiffPreview = useEnvironmentQuery(
-    singleFileMode && activeThread && activeCwd && activeFilePath
+    singleFileMode && activeThread && reviewCwd && activeFilePath
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
-            cwd: activeCwd,
+            cwd: reviewCwd,
             sourceKind: selectedSourceKind,
             filePath: activeFilePath,
             ...(selectedBaseRef ? { baseRef: selectedBaseRef } : {}),
@@ -747,7 +780,7 @@ export default function DiffPanel({
   const selectedPatchError = isTurnScope
     ? activeCheckpointDiff.error
     : (branchDiffPreview.error ?? fileDiffPreview.error);
-  const canRefreshReview = isGitRepo && activeThread != null && activeCwd != null;
+  const canRefreshReview = isGitRepo && activeThread != null && reviewCwd != null;
   const canRefreshGitDiff = canRefreshReview && !isTurnScope;
   const refreshBranchDiffPreview = useCallback(() => {
     branchDiffPreview.refresh();
@@ -783,7 +816,7 @@ export default function DiffPanel({
     enabled: canRefreshGitDiff,
     mutationId: workspaceMutationId,
     refresh: refreshBranchDiffPreview,
-    resourceKey: JSON.stringify([routeThreadRef, activeCwd, selectedGitScope]),
+    resourceKey: JSON.stringify([routeThreadRef, reviewCwd, selectedGitScope]),
   });
   // A query can be unresolved before its waiting flag flips. Only reveal known
   // data (or an error), never an intermediate "0 files" or missing stage actions.
@@ -939,13 +972,23 @@ export default function DiffPanel({
     return () => observer.disconnect();
   }, [activeThreadId, isGitRepo, isTurnScope, orderedTurnDiffSummaries.length]);
 
+  const checkpointScopes = activeThread?.projection?.checkpointScopes;
   const openDiffFile = useCallback(
     (filePath: string) => {
+      // A Git view of another repository lists paths from that repository's folder, and a turn
+      // names another repository's files from the thread's folder (`../lib/x.ts` for one outside
+      // it). The file viewer reads below the thread's folder, so those outside open in the editor.
+      const repositoryFile = isTurnScope
+        ? threadRepositoryFile(checkpointScopes ?? [], filePath)
+        : reviewCwd !== undefined && reviewCwd !== activeCwd
+          ? { cwd: reviewCwd, path: filePath, insideThreadFolder: false }
+          : null;
+      const outsideThreadFolder = repositoryFile !== null && !repositoryFile.insideThreadFolder;
       openDiffFilePrimaryAction({
-        threadRef: routeThreadRef,
-        filePath,
-        activeCwd,
-        repositoryRoot: activeRepositoryRoot,
+        threadRef: outsideThreadFolder ? null : routeThreadRef,
+        filePath: outsideThreadFolder ? repositoryFile.path : filePath,
+        activeCwd: outsideThreadFolder ? repositoryFile.cwd : activeCwd,
+        repositoryRoot: repositoryFile !== null ? undefined : threadRepositoryRoot,
         openInEditor: (targetPath) => {
           void (async () => {
             const result = await openInPreferredEditor(targetPath);
@@ -965,7 +1008,15 @@ export default function DiffPanel({
         },
       });
     },
-    [activeCwd, activeRepositoryRoot, openInPreferredEditor, routeThreadRef],
+    [
+      activeCwd,
+      checkpointScopes,
+      isTurnScope,
+      reviewCwd,
+      threadRepositoryRoot,
+      openInPreferredEditor,
+      routeThreadRef,
+    ],
   );
   const toggleDiffFileCollapsed = useCallback(
     (fileKey: string) => {
@@ -1007,12 +1058,18 @@ export default function DiffPanel({
     if (!routeThreadRef) return;
     useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
   };
+  const selectReviewRepository = (path: string) => {
+    if (path === reviewCwd) return;
+    setPickedRepositoryPath(path);
+    // A commit or base branch of the repository being left means nothing in the next one.
+    if (routeThreadRef) useDiffPanelStore.getState().clearGitRefs(routeThreadRef);
+  };
 
   const stageFiles = async (
     files: readonly Pick<ReviewFile, "path" | "oldPath">[],
     staged: boolean,
   ) => {
-    if (!activeThread || !activeCwd || staging || isGitActionRunning || files.length === 0) return;
+    if (!activeThread || !reviewCwd || staging || isGitActionRunning || files.length === 0) return;
     setStaging(true);
     setActionError(null);
     try {
@@ -1025,7 +1082,7 @@ export default function DiffPanel({
       if (!firstPath) return;
       const result = await setFilesStaged({
         environmentId: activeThread.environmentId,
-        input: { cwd: activeCwd, filePaths: [firstPath, ...otherPaths], staged },
+        input: { cwd: reviewCwd, filePaths: [firstPath, ...otherPaths], staged },
       });
       if (result._tag !== "Success") throw squashAtomCommandFailure(result);
       refreshBranchDiffPreview();
@@ -1090,13 +1147,42 @@ export default function DiffPanel({
   const headerRow = (
     <div className="flex w-full min-w-0 flex-col gap-2 py-2">
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-xs font-medium" title={activeCwd}>
-          {activeProject?.title ?? "Review"}
-          {gitStatusQuery.data?.refName ? ` · ${gitStatusQuery.data.refName}` : ""}
-        </span>
-        {activeThread && activeCwd && (
+        {reviewRepositories.length > 1 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="inline-flex h-6 min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 text-xs font-medium outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Repository"
+              title={reviewCwd}
+            >
+              <span className="truncate">
+                {reviewRepositories.find((repository) => repository.path === reviewCwd)?.name ??
+                  activeProject?.title ??
+                  "Review"}
+                {gitStatusQuery.data?.refName ? ` · ${gitStatusQuery.data.refName}` : ""}
+              </span>
+              <ChevronDownIcon className="size-3.5 shrink-0 opacity-70" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-60">
+              {reviewRepositories.map((repository) => (
+                <DropdownMenuItem
+                  key={repository.path}
+                  className={repository.path === reviewCwd ? "bg-foreground/[0.08]" : undefined}
+                  onClick={() => selectReviewRepository(repository.path)}
+                >
+                  <span className="truncate">{repository.name}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <span className="min-w-0 truncate text-xs font-medium" title={reviewCwd}>
+            {activeProject?.title ?? "Review"}
+            {gitStatusQuery.data?.refName ? ` · ${gitStatusQuery.data.refName}` : ""}
+          </span>
+        )}
+        {activeThread && reviewCwd && (
           <GitActionsControl
-            gitCwd={activeCwd}
+            gitCwd={reviewCwd}
             activeThreadRef={routeThreadRef}
             stagedOnly
             stagedFiles={stagedFileManifest}
@@ -1773,4 +1859,22 @@ export default function DiffPanel({
       )}
     </DiffPanelShell>
   );
+}
+
+/**
+ * The repositories the Diff pane's Git views can read for a thread: its own folder when that is a
+ * repository, then the project's other repositories. Turn diffs cover all of them at once.
+ */
+export function deriveReviewRepositories(
+  cwd: string | null,
+  folders: WorkspaceListFoldersResult | null,
+): ReadonlyArray<{ readonly name: string; readonly path: string }> {
+  if (cwd === null) return [];
+  if (folders === null) return [{ name: "Project folder", path: cwd }];
+  return [
+    ...(folders.projectIsGitRepository ? [{ name: "Project folder", path: cwd }] : []),
+    ...folders.folders
+      .filter((folder) => folder.state === "git")
+      .map((folder) => ({ name: folder.name, path: folder.path })),
+  ];
 }

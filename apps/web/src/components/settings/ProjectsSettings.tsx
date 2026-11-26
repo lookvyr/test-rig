@@ -32,6 +32,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { ITEM_ROW_CLASSNAME } from "./itemRows";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
+import { ProjectRepositoriesSettings } from "./ProjectRepositoriesSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { DefaultModelRow, DefaultPermissionsRow, NewThreadWorkspaceRow } from "./SettingsPanels";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
@@ -313,6 +314,8 @@ function ProjectSettingsPanel({
           />
         ))}
       </SettingsSection>
+
+      <ProjectRepositoriesSettings members={members} />
 
       <SettingsSection title="New threads">
         <DefaultModelRow />

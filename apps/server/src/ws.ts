@@ -63,6 +63,8 @@ import {
   ProjectWriteFileError,
   type FilesystemBrowseFailure,
   FilesystemBrowseError,
+  TaskFolderError,
+  GitCommandError,
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
   RpcClientId,
@@ -99,6 +101,8 @@ import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import { issueAttachmentUploadUrl } from "./assets/AttachmentUpload.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
+import * as WorkspaceFolders from "./workspace/WorkspaceFolders.ts";
+import * as TaskFolders from "./workspace/TaskFolders.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -349,6 +353,8 @@ const makeWsRpcLayer = (
       const storageCleanup = yield* StorageCleanup.StorageCleanup;
       const appMcpOAuth = yield* AppMcpOAuth;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+      const workspaceFolders = yield* WorkspaceFolders.WorkspaceFolders;
+      const taskFolders = yield* TaskFolders.TaskFolders;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
@@ -1102,6 +1108,39 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.shellOpenInEditor, externalLauncher.launchEditor(input), {
             "rpc.aggregate": "workspace",
           }),
+        [WS_METHODS.workspaceListFolders]: (input) =>
+          observeRpcEffect(WS_METHODS.workspaceListFolders, workspaceFolders.list(input), {
+            "rpc.aggregate": "workspace",
+          }),
+        [WS_METHODS.workspaceAddTaskFolderRepository]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.workspaceAddTaskFolderRepository,
+            threadManagementV2.getThreadShell(input.threadId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TaskFolderError({
+                    operation: "add-repository",
+                    detail: "Could not read the thread.",
+                    cause,
+                  }),
+              ),
+              Effect.flatMap((thread) =>
+                thread === null || thread.worktreePath === null || thread.branch === null
+                  ? Effect.fail(
+                      new TaskFolderError({
+                        operation: "add-repository",
+                        detail: "This thread has no worktree of its own.",
+                      }),
+                    )
+                  : taskFolders.addRepository({
+                      worktreePath: thread.worktreePath,
+                      branch: thread.branch,
+                      repositoryPath: input.repositoryPath,
+                    }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
         [WS_METHODS.filesystemBrowse]: (input) =>
           observeRpcEffect(
             WS_METHODS.filesystemBrowse,
@@ -1436,7 +1475,29 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsRemoveWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsRemoveWorktree,
-            gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+            // A thread's folder may be a task folder: its repositories' worktrees go with it.
+            taskFolders.find(input.path).pipe(
+              Effect.flatMap(
+                Option.match({
+                  onNone: () =>
+                    gitWorkflow
+                      .removeWorktree(input)
+                      .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+                  onSome: (taskFolder) =>
+                    taskFolders.remove({ taskFolder, force: input.force === true }).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new GitCommandError({
+                            operation: "TaskFolders.remove",
+                            command: "git worktree remove",
+                            cwd: input.cwd,
+                            detail: cause.detail,
+                          }),
+                      ),
+                    ),
+                }),
+              ),
+            ),
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.vcsCreateRef]: (input) =>

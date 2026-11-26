@@ -606,6 +606,14 @@ export const OrchestrationV2ThreadLaunchWorkspaceStrategy = Schema.Union([
     baseRef: TrimmedNonEmptyString,
     branch: Schema.optional(TrimmedNonEmptyString),
     startFromOrigin: Schema.optional(Schema.Boolean),
+    repositories: Schema.optional(
+      Schema.Array(Schema.Struct({ path: TrimmedNonEmptyString }))
+        .check(Schema.isMaxLength(128))
+        .annotate({
+          description:
+            "The project's other repositories to give a worktree. Default: all of them, or none above 8.",
+        }),
+    ),
   }),
 ]);
 export type OrchestrationV2ThreadLaunchWorkspaceStrategy =
@@ -879,10 +887,28 @@ export const OrchestrationV2CheckpointScope = Schema.Struct({
   nodeId: NodeId,
   parentScopeId: Schema.NullOr(CheckpointScopeId),
   providerThreadId: Schema.NullOr(ProviderThreadId),
-  kind: Schema.Literals(["root_run", "subagent", "tool", "provider_thread", "manual"]),
+  kind: Schema.Literals([
+    "root_run",
+    "subagent",
+    "tool",
+    "provider_thread",
+    "manual",
+    // One Git repository the thread reaches besides its own folder, a child of the root scope.
+    // Its records are sparse: only a run that changed the repository has a checkpoint.
+    "repository",
+  ]),
   ordinalWithinParent: NonNegativeInt,
   advancesAppRunCount: Schema.Boolean,
   cwd: TrimmedNonEmptyString,
+  /** Repository scopes: the repository's display name. */
+  label: Schema.optionalKey(TrimmedNonEmptyString),
+  /** Repository scopes: the project's path for the repository, which stays put when `cwd` moves. */
+  repositoryPath: Schema.optionalKey(TrimmedNonEmptyString),
+  /**
+   * Repository scopes: where the repository sits from the thread's folder, `/`-separated; it may
+   * start with `../`. Its files are shown under this path, so two repositories' files stay apart.
+   */
+  relativePath: Schema.optionalKey(TrimmedNonEmptyString),
   createdAt: Schema.DateTimeUtc,
 });
 export type OrchestrationV2CheckpointScope = typeof OrchestrationV2CheckpointScope.Type;

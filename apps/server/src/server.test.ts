@@ -121,6 +121,8 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as WorkspaceFolders from "./workspace/WorkspaceFolders.ts";
+import * as TaskFolders from "./workspace/TaskFolders.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
@@ -466,6 +468,11 @@ const buildAppUnderTest = (options?: {
         Layer.provide(WorkspacePaths.layer),
         Layer.provide(T3ProjectFileLoader.layer),
       ),
+      Layer.mock(WorkspaceFolders.WorkspaceFolders)({
+        forThread: () => Effect.succeed(WorkspaceFolders.EMPTY_THREAD_WORKSPACE),
+        submodules: () => Effect.succeed([]),
+      }),
+      TaskFolders.layerTest,
     );
     const gitWorkflowLayer = GitWorkflowService.layer.pipe(
       Layer.provideMerge(vcsDriverRegistryLayer),
@@ -1261,7 +1268,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             (yield* client[WS_METHODS.skillLibraryRead]({ id: created.id })).name,
             input.name,
           );
-          assert.deepEqual(yield* client[WS_METHODS.mcpRuntimeList]({}), { statuses: [] });
+          assert.deepEqual(yield* client[WS_METHODS.mcpRuntimeList]({}), {
+            statuses: [],
+            serverTools: {},
+          });
           for (const request of [
             client[WS_METHODS.skillLibraryUpsert]({
               ...input,
@@ -1327,7 +1337,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               const read = yield* client[WS_METHODS.skillLibraryRead]({ id: created.id });
               assert.equal(read.instructions, updated.instructions);
               assert.equal(read.assignment.allProjects, true);
-              assert.deepEqual(yield* client[WS_METHODS.mcpRuntimeList]({}), { statuses: [] });
+              assert.deepEqual(yield* client[WS_METHODS.mcpRuntimeList]({}), {
+                statuses: [],
+                serverTools: {},
+              });
               yield* client[WS_METHODS.skillLibraryDelete]({ id: created.id });
               assert.deepEqual(yield* client[WS_METHODS.skillLibraryList]({}), { skills: [] });
             }),

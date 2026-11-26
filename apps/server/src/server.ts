@@ -80,6 +80,7 @@ import * as GitHubPullRequestWorkspace from "./sourceControl/GitHubPullRequestWo
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as ProjectStoreV2 from "./orchestration-v2/ProjectStore.ts";
+import * as WorkspaceFolders from "./workspace/WorkspaceFolders.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
@@ -321,6 +322,7 @@ const WorkspaceLayerLive = Layer.mergeAll(
   WorkspacePaths.layer,
   WorkspaceEntriesLayerLive,
   WorkspaceFileSystemLayerLive,
+  WorkspaceFolders.layer.pipe(Layer.provide(ProjectStoreV2.layer)),
 );
 
 const ProjectFaviconResolverLayerLive = ProjectFaviconResolver.layer.pipe(

@@ -31,6 +31,8 @@ interface DiffPanelStoreState {
   selectGitScope: (ref: ScopedThreadRef, scope: GitReviewScope) => void;
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
   selectCommit: (ref: ScopedThreadRef, commitRef: string | null) => void;
+  /** Forgets the picked commit and base branch, keeping the scope; for another repository. */
+  clearGitRefs: (ref: ScopedThreadRef) => void;
   selectLatestRun: (ref: ScopedThreadRef) => void;
   selectTurn: (ref: ScopedThreadRef, runId: RunId, filePath?: string) => void;
   selectFile: (
@@ -101,6 +103,27 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
             [scopedThreadKey(ref)]: { kind: "commit", commitRef: normalizeBaseRef(commitRef) },
           },
         })),
+      clearGitRefs: (ref) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          const previous = state.byThreadKey[threadKey];
+          const pinsRef =
+            (previous?.kind === "commit" && previous.commitRef !== null) ||
+            (previous?.kind === "branch" && previous.baseRef !== null);
+          const remembersBaseRef = (state.branchBaseRefByThreadKey[threadKey] ?? null) !== null;
+          if (!pinsRef && !remembersBaseRef) return state;
+          return {
+            byThreadKey:
+              previous?.kind === "commit"
+                ? { ...state.byThreadKey, [threadKey]: { kind: "commit", commitRef: null } }
+                : previous?.kind === "branch"
+                  ? { ...state.byThreadKey, [threadKey]: { kind: "branch", baseRef: null } }
+                  : state.byThreadKey,
+            branchBaseRefByThreadKey: remembersBaseRef
+              ? { ...state.branchBaseRefByThreadKey, [threadKey]: null }
+              : state.branchBaseRefByThreadKey,
+          };
+        }),
       selectLatestRun: (ref) =>
         set((state) => ({
           byThreadKey: {

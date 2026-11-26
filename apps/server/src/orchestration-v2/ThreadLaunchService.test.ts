@@ -46,6 +46,7 @@ import * as ProjectStore from "./ProjectStore.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
 import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistryMock.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ScheduledTasks from "../scheduledTasks/ScheduledTaskService.ts";
@@ -85,6 +86,7 @@ const project = {
   defaultModelSelection: modelSelection,
   defaultThreadEnvMode: null,
   scripts: [],
+  addedFolders: [],
   createdAt: "2026-06-20T00:00:00.000Z",
   updatedAt: "2026-06-20T00:00:00.000Z",
   deletedAt: null,
@@ -226,6 +228,7 @@ function makeHarness(options: HarnessOptions = {}) {
         namedProjectsRoot: "/projects",
         folderForThread: () => Effect.succeed(Option.none()),
       }),
+    TaskFolders.layerTest,
   );
   const preparationThreads =
     options.preparationThreads === undefined
@@ -261,6 +264,7 @@ function makeHarness(options: HarnessOptions = {}) {
               faviconPath: null,
               projectIcon: null,
               scripts: project.scripts,
+              addedFolders: [],
               createdAt: project.createdAt,
               updatedAt: project.updatedAt,
               deletedAt: project.deletedAt,

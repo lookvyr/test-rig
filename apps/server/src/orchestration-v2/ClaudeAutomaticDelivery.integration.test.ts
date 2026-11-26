@@ -333,6 +333,7 @@ it.effect.each(["child completion", "scheduled message", "user steering"] as con
                                 faviconPath: null,
                                 projectIcon: null,
                                 scripts: [],
+                                addedFolders: [],
                                 createdAt: "2026-10-06T00:00:00Z",
                                 updatedAt: "2026-10-06T00:00:00Z",
                                 deletedAt: null,

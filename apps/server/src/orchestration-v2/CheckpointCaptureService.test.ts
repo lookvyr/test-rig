@@ -18,6 +18,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -25,6 +26,7 @@ import { V2SqlitePersistenceMemory as SqlitePersistenceMemory } from "../persist
 import * as CheckpointStore from "../checkpointing/CheckpointStore.ts";
 import { VcsProcessTimeoutError } from "@t3tools/contracts";
 import * as CheckpointService from "./CheckpointService.ts";
+import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as CheckpointCaptureService from "./CheckpointCaptureService.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
@@ -271,6 +273,7 @@ it.layer(ProjectionStoreTestLayer)("CheckpointCaptureServiceV2", (it) => {
               IdAllocator.layer,
               refLookupFails
                 ? CheckpointService.layer.pipe(
+                    Layer.provide(Layer.merge(WorkspaceFolders.layerTest, Path.layer)),
                     Layer.provide(
                       Layer.mergeAll(
                         IdAllocator.layer,
@@ -291,6 +294,7 @@ it.layer(ProjectionStoreTestLayer)("CheckpointCaptureServiceV2", (it) => {
                     ),
                   )
                 : Layer.mock(CheckpointService.CheckpointServiceV2)({
+                    ...CheckpointService.singleFolderRepositories,
                     materializeBaselineCheckpoint: () =>
                       Effect.die(
                         "baseline materialization must be skipped when ordinal 0 is ready",
@@ -456,6 +460,7 @@ it.layer(ProjectionStoreTestLayer)("CheckpointCaptureServiceV2", (it) => {
           Layer.mergeAll(
             IdAllocator.layer,
             Layer.mock(CheckpointService.CheckpointServiceV2)({
+              ...CheckpointService.singleFolderRepositories,
               materializeBaselineCheckpoint: () => Effect.die("a discarded run has no baseline"),
               capture: () => Effect.die("a discarded run must not be captured"),
             }),
@@ -645,6 +650,7 @@ it.layer(ProjectionStoreTestLayer)("CheckpointCaptureServiceV2", (it) => {
             Layer.mergeAll(
               IdAllocator.layer,
               CheckpointService.layer.pipe(
+                Layer.provide(Layer.merge(WorkspaceFolders.layerTest, Path.layer)),
                 Layer.provide(
                   Layer.mergeAll(
                     IdAllocator.layer,
@@ -881,6 +887,7 @@ it.layer(ProjectionStoreTestLayer)("CheckpointCaptureServiceV2", (it) => {
           Layer.mergeAll(
             IdAllocator.layer,
             Layer.mock(CheckpointService.CheckpointServiceV2)({
+              ...CheckpointService.singleFolderRepositories,
               materializeBaselineCheckpoint: () =>
                 Effect.die("baseline materialization must be skipped when ordinal 0 is ready"),
               capture: () => Effect.succeed(captured),

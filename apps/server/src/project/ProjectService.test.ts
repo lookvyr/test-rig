@@ -97,7 +97,7 @@ const ProjectServiceDependenciesLayer = Layer.mergeAll(
   Layer.provideMerge(metadataLayer),
   Layer.provideMerge(SqlitePersistenceMemory),
   Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "project-service-race-" })),
-  Layer.provide(NodeServices.layer),
+  Layer.provideMerge(NodeServices.layer),
 );
 
 const waitForProject = Effect.fn("ProjectServiceTest.waitForProject")(function* (
@@ -237,6 +237,80 @@ it.layer(TestLayer)("ProjectService", (it) => {
         .pipe(Effect.flip);
       assert.equal(error._tag, "ProjectConflictError");
     }),
+  );
+
+  it.effect("adds and removes outside folders against the list the project has", () =>
+    Effect.gen(function* () {
+      const service = yield* ProjectService.ProjectService;
+      const fileSystem = yield* FileSystem.FileSystem;
+      // Real, since added folders are stored as the path they resolve to.
+      const parent = yield* fileSystem.realPath(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "project-folders-" }),
+      );
+      const root = `${parent}/shop`;
+      const infra = `${parent}/infra`;
+      const docs = `${parent}/docs`;
+      yield* fileSystem.makeDirectory(root);
+      yield* fileSystem.makeDirectory(infra);
+      yield* fileSystem.makeDirectory(docs);
+      const projectId = ProjectId.make("project:folders");
+      yield* service.create({
+        commandId: CommandId.make("command:folders:create"),
+        projectId,
+        title: "Shop",
+        workspaceRoot: root,
+      });
+      yield* service.update({
+        commandId: CommandId.make("command:folders:add-infra"),
+        projectId,
+        addFolders: [{ path: infra, name: "infra" }],
+      });
+      // A second client adds another folder without resending the first.
+      const added = yield* service.update({
+        commandId: CommandId.make("command:folders:add-docs"),
+        projectId,
+        addFolders: [
+          { path: docs, name: "docs" },
+          { path: infra, name: "infra" },
+        ],
+      });
+      assert.deepEqual(
+        added.addedFolders?.map((folder) => folder.name),
+        ["infra", "docs"],
+      );
+      const removed = yield* service.update({
+        commandId: CommandId.make("command:folders:remove-infra"),
+        projectId,
+        removeFolders: [infra],
+      });
+      assert.deepEqual(removed.addedFolders, [{ path: docs, name: "docs" }]);
+      assert.isTrue(yield* fileSystem.exists(infra));
+
+      const invalid = (folderPath: string) =>
+        service
+          .update({
+            commandId: CommandId.make(`command:folders:invalid:${folderPath}`),
+            projectId,
+            addFolders: [{ path: folderPath, name: "bad" }],
+          })
+          .pipe(
+            Effect.flip,
+            Effect.map((error) => error._tag),
+          );
+      assert.equal(yield* invalid(`${root}/api`), "ProjectInvalidError");
+      assert.equal(yield* invalid(parent), "ProjectInvalidError");
+      assert.equal(yield* invalid(`${parent}/missing`), "ProjectInvalidError");
+      assert.equal(yield* invalid("relative/path"), "ProjectInvalidError");
+
+      // Moving the project into an added folder drops it: the folder now holds the project.
+      yield* fileSystem.makeDirectory(`${docs}/site`);
+      const moved = yield* service.update({
+        commandId: CommandId.make("command:folders:move"),
+        projectId,
+        workspaceRoot: `${docs}/site`,
+      });
+      assert.deepEqual(moved.addedFolders ?? [], []);
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("auto-bootstraps a workspace exactly once", () =>

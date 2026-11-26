@@ -32,6 +32,19 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 
 A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live behind the VCS driver contract in `apps/server/src/vcs/VcsDriver.ts`, implemented by [GitVcsDriverCore.ts][3].
 
+#### Added folder
+
+A folder outside a project's workspace root that the user added to the project (`addedFolders`,
+stored as the real path approved). Agents are granted it as an extra writable root. Repositories
+inside the workspace root are discovered on disk instead and never stored. See
+[WorkspaceFolders.ts](../../apps/server/src/workspace/WorkspaceFolders.ts).
+
+#### Task folder
+
+The folder a worktree thread works in when its project covers other repositories: a mirror of the
+project with a worktree of each chosen repository, described by a `.t3-task-folder.json` record at
+its root. See [TaskFolders.ts](../../apps/server/src/workspace/TaskFolders.ts).
+
 #### Managed worktree folder
 
 A folder whose worktrees Test Rig may remove: `ServerConfig.worktreesDir`, the `worktreesDirectory` setting, and every folder in `previousWorktreesDirectories` (server-maintained when the setting changes). Resolved by `managedWorktreesDirectories` in [worktreesDirectory.ts][25]. A worktree dev home only manages its own `worktreesDir`, because its seeded data can point at real worktrees.

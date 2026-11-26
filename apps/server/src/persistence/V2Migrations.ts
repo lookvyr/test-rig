@@ -10,6 +10,7 @@ import dropUnusedV1Projections from "./Migrations/045_DropUnusedV1Projections.ts
 import threadMessageSearch from "./Migrations/046_ThreadMessageSearch.ts";
 import activeTurnItemIndexes from "./Migrations/047_ActiveTurnItemIndexes.ts";
 import scheduledTaskFreshSession from "./Migrations/048_ScheduledTaskFreshSession.ts";
+import projectAddedFolders from "./Migrations/049_ProjectAddedFolders.ts";
 // V1 retains its historical ledger. Only the snapshot-backed V2 layer runs these entries.
 export const runV2Migrations = Effect.fn("runV2Migrations")(function* () {
   return yield* Migrator.make({})({
@@ -25,6 +26,7 @@ export const runV2Migrations = Effect.fn("runV2Migrations")(function* () {
         ["46_ThreadMessageSearch", threadMessageSearch],
         ["47_ActiveTurnItemIndexes", activeTurnItemIndexes],
         ["48_ScheduledTaskFreshSession", scheduledTaskFreshSession],
+        ["49_ProjectAddedFolders", projectAddedFolders],
       ]),
     ),
   });

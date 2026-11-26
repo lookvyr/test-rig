@@ -3,6 +3,7 @@ import {
   type EventId,
   MAX_SCRIPT_ID_LENGTH,
   type ModelSelection,
+  type ProjectAddedFolder,
   type ProjectIconOverride,
   ProjectId,
   type ProjectScript,
@@ -37,6 +38,8 @@ export interface ProjectMetaUpdateCommand {
   readonly faviconPath?: string | null;
   readonly projectIcon?: ProjectIconOverride | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;
+  /** The whole added-folder list, already normalized against the project's row. */
+  readonly addedFolders?: ReadonlyArray<ProjectAddedFolder>;
 }
 
 export interface ProjectDeleteCommand {
@@ -223,6 +226,7 @@ export function planProjectCommand(input: {
           ...(command.faviconPath === undefined ? {} : { faviconPath: command.faviconPath }),
           ...(command.projectIcon === undefined ? {} : { projectIcon: command.projectIcon }),
           ...(command.scripts === undefined ? {} : { scripts: command.scripts }),
+          ...(command.addedFolders === undefined ? {} : { addedFolders: command.addedFolders }),
           updatedAt: occurredAt,
         },
       });

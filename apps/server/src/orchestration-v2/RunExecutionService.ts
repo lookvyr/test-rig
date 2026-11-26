@@ -39,6 +39,7 @@ import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
+import { REPOSITORY_CAPTURE_CONCURRENCY } from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import type {
@@ -56,6 +57,8 @@ import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import type { ProjectionStoreV2Error } from "./ProjectionStore.ts";
 import { makeProviderFailure, makeProviderFailureTurnItem } from "./ProviderFailure.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
+
+const REPOSITORY_BASELINE_BUDGET = "5 seconds";
 
 export interface ProviderEventRoutingState {
   readonly ownedThreadIds: ReadonlySet<ThreadId>;
@@ -890,10 +893,40 @@ export const layer: Layer.Layer<
                     .responseStreamingMode,
               ),
             );
+            // Side chats share their parent's folder and leave its review to the parent.
+            const repositories = input.appThread.lineage.sideChat
+              ? { scopes: [], rootExcludePaths: [] }
+              : yield* checkpointService.repositoryScopes({
+                  rootScope: input.checkpointScope,
+                  projectId: input.appThread.projectId,
+                  worktreePath: input.appThread.worktreePath,
+                });
+            // A few at a time and all within one budget, so many repositories delay a turn no
+            // longer than one; a repository that misses it shows no changes this turn.
+            yield* Effect.forEach(
+              repositories.scopes,
+              (scope) =>
+                checkpointService.captureRepositoryBaseline({
+                  scope,
+                  ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
+                }),
+              { concurrency: REPOSITORY_CAPTURE_CONCURRENCY, discard: true },
+            ).pipe(
+              Effect.timeoutOrElse({
+                duration: REPOSITORY_BASELINE_BUDGET,
+                orElse: () =>
+                  Effect.logWarning("orchestration V2 repository baselines ran out of time", {
+                    runId: input.run.id,
+                  }),
+              }),
+            );
             yield* checkpointService
               .captureBaseline({
                 scope: input.checkpointScope,
                 ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
+                ...(repositories.rootExcludePaths.length === 0
+                  ? {}
+                  : { excludePaths: repositories.rootExcludePaths }),
               })
               .pipe(
                 Effect.catchCause((cause) =>

@@ -95,6 +95,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectsCreateNew]: AuthOrchestrationOperateScope,
   [WS_METHODS.shellOpenInEditor]: AuthOrchestrationOperateScope,
   [WS_METHODS.filesystemBrowse]: AuthOrchestrationReadScope,
+  [WS_METHODS.workspaceListFolders]: AuthOrchestrationReadScope,
+  [WS_METHODS.workspaceAddTaskFolderRepository]: AuthOrchestrationOperateScope,
   [WS_METHODS.assetsPersistChatAttachments]: AuthOrchestrationOperateScope,
   [WS_METHODS.assetsCreateUrl]: AuthOrchestrationReadScope,
   [WS_METHODS.assetsCreateAttachmentUploadUrl]: AuthOrchestrationOperateScope,

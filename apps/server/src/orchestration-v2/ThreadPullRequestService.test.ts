@@ -269,6 +269,122 @@ describe("ThreadPullRequestServiceV2 reads", () => {
     ),
   );
 
+  it.effect("links an open pull request for the thread's branch in each of its repositories", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // A worktree thread of a plain project folder, on its branch in each repository.
+        const thread = {
+          ...threadShell("multi-repository-thread"),
+          branch: "feature/api",
+          worktreePath: "/worktrees/shop/feature-api/shop",
+        };
+        const activation = yield* Deferred.make<void>();
+        const domainEvents = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
+        const dispatched = yield* Queue.unbounded<unknown>();
+        const dependencies = Layer.mergeAll(
+          Layer.mock(Orchestrator.OrchestratorV2)({
+            streamDomainEvents: Stream.fromQueue(domainEvents),
+            getShellSnapshot: () =>
+              Effect.succeed({
+                schemaVersion: 2,
+                snapshotSequence: 1,
+                threads: [],
+                archivedThreads: [],
+              }),
+            getThreadEventSequence: () => Effect.succeed(1),
+            getThreadShell: () => Effect.succeed(thread),
+            getCheckpointContext: () =>
+              Effect.succeed({
+                runs: [{ id: "run:1" as never, ordinal: 1, status: "completed" }],
+                checkpointScopes: [
+                  {
+                    id: "scope:api" as never,
+                    runId: null,
+                    kind: "repository",
+                    cwd: "/shop/api",
+                    label: "api",
+                    relativePath: "api",
+                  },
+                  {
+                    id: "scope:web" as never,
+                    runId: null,
+                    kind: "repository",
+                    cwd: "/shop/web",
+                    label: "web",
+                    relativePath: "web",
+                  },
+                ],
+                checkpoints: [
+                  {
+                    scopeId: "scope:api" as never,
+                    runId: "run:1" as never,
+                    appRunOrdinal: null,
+                    ordinalWithinScope: 1,
+                    status: "ready",
+                    ref: "refs/t3/api" as never,
+                  },
+                ],
+              }),
+            dispatch: (command) =>
+              Queue.offer(dispatched, command).pipe(Effect.as({ sequence: 1 } as never)),
+          }),
+          Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+          Layer.mock(GitManager.GitManager)({
+            localStatus: ({ cwd }) =>
+              Effect.succeed({
+                isRepo: true,
+                refName: cwd === "/shop/api" ? "feature/api" : "feature/web",
+                isDefaultRef: false,
+              } as never),
+            branchPullRequest: ({ branch }) =>
+              Effect.succeed({
+                number: 7,
+                url: `https://github.com/acme/${branch === "feature/api" ? "api" : "web"}/pull/7`,
+                state: "open",
+              } as never),
+          }),
+          Layer.mock(PullRequestService.PullRequestService)({}),
+          Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),
+          Layer.mock(BackgroundPolicy.BackgroundPolicy)({
+            shouldRunOpportunisticWork: Effect.succeed(false),
+          }),
+          Layer.succeed(ServerActivation.ServerActivation, Deferred.await(activation)),
+          Layer.succeed(
+            Crypto.Crypto,
+            Crypto.make({
+              randomBytes: (size) => new Uint8Array(size).fill(1),
+              digest: (_algorithm, data) => Effect.succeed(data),
+            }),
+          ),
+          FileSystem.layerNoop({}),
+        );
+        yield* Effect.gen(function* () {
+          const service = yield* ThreadPullRequestService.make;
+          yield* service.start();
+          yield* Deferred.succeed(activation, undefined);
+          yield* service.drain;
+          // web's checkout is on another branch, so it is someone else's work.
+          yield* Queue.offer(domainEvents, {
+            type: "run.updated",
+            threadId: thread.id,
+            payload: { status: "completed" },
+          } as OrchestrationV2DomainEvent);
+          const command = (yield* Queue.take(dispatched)) as Record<string, unknown>;
+          expect(command).toMatchObject({
+            type: "thread.pull-request.link",
+            threadId: thread.id,
+            host: "github.com",
+            repository: "acme/api",
+            number: 7,
+            source: "created",
+          });
+          yield* service.drain;
+          expect(yield* Queue.size(dispatched)).toBe(0);
+        }).pipe(Effect.provide(dependencies));
+      }),
+    ),
+  );
+
   it.effect("an event for one thread reads that thread's shell, not every thread's", () =>
     Effect.scoped(
       Effect.gen(function* () {

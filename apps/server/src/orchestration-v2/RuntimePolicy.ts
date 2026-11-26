@@ -17,6 +17,7 @@ import {
   type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
 } from "./ProviderAdapter.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 
 /**
  * ERRORS
@@ -90,12 +91,15 @@ function providerRuntimeMode(
 export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   never,
-  ProjectStore.ProjectStoreV2 | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | ProjectStore.ProjectStoreV2
+  | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | WorkspaceFolders.WorkspaceFolders
 > = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
     const projects = yield* ProjectStore.ProjectStoreV2;
     const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+    const workspaceFolders = yield* WorkspaceFolders.WorkspaceFolders;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
         const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
@@ -128,10 +132,24 @@ export const layerFromProjectStore: Layer.Layer<
               }),
             ),
           ));
+        // The turn can still run in its own cwd, as a single-folder thread does.
+        const workspace = yield* workspaceFolders
+          .forThread({
+            projectId: input.thread.projectId,
+            worktreePath: input.thread.worktreePath,
+          })
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Could not resolve the thread's folders.", cause).pipe(
+                Effect.as(undefined),
+              ),
+            ),
+          );
         return ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
+          ...(workspace === undefined || workspace.folders.length === 0 ? {} : { workspace }),
         });
       }),
     });

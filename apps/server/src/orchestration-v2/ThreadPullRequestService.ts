@@ -17,6 +17,7 @@ import {
   type ThreadLinkedPullRequest,
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -97,11 +98,14 @@ export function projectWorkspaceMatchesSnapshot(
 }
 
 const BACKFILL_ATTEMPTS = 5;
+const REPOSITORY_LOOKUP_CONCURRENCY = 4;
 
 interface RefreshRequest {
   readonly threadId: ThreadId | null;
   readonly refresh: boolean;
   readonly backfill?: boolean;
+  /** Set when a run finished: ask the host again about the thread's repositories' branches. */
+  readonly repositories?: boolean;
 }
 
 export const make = Effect.gen(function* () {
@@ -146,6 +150,70 @@ export const make = Effect.gen(function* () {
           const thread = yield* orchestrator.getThreadShell(threadId);
           return { snapshotSequence, threads: thread === null ? [] : [thread] };
         });
+
+  // The project's other repositories a thread changed each have their own branch, so an open
+  // pull request there is linked like one the thread opened. Only a thread's own events ask: the
+  // sweep would query the host for every repository of every thread each minute.
+  const linkRepositoryPullRequests = Effect.fn(
+    "ThreadPullRequestServiceV2.linkRepositoryPullRequests",
+  )(function* (thread: OrchestrationV2ThreadShell, refresh: boolean) {
+    if (thread.archivedAt !== null || !threadPullRequestAutoLinkEnabled(thread)) return;
+    const { checkpointScopes } = yield* orchestrator.getCheckpointContext(thread.id);
+    const cwds = new Set(
+      checkpointScopes.flatMap((scope) => (scope.kind === "repository" ? [scope.cwd] : [])),
+    );
+    yield* Effect.forEach(
+      cwds,
+      (cwd) =>
+        Effect.gen(function* () {
+          const local = yield* git.localStatus({ cwd });
+          if (!local.isRepo || local.refName === null || local.isDefaultRef) return;
+          // A worktree thread's repositories are on its branch. A scope recorded before the
+          // thread moved still names the shared checkout, whose branch is someone else's.
+          if (thread.worktreePath !== null && local.refName !== thread.branch) return;
+          const detected = yield* git.branchPullRequest(
+            { cwd, branch: local.refName },
+            { refresh },
+          );
+          if (detected === null || detected.state !== "open") return;
+          const parsed = parseChangeRequestUrl(detected.url);
+          const key =
+            parsed === null
+              ? undefined
+              : { host: parsed.host, repository: parsed.repository, number: parsed.number };
+          // A link the user removed stays as a tombstone and is not added back.
+          if (
+            key === undefined ||
+            threadPullRequestsOf(thread).some((link) => threadPullRequestKeysEqual(link, key))
+          ) {
+            return;
+          }
+          yield* orchestrator.dispatch({
+            type: "thread.pull-request.link",
+            commandId: CommandId.make(
+              `server:thread-repository-pull-request:${thread.id}:${key.host}/${key.repository}#${key.number}`,
+            ),
+            threadId: thread.id,
+            host: key.host,
+            repository: key.repository,
+            number: key.number,
+            url: detected.url,
+            source: "created",
+          });
+        }).pipe(
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) =>
+              Effect.logWarning("repository pull request lookup failed", {
+                threadId: thread.id,
+                cwd,
+                cause: Cause.pretty(cause),
+              }),
+          ),
+        ),
+      { concurrency: REPOSITORY_LOOKUP_CONCURRENCY, discard: true },
+    );
+  });
 
   const synchronize = Effect.fn("ThreadPullRequestServiceV2.synchronize")(function* (
     request: RefreshRequest,
@@ -345,6 +413,23 @@ export const make = Effect.gen(function* () {
       // GraphQL document, instead of one `gh pr list` per branch.
       { concurrency: 32, discard: true },
     );
+    // After the thread's own sync, whose sequence guard a new link would otherwise invalidate.
+    const requested =
+      request.threadId === null
+        ? undefined
+        : threadSnapshot.threads.find((thread) => thread.id === request.threadId);
+    if (requested !== undefined) {
+      yield* linkRepositoryPullRequests(requested, request.repositories === true).pipe(
+        Effect.catchCauseIf(
+          (cause) => !Cause.hasInterruptsOnly(cause),
+          (cause) =>
+            Effect.logWarning("repository pull request discovery failed", {
+              threadId: requested.id,
+              cause: Cause.pretty(cause),
+            }),
+        ),
+      );
+    }
   });
 
   const worker = yield* makeDrainableWorker((request: RefreshRequest) =>
@@ -375,7 +460,11 @@ export const make = Effect.gen(function* () {
           event.payload.status === "cancelled" ||
           event.payload.status === "interrupted"
         ) {
-          return worker.enqueue({ threadId: event.threadId, refresh: true });
+          return worker.enqueue({
+            threadId: event.threadId,
+            refresh: true,
+            repositories: event.payload.status === "completed",
+          });
         }
         break;
     }

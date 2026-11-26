@@ -1,3 +1,4 @@
+// @effect-diagnostics anyUnknownInErrorContext:off
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -28,6 +29,7 @@ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import type { McpInvocationScope } from "./McpInvocationContext.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
 
 const callerThreadId = ThreadId.make("thread:schedule-caller");
 const ownProjectId = ProjectId.make("project:own");
@@ -162,17 +164,19 @@ const run = (scenario: {
                 ...task({
                   id: input.id ?? "task:new",
                   projectId: input.projectId,
-                  threadId: input.threadId,
+                  threadId: input.threadId ?? null,
                 }),
                 workspaceStrategy: input.workspaceStrategy,
               },
             }),
           ),
-        delete: ({ id }) => Ref.update(deletes, (current) => [...current, id]),
+        delete: ({ id }) =>
+          Ref.update(deletes, (current) => [...current, id]).pipe(Effect.as({ id })),
       }),
       Layer.mock(SecretRequests.SecretRequests)({}),
     );
     const layer = OrchestratorMcpService.layer.pipe(
+      Layer.provide(TaskFolders.layerTest),
       Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
       Layer.provide(
         Layer.mock(GitVcsDriver.GitVcsDriver)({

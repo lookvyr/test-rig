@@ -151,6 +151,19 @@ describe("buildTurnDiffTree", () => {
     ]);
   });
 
+  it("lists each folder outside the thread's folder as its own top-level node", () => {
+    const tree = buildTurnDiffTree([
+      { path: "../lib/a.ts", kind: "modified", additions: 1, deletions: 0 },
+      { path: "../tools/b.ts", kind: "modified", additions: 2, deletions: 0 },
+    ]);
+
+    expect(tree.map((node) => [node.kind, node.name, node.path])).toEqual([
+      ["directory", "../lib", "../lib"],
+      ["directory", "../tools", "../tools"],
+    ]);
+    expect(tree[0]?.kind === "directory" ? tree[0].children[0]?.path : null).toBe("../lib/a.ts");
+  });
+
   it("compacts only single-directory chains and stops at branch points", () => {
     const tree = buildTurnDiffTree([
       { path: "apps/server/src/index.ts", kind: "modified", additions: 2, deletions: 1 },

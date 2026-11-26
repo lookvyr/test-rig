@@ -138,6 +138,23 @@ export const ProjectIconOverride = Schema.Union([
 );
 export type ProjectIconOverride = typeof ProjectIconOverride.Type;
 
+export const PROJECT_ADDED_FOLDERS_MAX = 128;
+
+/**
+ * A folder someone added to a project from outside its own folder. Paths are absolute and only
+ * mean something on the project's own environment. Repositories inside the project folder are
+ * found on disk instead, so they are never stored.
+ */
+export const ProjectAddedFolder = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+});
+export type ProjectAddedFolder = typeof ProjectAddedFolder.Type;
+
+export const ProjectAddedFolders = Schema.Array(ProjectAddedFolder).check(
+  Schema.isMaxLength(PROJECT_ADDED_FOLDERS_MAX),
+);
+
 export const Project = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -150,6 +167,8 @@ export const Project = Schema.Struct({
   // Opt-in because background sync performs network I/O and may move the checkout.
   autoPull: Schema.optional(Schema.Boolean),
   scripts: Schema.Array(ProjectScript),
+  // Optional so cached snapshots from older servers still decode.
+  addedFolders: Schema.optional(ProjectAddedFolders),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -190,6 +209,11 @@ export const ProjectUpdatePayload = Schema.Struct({
   faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  // Applied to the list as the server has it when the update commits, so two clients' edits do
+  // not undo each other.
+  addFolders: Schema.optional(ProjectAddedFolders),
+  /** Absolute paths of added folders to take out of the project. Never deletes files. */
+  removeFolders: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type ProjectUpdatePayload = typeof ProjectUpdatePayload.Type;
 

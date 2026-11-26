@@ -196,6 +196,32 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     });
   });
 
+  it("grants a multi-folder thread's outside folders and lists them in the system prompt", () => {
+    const workspace = {
+      folders: [{ name: "infra", path: "/infra", isGitRepository: true }],
+      extraRoots: ["/infra"],
+    };
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-workspace",
+      resume: false,
+      cwd: "/workspace",
+      workspace,
+    });
+    assert.deepEqual(options.additionalDirectories, ["/workspace", "/infra"]);
+    const systemPrompt = options.systemPrompt as { append: string };
+    assert.include(systemPrompt.append, "- infra (Git repository): /infra");
+    // A changed folder list needs a new query.
+    assert.notEqual(
+      ClaudeAdapterV2.claudeEffectiveQueryPolicyKey({ runtimeMode: "full-access" } as never, {}),
+      ClaudeAdapterV2.claudeEffectiveQueryPolicyKey(
+        { runtimeMode: "full-access" } as never,
+        {},
+        workspace,
+      ),
+    );
+  });
+
   it.each([false, true])("requests thinking summaries with resume=%s", (resume) => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,

@@ -240,6 +240,7 @@
       "default": "./src/state/threadSubagents.ts"
     },
     "./state/thread-checkpoints": "./src/state/threadCheckpoints.ts",
+    "./state/thread-repositories": "./src/state/threadRepositories.ts",
     "./worktree-setup": {
       "types": "./src/worktreeSetup.ts",
       "default": "./src/worktreeSetup.ts"

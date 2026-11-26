@@ -19,12 +19,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import type { CheckpointStoreError } from "./Errors.ts";
-import type { VcsCheckpointOps } from "../vcs/VcsDriver.ts";
+import type { VcsCheckpointOps, VcsWorkingState } from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 export interface CaptureCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
+  /** Nested repositories with checkpoints of their own, relative to `cwd`. */
+  readonly excludePaths?: ReadonlyArray<string>;
 }
 
 export interface RestoreCheckpointInput {
@@ -40,6 +42,8 @@ export interface DiffCheckpointsInput {
   readonly fallbackFromToHead?: boolean;
   readonly ignoreWhitespace: boolean;
   readonly format?: "patch" | "numstat";
+  /** Prepended to every path in a patch, so several repositories' patches join into one. */
+  readonly pathPrefix?: string;
 }
 
 export interface DeleteCheckpointRefsInput {
@@ -94,6 +98,24 @@ export class CheckpointStore extends Context.Service<
     readonly deleteCheckpointRefs: (
       input: DeleteCheckpointRefsInput,
     ) => Effect.Effect<void, CheckpointStoreError>;
+
+    /** HEAD and whether the working tree differs from it, without snapshotting anything. */
+    readonly readWorkingState: (
+      cwd: string,
+    ) => Effect.Effect<VcsWorkingState, CheckpointStoreError>;
+
+    /** Points a checkpoint ref at an existing commit. */
+    readonly pointCheckpointRef: (input: {
+      readonly cwd: string;
+      readonly checkpointRef: CheckpointRef;
+      readonly commit: string;
+    }) => Effect.Effect<void, CheckpointStoreError>;
+
+    /** Whether a checkpoint holds exactly HEAD's files. */
+    readonly checkpointMatchesHead: (input: {
+      readonly cwd: string;
+      readonly checkpointRef: CheckpointRef;
+    }) => Effect.Effect<boolean, CheckpointStoreError>;
   }
 >()("t3/checkpointing/CheckpointStore") {}
 
@@ -158,7 +180,34 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.deleteCheckpointRefs(input);
   });
 
+  const readWorkingState: CheckpointStore["Service"]["readWorkingState"] = Effect.fn(
+    "readWorkingState",
+  )(function* (cwd) {
+    const checkpoints = yield* resolveCheckpoints("CheckpointStore.readWorkingState", cwd);
+    return yield* checkpoints.readWorkingState(cwd);
+  });
+
+  const pointCheckpointRef: CheckpointStore["Service"]["pointCheckpointRef"] = Effect.fn(
+    "pointCheckpointRef",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints("CheckpointStore.pointCheckpointRef", input.cwd);
+    return yield* checkpoints.pointCheckpointRef(input);
+  });
+
+  const checkpointMatchesHead: CheckpointStore["Service"]["checkpointMatchesHead"] = Effect.fn(
+    "checkpointMatchesHead",
+  )(function* (input) {
+    const checkpoints = yield* resolveCheckpoints(
+      "CheckpointStore.checkpointMatchesHead",
+      input.cwd,
+    );
+    return yield* checkpoints.checkpointMatchesHead(input);
+  });
+
   return CheckpointStore.of({
+    readWorkingState,
+    pointCheckpointRef,
+    checkpointMatchesHead,
     isGitRepository,
     captureCheckpoint,
     hasCheckpointRef,

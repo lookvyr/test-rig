@@ -111,6 +111,13 @@ interface GitActionsControlProps {
   stagedOnly?: boolean;
   stagedFiles?: readonly ReviewDiffFile[] | undefined;
   onActionComplete?: () => void;
+  /** Called with the pull request an action created or opened, such as to link it. */
+  onPullRequestOpened?: (url: string) => void;
+  /**
+   * Whether a branch an action creates becomes the thread's branch. False for another
+   * repository of the project: its branches are its own, not the thread's.
+   */
+  syncsThreadBranch?: boolean;
 }
 
 interface PendingDefaultBranchAction {
@@ -979,6 +986,8 @@ export default function GitActionsControl({
   stagedOnly = false,
   stagedFiles,
   onActionComplete,
+  onPullRequestOpened,
+  syncsThreadBranch = true,
 }: GitActionsControlProps) {
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
@@ -1080,13 +1089,13 @@ export default function GitActionsControl({
   const syncThreadBranchAfterGitAction = useCallback(
     (result: GitRunStackedActionResult) => {
       const branchUpdate = resolveThreadBranchUpdate(result);
-      if (!branchUpdate) {
+      if (!branchUpdate || !syncsThreadBranch) {
         return;
       }
 
       persistThreadBranchSync(branchUpdate.branch);
     },
-    [persistThreadBranchSync],
+    [persistThreadBranchSync, syncsThreadBranch],
   );
 
   const gitStatusQuery = useEnvironmentQuery(
@@ -1469,6 +1478,12 @@ export default function GitActionsControl({
 
       const actionResult = result.value;
       onActionComplete?.();
+      if (
+        actionResult.pr.url !== undefined &&
+        (actionResult.pr.status === "created" || actionResult.pr.status === "opened_existing")
+      ) {
+        onPullRequestOpened?.(actionResult.pr.url);
+      }
       syncThreadBranchAfterGitAction(actionResult);
       const closeResultToast = () => {
         toastManager.close(resolvedProgressToastId);

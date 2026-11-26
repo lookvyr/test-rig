@@ -24,6 +24,7 @@ import {
 } from "../../threadAccess.ts";
 import { ProjectToolkit } from "./tools.ts";
 import { assertPendingUploadOwnership } from "../attachment/handlers.ts";
+import * as WorkspaceFolders from "../../../workspace/WorkspaceFolders.ts";
 
 function projectFailure(error: Project.ProjectServiceError) {
   if (error._tag === "ProjectOperationError") return unavailable();
@@ -169,7 +170,14 @@ export const ProjectHandlersLive = ProjectToolkit.toLayer({
           code: "invalid_request",
           message: "The project was not found.",
         });
-      return yield* withResolvedScripts(result.value);
+      const project = yield* withResolvedScripts(result.value);
+      // Read from disk each time: a repository cloned into the folder belongs to it at once.
+      const folders = yield* WorkspaceFolders.WorkspaceFolders.pipe(
+        Effect.flatMap((service) => service.list({ projectId: input.projectId })),
+        Effect.map((listing) => listing.folders),
+        Effect.orElseSucceed(() => undefined),
+      );
+      return folders === undefined || folders.length === 0 ? project : { ...project, folders };
     }),
   t3_project_create: ({ workspaceRoot, ...input }) =>
     Effect.gen(function* () {

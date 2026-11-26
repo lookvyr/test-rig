@@ -35,6 +35,8 @@ export const projectMutationOperation = Effect.fn("projectMutationOperation")(fu
           ? {}
           : { defaultModelSelection: mutation.defaultModelSelection }),
         ...(mutation.scripts === undefined ? {} : { scripts: mutation.scripts }),
+        ...(mutation.addFolders === undefined ? {} : { addFolders: mutation.addFolders }),
+        ...(mutation.removeFolders === undefined ? {} : { removeFolders: mutation.removeFolders }),
       });
 
     case "project.delete":

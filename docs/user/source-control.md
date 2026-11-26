@@ -98,6 +98,13 @@ PR descriptions have no built-in section headings. Your writing instructions det
 
 Additional writing instructions fine-tune the selected style and take precedence when the two conflict. When following a repository change request template, description instructions can change the writing inside the template but do not replace its structure.
 
+## Projects with several repositories
+
+In a [project with several repositories](multi-repo-projects.md), a turn's changed files cover
+every repository, each under its own folder, and the Diff pane's repository picker chooses which
+repository its Git views read. Thread details list each changed repository with its own commit,
+push and pull request actions.
+
 ## Git is separate
 
 Git status, diffs, branches, worktrees, checkpoints, fetches, pulls, and pushes do not depend on a hosting-provider switch. They use the repository's configured Git remotes and credentials.

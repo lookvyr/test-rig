@@ -181,6 +181,14 @@ import {
   ReviewSetFilesStagedInput,
 } from "./review.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
+import {
+  TaskFolder,
+  TaskFolderError,
+  WorkspaceAddTaskFolderRepositoryInput,
+  WorkspaceFoldersError,
+  WorkspaceListFoldersInput,
+  WorkspaceListFoldersResult,
+} from "./workspaceFolders.ts";
 import { ORCHESTRATION_WS_METHODS, OrchestrationGetSnapshotError } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
@@ -300,6 +308,8 @@ export const WS_METHODS = {
 
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
+  workspaceListFolders: "workspace.listFolders",
+  workspaceAddTaskFolderRepository: "workspace.addTaskFolderRepository",
   assetsCreateUrl: "assets.createUrl",
   assetsCreateAttachmentUploadUrl: "assets.createAttachmentUploadUrl",
   assetsPersistChatAttachments: "assets.persistChatAttachments",
@@ -655,6 +665,21 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   success: FilesystemBrowseResult,
   error: Schema.Union([FilesystemBrowseError, EnvironmentAuthorizationError]),
 });
+
+export const WsWorkspaceListFoldersRpc = Rpc.make(WS_METHODS.workspaceListFolders, {
+  payload: WorkspaceListFoldersInput,
+  success: WorkspaceListFoldersResult,
+  error: Schema.Union([WorkspaceFoldersError, EnvironmentAuthorizationError]),
+});
+
+export const WsWorkspaceAddTaskFolderRepositoryRpc = Rpc.make(
+  WS_METHODS.workspaceAddTaskFolderRepository,
+  {
+    payload: WorkspaceAddTaskFolderRepositoryInput,
+    success: TaskFolder,
+    error: Schema.Union([TaskFolderError, EnvironmentAuthorizationError]),
+  },
+);
 
 const WsProjectsEnsureScratchRpc = Rpc.make(WS_METHODS.projectsEnsureScratch, {
   payload: Schema.Struct({ threadId: Schema.optional(ThreadId) }),
@@ -1571,6 +1596,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
+  WsWorkspaceListFoldersRpc,
+  WsWorkspaceAddTaskFolderRepositoryRpc,
   WsAssetsCreateUrlRpc,
   WsAssetsCreateAttachmentUploadUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,

@@ -56,6 +56,8 @@ import { layer as threadLifecycleServiceLayer } from "./ThreadLifecycleService.t
 import { layer as threadForkServiceLayer } from "./ThreadForkService.ts";
 import { layer as turnItemPositionStoreLayer } from "./TurnItemPositionStore.ts";
 import { layer as scheduledTaskServiceLayer } from "../scheduledTasks/ScheduledTaskService.ts";
+import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
 
 /** The shared application event log and its command receipts. */
 export const OrchestrationEventInfrastructureLayerLive = Layer.mergeAll(
@@ -63,8 +65,9 @@ export const OrchestrationEventInfrastructureLayerLive = Layer.mergeAll(
   OrchestrationCommandReceipts.OrchestrationCommandReceiptRepositoryLive,
 );
 
+const workspaceFoldersProvided = WorkspaceFolders.layer.pipe(Layer.provide(ProjectStore.layer));
 const runtimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
-  Layer.provide(ProjectStore.layer),
+  Layer.provide(Layer.merge(ProjectStore.layer, workspaceFoldersProvided)),
 );
 
 const eventStoreProvided = eventStoreLayer.pipe(
@@ -114,7 +117,9 @@ const providerEventIngestorProvided = providerEventIngestorLayer.pipe(
   ),
 );
 
-const checkpointServiceProvided = checkpointServiceLayer.pipe(Layer.provide(idAllocatorLayer));
+const checkpointServiceProvided = checkpointServiceLayer.pipe(
+  Layer.provide(Layer.merge(idAllocatorLayer, workspaceFoldersProvided)),
+);
 const contextHandoffServiceProvided = contextHandoffServiceLayer.pipe(
   Layer.provide(idAllocatorLayer),
 );
@@ -159,9 +164,11 @@ export const RunExecutionServiceLayerLive = runExecutionServiceLayer.pipe(
   ),
 );
 
+const taskFoldersProvided = TaskFolders.layer.pipe(Layer.provide(ProjectStore.layer));
 const providerTurnStartServiceProvided = providerTurnStartServiceLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
+      taskFoldersProvided,
       contextHandoffServiceProvided,
       eventSinkProvided,
       idAllocatorLayer,
@@ -258,6 +265,7 @@ const managedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
 const threadLaunchProvided = threadLaunchServiceLayer.pipe(
   Layer.provide(
     Layer.mergeAll(
+      taskFoldersProvided,
       ProjectServiceLayerLive,
       ProjectSetupScriptRunnerLayerLive,
       managedProjectFoldersProvided,
@@ -328,6 +336,7 @@ export const OrchestrationV2ProductionLayerLive = Layer.mergeAll(
   OrchestrationV2LayerLive.pipe(Layer.provide(ProjectServiceLayerLive)),
   ProjectServiceLayerLive,
   managedProjectFoldersProvided,
+  taskFoldersProvided,
   threadLaunchProvided,
   threadLifecycleProvided,
   scheduledTaskProvided,

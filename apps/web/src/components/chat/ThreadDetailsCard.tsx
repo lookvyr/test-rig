@@ -20,7 +20,7 @@ export type ThreadDetailsDensity = "full" | "compact" | "essential";
 // Lists that scroll as they grow. Counting them toward density would hide the workspace
 // controls whenever a list gets long, so the fit measurement leaves them out.
 const SCROLLING_LISTS_SELECTOR =
-  "[data-thread-relationships-panel], [data-thread-automations-panel], [data-thread-details-server-overflow], [data-thread-pr-watch]";
+  "[data-thread-relationships-panel], [data-thread-automations-panel], [data-thread-details-server-overflow], [data-thread-details-repository-overflow], [data-thread-pr-watch]";
 
 /** One persistent controls tree: moving between card and popover must not discard open forms. */
 export function ThreadDetailsCard({

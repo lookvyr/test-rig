@@ -98,6 +98,18 @@ export const WorktreeMcpStatusResult = Schema.Struct({
   defaultStartFromOrigin: Schema.Boolean.annotate({
     description: "`startFromOrigin` default for `t3_worktree_handoff`.",
   }),
+  repositories: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        name: TrimmedNonEmptyString,
+        worktreePath: TrimmedNonEmptyString,
+        repositoryPath: TrimmedNonEmptyString,
+      }),
+    ).annotate({
+      description:
+        "In a project covering several repositories: each repository's worktree in this thread's folder, on its branch.",
+    }),
+  ),
 });
 export type WorktreeMcpStatusResult = typeof WorktreeMcpStatusResult.Type;
 

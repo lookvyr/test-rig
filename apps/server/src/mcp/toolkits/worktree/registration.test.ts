@@ -29,10 +29,12 @@ import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 
 import * as ThreadLaunchService from "../../../orchestration-v2/ThreadLaunchService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
+import * as TaskFolders from "../../../workspace/TaskFolders.ts";
 
 const StubServicesLive = Layer.mergeAll(
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+  TaskFolders.layerTest,
   Layer.mock(ProviderInstanceRegistry)({ getInstance: () => Effect.succeed(undefined) }),
   Layer.mock(SecretRequests.SecretRequests)({}),
   Layer.mock(EventSink.EventSinkV2)({}),

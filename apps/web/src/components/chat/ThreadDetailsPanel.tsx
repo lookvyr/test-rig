@@ -6,6 +6,7 @@ import { preloadDiffPanel } from "../diffPanelLoader";
 import { shortcutLabelForCommand } from "../../keybindings";
 import type {
   EditorId,
+  ProjectId,
   ProjectScript,
   ResolvedKeybindingsConfig,
   ScopedThreadRef,
@@ -32,6 +33,9 @@ import { ThreadPullRequestWatches, useWatchedThreadPullRequests } from "./Thread
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
 import { ThreadServersPanel } from "./ThreadServersPanel";
 import { ThreadSideChatsPanel } from "./ThreadSideChatsPanel";
+import { ThreadRepositorySections } from "./ThreadRepositorySections";
+import { projectEnvironment } from "../../state/projects";
+import { taskFolderRepositories } from "@t3tools/client-runtime/state/thread-repositories";
 import { resolveThreadDetailsVisibility, THREAD_DETAILS_ITEMS } from "./threadDetailsItems";
 import { BranchToolbar, type BranchToolbarProps } from "../BranchToolbar";
 import { shouldShowEnvironmentIndicator } from "../BranchToolbar.logic";
@@ -40,6 +44,9 @@ export function ThreadDetailsPanel(props: {
   threadRef: ScopedThreadRef;
   toggleContainer: HTMLElement | null;
   projectName: string | undefined;
+  projectId: ProjectId | null;
+  /** The thread's own worktree, when it has one; such threads reach no other repositories. */
+  worktreePath: string | null;
   scripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
   gitCwd: string | null;
@@ -70,6 +77,29 @@ export function ThreadDetailsPanel(props: {
         })
       : null,
   ).data;
+  // The project's other repositories get their own sections; a plain project folder has no Git
+  // state of its own to show.
+  // For a worktree thread this is its task folder's worktrees; a single worktree has none.
+  const projectFoldersQuery = useEnvironmentQuery(
+    props.projectId && visible.branch
+      ? projectEnvironment.listFolders({
+          environmentId: props.threadRef.environmentId,
+          input: {
+            projectId: props.projectId,
+            ...(props.worktreePath === null ? {} : { worktreePath: props.worktreePath }),
+          },
+        })
+      : null,
+  );
+  const projectFolders = projectFoldersQuery.data;
+  const coversRepositories =
+    projectFolders?.folders.some((folder) => folder.state === "git") ?? false;
+  // A task folder can start with no repositories and gain them under "Other repositories...".
+  const taskFolder =
+    props.worktreePath === null || projectFolders === null || projectFolders.isTaskFolder !== true
+      ? null
+      : taskFolderRepositories(projectFolders);
+  const rootIsRepository = gitStatus?.isRepo !== false;
   const changesTotals = gitStatus?.hasWorkingTreeChanges
     ? gitStatus.workingTree
     : gitStatus?.branchChanges;
@@ -135,9 +165,17 @@ export function ThreadDetailsPanel(props: {
           scripts: visible.scripts && props.scripts !== undefined,
           branch: visible.branch && showBranchRows,
           pullRequests: visible.branch && props.gitCwd !== null,
+          // A draft has no thread yet to link a repository's pull request to.
+          repositories:
+            visible.branch &&
+            !props.isDraft &&
+            props.projectId !== null &&
+            (props.worktreePath === null || taskFolder !== null),
           changes:
             visible.changes &&
             props.gitCwd !== null &&
+            // A plain folder covering repositories opens Review from its repositories instead.
+            rootIsRepository &&
             (!redesign ||
               !props.isDraft ||
               !changesTotals ||
@@ -188,7 +226,7 @@ export function ThreadDetailsPanel(props: {
                   ) : null}
                 </ThreadDetailsSection>
               ) : null}
-              {show.branch || show.pullRequests || show.changes ? (
+              {show.branch || show.pullRequests || show.changes || show.repositories ? (
                 <ThreadDetailsSection
                   title="Version Control"
                   headingId="thread-details-git"
@@ -215,6 +253,16 @@ export function ThreadDetailsPanel(props: {
                         </span>
                       </span>
                     </ThreadDetailsControl>
+                  ) : null}
+                  {show.repositories && props.projectId ? (
+                    <ThreadRepositorySections
+                      threadRef={props.threadRef}
+                      projectId={props.projectId}
+                      threadCwd={rootIsRepository ? props.gitCwd : null}
+                      coversRepositories={coversRepositories || taskFolder !== null}
+                      taskFolder={taskFolder}
+                      onTaskFolderChange={projectFoldersQuery.refresh}
+                    />
                   ) : null}
                   {/* A watched PR is its own row, so it stands in for the generic one. */}
                   {!show.pullRequests ? null : watchedPullRequests.length > 0 ? (

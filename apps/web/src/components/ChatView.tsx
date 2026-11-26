@@ -1,5 +1,13 @@
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import {
+  WorktreeRepositoriesControl,
+  resolveWorktreeRepositoryPaths,
+} from "./WorktreeRepositoriesControl";
+import {
+  DEFAULT_WORKTREE_REPOSITORY_CHOICE,
+  useWorktreeRepositoryChoiceStore,
+} from "../worktreeRepositoryChoiceStore";
+import {
   answerShownApprovalsWithMessage,
   draftAttachmentLists,
   draftAttachmentListsChanged,
@@ -251,6 +259,7 @@ import { environmentCatalog } from "../connection/catalog";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
+import { projectEnvironment } from "../state/projects";
 import {
   primaryServerAvailableEditorsAtom,
   primaryServerKeybindingsAtom,
@@ -2762,6 +2771,43 @@ function ChatViewContent(props: ChatViewProps) {
   const isScratch =
     activeProject != null && isScratchProject(activeProject, serverConfig?.scratchWorkspaceRoot);
   const isGitRepo = !isScratch && (gitStatusQuery.data?.isRepo ?? true);
+  // The repositories the thread's folder covers: the project's, or a worktree thread's task
+  // folder worktrees. The same query as the Review panel and thread details, so it is shared.
+  const threadFolders = useEnvironmentQuery(
+    activeProject && !isScratch && activeThread
+      ? projectEnvironment.listFolders({
+          environmentId,
+          input: {
+            projectId: activeProject.id,
+            ...(activeThread.worktreePath ? { worktreePath: activeThread.worktreePath } : {}),
+          },
+        })
+      : null,
+  ).data;
+  const threadReachesRepositories =
+    threadFolders?.folders.some((folder) => folder.state === "git") ?? false;
+  // A project covering other repositories can start worktree threads even when its own folder
+  // is not a repository: each repository gets a worktree in the thread's folder.
+  const worktreeRepositories = useMemo(
+    () =>
+      activeThreadWorktreePath === null
+        ? (threadFolders?.folders.filter((folder) => folder.state === "git") ?? [])
+        : [],
+    [activeThreadWorktreePath, threadFolders],
+  );
+  const coversRepositories = worktreeRepositories.length > 0;
+  const canUseWorktree = isGitRepo || coversRepositories;
+  // A plain folder covering repositories, or a task folder of worktrees, has turn diffs and Git
+  // views without being a repository itself; so does any thread whose turns changed one.
+  const diffAvailable =
+    isGitRepo ||
+    threadReachesRepositories ||
+    (threadProjection?.checkpointScopes.some((scope) => scope.kind === "repository") ?? false);
+  const worktreeChoiceKey = activeProject ? `${environmentId}:${activeProject.id}` : "";
+  const worktreeRepositoryChoice = useWorktreeRepositoryChoiceStore(
+    (state) => state.byProjectKey[worktreeChoiceKey] ?? DEFAULT_WORKTREE_REPOSITORY_CHOICE,
+  );
+  const setWorktreeRepositoryChoice = useWorktreeRepositoryChoiceStore((state) => state.setChoice);
   const showComposerContextStrip = shouldShowComposerContextStrip({
     isNewThread: isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
@@ -3542,10 +3588,10 @@ function ChatViewContent(props: ChatViewProps) {
   }, [environmentById, environmentCatalogReady, navigate, openPreview]);
 
   const addDiffSurface = useCallback(() => {
-    if (!activeThreadRef || !isServerThread || !isGitRepo) return;
+    if (!activeThreadRef || !isServerThread || !diffAvailable) return;
     useRightPanelStore.getState().open(activeThreadRef, "diff");
     onDiffPanelOpen?.();
-  }, [activeThreadRef, isGitRepo, isServerThread, onDiffPanelOpen]);
+  }, [activeThreadRef, diffAvailable, isServerThread, onDiffPanelOpen]);
   const addFilesSurface = useCallback(() => {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
@@ -4215,7 +4261,7 @@ function ChatViewContent(props: ChatViewProps) {
       : false;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
-    isGitRepo,
+    isGitRepo: canUseWorktree,
   });
   const localCheckoutBranchMismatch = useMemo(
     () =>
@@ -5515,14 +5561,19 @@ function ChatViewContent(props: ChatViewProps) {
     const isFirstMessage = !isServerThread || activeThreadMessages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
-        ? activeThreadBranch
+        ? isGitRepo
+          ? activeThreadBranch
+          : worktreeRepositoryChoice.baseBranch.trim() || "HEAD"
         : null;
+    const worktreeRepositoryPaths = coversRepositories
+      ? resolveWorktreeRepositoryPaths(worktreeRepositories, worktreeRepositoryChoice)
+      : null;
 
     // In worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
     const shouldCreateWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
-    if (shouldCreateWorktree && !activeThreadBranch) {
+    if (shouldCreateWorktree && !baseBranchForWorktree) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
     }
@@ -5783,6 +5834,9 @@ function ChatViewContent(props: ChatViewProps) {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                      ...(worktreeRepositoryPaths === null
+                        ? {}
+                        : { repositories: worktreeRepositoryPaths.map((path) => ({ path })) }),
                     },
                     runSetupScript: true,
                   }
@@ -6415,6 +6469,19 @@ function ChatViewContent(props: ChatViewProps) {
     environmentId: activeThread.environmentId,
     threadId: activeThread.id,
     showGitControls: isGitRepo,
+    showEnvModeSelector: canUseWorktree,
+    ...(coversRepositories && envMode === "worktree" && activeThread.worktreePath === null
+      ? {
+          repositoriesControl: (
+            <WorktreeRepositoriesControl
+              repositories={worktreeRepositories}
+              choice={worktreeRepositoryChoice}
+              asksBaseBranch={!isGitRepo}
+              onChange={(choice) => setWorktreeRepositoryChoice(worktreeChoiceKey, choice)}
+            />
+          ),
+        }
+      : {}),
     ...(routeKind === "draft" && draftId ? { draftId } : {}),
     onEnvModeChange,
     startFromOrigin,
@@ -7089,6 +7156,8 @@ function ChatViewContent(props: ChatViewProps) {
                 threadRef={activeThreadRef}
                 toggleContainer={threadDetailsToggleContainer}
                 projectName={activeProject.title}
+                projectId={isScratch ? null : activeProject.id}
+                worktreePath={activeThread?.worktreePath ?? null}
                 scripts={activeProjectScripts}
                 preferredScriptId={lastInvokedScriptByProjectId[activeProject.id] ?? null}
                 openInCwd={gitCwd}
@@ -7238,7 +7307,7 @@ function ChatViewContent(props: ChatViewProps) {
           onAddSideChat={sideChatAvailable ? () => void addSideChatSurface() : undefined}
           sideChatAvailable={sideChatAvailable}
           browserAvailable={isPreviewAvailableFor(activeThreadRef?.environmentId)}
-          diffAvailable={isServerThread && isGitRepo}
+          diffAvailable={isServerThread && diffAvailable}
           filesAvailable={activeProject !== null}
         >
           {rightPanelContent}
@@ -7291,7 +7360,7 @@ function ChatViewContent(props: ChatViewProps) {
             onAddSideChat={sideChatAvailable ? () => void addSideChatSurface() : undefined}
             sideChatAvailable={sideChatAvailable}
             browserAvailable={isPreviewAvailableFor(activeThreadRef?.environmentId)}
-            diffAvailable={isServerThread && isGitRepo}
+            diffAvailable={isServerThread && diffAvailable}
             filesAvailable={activeProject !== null}
           >
             {rightPanelContent}

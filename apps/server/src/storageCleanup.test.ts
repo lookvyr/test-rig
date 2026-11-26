@@ -11,6 +11,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -21,6 +22,7 @@ import {
   ProviderSessionId,
   ThreadId,
   ProjectId,
+  type TaskFolder,
   type TerminalSummary,
 } from "@t3tools/contracts";
 import { ServerConfig } from "./config.ts";
@@ -32,6 +34,7 @@ import { TerminalManager } from "./terminal/Manager.ts";
 import { GitVcsDriver } from "./vcs/GitVcsDriver.ts";
 import { GitManager } from "./git/GitManager.ts";
 import * as Cleanup from "./storageCleanup.ts";
+import * as TaskFolders from "./workspace/TaskFolders.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -47,261 +50,264 @@ const git = (cwd: string, ...args: string[]) =>
 
 const decodeThread = Schema.decodeUnknownSync(Schema.toCodecIso(OrchestrationV2ThreadShell));
 const decodeThreadId = Schema.decodeUnknownSync(OrchestrationV2ThreadShell.fields.id);
-const fixture = Effect.gen(function* () {
-  const root = NodeFS.realpathSync(
-    NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "test-rig-cleanup-")),
-  );
-  roots.push(root);
-  const repo = NodePath.join(root, "repo");
-  NodeFS.mkdirSync(repo);
-  git(repo, "init", "-b", "main");
-  git(repo, "config", "user.name", "Cleanup test");
-  git(repo, "config", "user.email", "cleanup@example.invalid");
-  NodeFS.writeFileSync(NodePath.join(repo, "tracked.txt"), "original\n");
-  NodeFS.writeFileSync(
-    NodePath.join(repo, ".gitignore"),
-    "node_modules/\n.env\n.husky/_/\ndist/\n",
-  );
-  git(repo, "add", ".");
-  git(repo, "commit", "-m", "fixture");
-  const worktreesDir = NodePath.join(root, "worktrees");
-  NodeFS.mkdirSync(worktreesDir, { recursive: true });
-  const checkout = NodePath.join(worktreesDir, "task");
-  git(repo, "worktree", "add", "-b", "task", checkout);
-  const now = "2026-09-17T10:00:00.000Z";
-  const thread = decodeThread({
-    id: "thread-1",
-    projectId: "project-1",
-    title: "Cleanup test",
-    createdBy: "user",
-    creationSource: "web",
-    modelSelection: { instanceId: "codex", model: "test" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: "task",
-    worktreePath: checkout,
-    providerInstanceId: "codex",
-    activeProviderThreadId: null,
-    lineage: { rootThreadId: "thread-1", parentThreadId: null, relationshipToParent: null },
-    forkedFrom: null,
-    latestRunId: null,
-    activeRunId: null,
-    status: "idle",
-    pendingRuntimeRequest: null,
-    latestVisibleMessage: null,
-    itemCount: 0,
-    visibleItemCount: 0,
-    createdAt: DateTime.makeUnsafe(now),
-    updatedAt: DateTime.makeUnsafe(now),
-    archivedAt: null,
-    deletedAt: null,
-    settledOverride: "settled",
-    settledAt: DateTime.makeUnsafe(now),
-    latestUserMessageAt: null,
-    hasActionableProposedPlan: false,
-  });
-  let threads = [thread];
-  let settings: ServerSettings = DEFAULT_SERVER_SETTINGS;
-  let merged = false;
-  let terminals: TerminalSummary[] = [];
-  let afterStop = () => {};
-  let sessions: Effect.Success<ProviderSessionManagerV2["Service"]["residencies"]> = [];
-  let pendingWorkspaceEffects = false;
-  const project = {
-    id: ProjectId.make("project-1"),
-    title: "Fixture",
-    workspaceRoot: repo,
-    scripts: [],
-    defaultModelSelection: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const layer = Cleanup.layer.pipe(
-    Layer.provide(
-      Layer.mock(EffectOutboxV2, {
-        hasPendingWorkspaceEffects: () => Effect.sync(() => pendingWorkspaceEffects),
-      }),
-    ),
-    Layer.provide(ServerConfig.layerTest(repo, root)),
-    Layer.provide(
-      Layer.mock(ServerSettingsService, {
-        getSettings: Effect.sync(() => settings),
-        subscribeChanges: Effect.succeed(Stream.empty),
-      }),
-    ),
-    Layer.provide(Layer.mock(ProjectStoreV2, { listShells: () => Effect.succeed([project]) })),
-    Layer.provide(
-      Layer.mock(ThreadManagementService, {
-        getShellSnapshot: () =>
-          Effect.sync(() => ({
-            schemaVersion: 2,
-            snapshotSequence: 1,
-            threads,
-            archivedThreads: [],
-          })),
-        streamDomainEvents: Stream.empty,
-        dispatch: (command) =>
-          Effect.sync(() => {
-            if (command.type === "thread.auto-settle")
-              threads = threads.map((entry) =>
-                entry.id === command.threadId
-                  ? { ...entry, settledOverride: "settled", settledAt: DateTime.makeUnsafe(now) }
-                  : entry,
-              );
-            if (command.type === "thread.worktree-cleanup.set")
-              threads = threads.map((entry) =>
-                entry.id === command.threadId
-                  ? { ...entry, worktreeCleanup: command.status }
-                  : entry,
-              );
-            return { sequence: 1, storedEvents: [] };
-          }),
-      }),
-    ),
-    Layer.provide(
-      Layer.mock(ProviderSessionManagerV2, {
-        residencies: Effect.sync(() => sessions),
-        close: () =>
-          Effect.sync(() => {
-            afterStop();
-            sessions = [];
-          }),
-      }),
-    ),
-    Layer.provide(
-      Layer.mock(TerminalManager, {
-        subscribeMetadata: (listener) =>
-          listener({ type: "snapshot", terminals }).pipe(Effect.as(() => {})),
-        close: () => Effect.void,
-      }),
-    ),
-    Layer.provide(
-      Layer.mock(GitVcsDriver, {
-        execute: (input) =>
-          Effect.sync(() => {
-            const result = NodeChildProcess.spawnSync("git", [...input.args], {
-              cwd: input.cwd,
-              encoding: "utf8",
-            });
-            if (result.status !== 0 && input.allowNonZeroExit !== true)
-              throw new Error(`git ${input.args.join(" ")} failed: ${result.stderr}`);
-            return {
-              exitCode: ChildProcessSpawner.ExitCode(result.status ?? 1),
-              stdout: result.stdout,
-              stderr: result.stderr,
-              stdoutTruncated: false,
-              stderrTruncated: false,
-            };
-          }),
-        resolveCommit: (input) =>
-          Effect.sync(() => ({ commitSha: git(input.cwd, "rev-parse", input.revision).trim() })),
-        statusDetailsLocal: (cwd) =>
-          Effect.sync(() => ({
-            isRepo: true,
-            hasOriginRemote: false,
-            isDefaultBranch: false,
-            branch: git(cwd, "branch", "--show-current").trim(),
-            upstreamRef: null,
-            hasWorkingTreeChanges: git(cwd, "status", "--porcelain").length > 0,
-            workingTree: { files: [], insertions: 0, deletions: 0 },
-            hasUpstream: false,
-            aheadCount: 0,
-            behindCount: 0,
-            aheadOfDefaultCount: 0,
-          })),
-        removeWorktree: (input) =>
-          Effect.sync(() => {
-            expect(input.force).toBe(false);
-            git(input.cwd, "worktree", "remove", input.path);
-          }),
-      }),
-    ),
-    Layer.provide(
-      Layer.mock(GitManager, {
-        remoteStatus: () =>
-          Effect.sync(() => {
-            return {
+const fixtureWith = (taskFoldersLayer: Layer.Layer<TaskFolders.TaskFolders>) =>
+  Effect.gen(function* () {
+    const root = NodeFS.realpathSync(
+      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "test-rig-cleanup-")),
+    );
+    roots.push(root);
+    const repo = NodePath.join(root, "repo");
+    NodeFS.mkdirSync(repo);
+    git(repo, "init", "-b", "main");
+    git(repo, "config", "user.name", "Cleanup test");
+    git(repo, "config", "user.email", "cleanup@example.invalid");
+    NodeFS.writeFileSync(NodePath.join(repo, "tracked.txt"), "original\n");
+    NodeFS.writeFileSync(
+      NodePath.join(repo, ".gitignore"),
+      "node_modules/\n.env\n.husky/_/\ndist/\n",
+    );
+    git(repo, "add", ".");
+    git(repo, "commit", "-m", "fixture");
+    const worktreesDir = NodePath.join(root, "worktrees");
+    NodeFS.mkdirSync(worktreesDir, { recursive: true });
+    const checkout = NodePath.join(worktreesDir, "task");
+    git(repo, "worktree", "add", "-b", "task", checkout);
+    const now = "2026-09-17T10:00:00.000Z";
+    const thread = decodeThread({
+      id: "thread-1",
+      projectId: "project-1",
+      title: "Cleanup test",
+      createdBy: "user",
+      creationSource: "web",
+      modelSelection: { instanceId: "codex", model: "test" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: "task",
+      worktreePath: checkout,
+      providerInstanceId: "codex",
+      activeProviderThreadId: null,
+      lineage: { rootThreadId: "thread-1", parentThreadId: null, relationshipToParent: null },
+      forkedFrom: null,
+      latestRunId: null,
+      activeRunId: null,
+      status: "idle",
+      pendingRuntimeRequest: null,
+      latestVisibleMessage: null,
+      itemCount: 0,
+      visibleItemCount: 0,
+      createdAt: DateTime.makeUnsafe(now),
+      updatedAt: DateTime.makeUnsafe(now),
+      archivedAt: null,
+      deletedAt: null,
+      settledOverride: "settled",
+      settledAt: DateTime.makeUnsafe(now),
+      latestUserMessageAt: null,
+      hasActionableProposedPlan: false,
+    });
+    let threads = [thread];
+    let settings: ServerSettings = DEFAULT_SERVER_SETTINGS;
+    let merged = false;
+    let terminals: TerminalSummary[] = [];
+    let afterStop = () => {};
+    let sessions: Effect.Success<ProviderSessionManagerV2["Service"]["residencies"]> = [];
+    let pendingWorkspaceEffects = false;
+    const project = {
+      id: ProjectId.make("project-1"),
+      title: "Fixture",
+      workspaceRoot: repo,
+      scripts: [],
+      defaultModelSelection: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const layer = Cleanup.layer.pipe(
+      Layer.provide(taskFoldersLayer),
+      Layer.provide(
+        Layer.mock(EffectOutboxV2, {
+          hasPendingWorkspaceEffects: () => Effect.sync(() => pendingWorkspaceEffects),
+        }),
+      ),
+      Layer.provide(ServerConfig.layerTest(repo, root)),
+      Layer.provide(
+        Layer.mock(ServerSettingsService, {
+          getSettings: Effect.sync(() => settings),
+          subscribeChanges: Effect.succeed(Stream.empty),
+        }),
+      ),
+      Layer.provide(Layer.mock(ProjectStoreV2, { listShells: () => Effect.succeed([project]) })),
+      Layer.provide(
+        Layer.mock(ThreadManagementService, {
+          getShellSnapshot: () =>
+            Effect.sync(() => ({
+              schemaVersion: 2,
+              snapshotSequence: 1,
+              threads,
+              archivedThreads: [],
+            })),
+          streamDomainEvents: Stream.empty,
+          dispatch: (command) =>
+            Effect.sync(() => {
+              if (command.type === "thread.auto-settle")
+                threads = threads.map((entry) =>
+                  entry.id === command.threadId
+                    ? { ...entry, settledOverride: "settled", settledAt: DateTime.makeUnsafe(now) }
+                    : entry,
+                );
+              if (command.type === "thread.worktree-cleanup.set")
+                threads = threads.map((entry) =>
+                  entry.id === command.threadId
+                    ? { ...entry, worktreeCleanup: command.status }
+                    : entry,
+                );
+              return { sequence: 1, storedEvents: [] };
+            }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProviderSessionManagerV2, {
+          residencies: Effect.sync(() => sessions),
+          close: () =>
+            Effect.sync(() => {
+              afterStop();
+              sessions = [];
+            }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(TerminalManager, {
+          subscribeMetadata: (listener) =>
+            listener({ type: "snapshot", terminals }).pipe(Effect.as(() => {})),
+          close: () => Effect.void,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(GitVcsDriver, {
+          execute: (input) =>
+            Effect.sync(() => {
+              const result = NodeChildProcess.spawnSync("git", [...input.args], {
+                cwd: input.cwd,
+                encoding: "utf8",
+              });
+              if (result.status !== 0 && input.allowNonZeroExit !== true)
+                throw new Error(`git ${input.args.join(" ")} failed: ${result.stderr}`);
+              return {
+                exitCode: ChildProcessSpawner.ExitCode(result.status ?? 1),
+                stdout: result.stdout,
+                stderr: result.stderr,
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              };
+            }),
+          resolveCommit: (input) =>
+            Effect.sync(() => ({ commitSha: git(input.cwd, "rev-parse", input.revision).trim() })),
+          statusDetailsLocal: (cwd) =>
+            Effect.sync(() => ({
+              isRepo: true,
+              hasOriginRemote: false,
+              isDefaultBranch: false,
+              branch: git(cwd, "branch", "--show-current").trim(),
+              upstreamRef: null,
+              hasWorkingTreeChanges: git(cwd, "status", "--porcelain").length > 0,
+              workingTree: { files: [], insertions: 0, deletions: 0 },
               hasUpstream: false,
               aheadCount: 0,
               behindCount: 0,
-              pr: merged
-                ? {
-                    number: 1,
-                    title: "Merged",
-                    url: "https://example.invalid/pr/1",
-                    baseRef: "main",
-                    headRef: "task",
-                    state: "merged" as const,
-                  }
-                : null,
-            };
-          }),
-        invalidateStatus: () => Effect.void,
-      }),
-    ),
-    Layer.provide(NodeServices.layer),
-  );
-  const context = yield* Layer.build(layer);
-  const service = Context.get(context, Cleanup.StorageCleanup);
-  const state = {
-    get: (id: ThreadId) => threads.find((thread) => thread.id === id)?.worktreeCleanup ?? null,
-  };
-  return {
-    repo,
-    checkout,
-    thread,
-    state,
-    sweep: (mode: Cleanup.StorageCleanupMode = "quick") =>
-      service.sweep(mode).pipe(Effect.provide(context)),
-    start: () => service.start().pipe(Effect.provide(context)),
-    pendingEffects: (value: boolean) => {
-      pendingWorkspaceEffects = value;
-    },
-    residencies: (value: typeof sessions) => {
-      sessions = value;
-    },
-    enable: (value: boolean) => {
-      settings = {
-        ...settings,
-        storageCleanup: {
-          ...settings.storageCleanup,
-          worktreeSettledAfterDays: value ? 0 : null,
-        },
-      };
-    },
-    rules: (value: Partial<ServerSettings["storageCleanup"]>) => {
-      settings = { ...settings, storageCleanup: { ...settings.storageCleanup, ...value } };
-    },
-    settings: (value: Partial<ServerSettings>) => {
-      settings = { ...settings, ...value };
-    },
-    config: yield* ServerConfig.pipe(
-      Effect.provide(ServerConfig.layerTest(repo, root).pipe(Layer.provide(NodeServices.layer))),
-    ),
-    latestReport: () => service.latestReport,
-    setThreads: (value: typeof threads) => {
-      threads = value;
-    },
-    merge: () => {
-      merged = true;
-    },
-    terminal: (value: TerminalSummary) => {
-      terminals = [value];
-    },
-    onStop: (callback: () => void) => {
-      afterStop = callback;
-      sessions = [
-        {
-          providerSessionId: ProviderSessionId.make("session1"),
-          threadIds: [thread.id],
-          cwd: checkout,
-          busy: false,
-          closing: false,
-        },
-      ];
-    },
-  };
-});
+              aheadOfDefaultCount: 0,
+            })),
+          removeWorktree: (input) =>
+            Effect.sync(() => {
+              expect(input.force).toBe(false);
+              git(input.cwd, "worktree", "remove", input.path);
+            }),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(GitManager, {
+          remoteStatus: () =>
+            Effect.sync(() => {
+              return {
+                hasUpstream: false,
+                aheadCount: 0,
+                behindCount: 0,
+                pr: merged
+                  ? {
+                      number: 1,
+                      title: "Merged",
+                      url: "https://example.invalid/pr/1",
+                      baseRef: "main",
+                      headRef: "task",
+                      state: "merged" as const,
+                    }
+                  : null,
+              };
+            }),
+          invalidateStatus: () => Effect.void,
+        }),
+      ),
+      Layer.provide(NodeServices.layer),
+    );
+    const context = yield* Layer.build(layer);
+    const service = Context.get(context, Cleanup.StorageCleanup);
+    const state = {
+      get: (id: ThreadId) => threads.find((thread) => thread.id === id)?.worktreeCleanup ?? null,
+    };
+    return {
+      repo,
+      checkout,
+      thread,
+      state,
+      sweep: (mode: Cleanup.StorageCleanupMode = "quick") =>
+        service.sweep(mode).pipe(Effect.provide(context)),
+      start: () => service.start().pipe(Effect.provide(context)),
+      pendingEffects: (value: boolean) => {
+        pendingWorkspaceEffects = value;
+      },
+      residencies: (value: typeof sessions) => {
+        sessions = value;
+      },
+      enable: (value: boolean) => {
+        settings = {
+          ...settings,
+          storageCleanup: {
+            ...settings.storageCleanup,
+            worktreeSettledAfterDays: value ? 0 : null,
+          },
+        };
+      },
+      rules: (value: Partial<ServerSettings["storageCleanup"]>) => {
+        settings = { ...settings, storageCleanup: { ...settings.storageCleanup, ...value } };
+      },
+      settings: (value: Partial<ServerSettings>) => {
+        settings = { ...settings, ...value };
+      },
+      config: yield* ServerConfig.pipe(
+        Effect.provide(ServerConfig.layerTest(repo, root).pipe(Layer.provide(NodeServices.layer))),
+      ),
+      latestReport: () => service.latestReport,
+      setThreads: (value: typeof threads) => {
+        threads = value;
+      },
+      merge: () => {
+        merged = true;
+      },
+      terminal: (value: TerminalSummary) => {
+        terminals = [value];
+      },
+      onStop: (callback: () => void) => {
+        afterStop = callback;
+        sessions = [
+          {
+            providerSessionId: ProviderSessionId.make("session1"),
+            threadIds: [thread.id],
+            cwd: checkout,
+            busy: false,
+            closing: false,
+          },
+        ];
+      },
+    };
+  });
+const fixture = fixtureWith(TaskFolders.layerTest);
 
 describe("settled worktree cleanup", () => {
   it.effect("waits for pending or delayed checkpoint work and retries after it drains", () =>
@@ -753,4 +759,102 @@ describe("storageCleanupPullRequestMerged", () => {
     );
     expect(Cleanup.storageCleanupPullRequestMerged(null, worktree)).toBe(false);
   });
+});
+
+describe("task folder cleanup", () => {
+  const stub = (state: {
+    taskFolder: TaskFolder | undefined;
+    calls: Array<Parameters<TaskFolders.TaskFolders["Service"]["remove"]>[0]>;
+    verdicts: Array<string | null>;
+  }) =>
+    Layer.succeed(
+      TaskFolders.TaskFolders,
+      TaskFolders.TaskFolders.of({
+        covers: () => Effect.succeed(true),
+        find: (target) =>
+          Effect.succeed(
+            state.taskFolder !== undefined && target === state.taskFolder.projectPath
+              ? Option.some(state.taskFolder)
+              : Option.none(),
+          ),
+        create: () => Effect.die("unused"),
+        addRepository: () => Effect.die("unused"),
+        remove: (input) =>
+          Effect.gen(function* () {
+            state.calls.push(input);
+            const verdicts = yield* Effect.forEach(input.taskFolder.repositories, (checkout) =>
+              input.inspect!(checkout),
+            );
+            state.verdicts.push(...verdicts);
+            return {
+              removed: input.taskFolder.repositories
+                .filter((_, index) => verdicts[index] === null)
+                .map((checkout) => checkout.worktreePath),
+              kept: input.taskFolder.repositories.flatMap((checkout, index) =>
+                verdicts[index] === null
+                  ? []
+                  : [{ path: checkout.worktreePath, reason: verdicts[index]! }],
+              ),
+            };
+          }),
+        restore: () => Effect.succeed(false),
+      }),
+    );
+
+  it.effect("removes a settled thread's task folder checkout by checkout, keeping its record", () =>
+    Effect.gen(function* () {
+      const state = {
+        taskFolder: undefined as TaskFolder | undefined,
+        calls: [] as Array<Parameters<TaskFolders.TaskFolders["Service"]["remove"]>[0]>,
+        verdicts: [] as Array<string | null>,
+      };
+      const f = yield* fixtureWith(stub(state));
+      state.taskFolder = {
+        root: NodePath.dirname(f.checkout),
+        projectId: ProjectId.make("project-1"),
+        projectRoot: f.repo,
+        anchor: f.repo,
+        projectPath: f.checkout,
+        projectIsWorktree: false,
+        repositories: [{ name: "repo", repositoryPath: f.repo, worktreePath: f.checkout }],
+        baseRef: "main",
+      };
+      // Local work in one checkout keeps it.
+      NodeFS.writeFileSync(NodePath.join(f.checkout, "tracked.txt"), "changed\n");
+      const kept = yield* f.sweep("manual");
+      expect(state.calls[0]).toMatchObject({ force: false, keepRecord: true });
+      expect(state.verdicts[0]).toMatch(/^has uncommitted changes/);
+      expect(kept.entries[0]).toMatchObject({ outcome: "kept", path: f.checkout });
+
+      git(f.checkout, "checkout", "--", "tracked.txt");
+      const removed = yield* f.sweep("manual");
+      expect(state.verdicts[1]).toBeNull();
+      expect(removed.entries[0]).toMatchObject({ outcome: "removed", path: f.checkout });
+    }),
+  );
+
+  it.effect("leaves a task folder alone for merged and unchanged rules", () =>
+    Effect.gen(function* () {
+      const state = {
+        taskFolder: undefined as TaskFolder | undefined,
+        calls: [] as Array<Parameters<TaskFolders.TaskFolders["Service"]["remove"]>[0]>,
+        verdicts: [] as Array<string | null>,
+      };
+      const f = yield* fixtureWith(stub(state));
+      state.taskFolder = {
+        root: NodePath.dirname(f.checkout),
+        projectId: ProjectId.make("project-1"),
+        projectRoot: f.repo,
+        anchor: f.repo,
+        projectPath: f.checkout,
+        projectIsWorktree: false,
+        repositories: [{ name: "repo", repositoryPath: f.repo, worktreePath: f.checkout }],
+        baseRef: "main",
+      };
+      f.rules({ worktreeSettledAfterDays: null, worktreeUnchanged: true, worktreeOnMerge: true });
+      const result = yield* f.sweep("manual");
+      expect(state.calls).toHaveLength(0);
+      expect(result.entries[0]?.outcome).toBe("kept");
+    }),
+  );
 });

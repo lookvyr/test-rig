@@ -1,6 +1,8 @@
 import {
   CommandId,
+  PROJECT_ADDED_FOLDERS_MAX,
   type OrchestrationProjectShell,
+  type ProjectAddedFolder,
   ProjectId,
   type Project,
   type ProjectCreatePayload,
@@ -11,8 +13,11 @@ import {
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
@@ -82,6 +87,15 @@ export class ProjectNotEmptyError extends Schema.TaggedError<ProjectNotEmptyErro
   }
 }
 
+export class ProjectInvalidError extends Schema.TaggedError<ProjectInvalidError>()(
+  "ProjectInvalidError",
+  { projectId: ProjectId, detail: Schema.String },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 export class ProjectOperationError extends Schema.TaggedError<ProjectOperationError>()(
   "ProjectOperationError",
   {
@@ -104,6 +118,7 @@ export class ProjectOperationError extends Schema.TaggedError<ProjectOperationEr
 }
 
 export type ProjectServiceError =
+  | ProjectInvalidError
   | ProjectNotFoundError
   | ProjectConflictError
   | ProjectNotEmptyError
@@ -153,6 +168,8 @@ export const make = Effect.gen(function* () {
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const legacyImporter = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
   const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   // Commands for one project run in order. Commands that claim a workspace root
   // also hold that root, so two projects cannot both claim it.
   const projectLocks = yield* makeKeyedSerialExecutor<ProjectId>();
@@ -172,6 +189,7 @@ export const make = Effect.gen(function* () {
     autoPull: row.autoPull,
     projectIcon: row.projectIcon,
     scripts: row.scripts,
+    ...(row.addedFolders.length === 0 ? {} : { addedFolders: row.addedFolders }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
@@ -219,13 +237,27 @@ export const make = Effect.gen(function* () {
    * Plan one command against rows read under its locks, then commit its event or
    * its rejection. A reused command id resolves to the receipt it already has.
    */
-  const commit = Effect.fn("ProjectService.commit")(function* (command: ProjectCommand) {
+  const commit = Effect.fn("ProjectService.commit")(function* (
+    initial: ProjectCommand,
+    // Decides the command from the row as it is under the project's lock. It must keep the
+    // command's type and workspace root, which pick the locks.
+    refine?: (
+      current: ProjectStore.ProjectRow | undefined,
+    ) => Effect.Effect<ProjectCommand, ProjectServiceError>,
+  ) {
+    const command = initial;
     const { projectId } = command;
     const dispatchError = (cause: unknown) =>
       new ProjectOperationError({ operation: "dispatch-project-command", projectId, cause });
     const workspaceRoot = command.type === "project.delete" ? undefined : command.workspaceRoot;
     const planAndCommit = Effect.gen(function* () {
       const project = Option.getOrUndefined(yield* readRow(projectId, { includeDeleted: true }));
+      let refinedCommand = command;
+      if (refine !== undefined) {
+        const refined = yield* Effect.exit(refine(project));
+        if (Exit.isFailure(refined)) return { refused: refined.cause } as const;
+        refinedCommand = refined.value;
+      }
       const workspaceOwner =
         workspaceRoot === undefined
           ? undefined
@@ -239,7 +271,7 @@ export const make = Effect.gen(function* () {
         .event({ commandId: command.commandId })
         .pipe(Effect.mapError(dispatchError));
       const planned = planProjectCommand({
-        command,
+        command: refinedCommand,
         state: { project, workspaceOwner },
         eventId,
         now,
@@ -252,17 +284,18 @@ export const make = Effect.gen(function* () {
           acceptedAt: now,
           event: planned.success,
         });
-        return receipt;
+        return { receipt } as const;
       }
-      return yield* eventSink.commitRejectedProjectCommand({
+      const receipt = yield* eventSink.commitRejectedProjectCommand({
         commandId: command.commandId,
         projectId,
         commandType: command.type,
         rejectedAt: now,
         error: encodeProjectCommandRejection(planned.failure),
       });
+      return { receipt } as const;
     });
-    const receipt = yield* projectLocks
+    const outcome = yield* projectLocks
       .withLock(
         projectId,
         workspaceRoot === undefined
@@ -270,6 +303,8 @@ export const make = Effect.gen(function* () {
           : workspaceLocks.withLock(workspaceRoot, planAndCommit),
       )
       .pipe(Effect.mapError(dispatchError));
+    if ("refused" in outcome) return yield* Effect.failCause(outcome.refused);
+    const { receipt } = outcome;
     if (receipt.projectId !== projectId || receipt.commandType !== command.type) {
       return yield* dispatchError(
         `Command ${command.commandId} was already used by ${receipt.commandType} for ${receipt.projectId}.`,
@@ -354,6 +389,73 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  /**
+   * The added-folder list after an update: the current one, less the removed paths, plus the new
+   * folders. Only a folder being added has to exist; one already added may have gone missing.
+   */
+  const isWithin = (root: string, target: string) => {
+    const relative = path.relative(root, target);
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  };
+
+  const realPathOf = (target: string) =>
+    fileSystem.realPath(target).pipe(Effect.orElseSucceed(() => target));
+
+  /**
+   * The added-folder list after an update: the current one, less the removed paths and any that
+   * no longer fit the project's folder, plus the new folders. New folders are stored as their real
+   * path, so agents are granted the place that was approved; only a folder being added has to
+   * exist, since one already added may have gone missing.
+   */
+  const nextAddedFolders = Effect.fn("ProjectService.nextAddedFolders")(function* (input: {
+    readonly projectId: ProjectId;
+    readonly workspaceRoot: string;
+    readonly current: ReadonlyArray<ProjectAddedFolder>;
+    readonly add: ReadonlyArray<ProjectAddedFolder>;
+    readonly remove: ReadonlyArray<string>;
+  }) {
+    const invalid = (detail: string) =>
+      Effect.fail(new ProjectInvalidError({ projectId: input.projectId, detail }));
+    const root = yield* realPathOf(input.workspaceRoot);
+    const overlapsRoot = (folderPath: string) =>
+      isWithin(root, folderPath) || isWithin(folderPath, root);
+    const removed = new Set(input.remove.map((entry) => path.resolve(entry)));
+    // A moved project folder can come to hold, or sit inside, a folder added before.
+    const next = input.current.filter(
+      (folder) => !removed.has(path.resolve(folder.path)) && !overlapsRoot(folder.path),
+    );
+    for (const folder of input.add) {
+      if (!path.isAbsolute(folder.path)) {
+        return yield* invalid(`Folder '${folder.path}' must be an absolute path.`);
+      }
+      const isFolder = yield* fileSystem.stat(folder.path).pipe(
+        Effect.map((info) => info.type === "Directory"),
+        Effect.orElseSucceed(() => false),
+      );
+      if (!isFolder) return yield* invalid(`'${folder.path}' is not a folder on this machine.`);
+      const folderPath = yield* realPathOf(path.resolve(folder.path));
+      if (next.some((existing) => existing.path === folderPath)) continue;
+      if (isWithin(root, folderPath)) {
+        // Repositories inside the project folder are found on their own.
+        return yield* invalid(
+          folderPath === root
+            ? "The project's own folder is always part of it; add other folders."
+            : `'${folder.path}' is inside the project folder, so its repositories are already part of the project.`,
+        );
+      }
+      if (isWithin(folderPath, root)) {
+        return yield* invalid(`'${folder.path}' contains the project's own folder.`);
+      }
+      next.push({ path: folderPath, name: folder.name });
+    }
+    if (next.length > PROJECT_ADDED_FOLDERS_MAX) {
+      return yield* invalid(
+        `A project can have at most ${PROJECT_ADDED_FOLDERS_MAX} added folders.`,
+      );
+    }
+    return next;
+  });
+
   const update: ProjectService["Service"]["update"] = Effect.fn("ProjectService.update")(
     function* (input) {
       const existing = yield* readRow(input.projectId);
@@ -368,7 +470,7 @@ export const make = Effect.gen(function* () {
               projectId: input.projectId,
               workspaceRoot: input.workspaceRoot,
             });
-      yield* commit({
+      const command = {
         type: "project.meta.update",
         commandId: input.commandId,
         projectId: input.projectId,
@@ -384,7 +486,32 @@ export const make = Effect.gen(function* () {
           ? {}
           : { defaultThreadEnvMode: input.defaultThreadEnvMode }),
         ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
-      });
+      } as const;
+      const changesFolders =
+        (input.addFolders?.length ?? 0) > 0 || (input.removeFolders?.length ?? 0) > 0;
+      // Checked against the row under the lock: another update may have moved the project or
+      // changed its folders meanwhile.
+      yield* commit(
+        command,
+        changesFolders || workspaceRoot !== previousRoot
+          ? (current) =>
+              current === undefined || current.deletedAt !== null
+                ? Effect.succeed(command)
+                : nextAddedFolders({
+                    projectId: input.projectId,
+                    workspaceRoot: command.workspaceRoot ?? current.workspaceRoot,
+                    current: current.addedFolders,
+                    add: input.addFolders ?? [],
+                    remove: input.removeFolders ?? [],
+                  }).pipe(
+                    Effect.map((addedFolders) =>
+                      !changesFolders && addedFolders.length === current.addedFolders.length
+                        ? command
+                        : { ...command, addedFolders },
+                    ),
+                  )
+          : undefined,
+      );
       if (workspaceRoot !== previousRoot) {
         yield* projectEnrichment.invalidate([previousRoot, workspaceRoot]);
       }

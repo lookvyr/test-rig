@@ -466,6 +466,43 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
+  it.effect("grants a multi-folder thread's outside folders and lists its folders", () =>
+    Effect.gen(function* () {
+      const workspace = {
+        folders: [
+          { name: "api", path: "/shop/api", isGitRepository: true },
+          { name: "infra", path: "/infra", isGitRepository: true },
+        ],
+        extraRoots: ["/infra"],
+      };
+      const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-workspace",
+        codexInput: [{ type: "text", text: "test" }],
+        runtimePolicy: { runtimeMode: "auto", interactionMode: "default", cwd: "/shop", workspace },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      });
+      assert.deepEqual(params.sandboxPolicy, { type: "workspaceWrite", writableRoots: ["/infra"] });
+      assert.include(
+        params.additionalContext?.test_rig_workspace?.value ?? "",
+        "- infra (Git repository): /infra",
+      );
+
+      // Read-only and full access have nothing to grant.
+      const readOnly = yield* CodexAdapterV2.buildCodexTurnStartParams({
+        nativeThreadId: "native-workspace-read-only",
+        codexInput: [{ type: "text", text: "test" }],
+        runtimePolicy: {
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          cwd: "/shop",
+          workspace,
+        },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      });
+      assert.deepEqual(readOnly.sandboxPolicy, { type: "readOnly" });
+    }),
+  );
+
   it.effect("adds default-mode developer instructions when the T3 MCP server is attached", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
