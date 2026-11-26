@@ -1,5 +1,12 @@
 # Selected upstream ports
 
+## Codex delegated thread archiving
+
+Adapts [#34829](https://github.com/pingdotgg/t3code/pull/34829). At idle cleanup
+or graceful shutdown, Codex archives completed app-owned children whose results
+reached their parents. Continuing restores the native thread. Forking restores
+it for the fork request and archives the idle source again afterward.
+
 ## November 5 nightly intake
 
 This batch adapts local-core changes through T3 Code `v0.1.8-nightly.20261105.4234`.

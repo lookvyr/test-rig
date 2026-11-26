@@ -83,6 +83,11 @@ completed agents under Previous agents. Inside the child,
 use Open parent thread, or the parent's name in the header breadcrumb, to return
 to the conversation that delegated the work.
 
+When Test Rig shares its Codex home with the Codex desktop app, a completed
+delegated Codex chat is archived in Codex after its result reaches the parent
+and the chat goes idle or Test Rig shuts down normally. You can still open it
+from the parent in Test Rig. Continuing the chat restores it in Codex.
+
 Working children remain visible after the parent finishes its response, including
 while you send a follow-up. Claude's native background children retain their tool
 activity and results as they finish.

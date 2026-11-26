@@ -6392,6 +6392,39 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
             ),
           );
 
+        const retryAfterUnarchive = <A>(
+          threadId: string,
+          request: Effect.Effect<A, CodexErrors.CodexAppServerError>,
+          afterRetry: Effect.Effect<void> = Effect.void,
+        ) =>
+          request.pipe(
+            Effect.catchTags({
+              CodexAppServerRequestError: (error) =>
+                /\bsession \S+ is archived\b|\bcodex unarchive\b/i.test(error.errorMessage)
+                  ? client.raw
+                      .request("thread/unarchive", { threadId })
+                      .pipe(Effect.andThen(request.pipe(Effect.ensuring(afterRetry))))
+                  : Effect.fail(error),
+            }),
+          );
+
+        const restoreArchiveAfterFork = (threadId: string) =>
+          readCodexThreadHistoryMetadata(client.raw, threadId).pipe(
+            // Another client may have resumed the source while the fork was running.
+            Effect.flatMap(({ loaded }) =>
+              loaded
+                ? Effect.void
+                : client.request("thread/archive", { threadId }).pipe(Effect.asVoid),
+            ),
+            Effect.timeout("5 seconds"),
+            Effect.catch((cause) =>
+              Effect.logWarning("Could not restore Codex thread archive after fork", {
+                threadId,
+                cause,
+              }),
+            ),
+          );
+
         const runtime: ProviderAdapterV2SessionRuntime = {
           instanceId: adapterOptions.instanceId,
           driver: CODEX_PROVIDER,
@@ -6481,19 +6514,22 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               const response = yield* ensureInitialized.pipe(
                 Effect.andThen(
                   // excludeTurns is not in the generated request schema yet.
-                  client.raw.request("thread/resume", {
-                    threadId: nativeThreadId,
-                    excludeTurns: true,
-                    ...codexThreadRuntimeParams({
-                      threadId: threadInput.threadId ?? threadInput.providerThread.appThreadId,
-                      ...(threadInput.modelSelection === undefined
-                        ? {}
-                        : { modelSelection: threadInput.modelSelection }),
-                      ...(threadInput.runtimePolicy === undefined
-                        ? {}
-                        : { runtimePolicy: threadInput.runtimePolicy }),
+                  retryAfterUnarchive(
+                    nativeThreadId,
+                    client.raw.request("thread/resume", {
+                      threadId: nativeThreadId,
+                      excludeTurns: true,
+                      ...codexThreadRuntimeParams({
+                        threadId: threadInput.threadId ?? threadInput.providerThread.appThreadId,
+                        ...(threadInput.modelSelection === undefined
+                          ? {}
+                          : { modelSelection: threadInput.modelSelection }),
+                        ...(threadInput.runtimePolicy === undefined
+                          ? {}
+                          : { runtimePolicy: threadInput.runtimePolicy }),
+                      }),
                     }),
-                  }),
+                  ),
                 ),
                 Effect.flatMap(decodeCodexResumeMetadata),
               );
@@ -6653,6 +6689,10 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
                 mcpRuntimeDisposers.delete(unloadInput.providerThread.appThreadId);
               }
               const nativeThreadId = yield* getNativeThreadId(unloadInput.providerThread);
+              if (unloadInput.archive === true) {
+                yield* client.request("thread/archive", { threadId: nativeThreadId });
+                return;
+              }
               yield* client.request("thread/unsubscribe", { threadId: nativeThreadId });
             }).pipe(
               Effect.mapError((cause) =>
@@ -7200,15 +7240,18 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               // process. After a restart or idle release, load it the same way
               // the next turn would before reverting.
               if (!loaded) {
-                yield* client.raw.request("thread/resume", {
+                yield* retryAfterUnarchive(
                   threadId,
-                  excludeTurns: true,
-                  ...codexThreadRuntimeParams({
-                    threadId: threadInput.providerThread.appThreadId,
-                    modelSelection: input.modelSelection,
-                    runtimePolicy: input.runtimePolicy,
+                  client.raw.request("thread/resume", {
+                    threadId,
+                    excludeTurns: true,
+                    ...codexThreadRuntimeParams({
+                      threadId: threadInput.providerThread.appThreadId,
+                      modelSelection: input.modelSelection,
+                      runtimePolicy: input.runtimePolicy,
+                    }),
                   }),
-                });
+                );
               }
               const response = yield* ensureInitialized.pipe(
                 Effect.andThen(revertCodexThread(client, threadId, numTurns)),
@@ -7247,21 +7290,25 @@ export function makeCodexAdapterV2(adapterOptions: CodexAdapterV2Options): Provi
               const boundary = yield* resolveCodexForkBoundary(threadInput);
               const response = yield* ensureInitialized.pipe(
                 Effect.andThen(
-                  client.request("thread/fork", {
+                  retryAfterUnarchive(
                     threadId,
-                    ...(boundary.lastTurnId === undefined
-                      ? {}
-                      : { lastTurnId: boundary.lastTurnId }),
-                    ...codexThreadRuntimeParams({
-                      threadId: threadInput.targetThreadId,
-                      ...(threadInput.modelSelection === undefined
+                    client.request("thread/fork", {
+                      threadId,
+                      ...(boundary.lastTurnId === undefined
                         ? {}
-                        : { modelSelection: threadInput.modelSelection }),
-                      ...(threadInput.runtimePolicy === undefined
-                        ? {}
-                        : { runtimePolicy: threadInput.runtimePolicy }),
+                        : { lastTurnId: boundary.lastTurnId }),
+                      ...codexThreadRuntimeParams({
+                        threadId: threadInput.targetThreadId,
+                        ...(threadInput.modelSelection === undefined
+                          ? {}
+                          : { modelSelection: threadInput.modelSelection }),
+                        ...(threadInput.runtimePolicy === undefined
+                          ? {}
+                          : { runtimePolicy: threadInput.runtimePolicy }),
+                      }),
                     }),
-                  }),
+                    restoreArchiveAfterFork(threadId),
+                  ),
                 ),
                 Effect.mapError(
                   (cause) =>

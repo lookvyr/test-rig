@@ -65,6 +65,7 @@ const busyTurnPrefix = (providerThreadId: ProviderThreadId) => `${providerThread
 const busyTurnKey = (providerThreadId: ProviderThreadId, runOrdinal: number) =>
   `${busyTurnPrefix(providerThreadId)}${runOrdinal}`;
 const UNLOAD_THREAD_TIMEOUT_MS = 10 * 1000;
+const SHUTDOWN_ARCHIVE_TIMEOUT_MS = 1000;
 
 export const ProviderSessionReleaseReason = Schema.Literals([
   "idle_timeout",
@@ -1322,12 +1323,20 @@ export const layerWithOptions = (
           // Capture runtime identity before yielding: a replacement session
           // can reuse the same providerSessionId while this fiber is parked.
           const probedRuntime = entry.runtime;
+          const codexIdleThreads = probedRuntime.driver === "codex" ? entry.idleThreadUnloads : [];
           const hasPendingWork =
-            probedRuntime.hasPendingBackgroundWork === undefined
+            (probedRuntime.hasPendingBackgroundWork === undefined
               ? false
               : yield* probedRuntime.hasPendingBackgroundWork.pipe(
                   Effect.catchCause(() => Effect.succeed(false)),
-                );
+                )) ||
+            Option.isSome(
+              yield* Effect.findFirst(codexIdleThreads, ([threadId]) =>
+                delegatedChildArchive(threadId).pipe(
+                  Effect.map((child) => child === "awaiting_delivery"),
+                ),
+              ),
+            );
           if (hasPendingWork) {
             const now = yield* Clock.currentTimeMillis;
             const pinnedSinceMs = entry.pinnedSinceMs ?? now;
@@ -1366,15 +1375,17 @@ export const layerWithOptions = (
               pinnedForMs: now - pinnedSinceMs,
             });
           }
-          // hasPendingBackgroundWork yields to the adapter, so the idle
-          // decision above can go stale; the generation guard revalidates
-          // busyTurns and idleGeneration inside releaseEntry's atomic
-          // entry removal.
+          // Releasing the session cancels its per-thread unloads.
+          yield* archiveIdleChildrenBeforeRelease(entry, input.generation).pipe(
+            Effect.timeoutOption(UNLOAD_THREAD_TIMEOUT_MS),
+          );
+          // Revalidate the idle decision atomically after the adapter calls.
           yield* releaseEntry({
             providerSessionId: input.providerSessionId,
             reason: "idle_timeout",
             cancelIdleFiber: false,
             onlyIfIdleGeneration: input.generation,
+            expectedRuntime: probedRuntime,
           }).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("orchestration-v2.driver-session.idle-release-failed", {
@@ -1795,10 +1806,54 @@ export const layerWithOptions = (
           );
         });
 
+      const delegatedChildArchive = Effect.fn("ProviderSessionManager.delegatedChildArchive")(
+        function* (threadId: ThreadId) {
+          const { thread, runs } = yield* projectionStore.getThreadRecords(threadId, ["runs"], {
+            runStatuses: [],
+            includeLatestRun: true,
+          });
+          const parentThreadId = thread.lineage.parentThreadId;
+          if (thread.lineage.relationshipToParent !== "subagent" || parentThreadId === null) {
+            return undefined;
+          }
+          // A follow-up run names its task. The initial task is where the thread forked from.
+          const taskId =
+            runs.at(-1)?.delegatedTaskId ??
+            (thread.forkedFrom?.type === "node" ? thread.forkedFrom.nodeId : undefined);
+          if (taskId === undefined) return undefined;
+          const {
+            subagents: [task],
+          } = yield* projectionStore.getThreadRecords(parentThreadId, ["subagents"], {
+            subagentIds: [taskId],
+          });
+          if (
+            task?.origin !== "app_owned" ||
+            task.childThreadId !== threadId ||
+            task.status !== "completed"
+          ) {
+            return undefined;
+          }
+          const delivery = task.completionDelivery?.state;
+          if (delivery === "pending" || delivery === "claimed") {
+            const now = yield* Clock.currentTimeMillis;
+            return task.completedAt !== null &&
+              now - DateTime.toEpochMillis(task.completedAt) < maxIdlePinMs
+              ? "awaiting_delivery"
+              : undefined;
+          }
+          return delivery === "delivered" || delivery === "acknowledged" ? "ready" : undefined;
+        },
+        (effect) => effect.pipe(Effect.orElseSucceed(() => undefined)),
+      );
+
       const unloadIdleThread = (input: {
         readonly providerSessionId: ProviderSessionId;
         readonly threadId: ThreadId;
         readonly generation: number;
+        readonly archiveBeforeRelease?: {
+          readonly runtime: ProviderAdapterV2SessionRuntime;
+          readonly idleGeneration?: number;
+        };
       }): Effect.Effect<void> =>
         Effect.gen(function* () {
           const outcome = yield* threadAttachment.withLock(
@@ -1813,6 +1868,10 @@ export const layerWithOptions = (
                 pending === undefined ||
                 pending.generation !== input.generation ||
                 unloadThread === undefined ||
+                (input.archiveBeforeRelease !== undefined &&
+                  entry.runtime !== input.archiveBeforeRelease.runtime) ||
+                (input.archiveBeforeRelease?.idleGeneration !== undefined &&
+                  entry.idleGeneration !== input.archiveBeforeRelease.idleGeneration) ||
                 !entry.attachedThreadIds.has(input.threadId) ||
                 hasBusyTurn(entry, pending.providerThread.id)
               ) {
@@ -1827,10 +1886,20 @@ export const layerWithOptions = (
                       .hasPendingBackgroundWorkForThread(pending.providerThread)
                       .pipe(Effect.catchCause(() => Effect.succeed(false)));
               if (hasPendingWork) return "deferred" as const;
+              const child =
+                entry.runtime.driver === "codex"
+                  ? yield* delegatedChildArchive(input.threadId)
+                  : undefined;
+              if (child === "awaiting_delivery") return "deferred" as const;
+              const archive = child === "ready";
+              if (input.archiveBeforeRelease !== undefined && !archive) return "skipped" as const;
               const unloading = yield* Ref.modify(sessions, (current) => {
                 const latest = current.get(key);
                 if (
                   latest?.runtime !== entry.runtime ||
+                  (input.archiveBeforeRelease?.idleGeneration !== undefined &&
+                    (latest.busyTurns.size > 0 ||
+                      latest.idleGeneration !== input.archiveBeforeRelease.idleGeneration)) ||
                   latest.idleThreadUnloads.get(input.threadId)?.generation !== input.generation
                 ) {
                   return [false, current] as const;
@@ -1839,19 +1908,34 @@ export const layerWithOptions = (
                   latest.loadedProviderThreadKeyByThread,
                 );
                 loadedProviderThreadKeyByThread.delete(input.threadId);
-                const idleThreadUnloads = new Map(latest.idleThreadUnloads);
-                idleThreadUnloads.delete(input.threadId);
                 const updated = new Map(current);
                 updated.set(key, {
                   ...latest,
                   loadedProviderThreadKeyByThread,
-                  idleThreadUnloads,
                 });
                 return [true, updated] as const;
               });
               if (!unloading) return "skipped" as const;
-              yield* unloadThread({ providerThread: pending.providerThread }).pipe(
-                Effect.timeout(UNLOAD_THREAD_TIMEOUT_MS),
+              const unload = (archiveThread: boolean) =>
+                unloadThread({
+                  providerThread: pending.providerThread,
+                  archive: archiveThread,
+                }).pipe(Effect.timeout(UNLOAD_THREAD_TIMEOUT_MS));
+              yield* unload(archive).pipe(
+                Effect.catch((cause) =>
+                  archive
+                    ? Effect.logWarning("orchestration-v2.driver-session.idle-archive-failed", {
+                        providerSessionId: input.providerSessionId,
+                        threadId: input.threadId,
+                        providerThreadId: pending.providerThread.id,
+                        cause,
+                      }).pipe(
+                        Effect.andThen(
+                          input.archiveBeforeRelease === undefined ? unload(false) : Effect.void,
+                        ),
+                      )
+                    : Effect.fail(cause),
+                ),
                 Effect.catchCause((cause) =>
                   Effect.logWarning("orchestration-v2.driver-session.idle-unload-failed", {
                     providerSessionId: input.providerSessionId,
@@ -1860,17 +1944,55 @@ export const layerWithOptions = (
                     cause,
                   }),
                 ),
+                // Idle session cleanup needs this entry to find the in-flight unload.
+                Effect.ensuring(
+                  Ref.update(sessions, (current) => {
+                    const latest = current.get(key);
+                    if (
+                      latest?.runtime !== entry.runtime ||
+                      latest.idleThreadUnloads.get(input.threadId)?.generation !== input.generation
+                    ) {
+                      return current;
+                    }
+                    const idleThreadUnloads = new Map(latest.idleThreadUnloads);
+                    idleThreadUnloads.delete(input.threadId);
+                    const updated = new Map(current);
+                    updated.set(key, { ...latest, idleThreadUnloads });
+                    return updated;
+                  }),
+                ),
               );
               return "unloaded" as const;
             }),
           );
           // Re-check on this fiber after another idle window, outside the
           // lock so the thread's next attach is not held up meanwhile.
-          if (outcome === "deferred") {
+          if (outcome === "deferred" && input.archiveBeforeRelease === undefined) {
             yield* Effect.sleep(Duration.millis(idleTimeoutMs));
             return yield* unloadIdleThread(input);
           }
         });
+
+      const archiveIdleChildrenBeforeRelease = (
+        entry: LiveSessionEntry,
+        idleGeneration?: number,
+      ) =>
+        entry.runtime.driver !== "codex"
+          ? Effect.void
+          : Effect.forEach(
+              entry.idleThreadUnloads,
+              ([threadId, pending]) =>
+                unloadIdleThread({
+                  providerSessionId: entry.runtime.providerSessionId,
+                  threadId,
+                  generation: pending.generation,
+                  archiveBeforeRelease: {
+                    runtime: entry.runtime,
+                    ...(idleGeneration === undefined ? {} : { idleGeneration }),
+                  },
+                }),
+              { discard: true },
+            );
 
       const observeActivity = (
         providerSessionId: ProviderSessionId,
@@ -2245,6 +2367,10 @@ export const layerWithOptions = (
       const sessionScopes = yield* Scope.make("parallel");
       const shutdown = Effect.gen(function* () {
         const activeSessions = [...(yield* Ref.get(sessions)).values()];
+        yield* Effect.forEach(activeSessions, (entry) => archiveIdleChildrenBeforeRelease(entry), {
+          discard: true,
+          concurrency: "unbounded",
+        }).pipe(Effect.timeoutOption(SHUTDOWN_ARCHIVE_TIMEOUT_MS));
         yield* Effect.forEach(
           activeSessions,
           (entry) =>

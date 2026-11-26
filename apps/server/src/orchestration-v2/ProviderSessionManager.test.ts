@@ -3,6 +3,7 @@ import * as NetAddress from "effect/unstable/net/NetAddress";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, vi } from "@effect/vitest";
 import {
+  CommandId,
   ALL_PROJECTS_TOOLS_ASSIGNMENT,
   EnvironmentId,
   EventId,
@@ -175,6 +176,7 @@ interface TestProviderRuntimeState {
   readonly interruptCount: number;
   readonly resumeCount: number;
   readonly unloadedNativeThreadIds: ReadonlyArray<string>;
+  readonly archivedNativeThreadIds: ReadonlyArray<string>;
   readonly eventQueues: ReadonlyMap<string, Queue.Queue<ProviderAdapterV2Event, Cause.Done>>;
 }
 
@@ -184,6 +186,7 @@ const emptyState: TestProviderRuntimeState = {
   interruptCount: 0,
   resumeCount: 0,
   unloadedNativeThreadIds: [],
+  archivedNativeThreadIds: [],
   eventQueues: new Map(),
 };
 
@@ -439,16 +442,16 @@ function makeProviderAdapter(
               ...current,
               interruptCount: current.interruptCount + 1,
             })).pipe(Effect.andThen(options.afterInterrupt ?? Effect.void)),
-          unloadThread: ({ providerThread }) =>
+          unloadThread: ({ providerThread, archive }) =>
             (options.beforeUnload ?? Effect.void).pipe(
               Effect.andThen(
-                Ref.update(state, (current) => ({
-                  ...current,
-                  unloadedNativeThreadIds: [
-                    ...current.unloadedNativeThreadIds,
-                    providerThread.nativeThreadRef?.nativeId ?? "",
-                  ],
-                })),
+                Ref.update(state, (current) => {
+                  const ids = archive ? "archivedNativeThreadIds" : "unloadedNativeThreadIds";
+                  return {
+                    ...current,
+                    [ids]: [...current[ids], providerThread.nativeThreadRef?.nativeId ?? ""],
+                  };
+                }),
               ),
             ),
           respondToRuntimeRequest: () => Effect.void,
@@ -4217,10 +4220,13 @@ function runIdleThreadUnloadScenario(
     readonly endTurn: (threadId: ThreadId, ordinal: number) => Effect.Effect<void>;
     readonly reopen: Effect.Effect<void>;
     readonly resume: (threadId: ThreadId) => Effect.Effect<void>;
+    readonly deliverChildResult: Effect.Effect<void>;
   }) => Effect.Effect<void, ProviderSessionManager.ProviderSessionManagerV2Error>,
   options: {
     readonly hasPendingBackgroundWorkForThread?: Effect.Effect<boolean>;
     readonly beforeUnload?: Effect.Effect<void>;
+    readonly beforeClose?: Effect.Effect<void>;
+    readonly delegatedChild?: boolean;
   } = {},
 ) {
   return Effect.gen(function* () {
@@ -4236,12 +4242,66 @@ function runIdleThreadUnloadScenario(
       const providerSessionId = idAllocator.derive.providerSession({
         providerInstanceId: modelSelection.instanceId,
       });
-      yield* eventSink.write({
-        events: [
-          yield* makeThreadCreatedEvent({ idAllocator, threadId: threadA, now }),
-          yield* makeThreadCreatedEvent({ idAllocator, threadId: threadB, now }),
-        ],
-      });
+      const threadACreated = yield* makeThreadCreatedEvent({ idAllocator, threadId: threadA, now });
+      const threadBCreated = yield* makeThreadCreatedEvent({ idAllocator, threadId: threadB, now });
+      const parentRunId = idAllocator.derive.run({ threadId: threadB, ordinal: 1 });
+      const parentNodeId = idAllocator.derive.rootNode({ runId: parentRunId });
+      const taskId = idAllocator.derive.delegatedTaskNode({ commandId: CommandId.make(name) });
+      const childResultEvent = (delivery: "pending" | "delivered") =>
+        Effect.gen(function* () {
+          return {
+            id: yield* idAllocator.allocate.event({ threadId: threadB }),
+            type: "subagent.updated",
+            threadId: threadB,
+            nodeId: taskId,
+            providerInstanceId: modelSelection.instanceId,
+            occurredAt: now,
+            payload: {
+              id: taskId,
+              threadId: threadB,
+              runId: parentRunId,
+              parentNodeId,
+              origin: "app_owned",
+              createdBy: "agent",
+              driver: CODEX_DRIVER,
+              providerInstanceId: modelSelection.instanceId,
+              providerThreadId: null,
+              childThreadId: threadA,
+              nativeTaskRef: null,
+              prompt: "Delegated work",
+              title: null,
+              model: null,
+              completionDelivery: { state: delivery, observedByRunId: null },
+              status: "completed",
+              result: "Done.",
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+            },
+          } satisfies OrchestrationV2DomainEvent;
+        });
+      if (options.delegatedChild === true) {
+        yield* eventSink.write({
+          events: [
+            threadBCreated,
+            {
+              ...threadACreated,
+              payload: {
+                ...threadACreated.payload,
+                lineage: {
+                  parentThreadId: threadB,
+                  relationshipToParent: "subagent",
+                  rootThreadId: threadB,
+                },
+                forkedFrom: { type: "node", nodeId: taskId },
+              },
+            },
+            yield* childResultEvent("pending"),
+          ],
+        });
+      } else {
+        yield* eventSink.write({ events: [threadACreated, threadBCreated] });
+      }
       let runtime = yield* manager.open({
         threadId: threadA,
         providerSessionId,
@@ -4336,6 +4396,9 @@ function runIdleThreadUnloadScenario(
         startTurn,
         endTurn,
         resume,
+        deliverChildResult: Effect.gen(function* () {
+          yield* eventSink.write({ events: [yield* childResultEvent("delivered")] });
+        }).pipe(Effect.orDie),
         reopen: Effect.gen(function* () {
           yield* manager.close(providerSessionId);
           runtime = yield* manager.open({
@@ -4359,12 +4422,14 @@ function runIdleThreadUnloadScenario(
           state,
           idleTimeoutMs: 1000,
           ...(options.beforeUnload === undefined ? {} : { beforeUnload: options.beforeUnload }),
+          ...(options.beforeClose === undefined ? {} : { beforeClose: options.beforeClose }),
           ...(options.hasPendingBackgroundWorkForThread === undefined
             ? {}
             : { hasPendingBackgroundWorkForThread: options.hasPendingBackgroundWorkForThread }),
         }),
       ),
     );
+    return yield* Ref.get(state);
   });
 }
 
@@ -4390,6 +4455,7 @@ it.effect(
           yield* endTurn(threadA, 2);
           yield* TestClock.adjust("1 second");
           assert.deepEqual((yield* Ref.get(state)).unloadedNativeThreadIds, [`native-${threadA}`]);
+          assert.deepEqual((yield* Ref.get(state)).archivedNativeThreadIds, []);
           assert.isTrue(Option.isSome(yield* manager.get(providerSessionId)));
           assert.equal((yield* Ref.get(state)).closeCount, 0);
 
@@ -4399,6 +4465,91 @@ it.effect(
           assert.equal((yield* Ref.get(state)).resumeCount, resumes + 1);
         }),
     ),
+);
+
+it.effect.each([true, false])(
+  "ProviderSessionManagerV2 archives an idle delegated child after result delivery (shared session stays open: %s)",
+  (keepSessionOpen) =>
+    runIdleThreadUnloadScenario(
+      "idle-delegated-child",
+      ({
+        state,
+        manager,
+        providerSessionId,
+        threadA,
+        threadB,
+        startTurn,
+        endTurn,
+        deliverChildResult,
+      }) =>
+        Effect.gen(function* () {
+          yield* startTurn(threadA, 1);
+          yield* endTurn(threadA, 1);
+          if (!keepSessionOpen) yield* endTurn(threadB, 1);
+
+          yield* TestClock.adjust("1 second");
+          assert.isTrue(Option.isSome(yield* manager.get(providerSessionId)));
+          assert.deepEqual((yield* Ref.get(state)).archivedNativeThreadIds, []);
+          assert.notInclude((yield* Ref.get(state)).unloadedNativeThreadIds, `native-${threadA}`);
+
+          yield* deliverChildResult;
+          yield* TestClock.adjust("1 second");
+          assert.deepEqual((yield* Ref.get(state)).archivedNativeThreadIds, [`native-${threadA}`]);
+          assert.equal(Option.isSome(yield* manager.get(providerSessionId)), keepSessionOpen);
+        }),
+      { delegatedChild: true },
+    ),
+);
+
+it.effect("ProviderSessionManagerV2 waits for an in-flight child archive before idle release", () =>
+  Effect.gen(function* () {
+    const archiving = yield* Deferred.make<void>();
+    const finishArchive = yield* Deferred.make<void>();
+    const closed = yield* Deferred.make<void>();
+    yield* runIdleThreadUnloadScenario(
+      "idle-release-during-archive",
+      ({ state, threadA, threadB, startTurn, endTurn, deliverChildResult }) =>
+        Effect.gen(function* () {
+          yield* startTurn(threadA, 1);
+          yield* endTurn(threadA, 1);
+          yield* deliverChildResult;
+          yield* TestClock.adjust("1 second");
+          yield* Deferred.await(archiving);
+          yield* endTurn(threadB, 1);
+          yield* TestClock.adjust("1 second");
+          assert.equal((yield* Ref.get(state)).closeCount, 0);
+          yield* Deferred.succeed(finishArchive, undefined);
+          yield* Deferred.await(closed);
+          assert.deepEqual((yield* Ref.get(state)).archivedNativeThreadIds, [`native-${threadA}`]);
+        }),
+      {
+        delegatedChild: true,
+        beforeUnload: Deferred.succeed(archiving, undefined).pipe(
+          Effect.andThen(Deferred.await(finishArchive)),
+        ),
+        beforeClose: Deferred.succeed(closed, undefined).pipe(Effect.asVoid),
+      },
+    );
+  }),
+);
+
+it.effect("ProviderSessionManagerV2 archives a delivered child on graceful shutdown", () =>
+  Effect.gen(function* () {
+    const finalState = yield* runIdleThreadUnloadScenario(
+      "shutdown-child-archive",
+      ({ state, threadA, startTurn, endTurn, deliverChildResult }) =>
+        Effect.gen(function* () {
+          yield* startTurn(threadA, 1);
+          yield* endTurn(threadA, 1);
+          yield* deliverChildResult;
+          assert.deepEqual((yield* Ref.get(state)).archivedNativeThreadIds, []);
+        }),
+      { delegatedChild: true },
+    );
+    assert.deepEqual(finalState.archivedNativeThreadIds, [
+      "native-thread-provider-session-manager-shutdown-child-archive-a",
+    ]);
+  }),
 );
 
 it.effect(

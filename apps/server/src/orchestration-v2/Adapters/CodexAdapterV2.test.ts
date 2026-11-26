@@ -3804,52 +3804,106 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
   );
 
-  it.effect("resumes a provider thread without requesting or decoding its history", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const scenario = "codex-resume-metadata";
-        const nativeThreadId = `native-${scenario}-thread`;
-        const preamble = codexReplayPreamble({
-          nativeThreadId,
-          nativeTurnId: "unused-turn",
-          prompt: "unused-prompt",
-        }).slice(0, 5);
-        const transcript = makeCodexReplayTranscript({
-          scenario,
-          entries: [
-            ...preamble,
-            {
-              type: "expect_outbound",
-              label: "thread/resume",
-              frame: {
-                id: 3,
-                method: "thread/resume",
-                params: {
-                  threadId: nativeThreadId,
-                  excludeTurns: true,
-                  config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+  it.effect.each([false, true])(
+    "resumes a provider thread without requesting or decoding its history (archived: %s)",
+    (archived) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const scenario = "codex-resume-metadata";
+          const nativeThreadId = `native-${scenario}-thread`;
+          const preamble = codexReplayPreamble({
+            nativeThreadId,
+            nativeTurnId: "unused-turn",
+            prompt: "unused-prompt",
+          }).slice(0, 5);
+          const resumeParams = {
+            threadId: nativeThreadId,
+            excludeTurns: true,
+            config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+          };
+          const resumeId = archived ? 6 : 3;
+          const transcript = makeCodexReplayTranscript({
+            scenario,
+            entries: [
+              ...preamble,
+              ...(archived
+                ? [
+                    {
+                      type: "expect_outbound" as const,
+                      label: "thread/archive",
+                      frame: {
+                        id: 3,
+                        method: "thread/archive",
+                        params: { threadId: nativeThreadId },
+                      },
+                    },
+                    {
+                      type: "emit_inbound" as const,
+                      label: "thread/archive",
+                      frame: { id: 3, result: {} },
+                    },
+                    {
+                      type: "expect_outbound" as const,
+                      label: "archived thread/resume",
+                      frame: { id: 4, method: "thread/resume", params: resumeParams },
+                    },
+                    {
+                      type: "emit_inbound" as const,
+                      label: "archived thread/resume",
+                      frame: {
+                        id: 4,
+                        error: { code: -32600, message: `session ${nativeThreadId} is archived` },
+                      },
+                    },
+                    {
+                      type: "expect_outbound" as const,
+                      label: "thread/unarchive",
+                      frame: {
+                        id: 5,
+                        method: "thread/unarchive",
+                        params: { threadId: nativeThreadId },
+                      },
+                    },
+                    {
+                      type: "emit_inbound" as const,
+                      label: "thread/unarchive",
+                      frame: { id: 5, result: { thread: { id: nativeThreadId } } },
+                    },
+                  ]
+                : []),
+              {
+                type: "expect_outbound",
+                label: "thread/resume",
+                frame: { id: resumeId, method: "thread/resume", params: resumeParams },
+              },
+              {
+                type: "emit_inbound",
+                label: "thread/resume",
+                frame: {
+                  id: resumeId,
+                  result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } },
                 },
               },
-            },
-            {
-              type: "emit_inbound",
-              label: "thread/resume",
-              frame: { id: 3, result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } } },
-            },
-          ],
-        });
-        const harness = yield* makeCodexReplayHarness(transcript);
-        const resumed = yield* harness.runtime.resumeThread({
-          providerThread: harness.providerThread,
-          modelSelection: CODEX_TEST_MODEL_SELECTION,
-          runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
-        });
+            ],
+          });
+          const harness = yield* makeCodexReplayHarness(transcript);
+          if (archived) {
+            yield* harness.runtime.unloadThread!({
+              providerThread: harness.providerThread,
+              archive: true,
+            });
+          }
+          const resumed = yield* harness.runtime.resumeThread({
+            providerThread: harness.providerThread,
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          });
 
-        assert.equal(resumed.nativeThreadRef?.nativeId, nativeThreadId);
-        assert.equal(resumed.status, "idle");
-        assert.equal(DateTime.toEpochMillis(resumed.updatedAt), 1782622450000);
-      }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
-    ),
+          assert.equal(resumed.nativeThreadRef?.nativeId, nativeThreadId);
+          assert.equal(resumed.status, "idle");
+          assert.equal(DateTime.toEpochMillis(resumed.updatedAt), 1782622450000);
+        }).pipe(Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+      ),
   );
 
   it.effect("continues an interrupted native thread with empty input and reasoning summaries", () =>
@@ -9164,6 +9218,81 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           "thread/rollback must not be sent to a legacy Codex fork",
         );
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
+  );
+
+  it.effect("restores the archive of an unloaded source after forking it", () =>
+    Effect.gen(function* () {
+      const nativeThreadId = "archived-fork-source";
+      const forkThreadId = "archived-fork-target";
+      const preamble = codexReplayPreamble({
+        nativeThreadId,
+        nativeTurnId: "unused-turn",
+        prompt: "unused",
+      });
+      const forkParams = { threadId: nativeThreadId, config: CodexAdapterV2.CODEX_THREAD_CONFIG };
+      const requests = [
+        {
+          method: "thread/fork",
+          params: forkParams,
+          reply: { error: { code: -32600, message: `session ${nativeThreadId} is archived` } },
+        },
+        {
+          method: "thread/unarchive",
+          params: { threadId: nativeThreadId },
+          reply: { result: {} },
+        },
+        {
+          method: "thread/fork",
+          params: forkParams,
+          reply: {
+            result: codexReplayThreadResult({
+              nativeThreadId: forkThreadId,
+              forkedFromId: nativeThreadId,
+            }),
+          },
+        },
+        {
+          method: "thread/read",
+          params: { threadId: nativeThreadId, includeTurns: false },
+          reply: { result: { thread: { status: { type: "notLoaded" } } } },
+        },
+        {
+          method: "thread/archive",
+          params: { threadId: nativeThreadId },
+          reply: { result: {} },
+        },
+      ];
+      const transcript = makeCodexReplayTranscript({
+        scenario: "codex-archive-source-after-fork",
+        entries: [
+          ...preamble.slice(0, 5),
+          ...requests.flatMap(({ method, params, reply }, index) => [
+            {
+              type: "expect_outbound" as const,
+              label: method,
+              frame: { id: index + 3, method, params },
+            },
+            { type: "emit_inbound" as const, label: method, frame: { id: index + 3, ...reply } },
+          ]),
+        ],
+      });
+      const outbound: Array<string> = [];
+      const harness = yield* makeCodexReplayHarness(
+        transcript,
+        () => Effect.void,
+        (method) =>
+          Effect.sync(() => {
+            outbound.push(method);
+          }),
+      );
+      const fork = yield* harness.runtime.forkThread({
+        sourceProviderThread: harness.providerThread,
+        targetThreadId: ThreadId.make("archived-fork-target"),
+      });
+
+      assert.equal(fork.nativeThreadRef?.nativeId, forkThreadId);
+      assert.deepEqual(outbound.slice(-3), ["thread/fork", "thread/fork", "thread/archive"]);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(IdAllocator.layer, NodeServices.layer))),
   );
 
   it.effect("propagates native thread/fork failures as typed fork errors", () =>
